@@ -105,7 +105,7 @@ export interface Row {
 // ============================================================================
 
 export interface Vote {
-  odId: UserId;
+  userId: UserId;
   rowIndex: number;
   factionVote: OptionId;
   personalVote: OptionId;
@@ -262,8 +262,8 @@ export type ConductorCommand =
 // ============================================================================
 
 export interface StoredClientIdentity {
-  odId: UserId;
-  odShowId: ShowId;
+  userId: UserId;
+  showId: ShowId;
   seatId: SeatId | null;
   lastVersion: number;
 }

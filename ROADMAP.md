@@ -22,7 +22,7 @@ This document provides a complete implementation order from start to finish, wit
 - [x] Verify TypeScript compiles: `npm run typecheck`
 - [x] Verify dev server starts: `npm run dev` (will show stub pages)
 - [x] Create `.env` file (if needed for local config)
-- [ ] First commit: `git commit -m "Initial scaffold from spec"`
+- [x] First commit: `git commit -m "Initial scaffold from spec"`
 
 **Checkpoint:** Server runs, you can visit `/audience`, `/projector`, `/controller` (all stubs)
 
@@ -42,8 +42,8 @@ Task: "Read CLAUDE.md, then implement conductor/coherence.ts with:
 Match the signatures in types.ts and behavior in ARCHITECTURE.md"
 ```
 
-- [ ] `conductor/coherence.ts` — implement functions
-- [ ] `conductor/__tests__/coherence.test.ts` — test cases:
+- [x] `conductor/coherence.ts` — implement functions
+- [x] `conductor/__tests__/coherence.test.ts` — test cases:
   - 100% alignment (all vote same option)
   - Split vote (e.g., 6-2 split)
   - Three-way split
@@ -58,8 +58,8 @@ Given all votes for a row, return the optionId with the most personal votes.
 Handle ties by picking the first alphabetically (deterministic)."
 ```
 
-- [ ] `calculatePopularWinner` function
-- [ ] Tests for ties, clear winner, single vote
+- [x] `calculatePopularWinner` function
+- [x] Tests for ties, clear winner, single vote
 
 ### 1.3 Tie Detection and Resolution
 ```
@@ -69,8 +69,8 @@ Task: "Create conductor/ties.ts with:
 Match types in types.ts"
 ```
 
-- [ ] `conductor/ties.ts`
-- [ ] `conductor/__tests__/ties.test.ts`
+- [x] `conductor/ties.ts`
+- [x] `conductor/__tests__/ties.test.ts`
 
 ### 1.4 Coup Mechanics
 ```
@@ -81,8 +81,8 @@ Task: "Create conductor/coup.ts with:
 Follow the coup rules in ARCHITECTURE.md"
 ```
 
-- [ ] `conductor/coup.ts`
-- [ ] `conductor/__tests__/coup.test.ts` — test cases:
+- [x] `conductor/coup.ts`
+- [x] `conductor/__tests__/coup.test.ts` — test cases:
   - Successful coup at threshold
   - Below threshold (no trigger)
   - Faction already used coup
@@ -97,8 +97,8 @@ Task: "Create conductor/assignment.ts with:
 Follow the algorithm in ARCHITECTURE.md (balance as hard constraint, adjacency as soft)"
 ```
 
-- [ ] `conductor/assignment.ts`
-- [ ] `conductor/__tests__/assignment.test.ts` — test cases:
+- [x] `conductor/assignment.ts`
+- [x] `conductor/__tests__/assignment.test.ts` — test cases:
   - Perfect balance (12 users → 3,3,3,3)
   - Imperfect balance (13 users → 4,3,3,3)
   - Adjacency optimization (mock graph)
@@ -113,9 +113,9 @@ Task: "Create conductor/conductor.ts with:
 Start with phase transitions only (no vote processing yet)"
 ```
 
-- [ ] `conductor/conductor.ts` — scaffold with phase transitions
-- [ ] Handle: `ADVANCE_PHASE`, `START_SHOW`, `PAUSE`, `RESUME`
-- [ ] `conductor/__tests__/conductor.test.ts` — phase transition tests
+- [x] `conductor/conductor.ts` — scaffold with phase transitions
+- [x] Handle: `ADVANCE_PHASE`, `START_SHOW`, `PAUSE`, `RESUME`
+- [x] `conductor/__tests__/conductor.test.ts` — phase transition tests
 
 ### 1.7 Vote Processing
 ```
@@ -126,8 +126,8 @@ Task: "Add vote handling to conductor/conductor.ts:
 - Update personal tree"
 ```
 
-- [ ] Vote submission logic
-- [ ] Tests for vote storage, override, personal tree update
+- [x] Vote submission logic
+- [x] Tests for vote storage, override, personal tree update
 
 ### 1.8 Reveal Logic
 ```
@@ -140,8 +140,8 @@ Task: "Add reveal phase logic to conductor/conductor.ts:
 - Update paths (faction + popular)"
 ```
 
-- [ ] Reveal logic in conductor
-- [ ] Tests for reveal with/without ties, path updates
+- [x] Reveal logic in conductor
+- [x] Tests for reveal with/without ties, path updates
 
 ### 1.9 Full Command Coverage
 ```
@@ -152,16 +152,16 @@ Task: "Complete conductor/conductor.ts with remaining commands:
 - USER_CONNECT, USER_DISCONNECT, USER_RECONNECT"
 ```
 
-- [ ] All commands implemented
-- [ ] Tests for each command
+- [x] All commands implemented
+- [x] Tests for each command
 
 **Phase 1 Checkpoint:**
 ```bash
 npm run test:conductor  # All tests pass
 ```
 
-- [ ] All conductor tests pass
-- [ ] `git commit -m "Complete conductor implementation"`
+- [x] All conductor tests pass (103 tests)
+- [x] `git commit -m "Complete conductor implementation"`
 
 ---
 
