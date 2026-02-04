@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build outputs
+dist/
+build/
+*.js.map
+*.d.ts
+!packages/conductor/src/types.ts
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# SQLite database and backups
+*.db
+*.sqlite
+*.sqlite3
+backups/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test coverage
+coverage/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Package manager locks (keep package-lock.json, ignore others if not using them)
+yarn.lock
+pnpm-lock.yaml
+
+# State exports (manual backups from controller)
+state-exports/
+*.state.json
