@@ -4,6 +4,28 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-04] — Complete Persistence Layer (Phase 2)
+
+**Context:** The system must persist show state to survive server crashes during live performances. State recovery needs to be immediate and transparent to users. Database operations must be atomic to prevent corruption.
+
+**Changes:**
+- Created server/persistence.ts with SQLite + WAL mode initialization
+- Implemented saveState/loadState with custom Map/Set serialization
+- Implemented saveVote, saveUser, saveFigTreeResponse functions
+- Created server/backup.ts for manual backup/restore functionality
+- Added listBackups, pruneBackups, createAndPruneBackup utilities
+- Added comprehensive test coverage (40 tests covering all persistence operations)
+- Updated better-sqlite3 to support Node 24
+
+**Implications:**
+- Every state change is immediately written to SQLite (not periodic)
+- WAL mode enables concurrent reads during writes for better performance
+- Backup files are human-readable JSON for emergency recovery
+- Tests verify Map/Set serialization works correctly (crucial for state integrity)
+- Foreign key constraints ensure referential integrity (shows must exist before users/votes)
+
+---
+
 ## [2024-XX-XX] — Next.js with Custom Server Architecture
 
 **Context:** WebSocket support is required for real-time updates. Next.js API routes don't support persistent WebSocket connections, so we need a custom server. For a ~30 person live performance, a single process is simpler to deploy, monitor, and recover.
