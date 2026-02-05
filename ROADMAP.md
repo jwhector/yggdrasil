@@ -301,15 +301,30 @@ Task: "Update server/index.ts to:
 - [ ] Full server integration
 - [ ] State persists on every change
 
+### 3.7 Periodic Backup System
+```
+Task: "Add automatic backup creation in server/index.ts:
+- Create backup on show phase transitions (lobby → running, running → finale)
+- Optional: periodic backups during running phase (configurable interval)
+- Use createAndPruneBackup() to automatically clean old backups
+- Store backups in ./data/backups directory"
+```
+
+- [ ] Backup on phase transitions
+- [ ] Configure backup directory and retention count
+- [ ] Test backup creation during show flow
+
 **Phase 3 Checkpoint:**
 ```bash
 npm run dev
 # Open two browser tabs
 # Verify: connect, disconnect, reconnect works
 # Verify: controller commands reach server
+# Verify: backups created in ./data/backups during phase transitions
 ```
 
 - [ ] Manual WebSocket testing passes
+- [ ] Automatic backups working
 - [ ] `git commit -m "Complete WebSocket server"`
 
 ---
