@@ -4,6 +4,69 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-04] — Fix Phase Event Naming Collision
+
+**Context:** The conductor emits both row phase changes (auditioning, voting, revealing, etc.) and show phase changes (lobby, running, finale, etc.). The event `PHASE_CHANGED` was ambiguous, and the client was incorrectly interpreting row phase changes as show phase changes. This caused the controller UI buttons to be disabled incorrectly—for example, when a row entered "auditioning" phase, the controller thought the entire show was in an invalid state.
+
+**Changes:**
+- Renamed `PHASE_CHANGED` event → `ROW_PHASE_CHANGED` throughout the codebase
+  - `conductor/types.ts` — Updated ConductorEvent type definition
+  - `conductor/conductor.ts` — All event emissions
+  - `conductor/coup.ts` — Coup-triggered phase changes
+  - `server/socket.ts` — Event broadcast handling
+- Updated `hooks/useShowState.ts`:
+  - Renamed `handlePhaseChanged` → `handleRowPhaseChanged` for clarity
+  - Fixed handler to update `rows[data.row].phase` instead of show phase
+  - Updated socket listener from `phase_changed` → `row_phase_changed`
+- Fixed double connection and missing heartbeat issues in `hooks/useSocket.ts`:
+  - Added `socketRef` for proper cleanup in React Strict Mode
+  - Added `ping`/`pong` handler to respond to server heartbeats
+  - Prevented duplicate connections when component remounts
+
+**Implications:**
+- Event naming now clearly distinguishes row-level vs show-level phase transitions
+- Controller UI buttons now correctly enable/disable based on actual show phase
+- Future events should follow this naming pattern: `ROW_*` for row-level, `SHOW_*` for show-level
+- Client properly responds to heartbeats, preventing false disconnections
+
+---
+
+## [2026-02-04] — Complete Controller UI (Phase 4)
+
+**Context:** The controller is the performer's interface for managing a live show. It must display real-time state, provide phase controls, and include emergency recovery options. Building the controller first enables testing all other components.
+
+**Changes:**
+- Created `lib/storage.ts` — localStorage helpers for client identity persistence
+- Created `hooks/useSocket.ts` — Socket.IO connection with exponential backoff reconnection
+- Created `hooks/useShowState.ts` — Client-side state management from server events
+- Built `app/controller/page.tsx` with complete UI:
+  - Connection status indicator (green/yellow/red)
+  - Show state overview (phase, current row, user count, version)
+  - Faction distribution display
+  - Phase controls (Assign Factions, Start Show, Advance, Pause, Skip, Restart, Force Finale)
+  - Emergency controls (Reset to Lobby with confirmation, Export/Import State, Force Reconnect All)
+- Created `components/SeatMap.tsx` — Lobby seat visualization with faction colors
+
+**Divergence from Plan — State Serialization:**
+The original roadmap did not address how `Map` and `Set` objects in `ShowState` would survive JSON serialization over Socket.IO. These types become plain objects when JSON-serialized, breaking type safety.
+
+**Solution implemented:**
+- Created `lib/serialization.ts` with `serializeState()` and `deserializeState()` functions
+- Server serializes `Map` → `[key, value][]` arrays and `Set` → arrays before emitting
+- Client deserializes arrays back to proper `Map` and `Set` instances after receiving
+- Added `isSerializedState()` type guard for detection
+- Updated `server/socket.ts` to call `serializeState()` for controller mode
+- Updated `hooks/useShowState.ts` to call `deserializeState()` when receiving state
+
+This ensures all state objects conform to their TypeScript type definitions after transmission.
+
+**Implications:**
+- Future client types (projector, audience) already receive filtered state without Maps/Sets
+- Any new fields using Map/Set in ShowState must be added to serialization functions
+- The serialization pattern could be applied to other event types if needed
+
+---
+
 ## [2026-02-04] — Complete WebSocket Server (Phase 3)
 
 **Context:** The system requires real-time bidirectional communication for 30+ concurrent users during live performances. WebSocket connections must be resilient to network issues, with automatic reconnection and heartbeat monitoring. All state changes must be immediately persisted and broadcast to appropriate clients.

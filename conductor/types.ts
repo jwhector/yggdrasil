@@ -323,7 +323,7 @@ export interface AudioCue {
 
 export type ConductorEvent =
   // Phase and game flow
-  | { type: 'PHASE_CHANGED'; row: number; phase: RowPhase }
+  | { type: 'ROW_PHASE_CHANGED'; row: number; phase: RowPhase }
   | { type: 'AUDITION_OPTION_CHANGED'; row: number; optionIndex: number }
   | { type: 'VOTE_RECEIVED'; userId: UserId; row: number }
   | { type: 'REVEAL'; payload: RevealPayload }

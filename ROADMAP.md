@@ -329,7 +329,7 @@ npm run dev
 
 ---
 
-## Phase 4: Controller UI
+## Phase 4: Controller UI ✓
 **Time estimate:** 3-4 hours
 **Model:** Sonnet
 
@@ -344,8 +344,8 @@ Task: "Create hooks/useSocket.ts:
 - Store client identity in localStorage"
 ```
 
-- [ ] `hooks/useSocket.ts`
-- [ ] `lib/storage.ts` — localStorage helpers
+- [x] `hooks/useSocket.ts`
+- [x] `lib/storage.ts` — localStorage helpers
 
 ### 4.2 Show State Hook
 ```
@@ -355,8 +355,8 @@ Task: "Create hooks/useShowState.ts:
 - Expose typed state and actions"
 ```
 
-- [ ] `hooks/useShowState.ts`
-- [ ] State updates from events
+- [x] `hooks/useShowState.ts`
+- [x] State updates from events
 
 ### 4.3 Controller Layout
 ```
@@ -367,8 +367,8 @@ Task: "Build app/controller/page.tsx with sections:
 - Current row info"
 ```
 
-- [ ] Basic controller layout
-- [ ] Live state display
+- [x] Basic controller layout
+- [x] Live state display
 
 ### 4.4 Phase Controls
 ```
@@ -380,8 +380,8 @@ Task: "Add control buttons to controller:
 - Restart Row"
 ```
 
-- [ ] Phase control buttons
-- [ ] Disable based on current phase
+- [x] Phase control buttons
+- [x] Disable based on current phase
 
 ### 4.5 Emergency Controls
 ```
@@ -392,8 +392,8 @@ Task: "Add emergency section to controller:
 - Force Reconnect All"
 ```
 
-- [ ] Emergency controls
-- [ ] Export/import working
+- [x] Emergency controls
+- [x] Export/import working
 
 ### 4.6 Seat Map (Lobby)
 ```
@@ -403,8 +403,24 @@ Task: "Create components/SeatMap.tsx:
 - Visual of room layout"
 ```
 
-- [ ] `components/SeatMap.tsx`
-- [ ] Integrate into controller
+- [x] `components/SeatMap.tsx`
+- [x] Integrate into controller
+
+### 4.7 State Serialization (Added)
+
+**Note:** This task was not in the original roadmap but was discovered during implementation. Map and Set objects in ShowState don't survive JSON serialization over Socket.IO.
+
+```
+Task: "Create lib/serialization.ts:
+- serializeState() — Convert Maps to arrays, Sets to arrays
+- deserializeState() — Reconstruct Maps and Sets from arrays
+- Update server to serialize before emitting
+- Update client to deserialize after receiving"
+```
+
+- [x] `lib/serialization.ts`
+- [x] Server uses `serializeState()` for controller state
+- [x] Client uses `deserializeState()` when receiving state
 
 **Phase 4 Checkpoint:**
 ```bash
@@ -415,7 +431,7 @@ npm run dev
 # Verify: can export and re-import state
 ```
 
-- [ ] Controller fully functional
+- [x] Controller fully functional
 - [ ] `git commit -m "Complete controller UI"`
 
 ---

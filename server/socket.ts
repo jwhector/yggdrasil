@@ -27,6 +27,7 @@ import type {
 } from '../conductor/types';
 import { processCommand } from '../conductor';
 import type { PersistenceLayer } from './persistence';
+import { serializeState } from '../lib/serialization';
 
 /**
  * Client mode for filtering state
@@ -411,7 +412,7 @@ function broadcastEvents(
   for (const event of events) {
     switch (event.type) {
       // Broadcast to all clients
-      case 'PHASE_CHANGED':
+      case 'ROW_PHASE_CHANGED':
       case 'AUDITION_OPTION_CHANGED':
       case 'REVEAL':
       case 'TIE_DETECTED':
@@ -507,11 +508,11 @@ function filterStateForClient(
   state: ShowState,
   mode: ClientMode,
   userId?: UserId
-): Partial<ShowState> | AudienceClientState | ProjectorClientState | ControllerClientState {
+): ReturnType<typeof serializeState> | Partial<ShowState> | AudienceClientState | ProjectorClientState | ControllerClientState {
   switch (mode) {
     case 'controller':
-      // Controller sees everything
-      return state;
+      // Controller sees everything - serialize to handle Maps/Sets
+      return serializeState(state);
 
     case 'projector':
       // Projector sees public display info

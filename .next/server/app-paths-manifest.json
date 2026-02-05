@@ -1,6 +1,4 @@
 {
-  "/page": "app/page.js",
-  "/audience/page": "app/audience/page.js",
-  "/projector/page": "app/projector/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
   "/controller/page": "app/controller/page.js"
 }

@@ -6,7 +6,13 @@
  * by the server layer.
  *
  * Architecture: (state, command) => (newState, events)
+ *
+ * Debug logging: Enable with DEBUG=conductor environment variable
  */
+
+import createDebug from 'debug';
+
+const debug = createDebug('conductor');
 
 import type {
   ShowState,
@@ -91,71 +97,100 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
  * @returns Array of events to emit
  */
 export function processCommand(state: ShowState, command: ConductorCommand): ConductorEvent[] {
+  debug('Command received: %s', command.type);
+  debug('  State before: phase=%s, version=%d, row=%d', state.phase, state.version, state.currentRowIndex);
+
   // Increment version for every command
   state.version++;
   state.lastUpdated = Date.now();
 
+  let events: ConductorEvent[];
+
   switch (command.type) {
     case 'USER_CONNECT':
-      return handleUserConnect(state, command.userId, command.seatId, command.existingFaction);
+      events = handleUserConnect(state, command.userId, command.seatId, command.existingFaction);
+      break;
 
     case 'USER_DISCONNECT':
-      return handleUserDisconnect(state, command.userId);
+      events = handleUserDisconnect(state, command.userId);
+      break;
 
     case 'USER_RECONNECT':
-      return handleUserReconnect(state, command.userId, command.lastVersion);
+      events = handleUserReconnect(state, command.userId, command.lastVersion);
+      break;
 
     case 'SUBMIT_FIG_TREE_RESPONSE':
-      return handleFigTreeResponse(state, command.userId, command.text);
+      events = handleFigTreeResponse(state, command.userId, command.text);
+      break;
 
     case 'ASSIGN_FACTIONS':
-      return handleAssignFactions(state);
+      events = handleAssignFactions(state);
+      break;
 
     case 'START_SHOW':
-      return handleStartShow(state);
+      events = handleStartShow(state);
+      break;
 
     case 'ADVANCE_PHASE':
-      return handleAdvancePhase(state);
+      events = handleAdvancePhase(state);
+      break;
 
     case 'SUBMIT_VOTE':
-      return handleSubmitVote(state, command.userId, command.factionVote, command.personalVote);
+      events = handleSubmitVote(state, command.userId, command.factionVote, command.personalVote);
+      break;
 
     case 'SUBMIT_COUP_VOTE':
-      return processCoupVote(state, command.userId);
+      events = processCoupVote(state, command.userId);
+      break;
 
     case 'PAUSE':
-      return handlePause(state);
+      events = handlePause(state);
+      break;
 
     case 'RESUME':
-      return handleResume(state);
+      events = handleResume(state);
+      break;
 
     case 'SKIP_ROW':
-      return handleSkipRow(state);
+      events = handleSkipRow(state);
+      break;
 
     case 'RESTART_ROW':
-      return handleRestartRow(state);
+      events = handleRestartRow(state);
+      break;
 
     case 'TRIGGER_COUP':
-      return triggerCoupManually(state, command.factionId);
+      events = triggerCoupManually(state, command.factionId);
+      break;
 
     case 'SET_TIMING':
-      return handleSetTiming(state, command.timing);
+      events = handleSetTiming(state, command.timing);
+      break;
 
     case 'FORCE_FINALE':
-      return handleForceFinale(state);
+      events = handleForceFinale(state);
+      break;
 
     case 'RESET_TO_LOBBY':
-      return handleResetToLobby(state, command.preserveUsers);
+      events = handleResetToLobby(state, command.preserveUsers);
+      break;
 
     case 'IMPORT_STATE':
-      return handleImportState(state, command.state);
+      events = handleImportState(state, command.state);
+      break;
 
     case 'FORCE_RECONNECT_ALL':
-      return handleForceReconnectAll(state);
+      events = handleForceReconnectAll(state);
+      break;
 
     default:
-      return [{ type: 'ERROR', message: 'Unknown command type', command }];
+      events = [{ type: 'ERROR', message: 'Unknown command type', command }];
   }
+
+  debug('  State after: phase=%s, version=%d, row=%d', state.phase, state.version, state.currentRowIndex);
+  debug('  Events emitted: %d [%s]', events.length, events.map(e => e.type).join(', '));
+
+  return events;
 }
 
 // ============================================================================
@@ -168,9 +203,12 @@ function handleUserConnect(
   seatId?: string,
   existingFaction?: FactionId
 ): ConductorEvent[] {
+  debug('handleUserConnect: userId=%s, seatId=%s, existingFaction=%s', userId, seatId, existingFaction);
+
   // Check if user already exists
   const existingUser = state.users.get(userId);
   if (existingUser) {
+    debug('  User already exists, marking as reconnected');
     existingUser.connected = true;
     return [
       { type: 'USER_RECONNECTED', userId, missedEvents: state.version - 0 },
@@ -196,12 +234,15 @@ function handleUserConnect(
     figTreeResponse: null,
   });
 
+  debug('  New user created, total users: %d', state.users.size);
+
   // If factions already assigned and user doesn't have a faction, assign as latecomer
   const events: ConductorEvent[] = [
     { type: 'USER_JOINED', userId, faction: user.faction },
   ];
 
   if (state.phase !== 'lobby' && user.faction === null) {
+    debug('  Late joiner detected, assigning faction');
     const graph = createAdjacencyGraph(state);
     const assignedFaction = assignLatecomer(
       { id: userId, seatId: user.seatId },
@@ -209,6 +250,7 @@ function handleUserConnect(
       graph
     );
     user.faction = assignedFaction;
+    debug('  Assigned to faction: %d', assignedFaction);
 
     events.push({ type: 'FACTION_ASSIGNED', userId, faction: assignedFaction });
   }
@@ -261,7 +303,10 @@ function handleFigTreeResponse(state: ShowState, userId: UserId, text: string): 
 // ============================================================================
 
 function handleAssignFactions(state: ShowState): ConductorEvent[] {
+  debug('handleAssignFactions: %d users to assign', state.users.size);
+
   if (state.phase !== 'lobby') {
+    debug('  Error: wrong phase (%s)', state.phase);
     return [{ type: 'ERROR', message: 'Can only assign factions during lobby phase' }];
   }
 
@@ -275,12 +320,15 @@ function handleAssignFactions(state: ShowState): ConductorEvent[] {
   const assignments = assignFactions(users, graph);
 
   // Apply assignments
+  const factionCounts = [0, 0, 0, 0];
   for (const [userId, factionId] of assignments) {
     const user = state.users.get(userId);
     if (user) {
       user.faction = factionId;
+      factionCounts[factionId]++;
     }
   }
+  debug('  Faction distribution: %o', factionCounts);
 
   state.phase = 'assigning';
 
@@ -295,7 +343,10 @@ function handleAssignFactions(state: ShowState): ConductorEvent[] {
 // ============================================================================
 
 function handleStartShow(state: ShowState): ConductorEvent[] {
+  debug('handleStartShow: current phase=%s', state.phase);
+
   if (state.phase !== 'assigning') {
+    debug('  Error: wrong phase');
     return [{ type: 'ERROR', message: 'Can only start show from assigning phase' }];
   }
 
@@ -303,10 +354,11 @@ function handleStartShow(state: ShowState): ConductorEvent[] {
   state.currentRowIndex = 0;
   state.rows[0].phase = 'auditioning';
   state.rows[0].currentAuditionIndex = 0;
+  debug('  Show started, beginning row 0 auditioning');
 
   return [
     { type: 'SHOW_PHASE_CHANGED', phase: 'running' },
-    { type: 'PHASE_CHANGED', row: 0, phase: 'auditioning' },
+    { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
     { type: 'AUDITION_OPTION_CHANGED', row: 0, optionIndex: 0 },
     {
       type: 'AUDIO_CUE',
@@ -320,11 +372,13 @@ function handleStartShow(state: ShowState): ConductorEvent[] {
 }
 
 function handleAdvancePhase(state: ShowState): ConductorEvent[] {
+  const currentRow = state.rows[state.currentRowIndex];
+  debug('handleAdvancePhase: row=%d, rowPhase=%s', state.currentRowIndex, currentRow.phase);
+
   if (state.phase !== 'running') {
+    debug('  Error: wrong show phase (%s)', state.phase);
     return [{ type: 'ERROR', message: 'Can only advance phase during running phase' }];
   }
-
-  const currentRow = state.rows[state.currentRowIndex];
 
   switch (currentRow.phase) {
     case 'auditioning':
@@ -354,6 +408,8 @@ function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEve
     currentRow.currentAuditionIndex = 0;
   }
 
+  debug('  advanceFromAuditioning: auditionIndex=%d', currentRow.currentAuditionIndex);
+
   // Stop current option audio
   events.push({
     type: 'AUDIO_CUE',
@@ -369,6 +425,7 @@ function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEve
 
   if (currentRow.currentAuditionIndex < 4) {
     // Audition next option
+    debug('  Moving to option %d', currentRow.currentAuditionIndex);
     events.push({
       type: 'AUDITION_OPTION_CHANGED',
       row: currentRow.index,
@@ -384,10 +441,11 @@ function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEve
     });
   } else {
     // All options auditioned, move to voting
+    debug('  All options auditioned, transitioning to voting');
     currentRow.phase = 'voting';
     currentRow.currentAuditionIndex = null;
     events.push({
-      type: 'PHASE_CHANGED',
+      type: 'ROW_PHASE_CHANGED',
       row: currentRow.index,
       phase: 'voting',
     });
@@ -400,7 +458,7 @@ function advanceFromVoting(state: ShowState, currentRow: Row): ConductorEvent[] 
   currentRow.phase = 'revealing';
 
   return [
-    { type: 'PHASE_CHANGED', row: currentRow.index, phase: 'revealing' },
+    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'revealing' },
     ...performReveal(state, currentRow),
   ];
 }
@@ -409,7 +467,7 @@ function advanceFromRevealing(state: ShowState, currentRow: Row): ConductorEvent
   currentRow.phase = 'coup_window';
 
   return [
-    { type: 'PHASE_CHANGED', row: currentRow.index, phase: 'coup_window' },
+    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'coup_window' },
   ];
 }
 
@@ -420,7 +478,7 @@ function advanceFromCoupWindow(state: ShowState, currentRow: Row): ConductorEven
   clearCoupVotesForNewRow(state);
 
   return [
-    { type: 'PHASE_CHANGED', row: currentRow.index, phase: 'committed' },
+    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'committed' },
     {
       type: 'ROW_COMMITTED',
       row: currentRow.index,
@@ -431,6 +489,8 @@ function advanceFromCoupWindow(state: ShowState, currentRow: Row): ConductorEven
 }
 
 function advanceToNextRow(state: ShowState): ConductorEvent[] {
+  debug('advanceToNextRow: currentRow=%d, totalRows=%d', state.currentRowIndex, state.rows.length);
+
   // Reset coup multipliers (they only apply to the row where coup occurred)
   resetCoupMultipliers(state);
 
@@ -440,9 +500,10 @@ function advanceToNextRow(state: ShowState): ConductorEvent[] {
     const nextRow = state.rows[state.currentRowIndex];
     nextRow.phase = 'auditioning';
     nextRow.currentAuditionIndex = 0;
+    debug('  Advancing to row %d', state.currentRowIndex);
 
     return [
-      { type: 'PHASE_CHANGED', row: nextRow.index, phase: 'auditioning' },
+      { type: 'ROW_PHASE_CHANGED', row: nextRow.index, phase: 'auditioning' },
       { type: 'AUDITION_OPTION_CHANGED', row: nextRow.index, optionIndex: 0 },
       {
         type: 'AUDIO_CUE',
@@ -455,6 +516,7 @@ function advanceToNextRow(state: ShowState): ConductorEvent[] {
     ];
   } else {
     // All rows complete, move to finale
+    debug('  All rows complete, entering finale');
     state.phase = 'finale';
 
     return [
@@ -469,6 +531,7 @@ function advanceToNextRow(state: ShowState): ConductorEvent[] {
 // ============================================================================
 
 function performReveal(state: ShowState, currentRow: Row): ConductorEvent[] {
+  debug('performReveal: row=%d, attempt=%d', currentRow.index, currentRow.attempts);
   const events: ConductorEvent[] = [];
 
   // Build user faction map
@@ -498,6 +561,9 @@ function performReveal(state: ShowState, currentRow: Row): ConductorEvent[] {
       currentRow.attempts
     ) || currentRow.options[0].id; // Fallback to first option
 
+    debug('  Faction %d: votes=%d, rawCoherence=%.3f, weightedCoherence=%.3f, option=%s',
+      faction.id, factionVotes.length, rawCoherence, weightedCoherence, votedForOption);
+
     return {
       factionId: faction.id,
       rawCoherence,
@@ -514,6 +580,7 @@ function performReveal(state: ShowState, currentRow: Row): ConductorEvent[] {
   let winningOptionId: OptionId;
 
   if (tieInfo.occurred) {
+    debug('  Tie detected between factions: %o', tieInfo.tiedFactionIds);
     events.push({
       type: 'TIE_DETECTED',
       row: currentRow.index,
@@ -521,6 +588,7 @@ function performReveal(state: ShowState, currentRow: Row): ConductorEvent[] {
     });
 
     winningFactionId = resolveTie(tieInfo.tiedFactionIds);
+    debug('  Tie resolved, winner: faction %d', winningFactionId);
 
     events.push({
       type: 'TIE_RESOLVED',
@@ -532,10 +600,12 @@ function performReveal(state: ShowState, currentRow: Row): ConductorEvent[] {
     winningFactionId = factionResults.reduce((max, curr) =>
       curr.weightedCoherence > max.weightedCoherence ? curr : max
     ).factionId;
+    debug('  Winning faction: %d (highest coherence)', winningFactionId);
   }
 
   // Get winning option from winning faction
   winningOptionId = factionResults.find(r => r.factionId === winningFactionId)!.votedForOption;
+  debug('  Winning option: %s', winningOptionId);
 
   // Calculate popular vote
   const popularWinner = calculatePopularWinner(
@@ -551,10 +621,12 @@ function performReveal(state: ShowState, currentRow: Row): ConductorEvent[] {
   ).length;
 
   const divergedFromFaction = popularWinner !== winningOptionId;
+  debug('  Popular vote: %s (%d votes), diverged=%s', popularWinner, popularVoteCount, divergedFromFaction);
 
   // Update paths
   state.paths.factionPath.push(winningOptionId);
   state.paths.popularPath.push(popularWinner);
+  debug('  Paths updated: faction=%o, popular=%o', state.paths.factionPath, state.paths.popularPath);
 
   // Commit option
   currentRow.committedOption = winningOptionId;
@@ -604,24 +676,35 @@ function handleSubmitVote(
   factionVote: OptionId,
   personalVote: OptionId
 ): ConductorEvent[] {
+  debug('handleSubmitVote: userId=%s, factionVote=%s, personalVote=%s', userId, factionVote, personalVote);
+
   const user = state.users.get(userId);
   if (!user) {
+    debug('  Error: user not found');
     return [{ type: 'ERROR', message: 'User not found' }];
   }
 
   if (user.faction === null) {
+    debug('  Error: user has no faction');
     return [{ type: 'ERROR', message: 'User not assigned to faction' }];
   }
 
   const currentRow = state.rows[state.currentRowIndex];
   if (currentRow.phase !== 'voting') {
+    debug('  Ignored: wrong phase (%s)', currentRow.phase);
     return []; // Silently ignore votes during wrong phase
   }
 
+  debug('  User faction: %d, row: %d, attempt: %d', user.faction, currentRow.index, currentRow.attempts);
+
   // Remove any existing vote from this user for this row/attempt
+  const previousVoteCount = state.votes.length;
   state.votes = state.votes.filter(v =>
     !(v.userId === userId && v.rowIndex === currentRow.index && v.attempt === currentRow.attempts)
   );
+  if (state.votes.length < previousVoteCount) {
+    debug('  Replaced existing vote');
+  }
 
   // Add new vote
   const vote: Vote = {
@@ -634,6 +717,10 @@ function handleSubmitVote(
   };
 
   state.votes.push(vote);
+
+  // Count votes for this row
+  const rowVotes = state.votes.filter(v => v.rowIndex === currentRow.index && v.attempt === currentRow.attempts);
+  debug('  Vote recorded, total votes for row: %d', rowVotes.length);
 
   // Update personal tree
   const personalTree = state.personalTrees.get(userId);
@@ -688,7 +775,7 @@ function handleSkipRow(state: ShowState): ConductorEvent[] {
   state.paths.popularPath.push(currentRow.options[0].id);
 
   return [
-    { type: 'PHASE_CHANGED', row: currentRow.index, phase: 'committed' },
+    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'committed' },
     { type: 'ROW_COMMITTED', row: currentRow.index, optionId: currentRow.options[0].id, popularOptionId: currentRow.options[0].id },
   ];
 }
@@ -707,7 +794,7 @@ function handleRestartRow(state: ShowState): ConductorEvent[] {
   state.votes = state.votes.filter(v => v.rowIndex !== currentRow.index || v.attempt !== currentRow.attempts);
 
   return [
-    { type: 'PHASE_CHANGED', row: currentRow.index, phase: 'auditioning' },
+    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'auditioning' },
     { type: 'AUDITION_OPTION_CHANGED', row: currentRow.index, optionIndex: 0 },
     {
       type: 'AUDIO_CUE',
@@ -735,13 +822,17 @@ function handleForceFinale(state: ShowState): ConductorEvent[] {
 }
 
 function handleResetToLobby(state: ShowState, preserveUsers: boolean): ConductorEvent[] {
+  debug('handleResetToLobby: preserveUsers=%s, currentPhase=%s', preserveUsers, state.phase);
+
   if (preserveUsers) {
     // Keep users but reset their factions and votes
+    debug('  Preserving %d users, clearing factions', state.users.size);
     for (const user of state.users.values()) {
       user.faction = null;
     }
   } else {
     // Clear all users
+    debug('  Clearing all %d users', state.users.size);
     state.users.clear();
     state.personalTrees.clear();
   }

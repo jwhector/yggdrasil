@@ -104,7 +104,7 @@ export function processCoupVote(state: ShowState, userId: UserId): ConductorEven
     });
 
     events.push({
-      type: 'PHASE_CHANGED',
+      type: 'ROW_PHASE_CHANGED',
       row: state.currentRowIndex,
       phase: 'auditioning',
     });
@@ -155,7 +155,7 @@ export function triggerCoupManually(state: ShowState, factionId: FactionId): Con
       row: state.currentRowIndex,
     },
     {
-      type: 'PHASE_CHANGED',
+      type: 'ROW_PHASE_CHANGED',
       row: state.currentRowIndex,
       phase: 'auditioning',
     },

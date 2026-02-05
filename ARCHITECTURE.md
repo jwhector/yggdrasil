@@ -604,6 +604,9 @@ function processCoupVote(state: ShowState, userId: UserId): ConductorEvent[] {
 - Audience members also join faction-specific rooms: `faction:0`, `faction:1`, etc.
 - Coup meter updates are broadcast only to faction rooms (hidden until triggered)
 
+### State Serialization
+`ShowState` contains `Map` and `Set` objects which don't survive JSON serialization. The server serializes state before sending (converting Maps to `[key, value][]` arrays and Sets to arrays), and clients deserialize after receiving. See `lib/serialization.ts` for implementation.
+
 ### Client → Server Events
 
 | Event | Payload | Sender |
