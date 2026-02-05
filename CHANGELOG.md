@@ -4,6 +4,35 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-04] — Complete WebSocket Server (Phase 3)
+
+**Context:** The system requires real-time bidirectional communication for 30+ concurrent users during live performances. WebSocket connections must be resilient to network issues, with automatic reconnection and heartbeat monitoring. All state changes must be immediately persisted and broadcast to appropriate clients.
+
+**Changes:**
+- Created server/socket.ts with complete Socket.IO event handling infrastructure
+- Implemented room-based broadcasting (audience, projector, controller, faction:0-3)
+- Added client→server events: join, vote, coup_vote, fig_tree_response, command
+- Added server→client event broadcasting with intelligent routing
+- Implemented heartbeat system (15s ping, 5s timeout, 2 missed = disconnect)
+- Implemented reconnection protocol with version tracking and state sync
+- Added state filtering by client type (audience sees subset, controller sees all)
+- Wired server/index.ts to initialize persistence, load/create show state, and coordinate state updates
+- Implemented automatic backup on phase transitions (lobby→running, running→finale)
+- Added optional periodic backup system (configurable via environment variables)
+- Added graceful shutdown with final backup and cleanup
+
+**Implications:**
+- All state mutations immediately persist to SQLite before broadcasting events
+- Faction-specific events (coup meters) only visible to that faction's room
+- Clients automatically reconnect with exponential backoff on disconnect
+- State version tracking enables efficient delta sync (vs full state transfer)
+- Backups created at critical phase transitions ensure recovery points
+- Server can survive crashes and restore exact state from last persist
+- Controller commands pass through same event system as user actions
+- PERIODIC_BACKUP env var enables additional safety during long performances
+
+---
+
 ## [2026-02-04] — Complete Persistence Layer (Phase 2)
 
 **Context:** The system must persist show state to survive server crashes during live performances. State recovery needs to be immediate and transparent to users. Database operations must be atomic to prevent corruption.

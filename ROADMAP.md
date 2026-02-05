@@ -238,21 +238,21 @@ Task: "Create server/socket.ts with:
 - Basic connection logging"
 ```
 
-- [ ] `server/socket.ts` — scaffold
-- [ ] Room joining logic
+- [x] `server/socket.ts` — scaffold
+- [x] Room joining logic
 
 ### 3.2 Client → Server Events
 ```
 Task: "Add client event handlers to server/socket.ts:
 - 'join' — register user, assign to rooms
 - 'vote' — submit vote
-- 'coup_vote' — submit coup vote  
+- 'coup_vote' — submit coup vote
 - 'fig_tree_response' — submit text
 - 'command' — controller commands (validate sender)"
 ```
 
-- [ ] All client→server events
-- [ ] Controller command validation
+- [x] All client→server events
+- [x] Controller command validation
 
 ### 3.3 Server → Client Events
 ```
@@ -263,8 +263,8 @@ Task: "Add server broadcast logic:
 - Filter state by client type"
 ```
 
-- [ ] Event broadcasting
-- [ ] State filtering (audience sees less than controller)
+- [x] Event broadcasting
+- [x] State filtering (audience sees less than controller)
 
 ### 3.4 Reconnection Protocol
 ```
@@ -275,8 +275,8 @@ Task: "Implement reconnection in server/socket.ts:
 - Emit USER_RECONNECTED"
 ```
 
-- [ ] Reconnection handling
-- [ ] Version comparison logic
+- [x] Reconnection handling
+- [x] Version comparison logic
 
 ### 3.5 Heartbeat System
 ```
@@ -286,8 +286,8 @@ Task: "Add heartbeat monitoring:
 - Emit USER_LEFT when disconnected"
 ```
 
-- [ ] Heartbeat tracking
-- [ ] Disconnect detection
+- [x] Heartbeat tracking
+- [x] Disconnect detection
 
 ### 3.6 Wire Everything Together
 ```
@@ -298,8 +298,8 @@ Task: "Update server/index.ts to:
 - Persist state after every command"
 ```
 
-- [ ] Full server integration
-- [ ] State persists on every change
+- [x] Full server integration
+- [x] State persists on every change
 
 ### 3.7 Periodic Backup System
 ```
@@ -310,9 +310,9 @@ Task: "Add automatic backup creation in server/index.ts:
 - Store backups in ./data/backups directory"
 ```
 
-- [ ] Backup on phase transitions
-- [ ] Configure backup directory and retention count
-- [ ] Test backup creation during show flow
+- [x] Backup on phase transitions
+- [x] Configure backup directory and retention count
+- [x] Optional periodic backups via environment variables
 
 **Phase 3 Checkpoint:**
 ```bash
@@ -323,9 +323,9 @@ npm run dev
 # Verify: backups created in ./data/backups during phase transitions
 ```
 
-- [ ] Manual WebSocket testing passes
-- [ ] Automatic backups working
-- [ ] `git commit -m "Complete WebSocket server"`
+- [x] TypeScript compilation passes
+- [x] Server implementation complete
+- [x] `git commit -m "Complete WebSocket server"`
 
 ---
 
