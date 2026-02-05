@@ -177,8 +177,8 @@ Task: "Create server/persistence.ts with:
 - Enables WAL mode"
 ```
 
-- [ ] `server/persistence.ts` — initialization
-- [ ] Verify tables created
+- [x] `server/persistence.ts` — initialization
+- [x] Verify tables created
 
 ### 2.2 State Persistence
 ```
@@ -188,9 +188,9 @@ Task: "Add to server/persistence.ts:
 - getLatestShow() — returns most recent show"
 ```
 
-- [ ] CRUD for show state
-- [ ] Transaction wrapping
-- [ ] `server/__tests__/persistence.test.ts`
+- [x] CRUD for show state
+- [x] Transaction wrapping
+- [x] `server/__tests__/persistence.test.ts`
 
 ### 2.3 Vote and User Persistence
 ```
@@ -201,8 +201,8 @@ Task: "Add to server/persistence.ts:
 - getUsersByShow(showId)"
 ```
 
-- [ ] User/vote persistence
-- [ ] Tests
+- [x] User/vote persistence
+- [x] Tests
 
 ### 2.4 Backup System
 ```
@@ -213,16 +213,16 @@ Task: "Create server/backup.ts with:
 - pruneBackups(directory, maxCount)"
 ```
 
-- [ ] Backup functions
-- [ ] Tests
+- [x] Backup functions
+- [x] Tests
 
 **Phase 2 Checkpoint:**
 ```bash
 npm test -- server/  # All persistence tests pass
 ```
 
-- [ ] Persistence tests pass
-- [ ] `git commit -m "Complete persistence layer"`
+- [x] Persistence tests pass (40 tests)
+- [x] `git commit -m "Complete persistence layer"`
 
 ---
 
