@@ -619,16 +619,23 @@ function processCoupVote(state: ShowState, userId: UserId): ConductorEvent[] {
 
 ### Server → Client Events
 
-| Event | Payload | Recipients |
-|-------|---------|------------|
-| `state_sync` | `ShowState` (filtered by recipient) | All (on connect) |
-| `phase_changed` | `{ row, phase }` | All |
-| `reveal` | `RevealPayload` | All |
-| `coup_meter` | `{ progress }` | Faction-specific |
-| `coup_triggered` | `{ factionId, row }` | All |
-| `row_committed` | `{ row, optionId }` | All |
-| `finale_timeline` | `{ path, text }` | All (projector shows, audience sees "your turn" indicator) |
-| `user_faction` | `{ faction }` | Individual (on join) |
+**Primary Event:**
+| Event | Payload | Recipients | When |
+|-------|---------|------------|------|
+| `state_sync` | `ShowState` (filtered by recipient) | All | **On every state change** + initial connect |
+
+**State Sync Strategy:**
+The system uses **full state syncs** rather than granular event broadcasting. After any state mutation, the server broadcasts the complete filtered state to each client type:
+- **Controller**: Full serialized state (Maps/Sets converted to arrays)
+- **Projector**: Public filtered state (rows, paths, factions, no user details)
+- **Audience**: Personalized filtered state (their faction, votes, current row)
+
+This eliminates the possibility of state drift between client and server. The client simply replaces its entire state on each update rather than manually patching specific fields. The trade-off is higher bandwidth (~10-50KB per update), which is acceptable for ~30 users with infrequent state changes.
+
+**Special Purpose Events:**
+Some events are still emitted for specific non-state purposes:
+- `error`: Sent to controller for visibility into invalid commands
+- `identity`: Sent to new audience members with their assigned userId
 
 ---
 

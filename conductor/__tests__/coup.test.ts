@@ -253,7 +253,7 @@ describe('processCoupVote', () => {
       row: 0,
     });
     expect(events).toContainEqual({
-      type: 'PHASE_CHANGED',
+      type: 'ROW_PHASE_CHANGED',
       row: 0,
       phase: 'auditioning',
     });

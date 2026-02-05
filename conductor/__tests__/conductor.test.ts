@@ -277,7 +277,7 @@ describe('Phase Transitions', () => {
       phase: 'running',
     });
     expect(events).toContainEqual({
-      type: 'PHASE_CHANGED',
+      type: 'ROW_PHASE_CHANGED',
       row: 0,
       phase: 'auditioning',
     });
@@ -316,7 +316,7 @@ describe('Phase Transitions', () => {
 
     expect(state.rows[0].phase).toBe('revealing');
     expect(events).toContainEqual({
-      type: 'PHASE_CHANGED',
+      type: 'ROW_PHASE_CHANGED',
       row: 0,
       phase: 'revealing',
     });

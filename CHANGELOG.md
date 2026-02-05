@@ -4,6 +4,36 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-04] — Replace Granular Events with Full State Syncs
+
+**Context:** The WebSocket layer was using granular event-based updates (ROW_PHASE_CHANGED, SHOW_PHASE_CHANGED, etc.) that required client-side handlers to manually patch state. This created opportunities for state drift—the bug in `handleRowPhaseChanged` that updated row phase but not `currentRowIndex` is a perfect example. As the system grows, maintaining synchronized client-side state transformations becomes increasingly fragile and error-prone. For a live performance system where reliability is critical, eliminating state drift is more important than minimizing bandwidth.
+
+**Changes:**
+- **server/socket.ts**:
+  - Rewrote `broadcastEvents()` to send full filtered state to each client type on every state change
+  - Made function async to support iterating audience sockets for personalized state
+  - Removed large switch statement that routed 40+ granular event types
+  - Kept only special handling for FACTION_ASSIGNED (to join faction rooms) and ERROR events
+  - Store `userId` on socket objects for audience members to enable personalized filtering
+  - Updated all `broadcastEvents()` call sites to use `await`
+- **hooks/useShowState.ts**:
+  - Removed 7 incremental event handlers (~80 lines): `handleRowPhaseChanged`, `handleShowPhaseChanged`, `handleRowCommitted`, `handlePathsUpdated`, `handleUserJoined`, `handleUserLeft`, `handleFactionsAssigned`
+  - Simplified to single `handleStateSync` handler
+  - Removed all socket event registrations except `state_sync`
+
+**Implications:**
+- **State drift is eliminated**: Client state is always an exact copy of server state filtered for that client type
+- **Simpler client code**: No need to anticipate which state fields change with each event type
+- **Less maintenance burden**: New state fields automatically sync without updating event handlers
+- **Higher bandwidth per update**: ~10-50KB per state change for 30 users = 1.5MB total broadcast (acceptable for local network and infrequent updates)
+- **Version tracking**: `state.version` still increments on every change, enabling future optimizations like delta compression if needed
+- **Breaking change**: Old clients expecting granular events (row_phase_changed, etc.) will not work—but system isn't deployed yet
+- **Future development**: When adding new state fields, no client-side handler updates required
+
+**Trade-off rationale:** For ~30 concurrent users with infrequent state changes (~every 10-30 seconds), full state syncs (~50KB) are negligible bandwidth. The reliability benefit of guaranteed state consistency far outweighs the small bandwidth cost. This aligns with the system's priority of robustness for live performance over premature optimization.
+
+---
+
 ## [2026-02-04] — Fix Phase Event Naming Collision
 
 **Context:** The conductor emits both row phase changes (auditioning, voting, revealing, etc.) and show phase changes (lobby, running, finale, etc.). The event `PHASE_CHANGED` was ambiguous, and the client was incorrectly interpreting row phase changes as show phase changes. This caused the controller UI buttons to be disabled incorrectly—for example, when a row entered "auditioning" phase, the controller thought the entire show was in an invalid state.

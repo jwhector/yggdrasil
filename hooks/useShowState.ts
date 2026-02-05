@@ -41,7 +41,8 @@ export function useShowState(
   useEffect(() => {
     if (!socket) return;
 
-    // State sync - full state update
+    // Single state sync handler - receives full state on every update
+    // This eliminates the possibility of state drift between client and server
     const handleStateSync = (data: ShowState | SerializedShowState) => {
       // Deserialize if it's serialized format (controller mode)
       const state = isSerializedState(data) ? deserializeState(data) : data;
@@ -51,93 +52,10 @@ export function useShowState(
       setIsLoading(false);
     };
 
-    // Incremental events that update state
-    // ROW phase changed (auditioning, voting, revealing, coup_window, committed)
-    const handleRowPhaseChanged = (data: { row: number; phase: any }) => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        const updatedRows = [...prev.rows];
-        if (updatedRows[data.row]) {
-          updatedRows[data.row] = { ...updatedRows[data.row], phase: data.phase };
-        }
-        const updated = { ...prev, rows: updatedRows, version: prev.version + 1 };
-        updateLastVersion(updated.version);
-        return updated;
-      });
-    };
-
-    // SHOW phase changed (lobby, assigning, running, finale, paused, ended)
-    const handleShowPhaseChanged = (data: { phase: any }) => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        const updated = { ...prev, phase: data.phase, version: prev.version + 1 };
-        updateLastVersion(updated.version);
-        return updated;
-      });
-    };
-
-    const handleRowCommitted = (data: { row: number; optionId: string; popularOptionId: string }) => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        const updated = { ...prev, version: prev.version + 1 };
-        // Update the committed option for the row
-        if (updated.rows[data.row]) {
-          updated.rows[data.row].committedOption = data.optionId;
-        }
-        updateLastVersion(updated.version);
-        return updated;
-      });
-    };
-
-    const handlePathsUpdated = (data: { paths: any }) => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        const updated = { ...prev, paths: data.paths, version: prev.version + 1 };
-        updateLastVersion(updated.version);
-        return updated;
-      });
-    };
-
-    const handleUserJoined = () => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        return { ...prev, version: prev.version + 1 };
-      });
-    };
-
-    const handleUserLeft = () => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        return { ...prev, version: prev.version + 1 };
-      });
-    };
-
-    const handleFactionsAssigned = () => {
-      setFullState((prev) => {
-        if (!prev) return prev;
-        return { ...prev, version: prev.version + 1 };
-      });
-    };
-
-    // Register event listeners
     socket.on('state_sync', handleStateSync);
-    socket.on('row_phase_changed', handleRowPhaseChanged);
-    socket.on('show_phase_changed', handleShowPhaseChanged);
-    socket.on('row_committed', handleRowCommitted);
-    socket.on('paths_updated', handlePathsUpdated);
-    socket.on('user_joined', handleUserJoined);
-    socket.on('user_left', handleUserLeft);
-    socket.on('factions_assigned', handleFactionsAssigned);
 
     return () => {
       socket.off('state_sync', handleStateSync);
-      socket.off('row_phase_changed', handleRowPhaseChanged);
-      socket.off('show_phase_changed', handleShowPhaseChanged);
-      socket.off('row_committed', handleRowCommitted);
-      socket.off('paths_updated', handlePathsUpdated);
-      socket.off('user_joined', handleUserJoined);
-      socket.off('user_left', handleUserLeft);
-      socket.off('factions_assigned', handleFactionsAssigned);
     };
   }, [socket]);
 

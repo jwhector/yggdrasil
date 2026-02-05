@@ -110,7 +110,7 @@ export function setupSocketHandlers(
   /**
    * Handle user disconnect
    */
-  function handleUserDisconnect(socket: Socket, userId: UserId): void {
+  async function handleUserDisconnect(socket: Socket, userId: UserId): Promise<void> {
     const state = getState();
     const user = state.users.get(userId);
 
@@ -127,7 +127,7 @@ export function setupSocketHandlers(
       persistence.saveState(state);
 
       // Broadcast disconnection
-      broadcastEvents(io, events, state);
+      await broadcastEvents(io, events, state);
     }
 
     heartbeats.delete(socket.id);
@@ -163,7 +163,7 @@ export function setupSocketHandlers(
      *
      * Payload: { userId?: string, mode: 'audience' | 'projector' | 'controller', seatId?: string }
      */
-    socket.on('join', (data: { userId?: UserId; mode: ClientMode; seatId?: string }) => {
+    socket.on('join', async (data: { userId?: UserId; mode: ClientMode; seatId?: string }) => {
       console.log(`[Socket] Join request:`, data);
 
       const state = getState();
@@ -187,11 +187,12 @@ export function setupSocketHandlers(
           setState(state, events);
           persistence.saveState(state);
 
-          // Update heartbeat with userId
+          // Update heartbeat and socket with userId
           const heartbeat = heartbeats.get(socket.id);
           if (heartbeat) {
             heartbeat.userId = userId;
           }
+          (socket as any).userId = userId;
 
           // Send full state sync
           const filteredState = filterStateForClient(state, data.mode, userId);
@@ -202,7 +203,7 @@ export function setupSocketHandlers(
             socket.join(`faction:${existingUser.faction}`);
           }
 
-          broadcastEvents(io, events, state);
+          await broadcastEvents(io, events, state);
         } else {
           // New user
           const events = processCommand(state, {
@@ -214,11 +215,12 @@ export function setupSocketHandlers(
           setState(state, events);
           persistence.saveState(state);
 
-          // Update heartbeat with userId
+          // Update heartbeat and socket with userId
           const heartbeat = heartbeats.get(socket.id);
           if (heartbeat) {
             heartbeat.userId = userId;
           }
+          (socket as any).userId = userId;
 
           // Send identity and initial state
           socket.emit('identity', { userId });
@@ -226,7 +228,7 @@ export function setupSocketHandlers(
           const filteredState = filterStateForClient(state, data.mode, userId);
           socket.emit('state_sync', filteredState);
 
-          broadcastEvents(io, events, state);
+          await broadcastEvents(io, events, state);
 
           // Save user to database
           const user = state.users.get(userId);
@@ -246,7 +248,7 @@ export function setupSocketHandlers(
      *
      * Payload: { userId: string, lastVersion: number }
      */
-    socket.on('reconnect_user', (data: { userId: UserId; lastVersion: number }) => {
+    socket.on('reconnect_user', async (data: { userId: UserId; lastVersion: number }) => {
       console.log(`[Socket] Reconnect request: ${data.userId}, last version: ${data.lastVersion}`);
 
       const state = getState();
@@ -267,11 +269,12 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      // Update heartbeat
+      // Update heartbeat and socket with userId
       const heartbeat = heartbeats.get(socket.id);
       if (heartbeat) {
         heartbeat.userId = data.userId;
       }
+      (socket as any).userId = data.userId;
 
       // Join rooms
       socket.join('audience');
@@ -283,7 +286,7 @@ export function setupSocketHandlers(
       const filteredState = filterStateForClient(state, 'audience', data.userId);
       socket.emit('state_sync', filteredState);
 
-      broadcastEvents(io, events, state);
+      await broadcastEvents(io, events, state);
     });
 
     /**
@@ -291,7 +294,7 @@ export function setupSocketHandlers(
      *
      * Payload: { userId: string, factionVote: OptionId, personalVote: OptionId }
      */
-    socket.on('vote', (data: { userId: UserId; factionVote: OptionId; personalVote: OptionId }) => {
+    socket.on('vote', async (data: { userId: UserId; factionVote: OptionId; personalVote: OptionId }) => {
       console.log(`[Socket] Vote from ${data.userId}: faction=${data.factionVote}, personal=${data.personalVote}`);
 
       const state = getState();
@@ -317,7 +320,7 @@ export function setupSocketHandlers(
         persistence.saveVote(vote, state.id);
       }
 
-      broadcastEvents(io, events, state);
+      await broadcastEvents(io, events, state);
     });
 
     /**
@@ -325,7 +328,7 @@ export function setupSocketHandlers(
      *
      * Payload: { userId: string }
      */
-    socket.on('coup_vote', (data: { userId: UserId }) => {
+    socket.on('coup_vote', async (data: { userId: UserId }) => {
       console.log(`[Socket] Coup vote from ${data.userId}`);
 
       const state = getState();
@@ -338,7 +341,7 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      broadcastEvents(io, events, state);
+      await broadcastEvents(io, events, state);
     });
 
     /**
@@ -346,7 +349,7 @@ export function setupSocketHandlers(
      *
      * Payload: { userId: string, text: string }
      */
-    socket.on('fig_tree_response', (data: { userId: UserId; text: string }) => {
+    socket.on('fig_tree_response', async (data: { userId: UserId; text: string }) => {
       console.log(`[Socket] Fig tree response from ${data.userId}: "${data.text.substring(0, 50)}..."`);
 
       const state = getState();
@@ -363,7 +366,7 @@ export function setupSocketHandlers(
       // Save response to database
       persistence.saveFigTreeResponse(data.userId, data.text, state.id);
 
-      broadcastEvents(io, events, state);
+      await broadcastEvents(io, events, state);
     });
 
     /**
@@ -371,7 +374,7 @@ export function setupSocketHandlers(
      *
      * Payload: ConductorCommand
      */
-    socket.on('command', (command: ConductorCommand) => {
+    socket.on('command', async (command: ConductorCommand) => {
       // TODO: Validate that sender is actually a controller
       console.log(`[Socket] Command from controller:`, command.type);
 
@@ -382,7 +385,7 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      broadcastEvents(io, events, state);
+      await broadcastEvents(io, events, state);
     });
 
     /**
@@ -402,78 +405,57 @@ export function setupSocketHandlers(
 }
 
 /**
- * Broadcast conductor events to appropriate rooms
+ * Broadcast full state sync to all clients after state changes
+ *
+ * This replaces granular event broadcasting with full state syncs,
+ * eliminating the possibility of state drift between client and server.
  */
-function broadcastEvents(
+async function broadcastEvents(
   io: SocketIOServer,
   events: ConductorEvent[],
   state: ShowState
-): void {
+): Promise<void> {
+  // Controller gets full serialized state (includes Maps/Sets as arrays)
+  io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
+
+  // Projector gets public filtered state (same for all projectors)
+  io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
+
+  // Audience gets personalized filtered state (includes their faction, votes, seat)
+  // Iterate all audience sockets to send user-specific data
+  const audienceSockets = await io.in('audience').fetchSockets();
+  for (const socket of audienceSockets) {
+    const userId = (socket as any).userId;
+    if (userId) {
+      try {
+        const filteredState = filterStateForClient(state, 'audience', userId);
+        socket.emit('state_sync', filteredState);
+      } catch (error) {
+        console.error(`[Socket] Error filtering state for user ${userId}:`, error);
+      }
+    }
+  }
+
+  // Handle special events that require additional actions beyond state sync
   for (const event of events) {
     switch (event.type) {
-      // Broadcast to all clients
-      case 'ROW_PHASE_CHANGED':
-      case 'AUDITION_OPTION_CHANGED':
-      case 'REVEAL':
-      case 'TIE_DETECTED':
-      case 'TIE_RESOLVED':
-      case 'PATHS_UPDATED':
-      case 'COUP_TRIGGERED':
-      case 'ROW_COMMITTED':
-      case 'SHOW_PHASE_CHANGED':
-      case 'FACTIONS_ASSIGNED':
-      case 'FINALE_POPULAR_SONG':
-      case 'FINALE_TIMELINE':
-      case 'FORCE_RECONNECT':
-      case 'SHOW_RESET':
-        io.emit(event.type.toLowerCase(), event);
-        break;
-
-      // Faction-specific broadcasts
-      case 'COUP_METER_UPDATE':
-        io.to(`faction:${event.factionId}`).emit('coup_meter_update', event);
-        break;
-
       case 'FACTION_ASSIGNED':
-        // Send to individual user and also join them to faction room
+        // Join user to faction room for future broadcasts
         const userSockets = getUserSockets(io, event.userId);
         userSockets.forEach(socket => {
-          socket.emit('faction_assigned', event);
           socket.join(`faction:${event.faction}`);
         });
         break;
 
-      // Individual user events
-      case 'USER_JOINED':
-      case 'USER_LEFT':
-      case 'USER_RECONNECTED':
-        io.to('controller').emit(event.type.toLowerCase(), event);
-        break;
-
-      // State sync is sent individually, not broadcast
-      case 'STATE_SYNC':
-        const sockets = getUserSockets(io, event.forUserId);
-        sockets.forEach(socket => {
-          socket.emit('state_sync', event.state);
-        });
-        break;
-
-      // Errors sent to controller
       case 'ERROR':
+        // Errors still sent separately to controller for visibility
         io.to('controller').emit('error', event);
         console.error('[Conductor Error]:', event.message, event.command);
         break;
 
-      // Audio cues and vote received are internal, not broadcast
-      case 'AUDIO_CUE':
-      case 'VOTE_RECEIVED':
-        // These are logged but not sent to clients
-        break;
-
+      // All other events are superseded by state sync
       default:
-        // Exhaustiveness check
-        const _exhaustive: never = event;
-        console.warn('[Socket] Unknown event type:', (_exhaustive as any).type);
+        break;
     }
   }
 }
