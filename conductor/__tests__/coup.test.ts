@@ -88,6 +88,7 @@ function createTestState(overrides?: Partial<ShowState>): ShowState {
       factions: [],
       timing: {
         auditionLoopsPerOption: 2,
+        auditionLoopsPerRow: 1,
         auditionPerOptionMs: 4000,
         votingWindowMs: 30000,
         revealDurationMs: 10000,

@@ -27,7 +27,8 @@
   },
   
   "timing": {
-    "auditionLoopsPerOption": 2,
+    "auditionLoopsPerOption": 1,
+    "auditionLoopsPerRow": 2,
     "auditionPerOptionMs": 10000,
     "votingWindowMs": 10000,
     "revealDurationMs": 5000,

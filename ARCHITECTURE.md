@@ -73,10 +73,17 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
 │                      │    Conductor     │  ← Pure state machine  │
 │                      │   (game logic)   │                        │
 │                      └──────────────────┘                        │
-│                      ┌──────────────────┐                        │
-│                      │   AudioAdapter   │  ← NullAdapter for MVP │
-│                      └──────────────────┘                        │
-└──────────────────────────────────────────────────────────────────┘
+│  ┌──────────────────┐  ┌──────────────────┐                      │
+│  │  Timing Engine   │  │   OSC Bridge     │  ← Ableton Live      │
+│  │ (auto-advance)   │◄─┤  (bidirectional) │    integration       │
+│  └──────────────────┘  └────────┬─────────┘                      │
+└──────────────────────────────────┼──────────────────────────────┘
+                                   │ OSC over UDP
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │   Ableton Live + Max for Live │
+                    │   (musical timing, audio)     │
+                    └──────────────────────────────┘
 ```
 
 ### Architecture: Next.js with Custom Server
@@ -875,6 +882,103 @@ Before each performance, run through:
 
 ---
 
+## Timing Engine & OSC Protocol
+
+### Hybrid Timing Architecture
+
+The system uses a **hybrid timing approach** where:
+- **Ableton Live** controls musical timing (audition loops, tempo-synced events)
+- **Server** controls game logic timing (voting windows, coup windows, reveals)
+
+This ensures sample-accurate musical transitions while keeping game logic simple.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           Server                                          │
+│  ┌─────────────────────┐     ┌─────────────────────┐                     │
+│  │    Timing Engine    │◄────│     OSC Bridge      │                     │
+│  │  (schedules timers, │     │  (UDP bidirectional)│                     │
+│  │   sends commands)   │     │                     │                     │
+│  └──────────┬──────────┘     └──────────┬──────────┘                     │
+│             │                           │                                 │
+│             │ ADVANCE_PHASE             │ OSC over UDP                    │
+│             ▼                           │                                 │
+│  ┌─────────────────────┐                │                                 │
+│  │     Conductor       │                │                                 │
+│  │  (pure game logic)  │                │                                 │
+│  └─────────────────────┘                │                                 │
+└─────────────────────────────────────────┼─────────────────────────────────┘
+                                          │
+                    ┌─────────────────────▼─────────────────────┐
+                    │        Ableton Live + Max for Live         │
+                    │  - Receives /ygg/* commands                │
+                    │  - Sends /ableton/* timing cues            │
+                    └────────────────────────────────────────────┘
+```
+
+### Timing Responsibilities by Phase
+
+| Row Phase | Timing Owner | Mechanism | Notes |
+|-----------|--------------|-----------|-------|
+| `auditioning` | **Ableton** | OSC `/ableton/audition/done` | Sample-accurate loop handling. Cycles through all 4 options `auditionLoopsPerRow` times |
+| `voting` | **Server** | JS timer (`votingWindowMs`) | Non-musical, slight drift OK |
+| `revealing` | **Server** | JS timer (`revealDurationMs`) | Can be extended for Ableton cues |
+| `coup_window` | **Server** | JS timer (`coupWindowMs`) | Non-musical timing |
+| `committed` | **Manual** | N/A | Performer controls row transitions |
+
+### OSC Protocol
+
+**Server → Ableton (Port 9001 by default)**
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `/ygg/audition/start` | `rowIndex: int`, `optionIndex: int`, `optionId: string` | Start playing option for audition |
+| `/ygg/audition/stop` | `rowIndex: int`, `optionIndex: int` | Stop current audition playback |
+| `/ygg/layer/commit` | `rowIndex: int`, `optionId: string` | Commit option as permanent layer |
+| `/ygg/layer/uncommit` | `rowIndex: int` | Remove committed layer (coup triggered) |
+| `/ygg/show/pause` | - | Pause all audio |
+| `/ygg/show/resume` | - | Resume audio |
+| `/ygg/finale/popular` | `path: string` | Play the popular path song |
+| `/ygg/finale/timeline` | `userId: string`, `path: string` | Play individual timeline |
+
+**Ableton → Server (Port 9000 by default)**
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `/ableton/loop/complete` | `rowIndex: int`, `optionIndex: int`, `loopCount: int` | Option loop completed |
+| `/ableton/audition/done` | `rowIndex: int`, `optionIndex: int` | All loops for this option finished |
+| `/ableton/cue/hit` | `cueName: string` | Named cue point reached |
+| `/ableton/ready` | - | Ableton is connected and ready |
+
+### Fallback Mode
+
+When Ableton is not connected, the timing engine uses JS timers for all phases:
+- Audition timing: `auditionPerOptionMs * auditionLoopsPerOption`
+- All other phases: Configured durations in `TimingConfig`
+
+This enables testing and rehearsal without Ableton running.
+
+### Environment Variables
+
+```bash
+TIMING_ENGINE_ENABLED=true|false  # Default: true
+OSC_ENABLED=true|false            # Default: true
+OSC_SEND_PORT=9001                # Port to send to Ableton
+OSC_RECEIVE_PORT=9000             # Port to receive from Ableton
+ABLETON_HOST=127.0.0.1            # Ableton host (for remote setups)
+```
+
+### Version Check Safety
+
+The timing engine uses **version checking** to prevent stale timer fires:
+1. When scheduling a timer, record the current `state.version`
+2. When timer fires, compare recorded version to current version
+3. If versions differ, skip the automatic advance (manual action took precedence)
+
+This ensures manual controller actions always override automatic timing.
+
+---
+
 ## Audio Adapter Interface
 
 The adapter is a pluggable module that translates Conductor events into audio system commands.
@@ -942,6 +1046,9 @@ yggdrasil/
 │   ├── socket.ts                # Socket.IO event handlers
 │   ├── persistence.ts           # SQLite layer
 │   ├── recovery.ts              # State recovery and backup logic
+│   ├── timing.ts                # Hybrid timing engine (Ableton + JS timers)
+│   ├── osc.ts                   # OSC bridge for Ableton communication
+│   ├── __tests__/               # Server unit tests
 │   └── adapters/
 │       ├── interface.ts         # AudioAdapter interface
 │       └── null.ts              # NullAdapter (logs only)

@@ -54,7 +54,10 @@ yggdrasil/
 ├── server/           # Custom server
 │   ├── index.ts      # Entry: HTTP + Next.js + Socket.IO
 │   ├── socket.ts     # Socket.IO handlers
-│   └── persistence.ts
+│   ├── persistence.ts
+│   ├── timing.ts     # Hybrid timing engine (Ableton + JS timers)
+│   ├── osc.ts        # OSC bridge for Ableton communication
+│   └── __tests__/    # Server unit tests
 ├── app/              # Next.js pages
 │   ├── audience/
 │   ├── projector/
@@ -76,12 +79,20 @@ yggdrasil/
 
 ## Current State
 
-The repository contains specifications and type definitions. Implementation has not begun.
+Core implementation is in progress:
 
-**Recommended implementation order:**
-1. `conductor/` — Pure state machine with comprehensive tests
-2. `server/` — Custom server with Socket.IO + persistence
-3. `app/` + `components/` — Start with `/controller`, then `/projector`, then `/audience`
+**Completed:**
+- `conductor/` — Pure state machine with comprehensive tests
+- `server/` — WebSocket server with Socket.IO, persistence, timing engine, OSC bridge
+- Basic `/controller` UI view
+
+**In Progress:**
+- `/projector` and `/audience` views
+- Ableton Live Max for Live integration (M4L device)
+
+**Key architectural components:**
+- **Timing Engine** (`server/timing.ts`): Hybrid timing with Ableton (audition) + JS timers (voting, coup)
+- **OSC Bridge** (`server/osc.ts`): Bidirectional UDP communication with Ableton Live
 
 ## Code Conventions
 

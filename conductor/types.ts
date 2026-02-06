@@ -141,6 +141,7 @@ export type ShowPhase =
 
 export interface TimingConfig {
   auditionLoopsPerOption: number;     // How many times each option loops during audition (default: 2)
+  auditionLoopsPerRow: number;        // How many complete cycles through all 4 options (default: 1)
   auditionPerOptionMs: number;        // ms per loop
   votingWindowMs: number;
   revealDurationMs: number;

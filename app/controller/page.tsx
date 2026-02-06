@@ -255,6 +255,10 @@ export default function ControllerPage() {
               <div style={{ fontSize: '0.875rem', color: '#666' }}>
                 Phase: {controllerState.rows[controllerState.currentRowIndex]?.phase}
               </div>
+              {controllerState.rows[controllerState.currentRowIndex]?.currentAuditionIndex !== null && 
+              (<div style={{ fontSize: '0.875rem', color: '#666' }}>
+                Audition Index: {controllerState.rows[controllerState.currentRowIndex]?.currentAuditionIndex}
+              </div>)}
               <div style={{ fontSize: '0.875rem', color: '#666' }}>
                 Attempts: {controllerState.rows[controllerState.currentRowIndex]?.attempts + 1}
               </div>

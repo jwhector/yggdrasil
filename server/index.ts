@@ -6,6 +6,7 @@
  * 2. Handles Socket.IO connections (real-time events)
  * 3. Manages SQLite persistence
  * 4. Runs the Conductor (game logic)
+ * 5. 
  * 
  * Start with: npm run dev (development) or npm run start (production)
  */
@@ -16,11 +17,13 @@ import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
-import type { ShowState, ShowConfig, ConductorEvent } from '../conductor/types';
-import { createInitialState } from '../conductor';
+import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand } from '../conductor/types';
+import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
-import { setupSocketHandlers } from './socket';
+import { setupSocketHandlers, broadcastEvents } from './socket';
 import { createAndPruneBackup } from './backup';
+import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
+import { createTimingEngine, type TimingEngine } from './timing';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -36,6 +39,13 @@ const CONFIG_PATH = join(process.cwd(), 'config', 'default-show.json');
 const PERIODIC_BACKUP_ENABLED = process.env.PERIODIC_BACKUP === 'true';
 const PERIODIC_BACKUP_INTERVAL_MS = parseInt(process.env.PERIODIC_BACKUP_INTERVAL_MS || '300000', 10); // Default: 5 minutes
 const MAX_BACKUPS = parseInt(process.env.MAX_BACKUPS || '10', 10);
+
+// Timing engine and OSC configuration
+const TIMING_ENGINE_ENABLED = process.env.TIMING_ENGINE_ENABLED !== 'false'; // Default: true
+const OSC_ENABLED = process.env.OSC_ENABLED !== 'false'; // Default: true
+const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '9001', 10);
+const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '9000', 10);
+const ABLETON_HOST = process.env.ABLETON_HOST || '127.0.0.1';
 
 async function main() {
   // Initialize Next.js
@@ -101,6 +111,9 @@ async function main() {
     return currentState;
   }
 
+  // Hooks for state change notifications (registered by timing engine and OSC)
+  const stateChangeHooks: Array<(state: ShowState, events: ConductorEvent[]) => void> = [];
+
   function setState(state: ShowState, events: ConductorEvent[]): void {
     currentState = state;
 
@@ -118,11 +131,140 @@ async function main() {
         }
       }
     }
+
+    // Call registered hooks
+    for (const hook of stateChangeHooks) {
+      try {
+        hook(state, events);
+      } catch (err) {
+        console.error('[Server] State change hook error:', err);
+      }
+    }
   }
 
   // Setup socket handlers
   console.log('[Server] Setting up Socket.IO handlers...');
   setupSocketHandlers(io, getState, setState, persistence);
+
+  // ============================================================================
+  // OSC Bridge and Timing Engine Setup
+  // ============================================================================
+
+  // Create OSC bridge (or null bridge if OSC disabled)
+  let oscBridge: OSCBridge;
+  if (OSC_ENABLED) {
+    console.log('[Server] Creating OSC bridge...');
+    oscBridge = createOSCBridge({
+      sendPort: OSC_SEND_PORT,
+      receivePort: OSC_RECEIVE_PORT,
+      abletonHost: ABLETON_HOST,
+    });
+  } else {
+    console.log('[Server] OSC disabled, using null bridge');
+    oscBridge = createNullOSCBridge();
+  }
+
+  // Create unified command processor for timing engine
+  // This processes a command, persists state, and broadcasts to all clients
+  async function processCommandAndBroadcast(command: ConductorCommand): Promise<void> {
+    const state = getState();
+    const events = processCommand(state, command);
+    setState(state, events);
+    persistence.saveState(state);
+    await broadcastEvents(io, events, state);
+  }
+
+  // Create timing engine
+  let timingEngine: TimingEngine | null = null;
+  if (TIMING_ENGINE_ENABLED) {
+    console.log('[Server] Creating timing engine...');
+    timingEngine = createTimingEngine(
+      (command) => {
+        // Fire-and-forget async command processing
+        processCommandAndBroadcast(command).catch(err => {
+          console.error('[Timing] Error processing command:', err);
+        });
+      },
+      getState,
+      {
+        enabled: true,
+        oscBridge: OSC_ENABLED ? oscBridge : null,
+      }
+    );
+  }
+
+  // Register timing engine hook
+  if (timingEngine) {
+    stateChangeHooks.push((state, events) => {
+      timingEngine!.onStateChanged(state, events);
+    });
+  }
+
+  // Register OSC audio cue hook
+  stateChangeHooks.push((state, events) => {
+    for (const event of events) {
+      if (event.type === 'AUDIO_CUE') {
+        const cue = event.cue;
+        switch (cue.type) {
+          case 'play_option':
+            if (cue.rowIndex !== undefined && cue.optionId) {
+              // Find option index from the current row
+              const row = state.rows[cue.rowIndex];
+              const optionIndex = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
+              oscBridge.send('/ygg/audition/start', cue.rowIndex, optionIndex, cue.optionId);
+            }
+            break;
+          case 'stop_option':
+            if (cue.rowIndex !== undefined && cue.optionId) {
+              const row = state.rows[cue.rowIndex];
+              const optionIndex = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
+              oscBridge.send('/ygg/audition/stop', cue.rowIndex, optionIndex);
+            }
+            break;
+          case 'commit_layer':
+            if (cue.rowIndex !== undefined && cue.optionId) {
+              oscBridge.send('/ygg/layer/commit', cue.rowIndex, cue.optionId);
+            }
+            break;
+          case 'uncommit_layer':
+            if (cue.rowIndex !== undefined) {
+              oscBridge.send('/ygg/layer/uncommit', cue.rowIndex);
+            }
+            break;
+          case 'play_timeline':
+            if (cue.path) {
+              oscBridge.send('/ygg/finale/popular', cue.path.join(','));
+            }
+            break;
+        }
+      }
+
+      // Handle pause/resume for OSC
+      if (event.type === 'SHOW_PHASE_CHANGED') {
+        const phaseEvent = event as { type: 'SHOW_PHASE_CHANGED'; phase: string };
+        if (phaseEvent.phase === 'paused') {
+          oscBridge.send('/ygg/show/pause');
+        } else if (state.pausedPhase === 'paused') {
+          // Resuming from pause
+          oscBridge.send('/ygg/show/resume');
+        }
+      }
+    }
+  });
+
+  // Start OSC bridge and timing engine
+  try {
+    await oscBridge.start();
+    console.log(`[Server] OSC bridge started (send: ${OSC_SEND_PORT}, receive: ${OSC_RECEIVE_PORT})`);
+  } catch (err) {
+    console.error('[Server] Failed to start OSC bridge:', err);
+    console.log('[Server] Continuing without OSC...');
+  }
+
+  if (timingEngine) {
+    timingEngine.start();
+    console.log('[Server] Timing engine started');
+  }
 
   // Optional: Periodic backup system
   let periodicBackupInterval: NodeJS.Timeout | null = null;
@@ -148,6 +290,16 @@ async function main() {
   // Cleanup on shutdown
   process.on('SIGINT', () => {
     console.log('\n[Server] Shutting down gracefully...');
+
+    // Stop timing engine
+    if (timingEngine) {
+      timingEngine.dispose();
+      console.log('[Server] Timing engine stopped');
+    }
+
+    // Stop OSC bridge
+    oscBridge.stop();
+    console.log('[Server] OSC bridge stopped');
 
     if (periodicBackupInterval) {
       clearInterval(periodicBackupInterval);

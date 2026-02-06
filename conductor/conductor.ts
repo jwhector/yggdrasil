@@ -403,12 +403,17 @@ function handleAdvancePhase(state: ShowState): ConductorEvent[] {
 
 function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEvent[] {
   const events: ConductorEvent[] = [];
+  const loopsPerRow = state.config.timing.auditionLoopsPerRow ?? 1;
 
   if (currentRow.currentAuditionIndex === null) {
     currentRow.currentAuditionIndex = 0;
   }
 
-  debug('  advanceFromAuditioning: auditionIndex=%d', currentRow.currentAuditionIndex);
+  debug('  advanceFromAuditioning: auditionIndex=%d, loopsPerRow=%d',
+    currentRow.currentAuditionIndex, loopsPerRow);
+
+  // Calculate the actual option index (0-3) from the raw audition index
+  const currentOptionIndex = currentRow.currentAuditionIndex % 4;
 
   // Stop current option audio
   events.push({
@@ -416,32 +421,38 @@ function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEve
     cue: {
       type: 'stop_option',
       rowIndex: currentRow.index,
-      optionId: currentRow.options[currentRow.currentAuditionIndex].id,
+      optionId: currentRow.options[currentOptionIndex].id,
     },
   });
 
-  // Move to next option
+  // Move to next audition step
   currentRow.currentAuditionIndex++;
 
-  if (currentRow.currentAuditionIndex < 4) {
+  // Calculate total audition steps: 4 options * loopsPerRow
+  const totalAuditionSteps = 4 * loopsPerRow;
+
+  if (currentRow.currentAuditionIndex < totalAuditionSteps) {
     // Audition next option
-    debug('  Moving to option %d', currentRow.currentAuditionIndex);
+    const nextOptionIndex = currentRow.currentAuditionIndex % 4;
+    debug('  Moving to audition step %d (option %d)',
+      currentRow.currentAuditionIndex, nextOptionIndex);
+
     events.push({
       type: 'AUDITION_OPTION_CHANGED',
       row: currentRow.index,
-      optionIndex: currentRow.currentAuditionIndex,
+      optionIndex: nextOptionIndex,
     });
     events.push({
       type: 'AUDIO_CUE',
       cue: {
         type: 'play_option',
         rowIndex: currentRow.index,
-        optionId: currentRow.options[currentRow.currentAuditionIndex].id,
+        optionId: currentRow.options[nextOptionIndex].id,
       },
     });
   } else {
-    // All options auditioned, move to voting
-    debug('  All options auditioned, transitioning to voting');
+    // All loops complete, move to voting
+    debug('  All %d audition loops complete, transitioning to voting', loopsPerRow);
     currentRow.phase = 'voting';
     currentRow.currentAuditionIndex = null;
     events.push({

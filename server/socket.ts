@@ -409,8 +409,10 @@ export function setupSocketHandlers(
  *
  * This replaces granular event broadcasting with full state syncs,
  * eliminating the possibility of state drift between client and server.
+ *
+ * Exported for use by timing engine and other server components.
  */
-async function broadcastEvents(
+export async function broadcastEvents(
   io: SocketIOServer,
   events: ConductorEvent[],
   state: ShowState
@@ -485,8 +487,10 @@ function getUserSockets(io: SocketIOServer, userId: UserId): Socket[] {
  * - Audience: Only what's relevant to them
  * - Projector: Public display info (no coup meters)
  * - Controller: Full state
+ *
+ * Exported for use by components that need to send filtered state.
  */
-function filterStateForClient(
+export function filterStateForClient(
   state: ShowState,
   mode: ClientMode,
   userId?: UserId

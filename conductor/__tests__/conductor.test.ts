@@ -27,6 +27,7 @@ function createTestConfig(): ShowConfig {
     factions,
     timing: {
       auditionLoopsPerOption: 2,
+      auditionLoopsPerRow: 1,
       auditionPerOptionMs: 4000,
       votingWindowMs: 30000,
       revealDurationMs: 10000,
@@ -304,6 +305,83 @@ describe('Phase Transitions', () => {
     events = processCommand(state, { type: 'ADVANCE_PHASE' });
     expect(state.rows[0].phase).toBe('voting');
     expect(state.rows[0].currentAuditionIndex).toBe(null);
+  });
+
+  describe('Audition Loops Per Row', () => {
+    test('with auditionLoopsPerRow=1, transitions to voting after 4 advances', () => {
+      const config = createTestConfig();
+      config.timing.auditionLoopsPerRow = 1;  // Explicit default
+      const state = createInitialState(config, 'test-show');
+      state.phase = 'running';
+      state.rows[0].phase = 'auditioning';
+      state.rows[0].currentAuditionIndex = 0;
+
+      // Advance through all 4 options
+      for (let i = 0; i < 3; i++) {
+        processCommand(state, { type: 'ADVANCE_PHASE' });
+        expect(state.rows[0].phase).toBe('auditioning');
+      }
+
+      processCommand(state, { type: 'ADVANCE_PHASE' });
+      expect(state.rows[0].phase).toBe('voting');
+    });
+
+    test('with auditionLoopsPerRow=2, transitions to voting after 8 advances', () => {
+      const config = createTestConfig();
+      config.timing.auditionLoopsPerRow = 2;
+      const state = createInitialState(config, 'test-show');
+      state.phase = 'running';
+      state.rows[0].phase = 'auditioning';
+      state.rows[0].currentAuditionIndex = 0;
+
+      // Advance through 7 steps (still in auditioning)
+      for (let i = 0; i < 7; i++) {
+        processCommand(state, { type: 'ADVANCE_PHASE' });
+        expect(state.rows[0].phase).toBe('auditioning');
+      }
+
+      // 8th advance moves to voting
+      processCommand(state, { type: 'ADVANCE_PHASE' });
+      expect(state.rows[0].phase).toBe('voting');
+    });
+
+    test('AUDITION_OPTION_CHANGED always emits optionIndex 0-3', () => {
+      const config = createTestConfig();
+      config.timing.auditionLoopsPerRow = 2;
+      const state = createInitialState(config, 'test-show');
+      state.phase = 'running';
+      state.rows[0].phase = 'auditioning';
+      state.rows[0].currentAuditionIndex = 0;
+
+      // Collect all option indices from events
+      const optionIndices: number[] = [];
+      for (let i = 0; i < 7; i++) {
+        const events = processCommand(state, { type: 'ADVANCE_PHASE' });
+        const optionEvent = events.find(e => e.type === 'AUDITION_OPTION_CHANGED');
+        if (optionEvent && optionEvent.type === 'AUDITION_OPTION_CHANGED') {
+          optionIndices.push(optionEvent.optionIndex);
+        }
+      }
+
+      // Should cycle 1,2,3,0,1,2,3 (7 advances from index 0)
+      expect(optionIndices).toEqual([1, 2, 3, 0, 1, 2, 3]);
+    });
+
+    test('defaults to 1 loop when auditionLoopsPerRow is not set', () => {
+      const config = createTestConfig();
+      delete (config.timing as any).auditionLoopsPerRow;  // Ensure not set
+      const state = createInitialState(config, 'test-show');
+      state.phase = 'running';
+      state.rows[0].phase = 'auditioning';
+      state.rows[0].currentAuditionIndex = 0;
+
+      // Should transition after 4 advances (default behavior)
+      for (let i = 0; i < 3; i++) {
+        processCommand(state, { type: 'ADVANCE_PHASE' });
+      }
+      processCommand(state, { type: 'ADVANCE_PHASE' });
+      expect(state.rows[0].phase).toBe('voting');
+    });
   });
 
   test('ADVANCE_PHASE from voting to revealing', () => {

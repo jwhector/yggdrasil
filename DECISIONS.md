@@ -119,6 +119,33 @@ These items are acknowledged but intentionally deferred. When resolving, move to
 
 ## Resolved Decisions
 
+### Hybrid Timing with Ableton Live (Resolved)
+
+**Decision:** Use a hybrid timing architecture where Ableton Live controls musical timing (audition loops) via OSC, while the server controls game logic timing (voting, coup windows) via JS timers.
+
+**Reasoning:**
+- Musical timing requires sample-accuracy; Ableton handles tempo, loops, and quantization natively
+- Game logic timing (voting windows) doesn't need musical precision; JS timers are sufficient
+- Bidirectional OSC enables the server to send commands and receive timing cues
+- Fallback mode (JS timers only) enables testing without Ableton running
+- Version checking prevents stale timer fires when manual advances occur
+
+**Architecture:**
+- `server/osc.ts`: Bidirectional OSC bridge (UDP, ports 9000/9001)
+- `server/timing.ts`: Timing engine that observes state changes and schedules advances
+- Conductor remains pure: timing logic lives entirely in server layer
+- `ADVANCE_PHASE` commands are sent like any other command (manual or automatic)
+
+**Key design choices:**
+- Row transitions remain manual (performer controls pacing)
+- Pause/resume uses fresh restart (timer restarts from scratch)
+- Timing engine enabled by default
+- Audition waits for `/ableton/audition/done`; other phases use JS timers
+
+**Date:** Phase 3 implementation
+
+---
+
 ### Next.js with Custom Server (Resolved)
 
 **Decision:** Use Next.js with a custom Node.js server (Option A: single process) rather than separate frontend and backend services.

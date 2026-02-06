@@ -4,6 +4,125 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-05] — Add `auditionLoopsPerRow` Configuration
+
+**Context:** The audition phase currently cycles through all 4 options once before transitioning to voting. For certain musical designs, it may be desirable to cycle through all options multiple times to give the audience more time to absorb the choices. This change adds a configurable `auditionLoopsPerRow` field that controls how many complete cycles through all 4 options occur before advancing to voting.
+
+**Changes:**
+- **conductor/types.ts**:
+  - Added `auditionLoopsPerRow: number` to `TimingConfig` interface
+  - Default value: 1 (preserves current behavior)
+
+- **conductor/conductor.ts**:
+  - Modified `advanceFromAuditioning()` to support multi-loop auditions
+  - `currentAuditionIndex` now grows to `auditionLoopsPerRow * 4` instead of stopping at 4
+  - Uses modulo arithmetic (`currentAuditionIndex % 4`) to derive actual option index (0-3)
+  - Events always emit option indices 0-3 regardless of loop count
+
+- **server/timing.ts**:
+  - Updated `handleAuditionPhase()` to use modulo for option index calculation
+  - Added loop progress logging (e.g., "option 2 (loop 1/2)")
+  - Updated `handleAbletonAuditionDone()` to compare against modulo option index
+
+- **config/default-show.json**:
+  - Added `auditionLoopsPerRow: 1` to timing configuration
+
+- **Tests**:
+  - Added 4 new tests to `conductor/__tests__/conductor.test.ts`
+  - Added 2 new tests to `server/__tests__/timing.test.ts`
+  - Updated test helper configs in all test files
+
+**Backward Compatibility:**
+- All code paths use `?? 1` fallback for missing field
+- Existing configs without the field continue to work with default behavior
+- Persisted states from older versions work correctly
+
+**Example:**
+```json
+"timing": {
+  "auditionLoopsPerRow": 2,  // Cycle: 0→1→2→3→0→1→2→3 then vote
+  "auditionLoopsPerOption": 2,
+  "auditionPerOptionMs": 10000
+}
+```
+
+---
+
+## [2026-02-05] — Hybrid Timing Engine with Ableton OSC Integration
+
+**Context:** The show requires automated phase advancement with precise musical timing. Rather than fighting against DAW timing with JavaScript timers, we implement a hybrid approach: Ableton Live controls musical timing (audition loops, tempo), while the server handles game logic timing (voting windows, coup windows). This separation of concerns plays to each system's strengths—Ableton provides sample-accurate timing, while Node.js manages state and game logic.
+
+**Changes:**
+- **server/osc.ts** (new):
+  - Implemented bidirectional OSC bridge for communication with Ableton Live
+  - Pure Node.js UDP implementation (no external dependencies)
+  - OSC encoding/decoding per the OSC 1.0 specification
+  - EventEmitter-based message routing by address pattern
+  - Null bridge for testing without Ableton
+  - Configurable ports (default: send 9001, receive 9000)
+
+- **server/timing.ts** (new):
+  - Hybrid timing engine that coordinates Ableton and server-side timers
+  - Audition phase: Sends OSC to Ableton, waits for `/ableton/audition/done` response
+  - Voting/revealing/coup_window phases: Uses JS `setTimeout` (non-musical timing)
+  - Committed phase: No timer (manual row transitions)
+  - Fallback mode: JS timers for all phases when Ableton not connected
+  - Version checking prevents stale timer fires after manual advances
+  - Pause cancels all timers; resume schedules fresh
+
+- **server/index.ts**:
+  - Added state change hooks pattern for extensibility
+  - Integrated OSC bridge and timing engine into server lifecycle
+  - Audio cue events (`AUDIO_CUE`) automatically sent via OSC
+  - Environment variable configuration for OSC ports and feature flags
+  - Proper cleanup on shutdown
+
+- **server/socket.ts**:
+  - Exported `broadcastEvents` and `filterStateForClient` for use by timing engine
+
+- **Tests** (24 new tests):
+  - `server/__tests__/timing.test.ts`: Timer scheduling, cancellation, OSC handling, lifecycle
+  - `server/__tests__/osc.test.ts`: Null bridge, protocol validation
+
+**OSC Protocol (Server ↔ Ableton):**
+
+Server → Ableton (port 9001):
+| Address | Description |
+|---------|-------------|
+| `/ygg/audition/start` | Start playing option for audition |
+| `/ygg/audition/stop` | Stop current audition playback |
+| `/ygg/layer/commit` | Commit option as permanent layer |
+| `/ygg/layer/uncommit` | Remove committed layer (coup) |
+| `/ygg/show/pause` | Pause all audio |
+| `/ygg/show/resume` | Resume audio |
+
+Ableton → Server (port 9000):
+| Address | Description |
+|---------|-------------|
+| `/ableton/audition/done` | All loops for option finished |
+| `/ableton/loop/complete` | Single loop completed (for UI feedback) |
+| `/ableton/cue/hit` | Named cue point reached |
+| `/ableton/ready` | Ableton connected and ready |
+
+**Configuration:**
+```bash
+TIMING_ENGINE_ENABLED=true|false  # Default: true
+OSC_ENABLED=true|false            # Default: true
+OSC_SEND_PORT=9001                # Port to send to Ableton
+OSC_RECEIVE_PORT=9000             # Port to receive from Ableton
+ABLETON_HOST=127.0.0.1            # Ableton host IP
+```
+
+**Implications:**
+- Max for Live patch needed in Ableton to implement the OSC protocol
+- Without Ableton, system falls back to JS timers (slightly less precise but functional)
+- Manual advances always take precedence over automatic timing
+- Row transitions remain manual—performer controls pacing between rows
+- Future: voting during audition phase requires conductor changes (flagged as TODO)
+- Future: reveal timing could be Ableton-driven if reveal has musical component
+
+---
+
 ## [2026-02-04] — Replace Granular Events with Full State Syncs
 
 **Context:** The WebSocket layer was using granular event-based updates (ROW_PHASE_CHANGED, SHOW_PHASE_CHANGED, etc.) that required client-side handlers to manually patch state. This created opportunities for state drift—the bug in `handleRowPhaseChanged` that updated row phase but not `currentRowIndex` is a perfect example. As the system grows, maintaining synchronized client-side state transformations becomes increasingly fragile and error-prone. For a live performance system where reliability is critical, eliminating state drift is more important than minimizing bandwidth.

@@ -432,7 +432,7 @@ npm run dev
 ```
 
 - [x] Controller fully functional
-- [ ] `git commit -m "Complete controller UI"`
+- [x] `git commit -m "Complete controller UI"`
 
 ---
 
