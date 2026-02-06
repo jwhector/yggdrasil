@@ -524,6 +524,7 @@ export function filterStateForClient(
         })) as any,
         paths: state.paths,
         config: state.config,
+        userCount: state.users.size,
       };
 
     case 'audience':

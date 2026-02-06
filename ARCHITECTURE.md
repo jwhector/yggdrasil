@@ -508,7 +508,6 @@ function resolveTie(tiedFactionIds: FactionId[]): FactionId {
   return tiedFactionIds[randomIndex];
 }
 ```
-```
 
 ### Coherence Calculation
 

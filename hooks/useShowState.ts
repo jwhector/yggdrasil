@@ -130,9 +130,13 @@ function transformForProjector(state: ShowState): ProjectorClientState {
     currentRowIndex: state.currentRowIndex,
     rows: state.rows.map((row) => ({
       index: row.index,
+      label: row.label,
+      type: row.type,
+      options: row.options,
       phase: row.phase,
       committedOption: row.committedOption,
       currentAuditionIndex: row.currentAuditionIndex,
+      attempts: row.attempts,
     })),
     paths: state.paths,
     factions: state.factions.map((f) => ({ id: f.id, name: f.name, color: f.color })),

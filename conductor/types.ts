@@ -403,9 +403,13 @@ export interface ProjectorClientState {
   currentRowIndex: number;
   rows: Array<{
     index: number;
+    label: string;
+    type: RowType;
+    options: Option[];
     phase: RowPhase;
     committedOption: OptionId | null;
     currentAuditionIndex: number | null;
+    attempts: number;
   }>;
   paths: DualPaths;           // Faction path (solid) and popular path (ghost)
   factions: Array<{ id: FactionId; name: string; color: string }>;
