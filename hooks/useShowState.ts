@@ -19,6 +19,7 @@ import type {
 } from '@/conductor/types';
 import { updateLastVersion } from '@/lib/storage';
 import { deserializeState, isSerializedState, type SerializedShowState } from '@/lib/serialization';
+import { getCoupProgress, canFactionCoup } from '@/conductor/coup';
 
 export type ClientMode = 'controller' | 'projector' | 'audience';
 
@@ -35,20 +36,34 @@ export function useShowState(
   userId: UserId | null
 ): ShowStateHookReturn {
   const [fullState, setFullState] = useState<ShowState | null>(null);
+  const [clientState, setClientState] = useState<ControllerClientState | ProjectorClientState | AudienceClientState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Listen to socket events
   useEffect(() => {
     if (!socket) return;
 
-    // Single state sync handler - receives full state on every update
-    // This eliminates the possibility of state drift between client and server
-    const handleStateSync = (data: ShowState | SerializedShowState) => {
-      // Deserialize if it's serialized format (controller mode)
-      const state = isSerializedState(data) ? deserializeState(data) : data;
-      console.log('[State] Received state sync, version:', state.version);
-      setFullState(state);
-      updateLastVersion(state.version);
+    // Single state sync handler
+    // Controller receives full serialized state
+    // Projector/Audience receive pre-filtered client states from server
+    const handleStateSync = (data: any) => {
+      // Controller mode: deserialize full state and transform
+      if (isSerializedState(data)) {
+        const state = deserializeState(data);
+        console.log('[State] Received full state, version:', state.version);
+        setFullState(state);
+        setClientState(transformStateForClient(state, mode, userId));
+        updateLastVersion(state.version);
+      } else {
+        // Projector/Audience mode: server already filtered the state
+        console.log('[State] Received filtered client state');
+        setFullState(null);
+        setClientState(data);
+        // Update version if available
+        if (data.version !== undefined) {
+          updateLastVersion(data.version);
+        }
+      }
       setIsLoading(false);
     };
 
@@ -57,7 +72,7 @@ export function useShowState(
     return () => {
       socket.off('state_sync', handleStateSync);
     };
-  }, [socket]);
+  }, [socket, mode, userId]);
 
   // Send command to server
   const sendCommand = useCallback(
@@ -72,9 +87,6 @@ export function useShowState(
     },
     [socket]
   );
-
-  // Transform full state into client-specific state
-  const clientState = fullState ? transformStateForClient(fullState, mode, userId) : null;
 
   return {
     state: clientState,
@@ -167,6 +179,20 @@ function transformForAudience(state: ShowState, userId: UserId | null): Audience
 
   const personalTree = userId ? state.personalTrees.get(userId) : null;
 
+  // Calculate coup meter and eligibility
+  let coupMeter: number | null = null;
+  let canCoup = false;
+
+  if (user?.faction !== null && user?.faction !== undefined && currentRow) {
+    const faction = state.factions[user.faction];
+    canCoup = canFactionCoup(faction, currentRow.phase);
+
+    // Only show coup meter during coup_window
+    if (currentRow.phase === 'coup_window') {
+      coupMeter = getCoupProgress(faction, state);
+    }
+  }
+
   return {
     userId: userId || '',
     seatId: user?.seatId || null,
@@ -182,7 +208,7 @@ function transformForAudience(state: ShowState, userId: UserId | null): Audience
         }
       : null,
     myVote,
-    coupMeter: null, // TODO: Track faction coup meter
-    canCoup: false, // TODO: Check if user's faction can coup
+    coupMeter,
+    canCoup,
   };
 }
