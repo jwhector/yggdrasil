@@ -545,6 +545,7 @@ export function filterStateForClient(
           phase: row.phase,
           committedOption: row.committedOption,
           currentAuditionIndex: row.currentAuditionIndex,
+          auditionComplete: row.auditionComplete,
           attempts: row.attempts,
         })),
         factions: state.factions.map(f => ({
@@ -593,6 +594,7 @@ export function filterStateForClient(
           phase: currentRow.phase,
           options: currentRow.options,
           currentAuditionIndex: currentRow.currentAuditionIndex,
+          auditionComplete: currentRow.auditionComplete,
         } : null,
         myVote: myVote ? {
           factionVote: myVote.factionVote,

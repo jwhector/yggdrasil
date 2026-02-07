@@ -129,6 +129,7 @@ export default function ProjectorPage() {
           <PhaseIndicator
             phase={projectorState.rows[projectorState.currentRowIndex]?.phase || 'pending'}
             currentAuditionIndex={projectorState.rows[projectorState.currentRowIndex]?.currentAuditionIndex}
+            auditionComplete={projectorState.rows[projectorState.currentRowIndex]?.auditionComplete || false}
             rowIndex={projectorState.currentRowIndex}
             rowLabel={(projectorState as any).config?.rows[projectorState.currentRowIndex]?.label || `Row ${projectorState.currentRowIndex}`}
           />

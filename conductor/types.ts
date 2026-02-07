@@ -69,8 +69,7 @@ export interface Faction {
 
 export type RowPhase =
   | 'pending'
-  | 'auditioning'
-  | 'voting'
+  | 'voting'        // Now includes audition playback
   | 'revealing'
   | 'coup_window'
   | 'committed';
@@ -97,7 +96,8 @@ export interface Row {
   phase: RowPhase;
   committedOption: OptionId | null;
   attempts: number;
-  currentAuditionIndex: number | null;
+  currentAuditionIndex: number | null;  // Used during 'voting' phase for audition playback
+  auditionComplete: boolean;             // Tracks if all options have been heard
 }
 
 // ============================================================================
@@ -326,6 +326,7 @@ export type ConductorEvent =
   // Phase and game flow
   | { type: 'ROW_PHASE_CHANGED'; row: number; phase: RowPhase }
   | { type: 'AUDITION_OPTION_CHANGED'; row: number; optionIndex: number }
+  | { type: 'AUDITION_COMPLETE'; row: number }
   | { type: 'VOTE_RECEIVED'; userId: UserId; row: number }
   | { type: 'REVEAL'; payload: RevealPayload }
   | { type: 'TIE_DETECTED'; row: number; tiedFactionIds: FactionId[] }
@@ -392,6 +393,7 @@ export interface AudienceClientState {
     phase: RowPhase;
     options: Option[];
     currentAuditionIndex: number | null;
+    auditionComplete: boolean;
   } | null;
   myVote: { factionVote: OptionId; personalVote: OptionId } | null;
   coupMeter: number | null; // Only if in coup_window
@@ -409,6 +411,7 @@ export interface ProjectorClientState {
     phase: RowPhase;
     committedOption: OptionId | null;
     currentAuditionIndex: number | null;
+    auditionComplete: boolean;
     attempts: number;
   }>;
   paths: DualPaths;           // Faction path (solid) and popular path (ghost)

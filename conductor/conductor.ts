@@ -56,6 +56,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     committedOption: null,
     attempts: 0,
     currentAuditionIndex: null,
+    auditionComplete: false,
   }));
 
   // Create factions from config
@@ -352,13 +353,14 @@ function handleStartShow(state: ShowState): ConductorEvent[] {
 
   state.phase = 'running';
   state.currentRowIndex = 0;
-  state.rows[0].phase = 'auditioning';
+  state.rows[0].phase = 'voting';
   state.rows[0].currentAuditionIndex = 0;
-  debug('  Show started, beginning row 0 auditioning');
+  state.rows[0].auditionComplete = false;
+  debug('  Show started, beginning row 0 voting (with audition)');
 
   return [
     { type: 'SHOW_PHASE_CHANGED', phase: 'running' },
-    { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
+    { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
     { type: 'AUDITION_OPTION_CHANGED', row: 0, optionIndex: 0 },
     {
       type: 'AUDIO_CUE',
@@ -373,7 +375,8 @@ function handleStartShow(state: ShowState): ConductorEvent[] {
 
 function handleAdvancePhase(state: ShowState): ConductorEvent[] {
   const currentRow = state.rows[state.currentRowIndex];
-  debug('handleAdvancePhase: row=%d, rowPhase=%s', state.currentRowIndex, currentRow.phase);
+  debug('handleAdvancePhase: row=%d, rowPhase=%s, auditionComplete=%s',
+    state.currentRowIndex, currentRow.phase, currentRow.auditionComplete);
 
   if (state.phase !== 'running') {
     debug('  Error: wrong show phase (%s)', state.phase);
@@ -381,11 +384,13 @@ function handleAdvancePhase(state: ShowState): ConductorEvent[] {
   }
 
   switch (currentRow.phase) {
-    case 'auditioning':
-      return advanceFromAuditioning(state, currentRow);
-
     case 'voting':
-      return advanceFromVoting(state, currentRow);
+      // If still auditioning, advance audition; otherwise move to revealing
+      if (!currentRow.auditionComplete) {
+        return advanceAuditionDuringVoting(state, currentRow);
+      } else {
+        return advanceFromVoting(state, currentRow);
+      }
 
     case 'revealing':
       return advanceFromRevealing(state, currentRow);
@@ -401,7 +406,7 @@ function handleAdvancePhase(state: ShowState): ConductorEvent[] {
   }
 }
 
-function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEvent[] {
+function advanceAuditionDuringVoting(state: ShowState, currentRow: Row): ConductorEvent[] {
   const events: ConductorEvent[] = [];
   const loopsPerRow = state.config.timing.auditionLoopsPerRow ?? 1;
 
@@ -409,7 +414,7 @@ function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEve
     currentRow.currentAuditionIndex = 0;
   }
 
-  debug('  advanceFromAuditioning: auditionIndex=%d, loopsPerRow=%d',
+  debug('  advanceAuditionDuringVoting: auditionIndex=%d, loopsPerRow=%d',
     currentRow.currentAuditionIndex, loopsPerRow);
 
   // Calculate the actual option index (0-3) from the raw audition index
@@ -451,14 +456,13 @@ function advanceFromAuditioning(state: ShowState, currentRow: Row): ConductorEve
       },
     });
   } else {
-    // All loops complete, move to voting
-    debug('  All %d audition loops complete, transitioning to voting', loopsPerRow);
-    currentRow.phase = 'voting';
+    // All loops complete, mark audition as complete but stay in voting phase
+    debug('  All %d audition loops complete, audition complete', loopsPerRow);
+    currentRow.auditionComplete = true;
     currentRow.currentAuditionIndex = null;
     events.push({
-      type: 'ROW_PHASE_CHANGED',
+      type: 'AUDITION_COMPLETE',
       row: currentRow.index,
-      phase: 'voting',
     });
   }
 
@@ -509,12 +513,13 @@ function advanceToNextRow(state: ShowState): ConductorEvent[] {
     // Move to next row
     state.currentRowIndex++;
     const nextRow = state.rows[state.currentRowIndex];
-    nextRow.phase = 'auditioning';
+    nextRow.phase = 'voting';
     nextRow.currentAuditionIndex = 0;
+    nextRow.auditionComplete = false;
     debug('  Advancing to row %d', state.currentRowIndex);
 
     return [
-      { type: 'ROW_PHASE_CHANGED', row: nextRow.index, phase: 'auditioning' },
+      { type: 'ROW_PHASE_CHANGED', row: nextRow.index, phase: 'voting' },
       { type: 'AUDITION_OPTION_CHANGED', row: nextRow.index, optionIndex: 0 },
       {
         type: 'AUDIO_CUE',
@@ -797,15 +802,16 @@ function handleRestartRow(state: ShowState): ConductorEvent[] {
   }
 
   const currentRow = state.rows[state.currentRowIndex];
-  currentRow.phase = 'auditioning';
+  currentRow.phase = 'voting';
   currentRow.currentAuditionIndex = 0;
+  currentRow.auditionComplete = false;
   currentRow.attempts++;
 
   // Clear votes for this row/attempt
   state.votes = state.votes.filter(v => v.rowIndex !== currentRow.index || v.attempt !== currentRow.attempts);
 
   return [
-    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'auditioning' },
+    { type: 'ROW_PHASE_CHANGED', row: currentRow.index, phase: 'voting' },
     { type: 'AUDITION_OPTION_CHANGED', row: currentRow.index, optionIndex: 0 },
     {
       type: 'AUDIO_CUE',

@@ -224,8 +224,8 @@ export function createTimingEngine(
     }
 
     const currentRow = state.rows[state.currentRowIndex];
-    if (currentRow.phase !== 'auditioning') {
-      console.log('[Timing] Ignoring audition_done - not in auditioning phase');
+    if (currentRow.phase !== 'voting' || currentRow.auditionComplete) {
+      console.log('[Timing] Ignoring audition_done - not in voting/auditioning phase');
       return;
     }
 
@@ -365,12 +365,13 @@ export function createTimingEngine(
 
     // Schedule based on current row phase
     switch (currentRow.phase) {
-      case 'auditioning':
-        handleAuditionPhase(state, currentRow);
-        break;
-
       case 'voting':
-        handleVotingPhase(state);
+        // If still auditioning, handle audition; otherwise handle voting window
+        if (!currentRow.auditionComplete) {
+          handleAuditionPhase(state, currentRow);
+        } else {
+          handleVotingPhase(state);
+        }
         break;
 
       case 'revealing':

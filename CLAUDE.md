@@ -126,10 +126,12 @@ Key types to understand:
 
 ```typescript
 ShowPhase: 'lobby' | 'assigning' | 'running' | 'finale' | 'ended' | 'paused'
-RowPhase: 'pending' | 'auditioning' | 'voting' | 'revealing' | 'coup_window' | 'committed'
+RowPhase: 'pending' | 'voting' | 'revealing' | 'coup_window' | 'committed'
 FactionId: 0 | 1 | 2 | 3
 User.faction: FactionId | null  // null until assignment phase
 ```
+
+**Note:** The `'voting'` phase includes audition playback. Rows track `auditionComplete: boolean` to manage the transition from audition to voting window.
 
 Commands flow in, events flow out:
 ```typescript

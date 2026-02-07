@@ -18,8 +18,7 @@ import { useShowState } from '@/hooks/useShowState';
 import { FigTreeInput } from '@/components/FigTreeInput';
 import { WaitingState } from '@/components/WaitingState';
 import { FactionReveal } from '@/components/FactionReveal';
-import { VoteInterface } from '@/components/VoteInterface';
-import { AuditionDisplay } from '@/components/AuditionDisplay';
+import { AuditionVoteInterface } from '@/components/AuditionVoteInterface';
 import { CoupMeter } from '@/components/CoupMeter';
 import type { AudienceClientState } from '@/conductor/types';
 
@@ -101,19 +100,13 @@ export default function AudiencePage() {
 
       {audienceState.showPhase === 'running' && audienceState.currentRow && (
         <>
-          {/* Show audition display during auditioning phase */}
-          {audienceState.currentRow.phase === 'auditioning' && (
-            <AuditionDisplay
-              options={audienceState.currentRow.options}
-              currentAuditionIndex={audienceState.currentRow.currentAuditionIndex}
-            />
-          )}
-
-          {/* Show vote interface during voting phase */}
+          {/* Show combined audition and vote interface during voting phase */}
           {audienceState.currentRow.phase === 'voting' && (
-            <VoteInterface
+            <AuditionVoteInterface
               options={audienceState.currentRow.options}
               rowIndex={audienceState.currentRow.index}
+              currentAuditionIndex={audienceState.currentRow.currentAuditionIndex}
+              auditionComplete={audienceState.currentRow.auditionComplete}
               myVote={audienceState.myVote}
               faction={audienceState.faction}
               sendCommand={sendCommand}

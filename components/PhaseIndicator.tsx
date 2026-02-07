@@ -12,6 +12,7 @@ import type { RowPhase } from '@/conductor/types';
 export interface PhaseIndicatorProps {
   phase: RowPhase;
   currentAuditionIndex: number | null;
+  auditionComplete: boolean;
   rowIndex: number;
   rowLabel: string;
 }
@@ -19,7 +20,11 @@ export interface PhaseIndicatorProps {
 /**
  * Get phase display text and color
  */
-function getPhaseInfo(phase: RowPhase, currentAuditionIndex: number | null): {
+function getPhaseInfo(
+  phase: RowPhase,
+  currentAuditionIndex: number | null,
+  auditionComplete: boolean
+): {
   text: string;
   color: string;
   backgroundColor: string;
@@ -31,14 +36,16 @@ function getPhaseInfo(phase: RowPhase, currentAuditionIndex: number | null): {
         color: '#999',
         backgroundColor: 'rgba(153, 153, 153, 0.1)',
       };
-    case 'auditioning':
-      const optionNum = currentAuditionIndex !== null ? currentAuditionIndex + 1 : '?';
-      return {
-        text: `Auditioning Option ${optionNum}/4`,
-        color: '#60a5fa',
-        backgroundColor: 'rgba(96, 165, 250, 0.1)',
-      };
     case 'voting':
+      // Show audition progress if still auditioning, otherwise show voting
+      if (!auditionComplete && currentAuditionIndex !== null) {
+        const optionNum = (currentAuditionIndex % 4) + 1;
+        return {
+          text: `Auditioning Option ${optionNum}/4`,
+          color: '#60a5fa',
+          backgroundColor: 'rgba(96, 165, 250, 0.1)',
+        };
+      }
       return {
         text: 'Voting Now',
         color: '#fbbf24',
@@ -74,10 +81,11 @@ function getPhaseInfo(phase: RowPhase, currentAuditionIndex: number | null): {
 export function PhaseIndicator({
   phase,
   currentAuditionIndex,
+  auditionComplete,
   rowIndex,
   rowLabel,
 }: PhaseIndicatorProps) {
-  const phaseInfo = getPhaseInfo(phase, currentAuditionIndex);
+  const phaseInfo = getPhaseInfo(phase, currentAuditionIndex, auditionComplete);
 
   // Log the currentAuditionIndex for debugging
   console.log('[PhaseIndicator] currentAuditionIndex:', currentAuditionIndex);

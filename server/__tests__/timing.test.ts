@@ -221,11 +221,11 @@ describe('Timing Engine', () => {
     });
 
     test('uses fallback JS timer for auditioning phase', () => {
-      currentState.rows[0].phase = 'auditioning';
+      currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
       timingEngine.onStateChanged(currentState, [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
       // Fallback uses auditionPerOptionMs * auditionLoopsPerOption = 100 * 2 = 200ms
@@ -253,11 +253,11 @@ describe('Timing Engine', () => {
     });
 
     test('waits for Ableton audition_done in OSC mode', () => {
-      currentState.rows[0].phase = 'auditioning';
+      currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
       timingEngine.onStateChanged(currentState, [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
       // In OSC mode, should NOT use JS timer for audition
@@ -271,11 +271,11 @@ describe('Timing Engine', () => {
     });
 
     test('ignores audition_done for wrong row', () => {
-      currentState.rows[0].phase = 'auditioning';
+      currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
       timingEngine.onStateChanged(currentState, [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
       // Wrong row index
@@ -285,11 +285,11 @@ describe('Timing Engine', () => {
     });
 
     test('ignores audition_done for wrong option', () => {
-      currentState.rows[0].phase = 'auditioning';
+      currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
       timingEngine.onStateChanged(currentState, [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
       // Wrong option index
@@ -298,23 +298,25 @@ describe('Timing Engine', () => {
       expect(mockSendCommand).not.toHaveBeenCalled();
     });
 
-    test('ignores audition_done when not in auditioning phase', () => {
+    test('ignores audition_done when audition is already complete', () => {
       currentState.rows[0].phase = 'voting';
+      currentState.rows[0].auditionComplete = true; // Audition already complete
 
       timingEngine.onStateChanged(currentState, [
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
-      // Send audition_done while in voting
+      // Send audition_done after audition complete
       timingEngine.onOSCMessage('/ableton/audition/done', [0, 0]);
 
-      // Should not advance (voting timer will)
+      // Should not advance
       jest.advanceTimersByTime(100);
       expect(mockSendCommand).not.toHaveBeenCalled();
     });
 
-    test('still uses JS timers for voting phase in OSC mode', () => {
+    test('uses JS timers for voting window after audition completes in OSC mode', () => {
       currentState.rows[0].phase = 'voting';
+      currentState.rows[0].auditionComplete = true; // Audition complete, now in voting window
 
       timingEngine.onStateChanged(currentState, [
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
@@ -332,7 +334,7 @@ describe('Timing Engine', () => {
       config.timing.auditionLoopsPerRow = 2;
       currentState = createInitialState(config, 'test-show');
       currentState.phase = 'running';
-      currentState.rows[0].phase = 'auditioning';
+      currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
       timingEngine = createTimingEngine(
@@ -343,7 +345,7 @@ describe('Timing Engine', () => {
       timingEngine.start();
 
       timingEngine.onStateChanged(currentState, [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'auditioning' },
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
       // Each option still takes auditionPerOptionMs * auditionLoopsPerOption
@@ -360,7 +362,7 @@ describe('Timing Engine', () => {
       config.timing.auditionLoopsPerRow = 2;
       currentState = createInitialState(config, 'test-show');
       currentState.phase = 'running';
-      currentState.rows[0].phase = 'auditioning';
+      currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 4;  // Loop 2, option 0
 
       const mockOscBridge = createNullOSCBridge();

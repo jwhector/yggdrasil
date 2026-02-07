@@ -270,7 +270,7 @@ describe('Phase Transitions', () => {
     const events = processCommand(state, { type: 'START_SHOW' });
 
     expect(state.phase).toBe('running');
-    expect(state.rows[0].phase).toBe('auditioning');
+    expect(state.rows[0].phase).toBe('voting');
     expect(state.rows[0].currentAuditionIndex).toBe(0);
 
     expect(events).toContainEqual({
@@ -280,69 +280,80 @@ describe('Phase Transitions', () => {
     expect(events).toContainEqual({
       type: 'ROW_PHASE_CHANGED',
       row: 0,
-      phase: 'auditioning',
+      phase: 'voting',
     });
   });
 
-  test('ADVANCE_PHASE during auditioning cycles through options', () => {
+  test('ADVANCE_PHASE during voting (auditioning) cycles through options', () => {
     const config = createTestConfig();
     const state = createInitialState(config, 'test-show');
     state.phase = 'running';
-    state.rows[0].phase = 'auditioning';
+    state.rows[0].phase = 'voting';
+    state.rows[0].auditionComplete = false;
     state.rows[0].currentAuditionIndex = 0;
 
     // Advance through options
     let events = processCommand(state, { type: 'ADVANCE_PHASE' });
     expect(state.rows[0].currentAuditionIndex).toBe(1);
+    expect(state.rows[0].auditionComplete).toBe(false);
 
     events = processCommand(state, { type: 'ADVANCE_PHASE' });
     expect(state.rows[0].currentAuditionIndex).toBe(2);
+    expect(state.rows[0].auditionComplete).toBe(false);
 
     events = processCommand(state, { type: 'ADVANCE_PHASE' });
     expect(state.rows[0].currentAuditionIndex).toBe(3);
+    expect(state.rows[0].auditionComplete).toBe(false);
 
-    // Final advance should move to voting
+    // Final advance should mark audition complete (stay in voting phase)
     events = processCommand(state, { type: 'ADVANCE_PHASE' });
     expect(state.rows[0].phase).toBe('voting');
+    expect(state.rows[0].auditionComplete).toBe(true);
     expect(state.rows[0].currentAuditionIndex).toBe(null);
   });
 
   describe('Audition Loops Per Row', () => {
-    test('with auditionLoopsPerRow=1, transitions to voting after 4 advances', () => {
+    test('with auditionLoopsPerRow=1, marks audition complete after 4 advances', () => {
       const config = createTestConfig();
       config.timing.auditionLoopsPerRow = 1;  // Explicit default
       const state = createInitialState(config, 'test-show');
       state.phase = 'running';
-      state.rows[0].phase = 'auditioning';
+      state.rows[0].phase = 'voting';
+      state.rows[0].auditionComplete = false;
       state.rows[0].currentAuditionIndex = 0;
 
       // Advance through all 4 options
       for (let i = 0; i < 3; i++) {
         processCommand(state, { type: 'ADVANCE_PHASE' });
-        expect(state.rows[0].phase).toBe('auditioning');
+        expect(state.rows[0].phase).toBe('voting');
+        expect(state.rows[0].auditionComplete).toBe(false);
       }
 
       processCommand(state, { type: 'ADVANCE_PHASE' });
       expect(state.rows[0].phase).toBe('voting');
+      expect(state.rows[0].auditionComplete).toBe(true);
     });
 
-    test('with auditionLoopsPerRow=2, transitions to voting after 8 advances', () => {
+    test('with auditionLoopsPerRow=2, marks audition complete after 8 advances', () => {
       const config = createTestConfig();
       config.timing.auditionLoopsPerRow = 2;
       const state = createInitialState(config, 'test-show');
       state.phase = 'running';
-      state.rows[0].phase = 'auditioning';
+      state.rows[0].phase = 'voting';
+      state.rows[0].auditionComplete = false;
       state.rows[0].currentAuditionIndex = 0;
 
-      // Advance through 7 steps (still in auditioning)
+      // Advance through 7 steps (still auditioning)
       for (let i = 0; i < 7; i++) {
         processCommand(state, { type: 'ADVANCE_PHASE' });
-        expect(state.rows[0].phase).toBe('auditioning');
+        expect(state.rows[0].phase).toBe('voting');
+        expect(state.rows[0].auditionComplete).toBe(false);
       }
 
-      // 8th advance moves to voting
+      // 8th advance marks audition complete
       processCommand(state, { type: 'ADVANCE_PHASE' });
       expect(state.rows[0].phase).toBe('voting');
+      expect(state.rows[0].auditionComplete).toBe(true);
     });
 
     test('AUDITION_OPTION_CHANGED always emits optionIndex 0-3', () => {
@@ -350,7 +361,8 @@ describe('Phase Transitions', () => {
       config.timing.auditionLoopsPerRow = 2;
       const state = createInitialState(config, 'test-show');
       state.phase = 'running';
-      state.rows[0].phase = 'auditioning';
+      state.rows[0].phase = 'voting';
+      state.rows[0].auditionComplete = false;
       state.rows[0].currentAuditionIndex = 0;
 
       // Collect all option indices from events
@@ -372,7 +384,8 @@ describe('Phase Transitions', () => {
       delete (config.timing as any).auditionLoopsPerRow;  // Ensure not set
       const state = createInitialState(config, 'test-show');
       state.phase = 'running';
-      state.rows[0].phase = 'auditioning';
+      state.rows[0].phase = 'voting';
+      state.rows[0].auditionComplete = false;
       state.rows[0].currentAuditionIndex = 0;
 
       // Should transition after 4 advances (default behavior)
@@ -389,6 +402,7 @@ describe('Phase Transitions', () => {
     const state = createInitialState(config, 'test-show');
     state.phase = 'running';
     state.rows[0].phase = 'voting';
+    state.rows[0].auditionComplete = true; // Audition must be complete to advance to revealing
 
     const events = processCommand(state, { type: 'ADVANCE_PHASE' });
 
@@ -441,7 +455,7 @@ describe('Phase Transitions', () => {
     const events = processCommand(state, { type: 'ADVANCE_PHASE' });
 
     expect(state.currentRowIndex).toBe(1);
-    expect(state.rows[1].phase).toBe('auditioning');
+    expect(state.rows[1].phase).toBe('voting');
     expect(state.rows[1].currentAuditionIndex).toBe(0);
   });
 
@@ -544,7 +558,7 @@ describe('Vote Processing', () => {
     const config = createTestConfig();
     const state = createInitialState(config, 'test-show');
     state.phase = 'running';
-    state.rows[0].phase = 'auditioning'; // Wrong phase
+    state.rows[0].phase = 'revealing'; // Wrong phase for voting
 
     processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
     state.users.get('u1')!.faction = 0;
@@ -610,7 +624,7 @@ describe('Controller Commands', () => {
 
     const events = processCommand(state, { type: 'RESTART_ROW' });
 
-    expect(state.rows[0].phase).toBe('auditioning');
+    expect(state.rows[0].phase).toBe('voting');
     expect(state.rows[0].currentAuditionIndex).toBe(0);
     expect(state.rows[0].attempts).toBe(1);
   });

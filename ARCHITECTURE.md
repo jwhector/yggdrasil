@@ -33,7 +33,7 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
 | **Row** | A single decision point in the song. The show consists of 7–8 rows. |
 | **Option** | One of 4 choices available in a row. Options are musically ambiguous and not tied to specific factions. |
 | **Faction** | One of 4 groups the audience is divided into. Factions compete by internal alignment, not by "owning" specific options. |
-| **Audition** | The phase where each option is previewed (musically) before voting. |
+| **Audition** | The playback of musical options during the voting phase. Users can vote while listening. |
 | **Faction Vote** | A user's vote for which option should win (contributes to faction coherence). |
 | **Personal Vote** | A user's private vote for their preferred option (used in finale). |
 | **Coherence** | A faction's internal alignment: `(largest agreement bloc) / (faction voters)`. |
@@ -341,12 +341,13 @@ interface Row {
   phase: RowPhase;
   committedOption: OptionId | null;     // Set after reveal
   attempts: number;                     // Increments after each coup on this row
+  currentAuditionIndex: number | null;  // Used during 'voting' phase for audition playback (0-3)
+  auditionComplete: boolean;             // True when all options have been heard
 }
 
-type RowPhase = 
+type RowPhase =
   | 'pending'
-  | 'auditioning'
-  | 'voting'
+  | 'voting'        // Includes audition playback - users vote while listening
   | 'revealing'
   | 'coup_window'
   | 'committed';
@@ -431,11 +432,13 @@ The **Conductor** is a pure logic module with no I/O. It receives commands, vali
 ### Row Phase Transitions
 
 ```
-pending → auditioning → voting → revealing → coup_window → committed
-                                                 │
-                                                 ▼ (if coup triggered)
-                                            auditioning (attempt + 1)
+pending → voting (with audition) → revealing → coup_window → committed
+                                                   │
+                                                   ▼ (if coup triggered)
+                                              voting (attempt + 1, reset audition)
 ```
+
+**Note:** The `voting` phase includes both audition playback and vote collection. The conductor tracks `auditionComplete: boolean` to manage the transition from audition to voting window within the same phase.
 
 ### Commands (Input)
 
@@ -919,8 +922,8 @@ This ensures sample-accurate musical transitions while keeping game logic simple
 
 | Row Phase | Timing Owner | Mechanism | Notes |
 |-----------|--------------|-----------|-------|
-| `auditioning` | **Ableton** | OSC `/ableton/audition/done` | Sample-accurate loop handling. Cycles through all 4 options `auditionLoopsPerRow` times |
-| `voting` | **Server** | JS timer (`votingWindowMs`) | Non-musical, slight drift OK |
+| `voting` (audition) | **Ableton** | OSC `/ableton/audition/done` | Sample-accurate loop handling. Cycles through all 4 options `auditionLoopsPerRow` times. Sets `auditionComplete = true` when done |
+| `voting` (after audition) | **Server** | JS timer (`votingWindowMs`) | Non-musical, slight drift OK. Timer starts after `AUDITION_COMPLETE` event |
 | `revealing` | **Server** | JS timer (`revealDurationMs`) | Can be extended for Ableton cues |
 | `coup_window` | **Server** | JS timer (`coupWindowMs`) | Non-musical timing |
 | `committed` | **Manual** | N/A | Performer controls row transitions |

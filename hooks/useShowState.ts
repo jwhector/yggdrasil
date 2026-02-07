@@ -148,6 +148,7 @@ function transformForProjector(state: ShowState): ProjectorClientState {
       phase: row.phase,
       committedOption: row.committedOption,
       currentAuditionIndex: row.currentAuditionIndex,
+      auditionComplete: row.auditionComplete,
       attempts: row.attempts,
     })),
     paths: state.paths,
@@ -205,6 +206,7 @@ function transformForAudience(state: ShowState, userId: UserId | null): Audience
           phase: currentRow.phase,
           options: currentRow.options,
           currentAuditionIndex: currentRow.currentAuditionIndex,
+          auditionComplete: currentRow.auditionComplete,
         }
       : null,
     myVote,

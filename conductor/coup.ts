@@ -6,7 +6,7 @@
  *
  * Coup requires a threshold fraction of the faction to vote for it during the
  * coup_window phase. When triggered:
- * - Row resets to auditioning phase
+ * - Row resets to voting phase (with audition)
  * - Row attempt counter increments
  * - Faction's coupMultiplier increases (e.g., 1.0 → 1.5)
  * - Faction's coupUsed flag is set to true (one-time use)
@@ -91,8 +91,9 @@ export function processCoupVote(state: ShowState, userId: UserId): ConductorEven
     faction.coupUsed = true;
     faction.coupMultiplier = 1 + state.config.coup.multiplierBonus;
     currentRow.attempts += 1;
-    currentRow.phase = 'auditioning';
+    currentRow.phase = 'voting';
     currentRow.currentAuditionIndex = 0; // Reset audition to first option
+    currentRow.auditionComplete = false;
 
     // Clear coup votes for this row (since we're starting over)
     faction.currentRowCoupVotes.clear();
@@ -106,7 +107,7 @@ export function processCoupVote(state: ShowState, userId: UserId): ConductorEven
     events.push({
       type: 'ROW_PHASE_CHANGED',
       row: state.currentRowIndex,
-      phase: 'auditioning',
+      phase: 'voting',
     });
 
     // Emit audio cue to uncommit the layer
@@ -142,8 +143,9 @@ export function triggerCoupManually(state: ShowState, factionId: FactionId): Con
   faction.coupUsed = true;
   faction.coupMultiplier = 1 + state.config.coup.multiplierBonus;
   currentRow.attempts += 1;
-  currentRow.phase = 'auditioning';
+  currentRow.phase = 'voting';
   currentRow.currentAuditionIndex = 0;
+  currentRow.auditionComplete = false;
 
   // Clear coup votes
   faction.currentRowCoupVotes.clear();
@@ -157,7 +159,7 @@ export function triggerCoupManually(state: ShowState, factionId: FactionId): Con
     {
       type: 'ROW_PHASE_CHANGED',
       row: state.currentRowIndex,
-      phase: 'auditioning',
+      phase: 'voting',
     },
     {
       type: 'AUDIO_CUE',

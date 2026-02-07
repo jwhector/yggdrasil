@@ -4,6 +4,78 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-06] — Merge Auditioning and Voting Phases + Auto-Submit Votes
+
+**Context:** The original design had separate `auditioning` and `voting` phases, requiring audiences to wait passively during audition, then switch to voting mode. This created unnecessary friction and delayed engagement. Additionally, the two-click vote selection mechanism (click once for faction, again for personal) was confusing for first-time users on mobile. This change merges audition and voting into a single phase where users can vote while listening, and replaces the sequential click pattern with an explicit popover interface with auto-submit.
+
+**Why This Change:**
+1. **Better engagement**: Users can make decisions as they hear options, not after
+2. **Reduced latency**: No "dead time" between hearing all options and being able to vote
+3. **Clearer UX**: Popover with labeled buttons ("Faction Vote" / "Personal Vote") removes ambiguity
+4. **Mobile-friendly**: Single tap + choice is more intuitive than remembering click sequence
+5. **Instant feedback**: Auto-submit removes extra button press, votes save immediately
+
+**Changes:**
+- **conductor/types.ts**:
+  - Removed `'auditioning'` from `RowPhase` enum
+  - Added `auditionComplete: boolean` to `Row` interface to track audition progress within voting phase
+  - Added `AUDITION_COMPLETE` event type
+  - Updated `AudienceClientState` and `ProjectorClientState` to include `auditionComplete`
+
+- **conductor/conductor.ts**:
+  - Renamed `advanceFromAuditioning` → `advanceAuditionDuringVoting`
+  - Updated `handleStartShow` to start rows in `'voting'` phase with `auditionComplete: false`
+  - Modified `handleAdvancePhase` to handle audition within voting phase:
+    - If `!auditionComplete`: advance audition, emit `AUDITION_OPTION_CHANGED`
+    - If `auditionComplete`: advance to revealing phase
+  - Updated `advanceToNextRow` and `handleRestartRow` to initialize voting phase with audition
+
+- **conductor/coup.ts**:
+  - Updated coup trigger to reset to `'voting'` phase with `auditionComplete: false`
+
+- **server/timing.ts**:
+  - Modified `onStateChanged` to handle combined phase:
+    - During voting, check `auditionComplete` to decide between audition timing (Ableton) or voting timer (JS)
+  - Updated `handleAbletonAuditionDone` to check for voting phase with incomplete audition
+
+- **server/socket.ts**:
+  - Added `auditionComplete` to client state filtering for both audience and projector
+
+- **components/AuditionVoteInterface.tsx** (new):
+  - Combined `AuditionDisplay` and `VoteInterface` into single component
+  - Shows "Now Playing: Option X" during audition
+  - Animated popover appears on option tap with two buttons: "Faction Vote" / "Personal Vote"
+  - Auto-submits votes via `useEffect` when both faction and personal votes selected
+  - Shows "✓ Votes saved" indicator when complete
+  - Removed manual submit button
+
+- **components/PhaseIndicator.tsx**:
+  - Updated to show audition progress during voting phase based on `auditionComplete` flag
+  - Displays "Auditioning Option X/4" when `!auditionComplete`, "Voting Now" when complete
+
+- **app/audience/page.tsx**:
+  - Replaced separate `AuditionDisplay` and `VoteInterface` conditionals with single `AuditionVoteInterface`
+  - Renders during `'voting'` phase regardless of audition state
+
+- **Tests**:
+  - Updated all conductor tests expecting `'auditioning'` phase to use `'voting'` with `auditionComplete`
+  - Updated timing tests to reflect combined phase behavior
+  - Updated coup tests for phase reset behavior
+  - All 173 tests passing
+
+**Backward Compatibility:**
+- Breaking change: Persisted states with `'auditioning'` phase would be invalid
+- Migration not implemented (development-only change, no active performances)
+- Type system will catch all usage via compile errors
+
+**User Experience:**
+```
+Before: Listen passively → Wait → Click option → Click again → Click submit
+After: Listen + Vote in parallel → Tap option → Choose vote type → Auto-saved
+```
+
+---
+
 ## [2026-02-05] — Add `auditionLoopsPerRow` Configuration
 
 **Context:** The audition phase currently cycles through all 4 options once before transitioning to voting. For certain musical designs, it may be desirable to cycle through all options multiple times to give the audience more time to absorb the choices. This change adds a configurable `auditionLoopsPerRow` field that controls how many complete cycles through all 4 options occur before advancing to voting.

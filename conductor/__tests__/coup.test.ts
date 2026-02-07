@@ -243,7 +243,7 @@ describe('processCoupVote', () => {
     expect(state.factions[0].coupUsed).toBe(true);
     expect(state.factions[0].coupMultiplier).toBe(1.5);
     expect(state.rows[0].attempts).toBe(1);
-    expect(state.rows[0].phase).toBe('auditioning');
+    expect(state.rows[0].phase).toBe('voting');
     expect(state.rows[0].currentAuditionIndex).toBe(0);
     expect(state.factions[0].currentRowCoupVotes.size).toBe(0); // Cleared
 
@@ -256,7 +256,7 @@ describe('processCoupVote', () => {
     expect(events).toContainEqual({
       type: 'ROW_PHASE_CHANGED',
       row: 0,
-      phase: 'auditioning',
+      phase: 'voting',
     });
     expect(events).toContainEqual({
       type: 'AUDIO_CUE',
@@ -362,7 +362,7 @@ describe('triggerCoupManually', () => {
     expect(state.factions[1].coupUsed).toBe(true);
     expect(state.factions[1].coupMultiplier).toBe(1.5);
     expect(state.rows[0].attempts).toBe(1);
-    expect(state.rows[0].phase).toBe('auditioning');
+    expect(state.rows[0].phase).toBe('voting');
     expect(events).toContainEqual({
       type: 'COUP_TRIGGERED',
       factionId: 1,
