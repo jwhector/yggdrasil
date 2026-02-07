@@ -23,6 +23,8 @@ build/
 *.sqlite
 *.sqlite3
 backups/
+*.db-shm
+*.db-wal
 
 # Logs
 logs/

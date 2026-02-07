@@ -5,6 +5,7 @@
   "description": "Interactive live performance system for collective song-building",
   "scripts": {
     "dev": "ts-node --project tsconfig.server.json server/index.ts",
+    "dev:network": "HOST=0.0.0.0 ts-node --project tsconfig.server.json server/index.ts",
     "build": "next build",
     "start": "NODE_ENV=production ts-node --project tsconfig.server.json server/index.ts",
     "test": "jest",

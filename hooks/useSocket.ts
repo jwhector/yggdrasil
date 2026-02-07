@@ -39,6 +39,8 @@ export function useSocket({ showId, seatId = null, mode }: UseSocketOptions): So
   const reconnectAttempts = useRef(0);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const socketRef = useRef<Socket | null>(null); // Track socket for cleanup
+  const lastPongTime = useRef<number>(Date.now()); // Track last successful pong
+  const isConnecting = useRef(false); // Prevent concurrent connection attempts
 
   // Calculate exponential backoff delay
   const getBackoffDelay = useCallback(() => {
@@ -53,18 +55,29 @@ export function useSocket({ showId, seatId = null, mode }: UseSocketOptions): So
   const connect = useCallback(() => {
     if (typeof window === 'undefined') return;
 
-    // Prevent double connections (React Strict Mode)
-    if (socketRef.current?.connected) {
-      console.log('[Socket] Already connected, skipping');
+    // Prevent concurrent connection attempts
+    if (isConnecting.current) {
+      console.log('[Socket] Connection attempt already in progress, skipping');
+      return;
+    }
+
+    // Prevent double connections only if truly connected AND recently received pong
+    const timeSinceLastPong = Date.now() - lastPongTime.current;
+    const CONNECTION_HEALTH_THRESHOLD = 30000; // 30 seconds
+
+    if (socketRef.current?.connected && timeSinceLastPong < CONNECTION_HEALTH_THRESHOLD) {
+      console.log('[Socket] Already connected and healthy, skipping');
       return;
     }
 
     // Clean up existing socket if any
     if (socketRef.current) {
+      console.log('[Socket] Cleaning up stale socket');
       socketRef.current.disconnect();
       socketRef.current = null;
     }
 
+    isConnecting.current = true;
     setConnectionState('connecting');
 
     // Get or create client identity
@@ -86,6 +99,8 @@ export function useSocket({ showId, seatId = null, mode }: UseSocketOptions): So
       console.log('[Socket] Connected');
       setConnectionState('connected');
       reconnectAttempts.current = 0;
+      isConnecting.current = false;
+      lastPongTime.current = Date.now();
 
       // Send join event
       newSocket.emit('join', {
@@ -100,12 +115,14 @@ export function useSocket({ showId, seatId = null, mode }: UseSocketOptions): So
     // Respond to server heartbeat pings
     newSocket.on('ping', () => {
       newSocket.emit('pong');
+      lastPongTime.current = Date.now();
     });
 
     // Connection error
     newSocket.on('connect_error', (error) => {
       console.error('[Socket] Connection error:', error);
       setConnectionState('reconnecting');
+      isConnecting.current = false;
       scheduleReconnect();
     });
 
@@ -113,6 +130,7 @@ export function useSocket({ showId, seatId = null, mode }: UseSocketOptions): So
     newSocket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
       setConnectionState('reconnecting');
+      isConnecting.current = false;
 
       // Only auto-reconnect if not a manual disconnect
       if (reason !== 'io client disconnect') {
@@ -184,6 +202,67 @@ export function useSocket({ showId, seatId = null, mode }: UseSocketOptions): So
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      // Reset connecting flag for React Strict Mode double-mount
+      isConnecting.current = false;
+    };
+  }, [connect]);
+
+  // Handle page visibility changes (app backgrounding/foregrounding)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const checkConnectionHealth = () => {
+      const timeSinceLastPong = Date.now() - lastPongTime.current;
+      const CONNECTION_STALE_THRESHOLD = 30000; // 30 seconds
+
+      // Force reconnect if:
+      // 1. No socket exists, or
+      // 2. Socket is not connected, or
+      // 3. Haven't received pong in a while (stale connection)
+      if (
+        !socketRef.current ||
+        !socketRef.current.connected ||
+        timeSinceLastPong > CONNECTION_STALE_THRESHOLD
+      ) {
+        console.log('[Socket] Connection stale or broken, forcing reconnect', {
+          hasSocket: !!socketRef.current,
+          isConnected: socketRef.current?.connected,
+          timeSinceLastPong,
+        });
+
+        // Force reconnect
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        isConnecting.current = false;
+        reconnectAttempts.current = 0;
+        connect();
+      } else {
+        console.log('[Socket] Connection healthy');
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      // When page becomes visible again
+      if (document.visibilityState === 'visible') {
+        console.log('[Socket] Page became visible, checking connection health');
+        checkConnectionHealth();
+      }
+    };
+
+    const handleFocus = () => {
+      // When window gains focus (backup for visibility API)
+      console.log('[Socket] Window focused, checking connection health');
+      checkConnectionHealth();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [connect]);
 

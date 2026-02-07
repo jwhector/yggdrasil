@@ -292,16 +292,23 @@ export function setupSocketHandlers(
     /**
      * CLIENT EVENT: Submit vote
      *
-     * Payload: { userId: string, factionVote: OptionId, personalVote: OptionId }
+     * Payload: { factionVote: OptionId, personalVote: OptionId }
+     * Note: userId is taken from socket session, not payload (security)
      */
-    socket.on('vote', async (data: { userId: UserId; factionVote: OptionId; personalVote: OptionId }) => {
-      console.log(`[Socket] Vote from ${data.userId}: faction=${data.factionVote}, personal=${data.personalVote}`);
+    socket.on('vote', async (data: { factionVote: OptionId; personalVote: OptionId }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] Vote rejected: no userId on socket');
+        return;
+      }
+
+      console.log(`[Socket] Vote from ${userId}: faction=${data.factionVote}, personal=${data.personalVote}`);
 
       const state = getState();
 
       const events = processCommand(state, {
         type: 'SUBMIT_VOTE',
-        userId: data.userId,
+        userId,
         factionVote: data.factionVote,
         personalVote: data.personalVote,
       });
@@ -311,7 +318,7 @@ export function setupSocketHandlers(
 
       // Save vote to database
       const vote = state.votes.find(
-        v => v.userId === data.userId &&
+        v => v.userId === userId &&
              v.rowIndex === state.currentRowIndex &&
              v.attempt === state.rows[state.currentRowIndex].attempts
       );
@@ -326,16 +333,22 @@ export function setupSocketHandlers(
     /**
      * CLIENT EVENT: Submit coup vote
      *
-     * Payload: { userId: string }
+     * Payload: (none - userId from socket session)
      */
-    socket.on('coup_vote', async (data: { userId: UserId }) => {
-      console.log(`[Socket] Coup vote from ${data.userId}`);
+    socket.on('coup_vote', async () => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] Coup vote rejected: no userId on socket');
+        return;
+      }
+
+      console.log(`[Socket] Coup vote from ${userId}`);
 
       const state = getState();
 
       const events = processCommand(state, {
         type: 'SUBMIT_COUP_VOTE',
-        userId: data.userId,
+        userId,
       });
 
       setState(state, events);
@@ -347,16 +360,23 @@ export function setupSocketHandlers(
     /**
      * CLIENT EVENT: Submit fig tree response
      *
-     * Payload: { userId: string, text: string }
+     * Payload: { text: string }
+     * Note: userId is taken from socket session, not payload (security)
      */
-    socket.on('fig_tree_response', async (data: { userId: UserId; text: string }) => {
-      console.log(`[Socket] Fig tree response from ${data.userId}: "${data.text.substring(0, 50)}..."`);
+    socket.on('fig_tree_response', async (data: { text: string }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] Fig tree response rejected: no userId on socket');
+        return;
+      }
+
+      console.log(`[Socket] Fig tree response from ${userId}: "${data.text.substring(0, 50)}..."`);
 
       const state = getState();
 
       const events = processCommand(state, {
         type: 'SUBMIT_FIG_TREE_RESPONSE',
-        userId: data.userId,
+        userId,
         text: data.text,
       });
 
@@ -364,7 +384,7 @@ export function setupSocketHandlers(
       persistence.saveState(state);
 
       // Save response to database
-      persistence.saveFigTreeResponse(data.userId, data.text, state.id);
+      persistence.saveFigTreeResponse(userId, data.text, state.id);
 
       await broadcastEvents(io, events, state);
     });
@@ -375,12 +395,23 @@ export function setupSocketHandlers(
      * Payload: ConductorCommand
      */
     socket.on('command', async (command: ConductorCommand) => {
-      // TODO: Validate that sender is actually a controller
-      console.log(`[Socket] Command from controller:`, command.type);
+      console.log(`[Socket] Command received:`, command.type);
+
+      let processedCommand = command;
+
+      // If command has a userId field, override it with socket session userId (security)
+      if ('userId' in command) {
+        const socketUserId = (socket as any).userId as UserId | undefined;
+        if (!socketUserId) {
+          console.warn(`[Socket] ${command.type} rejected: command requires userId but socket has none`);
+          return;
+        }
+        processedCommand = { ...command, userId: socketUserId };
+      }
 
       const state = getState();
 
-      const events = processCommand(state, command);
+      const events = processCommand(state, processedCommand);
 
       setState(state, events);
       persistence.saveState(state);
@@ -502,10 +533,9 @@ export function filterStateForClient(
 
     case 'projector':
       // Projector sees public display info
+      // Note: Use `showPhase` to match ProjectorClientState type
       return {
-        id: state.id,
-        version: state.version,
-        phase: state.phase,
+        showPhase: state.phase,
         currentRowIndex: state.currentRowIndex,
         rows: state.rows.map(row => ({
           index: row.index,
@@ -521,11 +551,16 @@ export function filterStateForClient(
           id: f.id,
           name: f.name,
           color: f.color,
-        })) as any,
+        })),
         paths: state.paths,
+        lastReveal: null,  // TODO: Track last reveal event
+        tiebreaker: null,  // TODO: Track tiebreaker state
+        currentFinaleTimeline: null,
+        finalePhase: null,
+        // Additional fields for projector display (not in type but used in page)
         config: state.config,
         userCount: state.users.size,
-      };
+      } as ProjectorClientState;
 
     case 'audience':
       if (!userId) {

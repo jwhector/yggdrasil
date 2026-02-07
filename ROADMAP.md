@@ -645,15 +645,29 @@ Task: "Fix useShowState hook to handle server-filtered states:
 
 **Phase 6 Checkpoint:**
 ```bash
+# Local testing
 npm run dev
 # Open /controller, /projector, and multiple /audience?seat=A1 tabs
+
+# Multi-device testing (phones/tablets)
+npm run dev:network
+# Connect phones to http://YOUR_IP:3000/audience?seat=A1
+# (See TESTING.md for full instructions)
+
 # Walk through complete show
-# Verify voting, coup meter, reveals all work
+# Verify voting, coup meter, reveals all work on actual devices
 ```
 
 - [x] TypeScript compilation passes
 - [x] All components created and integrated
+- [x] Network access configured (HOST env variable)
+- [x] Testing documentation created (TESTING.md)
 - [x] `git commit -m "Complete audience UI"`
+
+**Testing Resources:**
+- [TESTING.md](TESTING.md) - Full testing guide with multi-device setup
+- Use `npm run dev:network` to test on real phones/tablets
+- Server supports HOST=0.0.0.0 for local network access
 
 ---
 

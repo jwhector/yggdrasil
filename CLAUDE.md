@@ -11,6 +11,7 @@ An interactive live performance system where ~30 audience members on phones coll
 ```bash
 npm install          # Install dependencies
 npm run dev          # Start dev server (Next.js + Socket.IO on :3000)
+npm run dev:network  # Start dev server accessible from other devices on local network
 npm run build        # Build for production
 npm run start        # Start production server
 npm test             # Run all tests
@@ -18,6 +19,8 @@ npm run test:conductor   # Test conductor only
 npm run typecheck    # Check types
 npm run lint         # Lint code
 ```
+
+**Testing:** See [TESTING.md](TESTING.md) for multi-device testing and pre-performance checklists.
 
 ## Architecture
 

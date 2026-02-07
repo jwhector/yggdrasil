@@ -51,9 +51,10 @@ export function VoteInterface({
   const handleVoteSubmit = () => {
     if (!factionVote || !personalVote) return;
 
+    // Note: Server uses socket session for userId (security)
     sendCommand({
       type: 'SUBMIT_VOTE',
-      userId: '', // Will be filled by socket handler
+      userId: '', // Ignored by server - uses socket session
       factionVote,
       personalVote,
     });

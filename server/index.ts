@@ -26,7 +26,7 @@ import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const hostname = process.env.HOST || 'localhost';
 const port = parseInt(process.env.PORT || '3000', 10);
 
 // Paths
@@ -321,7 +321,7 @@ async function main() {
   });
 
   // Start server
-  server.listen(port, () => {
+  server.listen(port, hostname, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                      YGGDRASIL                            ║
@@ -333,6 +333,8 @@ async function main() {
 ║    /audience    - Audience member UI                      ║
 ║    /projector   - Projector display                       ║
 ║    /controller  - Performer controls                      ║
+║                                                           ║
+║  Network Access: ${hostname === '0.0.0.0' ? 'Enabled (all interfaces)' : 'Local only'}          ║
 ╚═══════════════════════════════════════════════════════════╝
     `);
   });

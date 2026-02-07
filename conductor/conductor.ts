@@ -692,7 +692,7 @@ function handleSubmitVote(
   const user = state.users.get(userId);
   if (!user) {
     debug('  Error: user not found');
-    return [{ type: 'ERROR', message: 'User not found' }];
+    return [{ type: 'ERROR', message: 'User not found, userId=' + userId }];
   }
 
   if (user.faction === null) {

@@ -4,6 +4,8 @@ An interactive live performance system where an audience collectively builds a s
 
 ## Quick Start
 
+### Local Development
+
 ```bash
 # Install dependencies
 npm install
@@ -17,6 +19,25 @@ npm test
 # Type check
 npm run typecheck
 ```
+
+### Testing with Real Devices
+
+To test the audience UI on actual phones/tablets:
+
+```bash
+# 1. Find your computer's IP address
+ipconfig getifaddr en0  # macOS Wi-Fi
+
+# 2. Start server for network access (binds to 0.0.0.0)
+npm run dev:network
+```
+
+Then on your phone (same Wi-Fi network):
+```
+http://YOUR_IP:3000/audience?seat=A1
+```
+
+**📱 Full testing guide:** See [TESTING.md](TESTING.md) for comprehensive testing instructions, troubleshooting, and pre-performance checklists.
 
 ## Architecture
 
