@@ -138,24 +138,22 @@ export default function ProjectorPage() {
             paths={projectorState.paths}
             currentRowIndex={projectorState.currentRowIndex}
             config={(projectorState as any).config}
+            showPhase={showPhase}
           />
         </>
       )}
 
       {showPhase === 'finale' && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100vh',
-          flexDirection: 'column',
-          gap: '2rem',
-        }}>
-          <h1 style={{ fontSize: '3rem', textAlign: 'center' }}>Finale</h1>
-          <p style={{ color: '#666', fontSize: '1.5rem' }}>
-            TODO: FinaleDisplay component
-          </p>
-        </div>
+        <SongTree
+          rows={projectorState.rows}
+          paths={projectorState.paths}
+          currentRowIndex={projectorState.currentRowIndex}
+          config={(projectorState as any).config}
+          showPhase={showPhase}
+          finalePhase={projectorState.finalePhase}
+          currentFinaleTimeline={projectorState.currentFinaleTimeline}
+          factionColors={projectorState.factions.map(f => f.color)}
+        />
       )}
 
       {showPhase === 'ended' && (

@@ -423,6 +423,7 @@ export interface ProjectorClientState {
   } | null;
   currentFinaleTimeline: FinaleTimeline | null;
   finalePhase: 'popular_song' | 'individual_timelines' | null;
+  
 }
 
 export interface ControllerClientState {
