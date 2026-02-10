@@ -320,6 +320,7 @@ export interface AudioCue {
   rowIndex?: number;
   optionId?: OptionId;
   path?: OptionId[];
+  userId?: UserId;  // Present for individual timeline playback
 }
 
 export type ConductorEvent =

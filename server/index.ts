@@ -11,6 +11,12 @@
  * Start with: npm run dev (development) or npm run start (production)
  */
 
+import { config as dotenvConfig } from 'dotenv';
+import { resolve } from 'path';
+
+// Load environment variables from .env file
+dotenvConfig({ path: resolve(process.cwd(), '.env') });
+
 import { createServer } from 'http';
 import { parse } from 'url';
 import { readFileSync, mkdirSync } from 'fs';
@@ -24,6 +30,7 @@ import { setupSocketHandlers, broadcastEvents } from './socket';
 import { createAndPruneBackup } from './backup';
 import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
+import { createAudioRouter, type AudioRouter } from './audio-router';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || 'localhost';
@@ -200,56 +207,10 @@ async function main() {
     });
   }
 
-  // Register OSC audio cue hook
+  // Create and register audio router
+  const audioRouter = createAudioRouter(oscBridge);
   stateChangeHooks.push((state, events) => {
-    for (const event of events) {
-      if (event.type === 'AUDIO_CUE') {
-        const cue = event.cue;
-        switch (cue.type) {
-          case 'play_option':
-            if (cue.rowIndex !== undefined && cue.optionId) {
-              // Find option index from the current row
-              const row = state.rows[cue.rowIndex];
-              const optionIndex = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-              oscBridge.send('/ygg/audition/start', cue.rowIndex, optionIndex, cue.optionId);
-            }
-            break;
-          case 'stop_option':
-            if (cue.rowIndex !== undefined && cue.optionId) {
-              const row = state.rows[cue.rowIndex];
-              const optionIndex = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-              oscBridge.send('/ygg/audition/stop', cue.rowIndex, optionIndex);
-            }
-            break;
-          case 'commit_layer':
-            if (cue.rowIndex !== undefined && cue.optionId) {
-              oscBridge.send('/ygg/layer/commit', cue.rowIndex, cue.optionId);
-            }
-            break;
-          case 'uncommit_layer':
-            if (cue.rowIndex !== undefined) {
-              oscBridge.send('/ygg/layer/uncommit', cue.rowIndex);
-            }
-            break;
-          case 'play_timeline':
-            if (cue.path) {
-              oscBridge.send('/ygg/finale/popular', cue.path.join(','));
-            }
-            break;
-        }
-      }
-
-      // Handle pause/resume for OSC
-      if (event.type === 'SHOW_PHASE_CHANGED') {
-        const phaseEvent = event as { type: 'SHOW_PHASE_CHANGED'; phase: string };
-        if (phaseEvent.phase === 'paused') {
-          oscBridge.send('/ygg/show/pause');
-        } else if (state.pausedPhase === 'paused') {
-          // Resuming from pause
-          oscBridge.send('/ygg/show/resume');
-        }
-      }
-    }
+    audioRouter.handleStateChange(state, events);
   });
 
   // Start OSC bridge and timing engine
@@ -296,6 +257,10 @@ async function main() {
       timingEngine.dispose();
       console.log('[Server] Timing engine stopped');
     }
+
+    // Stop audio router
+    audioRouter.dispose();
+    console.log('[Server] Audio router stopped');
 
     // Stop OSC bridge
     oscBridge.stop();

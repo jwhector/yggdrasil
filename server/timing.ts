@@ -175,8 +175,10 @@ export function createTimingEngine(
     const currentLoop = Math.floor(rawAuditionIndex / 4) + 1;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
-      // Ableton mode: Send OSC, wait for response
-      console.log(`[Timing] Audition: Sending to Ableton - row ${row.index}, option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
+      // Ableton mode: Wait for /ableton/audition/done response
+      // Note: The AUDIO_CUE play_option event (handled by audio router)
+      // will send the /ygg/audition/start OSC message. We just track state here.
+      console.log(`[Timing] Audition: Waiting for Ableton - row ${row.index}, option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
 
       auditionState = {
         rowIndex: row.index,
@@ -184,15 +186,7 @@ export function createTimingEngine(
         waitingForAbleton: true,
       };
 
-      // Send the actual option index (0-3) to Ableton, not the raw index
-      engineConfig.oscBridge.send(
-        '/ygg/audition/start',
-        row.index,
-        optionIndex,
-        option.id
-      );
-
-      // No timer - we wait for Ableton's audition_done message
+      // No timer, no OSC send - we wait for Ableton's response
     } else {
       // Fallback mode: Use JS timer
       console.log(`[Timing] Audition (fallback): option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);

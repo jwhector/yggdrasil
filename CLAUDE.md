@@ -60,6 +60,7 @@ yggdrasil/
 │   ├── persistence.ts
 │   ├── timing.ts     # Hybrid timing engine (Ableton + JS timers)
 │   ├── osc.ts        # OSC bridge for Ableton communication
+│   ├── audio-router.ts # Maps AUDIO_CUE events to OSC messages
 │   └── __tests__/    # Server unit tests
 ├── app/              # Next.js pages
 │   ├── audience/

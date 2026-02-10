@@ -135,7 +135,7 @@ function encodeOSCArgument(arg: OSCArgument): Buffer {
 /**
  * Encode an OSC message
  */
-function encodeOSCMessage(address: string, args: OSCArgument[]): Buffer {
+export function encodeOSCMessage(address: string, args: OSCArgument[]): Buffer {
   const addressBuffer = encodeOSCString(address);
   const typeTagBuffer = encodeOSCTypeTags(args);
   const argBuffers = args.map(encodeOSCArgument);
@@ -162,7 +162,7 @@ function decodeOSCString(buffer: Buffer, offset: number): [string, number] {
 /**
  * Decode an OSC message from buffer
  */
-function decodeOSCMessage(buffer: Buffer): OSCMessage | null {
+export function decodeOSCMessage(buffer: Buffer): OSCMessage | null {
   try {
     let offset = 0;
 
@@ -323,6 +323,16 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
           console.log(`[OSC] Listening on ${addr.address}:${addr.port}`);
           console.log(`[OSC] Sending to ${finalConfig.abletonHost}:${finalConfig.sendPort}`);
           running = true;
+          
+          // Send test message to verify Ableton connection
+          send('/live/test');
+          // send('/live/song/start_playing');
+          // send('/live/song/stop_listen/current_song_time')
+
+          // send('/live/clip/stop 0 0');
+          send('/live/clip/start_listen/playing_position', 0, 0);
+          // send('/live/clip/stop_listen/playing_position 0 0');
+          
           resolve();
         });
 

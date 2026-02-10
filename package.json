@@ -8,6 +8,7 @@
     "dev:network": "HOST=0.0.0.0 ts-node --project tsconfig.server.json server/index.ts",
     "build": "next build",
     "start": "NODE_ENV=production ts-node --project tsconfig.server.json server/index.ts",
+    "mock:ableton": "ts-node --project tsconfig.server.json server/tools/osc-mock-ableton.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:conductor": "jest conductor/",
@@ -17,6 +18,7 @@
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "debug": "^4.4.3",
+    "dotenv": "^17.2.4",
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

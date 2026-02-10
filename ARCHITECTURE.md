@@ -1050,10 +1050,10 @@ yggdrasil/
 │   ├── recovery.ts              # State recovery and backup logic
 │   ├── timing.ts                # Hybrid timing engine (Ableton + JS timers)
 │   ├── osc.ts                   # OSC bridge for Ableton communication
+│   ├── audio-router.ts          # Maps AUDIO_CUE events to OSC messages
 │   ├── __tests__/               # Server unit tests
-│   └── adapters/
-│       ├── interface.ts         # AudioAdapter interface
-│       └── null.ts              # NullAdapter (logs only)
+│   └── tools/
+│       └── osc-mock-ableton.ts  # Mock Ableton OSC responder for testing
 │
 ├── app/                         # Next.js App Router (pages)
 │   ├── layout.tsx               # Root layout

@@ -10,6 +10,10 @@ An interactive live performance system where an audience collectively builds a s
 # Install dependencies
 npm install
 
+# (Optional) Configure environment variables
+cp .env.example .env
+# Edit .env to customize server settings
+
 # Start development server (Next.js + Socket.IO on port 3000)
 npm run dev
 
@@ -25,11 +29,18 @@ npm run typecheck
 To test the audience UI on actual phones/tablets:
 
 ```bash
-# 1. Find your computer's IP address
-ipconfig getifaddr en0  # macOS Wi-Fi
+# Option 1: Use environment variable
+HOST=0.0.0.0 npm run dev
 
-# 2. Start server for network access (binds to 0.0.0.0)
+# Option 2: Configure in .env file
+# Set HOST=0.0.0.0 in .env, then:
+npm run dev
+
+# Option 3: Use the network script (sets HOST=0.0.0.0 automatically)
 npm run dev:network
+
+# Find your computer's IP address (macOS Wi-Fi)
+ipconfig getifaddr en0
 ```
 
 Then on your phone (same Wi-Fi network):
@@ -71,6 +82,24 @@ yggdrasil/
 - `http://localhost:3000/audience` — Audience member UI (join via QR code)
 - `http://localhost:3000/projector` — Display for projection
 - `http://localhost:3000/controller` — Performer control interface
+
+## Configuration
+
+Environment variables can be set via `.env` file. Copy `.env.example` to `.env` and customize:
+
+```bash
+cp .env.example .env
+```
+
+Key configuration options:
+
+- **HOST/PORT** — Server binding (use `HOST=0.0.0.0` for network access)
+- **OSC_ENABLED** — Enable/disable Ableton Live integration
+- **TIMING_ENGINE_ENABLED** — Enable/disable automatic timing
+- **PERIODIC_BACKUP** — Enable automatic periodic backups
+- **NODE_ENV** — Set to `production` for production builds
+
+See `.env.example` for complete documentation of all options.
 
 ## For AI Agents
 

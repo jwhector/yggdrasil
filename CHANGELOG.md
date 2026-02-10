@@ -4,6 +4,22 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-09] — Extract Audio Router & OSC Mock Tool
+
+**Context:** Audio cue routing (AUDIO_CUE → OSC messages) was inline in `server/index.ts` (~50 lines). This made it hard to test, and both the timing engine and the inline hook were sending `/ygg/audition/start` — causing duplicate OSC messages. Individual timeline playback (`/ygg/finale/timeline`) was also missing.
+
+**Changes:**
+- Extracted `server/audio-router.ts`: single owner of all outbound audio OSC messages
+- Removed duplicate `/ygg/audition/start` send from `server/timing.ts` (timing engine now only tracks state, doesn't send audio)
+- Added `userId?` to `AudioCue` type for individual vs popular timeline distinction
+- Added `/ygg/finale/timeline` routing alongside existing `/ygg/finale/popular`
+- Created `server/tools/osc-mock-ableton.ts`: standalone script simulating Ableton's OSC responses for testing without Ableton
+- Exported `encodeOSCMessage`/`decodeOSCMessage` from `server/osc.ts` for reuse
+
+**Implications:** The `server/adapters/` directory from ARCHITECTURE.md was never created; `audio-router.ts` fulfills that role with a simpler pattern. The timing engine still needs `oscBridge.isRunning()` to choose Ableton-wait vs JS-timer fallback.
+
+---
+
 ## [2026-02-06] — Merge Auditioning and Voting Phases + Auto-Submit Votes
 
 **Context:** The original design had separate `auditioning` and `voting` phases, requiring audiences to wait passively during audition, then switch to voting mode. This created unnecessary friction and delayed engagement. Additionally, the two-click vote selection mechanism (click once for faction, again for personal) was confusing for first-time users on mobile. This change merges audition and voting into a single phase where users can vote while listening, and replaces the sequential click pattern with an explicit popover interface with auto-submit.
