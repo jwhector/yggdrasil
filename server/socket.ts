@@ -63,7 +63,8 @@ export function setupSocketHandlers(
   io: SocketIOServer,
   getState: () => ShowState,
   setState: (state: ShowState, events: ConductorEvent[]) => void,
-  persistence: PersistenceLayer
+  persistence: PersistenceLayer,
+  createNewShow?: () => ShowState
 ): void {
   // Track heartbeats for all clients
   const heartbeats = new Map<string, ClientHeartbeat>();
@@ -396,6 +397,23 @@ export function setupSocketHandlers(
      */
     socket.on('command', async (command: ConductorCommand) => {
       console.log(`[Socket] Command received:`, command.type);
+
+      // NEW_SHOW is handled at the server level (requires I/O to read config)
+      if (command.type === 'NEW_SHOW') {
+        if (!createNewShow) {
+          console.error('[Socket] NEW_SHOW rejected: no createNewShow callback registered');
+          return;
+        }
+        const newState = createNewShow();
+        const events: ConductorEvent[] = [
+          { type: 'SHOW_PHASE_CHANGED', phase: 'lobby' },
+        ];
+        setState(newState, events);
+        persistence.saveState(newState);
+        await broadcastEvents(io, events, newState);
+        console.log(`[Socket] New show created: ${newState.id}`);
+        return;
+      }
 
       let processedCommand = command;
 

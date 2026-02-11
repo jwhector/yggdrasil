@@ -140,7 +140,7 @@ These items are acknowledged but intentionally deferred. When resolving, move to
 - Row transitions remain manual (performer controls pacing)
 - Pause/resume uses fresh restart (timer restarts from scratch)
 - Timing engine enabled by default
-- Audition waits for `/ableton/audition/done`; other phases use JS timers
+- Audition timing via AbletonOSC beat subscription (`/live/song/get/beat`); other phases use JS timers
 
 **Date:** Phase 3 implementation
 

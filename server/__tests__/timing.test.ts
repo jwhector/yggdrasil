@@ -4,7 +4,7 @@
  * Tests cover:
  * - Timer scheduling for each phase
  * - Timer cancellation on phase change
- * - Ableton OSC message handling
+ * - AbletonOSC beat-based audition timing
  * - Fallback mode (JS timers only)
  * - Pause/resume behavior
  */
@@ -34,6 +34,7 @@ function createTestConfig() {
       votingWindowMs: 200,
       revealDurationMs: 150,
       coupWindowMs: 100,
+      masterLoopBeats: 4, // Small for tests
     },
     coup: {
       threshold: 0.5,
@@ -237,7 +238,7 @@ describe('Timing Engine', () => {
     });
   });
 
-  describe('OSC Mode', () => {
+  describe('OSC Mode (Beat-Based)', () => {
     let mockOscBridge: OSCBridge;
 
     beforeEach(() => {
@@ -252,7 +253,7 @@ describe('Timing Engine', () => {
       timingEngine.start();
     });
 
-    test('waits for Ableton audition_done in OSC mode', () => {
+    test('does not use JS timer for audition in OSC mode', () => {
       currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
@@ -261,16 +262,47 @@ describe('Timing Engine', () => {
       ]);
 
       // In OSC mode, should NOT use JS timer for audition
-      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(10000);
+      expect(mockSendCommand).not.toHaveBeenCalled();
+    });
+
+    test('records start beat on first beat event and does not advance', () => {
+      currentState.rows[0].phase = 'voting';
+      currentState.rows[0].currentAuditionIndex = 0;
+
+      timingEngine.onStateChanged(currentState, [
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
+      ]);
+
+      // First beat records start beat, should not advance
+      timingEngine.onOSCMessage('/live/song/get/beat', [10]);
+      expect(mockSendCommand).not.toHaveBeenCalled();
+    });
+
+    test('advances after masterLoopBeats beats have elapsed', () => {
+      currentState.rows[0].phase = 'voting';
+      currentState.rows[0].currentAuditionIndex = 0;
+
+      timingEngine.onStateChanged(currentState, [
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
+      ]);
+
+      // First beat records start (beat 10)
+      timingEngine.onOSCMessage('/live/song/get/beat', [10]);
       expect(mockSendCommand).not.toHaveBeenCalled();
 
-      // Simulate Ableton sending audition_done
-      timingEngine.onOSCMessage('/ableton/audition/done', [0, 0]);
+      // Beats 11, 12, 13 — not enough (3 < 4 masterLoopBeats)
+      timingEngine.onOSCMessage('/live/song/get/beat', [11]);
+      timingEngine.onOSCMessage('/live/song/get/beat', [12]);
+      timingEngine.onOSCMessage('/live/song/get/beat', [13]);
+      expect(mockSendCommand).not.toHaveBeenCalled();
 
+      // Beat 14 — 4 beats elapsed (14 - 10 = 4 >= masterLoopBeats)
+      timingEngine.onOSCMessage('/live/song/get/beat', [14]);
       expect(mockSendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_PHASE' });
     });
 
-    test('ignores audition_done for wrong row', () => {
+    test('does not advance before enough beats have elapsed', () => {
       currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
@@ -278,45 +310,38 @@ describe('Timing Engine', () => {
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
-      // Wrong row index
-      timingEngine.onOSCMessage('/ableton/audition/done', [1, 0]);
+      // First beat records start (beat 0)
+      timingEngine.onOSCMessage('/live/song/get/beat', [0]);
+
+      // 3 more beats (3 elapsed < 4 masterLoopBeats)
+      timingEngine.onOSCMessage('/live/song/get/beat', [1]);
+      timingEngine.onOSCMessage('/live/song/get/beat', [2]);
+      timingEngine.onOSCMessage('/live/song/get/beat', [3]);
 
       expect(mockSendCommand).not.toHaveBeenCalled();
     });
 
-    test('ignores audition_done for wrong option', () => {
+    test('ignores beat events when audition is already complete', () => {
       currentState.rows[0].phase = 'voting';
-      currentState.rows[0].currentAuditionIndex = 0;
+      currentState.rows[0].auditionComplete = true;
 
       timingEngine.onStateChanged(currentState, [
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
-      // Wrong option index
-      timingEngine.onOSCMessage('/ableton/audition/done', [0, 1]);
+      // Beat events should be ignored (audition complete → JS voting timer)
+      timingEngine.onOSCMessage('/live/song/get/beat', [0]);
+      timingEngine.onOSCMessage('/live/song/get/beat', [100]);
 
-      expect(mockSendCommand).not.toHaveBeenCalled();
-    });
-
-    test('ignores audition_done when audition is already complete', () => {
-      currentState.rows[0].phase = 'voting';
-      currentState.rows[0].auditionComplete = true; // Audition already complete
-
-      timingEngine.onStateChanged(currentState, [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
-      ]);
-
-      // Send audition_done after audition complete
-      timingEngine.onOSCMessage('/ableton/audition/done', [0, 0]);
-
-      // Should not advance
-      jest.advanceTimersByTime(100);
-      expect(mockSendCommand).not.toHaveBeenCalled();
+      // Voting timer should fire instead
+      jest.advanceTimersByTime(200);
+      expect(mockSendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_PHASE' });
+      expect(mockSendCommand).toHaveBeenCalledTimes(1);
     });
 
     test('uses JS timers for voting window after audition completes in OSC mode', () => {
       currentState.rows[0].phase = 'voting';
-      currentState.rows[0].auditionComplete = true; // Audition complete, now in voting window
+      currentState.rows[0].auditionComplete = true;
 
       timingEngine.onStateChanged(currentState, [
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
@@ -357,7 +382,7 @@ describe('Timing Engine', () => {
       expect(mockSendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_PHASE' });
     });
 
-    test('OSC mode validates against option index modulo 4', () => {
+    test('OSC mode uses beat counting for multi-loop audition', () => {
       const config = createTestConfig();
       config.timing.auditionLoopsPerRow = 2;
       currentState = createInitialState(config, 'test-show');
@@ -375,8 +400,16 @@ describe('Timing Engine', () => {
       );
       timingEngine.start();
 
-      // Ableton sends optionIndex=0 (correct for raw index 4 % 4 = 0)
-      timingEngine.onOSCMessage('/ableton/audition/done', [0, 0]);
+      timingEngine.onStateChanged(currentState, [
+        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
+      ]);
+
+      // First beat records start
+      timingEngine.onOSCMessage('/live/song/get/beat', [50]);
+      expect(mockSendCommand).not.toHaveBeenCalled();
+
+      // Master loop complete (4 beats)
+      timingEngine.onOSCMessage('/live/song/get/beat', [54]);
       expect(mockSendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_PHASE' });
     });
   });

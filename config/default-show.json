@@ -32,7 +32,8 @@
     "auditionPerOptionMs": 10000,
     "votingWindowMs": 10000,
     "revealDurationMs": 5000,
-    "coupWindowMs": 10000
+    "coupWindowMs": 10000,
+    "masterLoopBeats": 31
   },
   
   "coup": {

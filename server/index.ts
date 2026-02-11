@@ -12,7 +12,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
-import { resolve } from 'path';
+import path, { resolve } from 'path';
 
 // Load environment variables from .env file
 dotenvConfig({ path: resolve(process.cwd(), '.env') });
@@ -50,8 +50,8 @@ const MAX_BACKUPS = parseInt(process.env.MAX_BACKUPS || '10', 10);
 // Timing engine and OSC configuration
 const TIMING_ENGINE_ENABLED = process.env.TIMING_ENGINE_ENABLED !== 'false'; // Default: true
 const OSC_ENABLED = process.env.OSC_ENABLED !== 'false'; // Default: true
-const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '9001', 10);
-const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '9000', 10);
+const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '11000', 10);
+const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
 const ABLETON_HOST = process.env.ABLETON_HOST || '127.0.0.1';
 
 async function main() {
@@ -101,7 +101,8 @@ async function main() {
     console.log('[Server] No existing show found, creating new show from config...');
 
     // Load show configuration
-    const configJson = readFileSync(CONFIG_PATH, 'utf-8');
+    const configJson = readFileSync(path.resolve(__dirname, CONFIG_PATH), 'utf-8');
+    console.log(`[Server] Loaded config: ${path.resolve(__dirname, CONFIG_PATH)}`);
     const config: ShowConfig = JSON.parse(configJson);
 
     // Create initial state
@@ -149,9 +150,19 @@ async function main() {
     }
   }
 
+  // Factory to create a fresh show from config
+  function createNewShow(): ShowState {
+    const configJson = readFileSync(path.resolve(__dirname, CONFIG_PATH), 'utf-8');
+    const config: ShowConfig = JSON.parse(configJson);
+    const showId = `show-${Date.now()}`;
+    const newState = createInitialState(config, showId);
+    console.log(`[Server] Created new show from config: ${showId}`);
+    return newState;
+  }
+
   // Setup socket handlers
   console.log('[Server] Setting up Socket.IO handlers...');
-  setupSocketHandlers(io, getState, setState, persistence);
+  setupSocketHandlers(io, getState, setState, persistence, createNewShow);
 
   // ============================================================================
   // OSC Bridge and Timing Engine Setup

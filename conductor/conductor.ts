@@ -184,6 +184,11 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       events = handleForceReconnectAll(state);
       break;
 
+    case 'NEW_SHOW':
+      // Handled at the server/socket layer (requires I/O); no-op here
+      events = [];
+      break;
+
     default:
       events = [{ type: 'ERROR', message: 'Unknown command type', command }];
   }

@@ -1,13 +1,13 @@
 /**
- * Timing Engine - Hybrid Timing with Ableton + Server Timers
+ * Timing Engine - Hybrid Timing with AbletonOSC + Server Timers
  *
  * Manages automatic phase advancement with a hybrid approach:
- * - Ableton Live controls musical timing (audition loops, audio cues)
+ * - AbletonOSC controls musical timing via beat events (audition loops)
  * - Server JS timers control game logic timing (voting, coup windows)
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
- * - For audition: Sends OSC to Ableton, waits for loop_complete/audition_done
+ * - For audition: Subscribes to beat events, counts beats for master loop completion
  * - For voting/revealing/coup_window: Uses JS timers
  * - Manual advances always take precedence (version check)
  *
@@ -66,12 +66,15 @@ interface TimerState {
 }
 
 /**
- * Audition state tracking (when waiting for Ableton)
+ * Beat tracking state (for Ableton mode audition timing)
  */
-interface AuditionState {
+interface BeatTrackingState {
+  /** The beat number when the current audition option started */
+  auditionOptionStartBeat: number | null;
+  /** Current row being auditioned */
   rowIndex: number;
-  optionIndex: number;
-  waitingForAbleton: boolean;
+  /** Raw audition index (0-based, maps to option via % 4) */
+  rawAuditionIndex: number;
 }
 
 /**
@@ -96,7 +99,7 @@ export function createTimingEngine(
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let auditionState: AuditionState | null = null;
+  let beatTrackingState: BeatTrackingState | null = null;
 
   // ============================================================================
   // Timer Management
@@ -160,7 +163,42 @@ export function createTimingEngine(
   }
 
   // ============================================================================
-  // Audition Phase (Ableton-Driven or Fallback)
+  // Beat Event Handling (AbletonOSC)
+  // ============================================================================
+
+  /**
+   * Handle beat event from AbletonOSC
+   */
+  function handleBeatEvent(beatNumber: number): void {
+    if (!running || !beatTrackingState) return;
+
+    const state = getState();
+    if (state.phase !== 'running') return;
+
+    const currentRow = state.rows[state.currentRowIndex];
+    if (currentRow.phase !== 'voting' || currentRow.auditionComplete) return;
+
+    // If we haven't recorded a start beat yet, this is it
+    if (beatTrackingState.auditionOptionStartBeat === null) {
+      beatTrackingState.auditionOptionStartBeat = beatNumber;
+      console.log(`[Timing] Beat ${beatNumber}: audition option start recorded`);
+      return;
+    }
+
+    const masterLoopBeats = state.config.timing.masterLoopBeats ?? 32;
+    // const beatsElapsed = beatNumber - beatTrackingState.auditionOptionStartBeat;
+    const beatsElapsed = beatNumber % masterLoopBeats;
+
+    // if (beatsElapsed >= masterLoopBeats) {
+    if (beatsElapsed === 0 && beatNumber !== 0) {
+      console.log(`[Timing] Beat ${beatNumber}: master loop complete (${beatsElapsed} beats >= ${masterLoopBeats}). Advancing.`);
+      beatTrackingState = null; // Clear; will be recreated on next audition phase
+      sendCommand({ type: 'ADVANCE_PHASE' });
+    }
+  }
+
+  // ============================================================================
+  // Audition Phase (Beat-Based or Fallback)
   // ============================================================================
 
   /**
@@ -169,32 +207,29 @@ export function createTimingEngine(
   function handleAuditionPhase(state: ShowState, row: Row): void {
     const rawAuditionIndex = row.currentAuditionIndex ?? 0;
     const optionIndex = rawAuditionIndex % 4;  // Always 0-3
-    const option = row.options[optionIndex];
     const timing = state.config.timing;
     const loopsPerRow = timing.auditionLoopsPerRow ?? 1;
     const currentLoop = Math.floor(rawAuditionIndex / 4) + 1;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
-      // Ableton mode: Wait for /ableton/audition/done response
-      // Note: The AUDIO_CUE play_option event (handled by audio router)
-      // will send the /ygg/audition/start OSC message. We just track state here.
-      console.log(`[Timing] Audition: Waiting for Ableton - row ${row.index}, option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
+      // Ableton mode: Track beats, advance on master loop boundary
+      console.log(`[Timing] Audition (AbletonOSC): row ${row.index}, option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
 
-      auditionState = {
+      beatTrackingState = {
+        auditionOptionStartBeat: null,  // Will be set on next beat event
         rowIndex: row.index,
-        optionIndex: rawAuditionIndex,  // Store raw index for validation
-        waitingForAbleton: true,
+        rawAuditionIndex,
       };
 
-      // No timer, no OSC send - we wait for Ableton's response
+      // Beat events are handled by handleBeatEvent() via the /live/song/get/beat listener
     } else {
       // Fallback mode: Use JS timer
       console.log(`[Timing] Audition (fallback): option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
 
-      auditionState = {
+      beatTrackingState = {
+        auditionOptionStartBeat: null,
         rowIndex: row.index,
-        optionIndex: rawAuditionIndex,  // Store raw index for validation
-        waitingForAbleton: false,
+        rawAuditionIndex,
       };
 
       // Calculate total audition time for this option
@@ -203,49 +238,6 @@ export function createTimingEngine(
 
       scheduleAdvance(totalMs, state.version, `auditioning option ${optionIndex} (loop ${currentLoop})`);
     }
-  }
-
-  /**
-   * Handle audition_done message from Ableton
-   */
-  function handleAbletonAuditionDone(rowIndex: number, optionIndex: number): void {
-    const state = getState();
-
-    // Verify we're still in the expected state
-    if (state.phase !== 'running') {
-      console.log('[Timing] Ignoring audition_done - show not running');
-      return;
-    }
-
-    const currentRow = state.rows[state.currentRowIndex];
-    if (currentRow.phase !== 'voting' || currentRow.auditionComplete) {
-      console.log('[Timing] Ignoring audition_done - not in voting/auditioning phase');
-      return;
-    }
-
-    if (state.currentRowIndex !== rowIndex) {
-      console.log(`[Timing] Ignoring audition_done - wrong row (expected ${state.currentRowIndex}, got ${rowIndex})`);
-      return;
-    }
-
-    // Compare against the actual option index (0-3), not raw audition index
-    const currentOptionIndex = (currentRow.currentAuditionIndex ?? 0) % 4;
-    if (currentOptionIndex !== optionIndex) {
-      console.log(`[Timing] Ignoring audition_done - wrong option (expected ${currentOptionIndex}, got ${optionIndex})`);
-      return;
-    }
-
-    console.log(`[Timing] Ableton audition_done: row ${rowIndex}, option ${optionIndex} - advancing`);
-    auditionState = null;
-    sendCommand({ type: 'ADVANCE_PHASE' });
-  }
-
-  /**
-   * Handle loop_complete message from Ableton (optional tracking)
-   */
-  function handleAbletonLoopComplete(rowIndex: number, optionIndex: number, loopCount: number): void {
-    console.log(`[Timing] Ableton loop_complete: row ${rowIndex}, option ${optionIndex}, loop ${loopCount}`);
-    // Currently just for logging - could be used for UI feedback
   }
 
   // ============================================================================
@@ -284,38 +276,21 @@ export function createTimingEngine(
   // ============================================================================
 
   /**
-   * Handle incoming OSC messages from Ableton
+   * Handle incoming OSC messages from AbletonOSC
    */
   function onOSCMessage(address: string, args: any[]): void {
     if (!running) return;
 
     switch (address) {
-      case '/ableton/audition/done': {
-        const [rowIndex, optionIndex] = args;
-        handleAbletonAuditionDone(rowIndex, optionIndex);
-        break;
-      }
-
-      case '/ableton/loop/complete': {
-        const [rowIndex, optionIndex, loopCount] = args;
-        handleAbletonLoopComplete(rowIndex, optionIndex, loopCount);
-        break;
-      }
-
-      case '/ableton/cue/hit': {
-        const [cueName] = args;
-        console.log(`[Timing] Ableton cue hit: ${cueName}`);
-        // TODO: Handle cue-based timing (e.g., reveal_complete)
-        break;
-      }
-
-      case '/ableton/ready': {
-        console.log('[Timing] Ableton is ready');
+      case '/live/song/get/beat': {
+        const beatNumber = args[0] as number;
+        handleBeatEvent(beatNumber);
         break;
       }
 
       default:
-        console.log(`[Timing] Unknown OSC message: ${address}`, args);
+        // Ignore unknown messages
+        break;
     }
   }
 
@@ -341,7 +316,7 @@ export function createTimingEngine(
     // Cancel timers on phase change
     if (rowPhaseEvent || showPhaseEvent) {
       cancelCurrentTimer();
-      auditionState = null;
+      beatTrackingState = null;
     }
 
     // Don't schedule if paused
@@ -412,22 +387,17 @@ export function createTimingEngine(
 
     // Wire up OSC message handling if bridge is available
     if (engineConfig.oscBridge) {
-      engineConfig.oscBridge.on('/ableton/audition/done', (...args) => {
-        onOSCMessage('/ableton/audition/done', args);
+      // Subscribe to beat events from AbletonOSC
+      engineConfig.oscBridge.on('/live/song/get/beat', (...args) => {
+        onOSCMessage('/live/song/get/beat', args);
       });
-      engineConfig.oscBridge.on('/ableton/loop/complete', (...args) => {
-        onOSCMessage('/ableton/loop/complete', args);
-      });
-      engineConfig.oscBridge.on('/ableton/cue/hit', (...args) => {
-        onOSCMessage('/ableton/cue/hit', args);
-      });
-      engineConfig.oscBridge.on('/ableton/ready', (...args) => {
-        onOSCMessage('/ableton/ready', args);
-      });
+
+      // Send subscription request to AbletonOSC
+      engineConfig.oscBridge.send('/live/song/start_listen/beat');
     }
 
     console.log('[Timing] Engine started');
-    console.log(`[Timing] Mode: ${engineConfig.oscBridge ? 'Ableton (OSC)' : 'Fallback (JS timers)'}`);
+    console.log(`[Timing] Mode: ${engineConfig.oscBridge ? 'AbletonOSC (beat-based)' : 'Fallback (JS timers)'}`);
 
     // Initialize based on current state
     const state = getState();
@@ -448,12 +418,11 @@ export function createTimingEngine(
 
     running = false;
     cancelCurrentTimer();
-    auditionState = null;
+    beatTrackingState = null;
 
-    // Unwire OSC handlers
+    // Unsubscribe from beat events
     if (engineConfig.oscBridge) {
-      // Note: Would need to store handler references to properly remove them
-      // For now, the bridge's removeAllListeners on stop() handles cleanup
+      engineConfig.oscBridge.send('/live/song/stop_listen/beat');
     }
 
     console.log('[Timing] Engine stopped');

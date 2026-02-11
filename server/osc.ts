@@ -25,6 +25,9 @@ export interface OSCBridge {
   /** Register handler for incoming OSC messages */
   on(address: string, handler: (...args: any[]) => void): void;
 
+  /** Register one-time handler for incoming OSC messages (auto-removes after first call) */
+  once(address: string, handler: (...args: any[]) => void): void;
+
   /** Remove handler for incoming OSC messages */
   off(address: string, handler: (...args: any[]) => void): void;
 
@@ -51,8 +54,8 @@ export interface OSCBridgeConfig {
  * Default configuration
  */
 const DEFAULT_CONFIG: OSCBridgeConfig = {
-  sendPort: 9001,
-  receivePort: 9000,
+  sendPort: 11000,
+  receivePort: 11001,
   abletonHost: '127.0.0.1',
 };
 
@@ -278,6 +281,14 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
   }
 
   /**
+   * Register one-time handler for incoming OSC messages
+   * Handler is automatically removed after first invocation
+   */
+  function once(address: string, handler: (...args: any[]) => void): void {
+    emitter.once(address, handler);
+  }
+
+  /**
    * Remove handler for incoming OSC messages
    */
   function off(address: string, handler: (...args: any[]) => void): void {
@@ -323,16 +334,10 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
           console.log(`[OSC] Listening on ${addr.address}:${addr.port}`);
           console.log(`[OSC] Sending to ${finalConfig.abletonHost}:${finalConfig.sendPort}`);
           running = true;
-          
-          // Send test message to verify Ableton connection
-          send('/live/test');
-          // send('/live/song/start_playing');
-          // send('/live/song/stop_listen/current_song_time')
 
-          // send('/live/clip/stop 0 0');
-          send('/live/clip/start_listen/playing_position', 0, 0);
-          // send('/live/clip/stop_listen/playing_position 0 0');
-          
+          // Send test message to verify AbletonOSC connection
+          send('/live/test');
+
           resolve();
         });
 
@@ -381,6 +386,7 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
   return {
     send,
     on,
+    once,
     off,
     start,
     stop,
@@ -402,6 +408,9 @@ export function createNullOSCBridge(): OSCBridge {
     },
     on(address: string, handler: (...args: any[]) => void): void {
       emitter.on(address, handler);
+    },
+    once(address: string, handler: (...args: any[]) => void): void {
+      emitter.once(address, handler);
     },
     off(address: string, handler: (...args: any[]) => void): void {
       emitter.off(address, handler);

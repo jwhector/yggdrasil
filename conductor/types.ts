@@ -146,6 +146,7 @@ export interface TimingConfig {
   votingWindowMs: number;
   revealDurationMs: number;
   coupWindowMs: number;
+  masterLoopBeats: number;            // Beats per master loop cycle (e.g., 32 for 8 bars in 4/4)
 }
 
 export interface CoupConfig {
@@ -256,6 +257,7 @@ export type ConductorCommand =
   // Emergency recovery (controller only)
   | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean }
   | { type: 'IMPORT_STATE'; state: ShowState }
+  | { type: 'NEW_SHOW' }
   | { type: 'FORCE_RECONNECT_ALL' };
 
 // ============================================================================

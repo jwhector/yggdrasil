@@ -1,3 +1,14 @@
 {
-  "pages": {}
+  "pages": {
+    "/controller/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/controller/page.js"
+    ],
+    "/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/layout.js"
+    ]
+  }
 }

@@ -81,7 +81,7 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
                                    │ OSC over UDP
                                    ▼
                     ┌──────────────────────────────┐
-                    │   Ableton Live + Max for Live │
+                    │   Ableton Live + AbletonOSC    │
                     │   (musical timing, audio)     │
                     └──────────────────────────────┘
 ```
@@ -909,12 +909,18 @@ This ensures sample-accurate musical transitions while keeping game logic simple
 │  │     Conductor       │                │                                 │
 │  │  (pure game logic)  │                │                                 │
 │  └─────────────────────┘                │                                 │
+│  ┌─────────────────────┐                │                                 │
+│  │   Audio Router      │◄───────────────┘                                 │
+│  │ (AUDIO_CUE → OSC)   │                                                  │
+│  └─────────────────────┘                                                  │
 └─────────────────────────────────────────┼─────────────────────────────────┘
                                           │
                     ┌─────────────────────▼─────────────────────┐
-                    │        Ableton Live + Max for Live         │
-                    │  - Receives /ygg/* commands                │
-                    │  - Sends /ableton/* timing cues            │
+                    │   Ableton Live + AbletonOSC Plugin         │
+                    │  (ideoforms)                               │
+                    │  - Exposes Live Object Model via /live/*   │
+                    │  - Listens on port 11000                   │
+                    │  - Responds on port 11001                  │
                     └────────────────────────────────────────────┘
 ```
 
@@ -922,52 +928,67 @@ This ensures sample-accurate musical transitions while keeping game logic simple
 
 | Row Phase | Timing Owner | Mechanism | Notes |
 |-----------|--------------|-----------|-------|
-| `voting` (audition) | **Ableton** | OSC `/ableton/audition/done` | Sample-accurate loop handling. Cycles through all 4 options `auditionLoopsPerRow` times. Sets `auditionComplete = true` when done |
-| `voting` (after audition) | **Server** | JS timer (`votingWindowMs`) | Non-musical, slight drift OK. Timer starts after `AUDITION_COMPLETE` event |
+| `voting` (audition) | **Ableton** | Beat subscription via `/live/song/get/beat` | Server counts beats to detect master loop completion (e.g., 32 beats = 8 bars). Clips loop naturally within the master loop duration |
+| `voting` (after audition) | **Server** | JS timer (`votingWindowMs`) | Non-musical, slight drift OK. Timer starts after audition complete |
 | `revealing` | **Server** | JS timer (`revealDurationMs`) | Can be extended for Ableton cues |
 | `coup_window` | **Server** | JS timer (`coupWindowMs`) | Non-musical timing |
 | `committed` | **Manual** | N/A | Performer controls row transitions |
 
 ### OSC Protocol
 
-**Server → Ableton (Port 9001 by default)**
+This system uses the **AbletonOSC** plugin (by ideoforms) which exposes Ableton Live's Live Object Model via standard OSC addresses. All addresses follow the `/live/*` namespace.
+
+**Session Layout Convention:**
+- **32 tracks total** (4 tracks per row × 8 rows)
+- Track index calculated as: `rowIndex * 4 + optionIndex`
+  - Row 0: tracks 0-3
+  - Row 1: tracks 4-7
+  - Row 2: tracks 8-11
+  - ...
+  - Row 7: tracks 28-31
+- All clips fire at slot 0 (scene 0)
+- Audition uses mute/unmute for smooth transitions (no stop/start glitches)
+- Layering works because each row has its own set of tracks
+
+**Server → AbletonOSC (Port 11000 by default)**
 
 | Address | Arguments | Description |
 |---------|-----------|-------------|
-| `/ygg/audition/start` | `rowIndex: int`, `optionIndex: int`, `optionId: string` | Start playing option for audition |
-| `/ygg/audition/stop` | `rowIndex: int`, `optionIndex: int` | Stop current audition playback |
-| `/ygg/layer/commit` | `rowIndex: int`, `optionId: string` | Commit option as permanent layer |
-| `/ygg/layer/uncommit` | `rowIndex: int` | Remove committed layer (coup triggered) |
-| `/ygg/show/pause` | - | Pause all audio |
-| `/ygg/show/resume` | - | Resume audio |
-| `/ygg/finale/popular` | `path: string` | Play the popular path song |
-| `/ygg/finale/timeline` | `userId: string`, `path: string` | Play individual timeline |
+| `/live/test` | - | Connectivity test (AbletonOSC responds with 'ok') |
+| `/live/song/start_listen/beat` | - | Subscribe to beat events |
+| `/live/song/stop_listen/beat` | - | Unsubscribe from beat events |
+| `/live/song/start_playing` | - | Start global transport |
+| `/live/song/stop_playing` | - | Stop global transport (pause) |
+| `/live/song/continue_playing` | - | Resume transport from current position |
+| `/live/clip/fire` | `trackIndex: int`, `clipIndex: int` | Fire clip at track/slot (always slot 0) |
+| `/live/clip/stop` | `trackIndex: int`, `clipIndex: int` | Stop clip at track/slot |
+| `/live/track/set/mute` | `trackIndex: int`, `mute: int` | Set track mute (1 = muted, 0 = unmuted) |
 
-**Ableton → Server (Port 9000 by default)**
+**AbletonOSC → Server (Port 11001 by default)**
 
 | Address | Arguments | Description |
 |---------|-----------|-------------|
-| `/ableton/loop/complete` | `rowIndex: int`, `optionIndex: int`, `loopCount: int` | Option loop completed |
-| `/ableton/audition/done` | `rowIndex: int`, `optionIndex: int` | All loops for this option finished |
-| `/ableton/cue/hit` | `cueName: string` | Named cue point reached |
-| `/ableton/ready` | - | Ableton is connected and ready |
+| `/live/test` | `response: string` | Connectivity test response (sends 'ok') |
+| `/live/song/get/beat` | `beatNumber: int` | Beat event (sent when subscribed) |
+| `/live/song/get/tempo` | `bpm: float` | Tempo response |
 
 ### Fallback Mode
 
-When Ableton is not connected, the timing engine uses JS timers for all phases:
+When AbletonOSC is not connected (no OSC bridge available), the timing engine uses JS timers for all phases:
 - Audition timing: `auditionPerOptionMs * auditionLoopsPerOption`
 - All other phases: Configured durations in `TimingConfig`
 
-This enables testing and rehearsal without Ableton running.
+This enables testing and rehearsal without Ableton running. The audio router still sends OSC messages in this mode, but they are not received by any listener.
 
 ### Environment Variables
 
 ```bash
 TIMING_ENGINE_ENABLED=true|false  # Default: true
 OSC_ENABLED=true|false            # Default: true
-OSC_SEND_PORT=9001                # Port to send to Ableton
-OSC_RECEIVE_PORT=9000             # Port to receive from Ableton
-ABLETON_HOST=127.0.0.1            # Ableton host (for remote setups)
+OSC_SEND_PORT=11000               # Port AbletonOSC listens on (default: 11000)
+OSC_RECEIVE_PORT=11001            # Port AbletonOSC sends from (default: 11001)
+OSC_HOST=127.0.0.1                # AbletonOSC host (for remote setups)
+MOCK_BPM=120                      # BPM for mock Ableton simulator (testing only)
 ```
 
 ### Version Check Safety

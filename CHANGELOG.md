@@ -4,6 +4,59 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-09] — AbletonOSC Integration
+
+**Context:** The system was designed around a custom Max for Live device sending bespoke `/ableton/*` messages for audition timing. This required maintaining custom M4L code and limited testing without a full Ableton setup. By switching to the AbletonOSC plugin (ideoforms), we gain direct control over Ableton's Live Object Model via standard OSC, eliminating custom M4L development.
+
+**Why This Change:**
+1. **No custom M4L code**: AbletonOSC exposes the full Live API via OSC, removing need for custom device
+2. **Better testability**: Mock AbletonOSC server simulates beat events, clip control, and transport
+3. **More control**: Direct clip fire/stop, track mute/unmute, and beat subscription via standard API
+4. **Session layout flexibility**: 32-track layout (4 per row) enables layering via track isolation
+5. **Beat-based timing**: Master loop in beats (e.g., 32 = 8 bars) with shorter clips looping naturally
+
+**Changes:**
+- **conductor/types.ts**: Added `masterLoopBeats` field to `TimingConfig` for beat-based loop detection
+- **config/default-show.json**: Added `"masterLoopBeats": 32` (8 bars in 4/4 time)
+- **.env.example, server/osc.ts, server/index.ts**: Updated default OSC ports from 9001/9000 → 11000/11001 (AbletonOSC standard)
+- **server/audio-router.ts**: Complete rewrite for AbletonOSC protocol
+  - Track indexing: `rowIndex * 4 + optionIndex` (32 tracks total)
+  - Audition via mute/unmute (clips fire once, cycle muting for smooth transitions)
+  - `play_option`: Fire all 4 row clips muted on first audition, then unmute/mute cycle
+  - `commit_layer`: Ensure winner unmuted, others muted (layering works via track isolation)
+  - `uncommit_layer`: Mute + stop all 4 tracks for row, clear fired state
+  - `play_timeline`: Mute all, fire+unmute path tracks (finale)
+  - Pause/resume: Global transport (`/live/song/stop_playing`, `/live/song/continue_playing`)
+- **server/timing.ts**: Rewrite for beat-based audition timing
+  - Subscribe to `/live/song/start_listen/beat` on start, unsubscribe on stop
+  - Track beats elapsed via `/live/song/get/beat` responses
+  - Advance when `beatsElapsed >= masterLoopBeats`
+  - Fallback mode unchanged (JS timers when OSC unavailable)
+- **server/__tests__/audio-router.test.ts**: Complete test rewrite for AbletonOSC assertions
+  - Verify track index calculation (row 2, option 3 → track 11)
+  - Verify clip fire + mute/unmute patterns
+  - Verify layering (committed rows don't affect other rows)
+  - Verify coup uncommit clears fired state (clips re-fire on next audition)
+- **server/tools/osc-mock-ableton.ts**: Rewrite as AbletonOSC simulator
+  - Beat event generation at configurable BPM (`MOCK_BPM` env var)
+  - Transport control (start/stop/continue)
+  - Clip fire/stop and track mute state tracking
+  - Test message responses (`/live/test` → 'ok')
+
+**Implications:**
+- Ableton session layout: 32 tracks (4 per row), clips at scene 0. Each row's tracks are independent, enabling layering.
+- Audio router is single source of truth for all audio OSC messages (timing engine only schedules, doesn't send audio messages).
+- Conductor remains pure — no changes to event emission logic, only new `masterLoopBeats` config field.
+
+**Session Setup for Ableton:**
+1. Create 32 audio tracks (or MIDI if using instruments)
+2. Group tracks by row: Row 0 = tracks 0-3, Row 1 = tracks 4-7, ..., Row 7 = tracks 28-31
+3. Place clips in scene 0 (first scene) for each track
+4. Clips should be multiples of master loop length (shorter clips loop naturally within master loop)
+5. Install and configure AbletonOSC to listen on port 11000, reply on 11001
+
+---
+
 ## [2026-02-09] — Extract Audio Router & OSC Mock Tool
 
 **Context:** Audio cue routing (AUDIO_CUE → OSC messages) was inline in `server/index.ts` (~50 lines). This made it hard to test, and both the timing engine and the inline hook were sending `/ygg/audition/start` — causing duplicate OSC messages. Individual timeline playback (`/ygg/finale/timeline`) was also missing.

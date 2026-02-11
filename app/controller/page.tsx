@@ -39,6 +39,7 @@ export default function ControllerPage() {
 
   // Confirmation state
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showNewShowConfirm, setShowNewShowConfirm] = useState(false);
 
   // Connection status indicator
   const connectionColor =
@@ -125,6 +126,11 @@ export default function ControllerPage() {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const handleNewShow = () => {
+    sendCommand({ type: 'NEW_SHOW' });
+    setShowNewShowConfirm(false);
   };
 
   const handleForceReconnectAll = () => {
@@ -326,13 +332,19 @@ export default function ControllerPage() {
       {/* Emergency Controls */}
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Emergency Controls</h2>
-        {!showResetConfirm ? (
+        {!showResetConfirm && !showNewShowConfirm ? (
           <div style={styles.buttonGrid}>
             <button
               onClick={() => setShowResetConfirm(true)}
               style={{ ...styles.button, ...styles.dangerButton }}
             >
               Reset to Lobby
+            </button>
+            <button
+              onClick={() => setShowNewShowConfirm(true)}
+              style={{ ...styles.button, ...styles.dangerButton }}
+            >
+              New Show
             </button>
             <button onClick={handleExportState} style={styles.button}>
               Export State
@@ -344,7 +356,7 @@ export default function ControllerPage() {
               Force Reconnect All
             </button>
           </div>
-        ) : (
+        ) : showResetConfirm ? (
           <div style={styles.confirmBox}>
             <p style={{ margin: '0 0 1rem 0' }}>
               Are you sure you want to reset to lobby?
@@ -364,6 +376,26 @@ export default function ControllerPage() {
               </button>
               <button
                 onClick={() => setShowResetConfirm(false)}
+                style={styles.button}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={styles.confirmBox}>
+            <p style={{ margin: '0 0 1rem 0' }}>
+              Start a completely new show? This will discard all current state and create a fresh show from config.
+            </p>
+            <div style={styles.buttonGrid}>
+              <button
+                onClick={handleNewShow}
+                style={{ ...styles.button, ...styles.dangerButton }}
+              >
+                Confirm New Show
+              </button>
+              <button
+                onClick={() => setShowNewShowConfirm(false)}
                 style={styles.button}
               >
                 Cancel

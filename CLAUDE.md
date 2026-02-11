@@ -92,7 +92,7 @@ Core implementation is in progress:
 
 **In Progress:**
 - `/projector` and `/audience` views
-- Ableton Live Max for Live integration (M4L device)
+- Ableton Live integration via AbletonOSC plugin (ideoforms)
 
 **Key architectural components:**
 - **Timing Engine** (`server/timing.ts`): Hybrid timing with Ableton (audition) + JS timers (voting, coup)

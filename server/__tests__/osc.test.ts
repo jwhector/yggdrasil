@@ -88,38 +88,38 @@ describe('OSC Bridge', () => {
   });
 });
 
-describe('OSC Address Patterns', () => {
-  // Test the expected OSC addresses from the protocol spec
+describe('AbletonOSC Address Patterns', () => {
+  // Test the expected AbletonOSC addresses from the protocol spec
 
   const expectedServerToAbleton = [
-    '/ygg/audition/start',
-    '/ygg/audition/stop',
-    '/ygg/layer/commit',
-    '/ygg/layer/uncommit',
-    '/ygg/show/pause',
-    '/ygg/show/resume',
-    '/ygg/finale/popular',
-    '/ygg/finale/timeline',
+    '/live/test',
+    '/live/song/start_listen/beat',
+    '/live/song/stop_listen/beat',
+    '/live/song/start_playing',
+    '/live/song/stop_playing',
+    '/live/song/continue_playing',
+    '/live/clip/fire',
+    '/live/clip/stop',
+    '/live/track/set/mute',
   ];
 
   const expectedAbletonToServer = [
-    '/ableton/loop/complete',
-    '/ableton/audition/done',
-    '/ableton/cue/hit',
-    '/ableton/ready',
+    '/live/test',
+    '/live/song/get/beat',
+    '/live/song/get/tempo',
   ];
 
-  test('server to ableton addresses are valid OSC format', () => {
+  test('server to AbletonOSC addresses follow /live/* namespace', () => {
     for (const address of expectedServerToAbleton) {
       expect(address).toMatch(/^\/[a-z_/]+$/i);
-      expect(address.startsWith('/ygg/')).toBe(true);
+      expect(address.startsWith('/live/')).toBe(true);
     }
   });
 
-  test('ableton to server addresses are valid OSC format', () => {
+  test('AbletonOSC to server addresses follow /live/* namespace', () => {
     for (const address of expectedAbletonToServer) {
       expect(address).toMatch(/^\/[a-z_/]+$/i);
-      expect(address.startsWith('/ableton/')).toBe(true);
+      expect(address.startsWith('/live/')).toBe(true);
     }
   });
 });

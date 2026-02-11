@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 /**
- * Mock Ableton - OSC responder for testing without Ableton Live
+ * Mock AbletonOSC - OSC responder for testing without Ableton Live
  *
- * Listens on port 9001 for /ygg/* messages from Yggdrasil server.
- * Simulates Ableton responses by sending /ableton/* messages to port 9000.
+ * Simulates AbletonOSC plugin behavior for development and testing.
+ * Listens on port 11000 for messages from Yggdrasil server.
+ * Sends responses to port 11001.
+ *
+ * Features:
+ * - Beat event generation at configurable BPM
+ * - Clip fire/stop/mute simulation
+ * - Transport control (play/stop/continue)
+ * - Test message responses
  *
  * Usage: npm run mock:ableton
  */
@@ -15,10 +22,11 @@ import { encodeOSCMessage, decodeOSCMessage } from '../osc';
 // Configuration
 // ============================================================================
 
-const LISTEN_PORT = parseInt(process.env.OSC_SEND_PORT || '9001', 10);
-const RESPOND_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '9000', 10);
+const LISTEN_PORT = parseInt(process.env.OSC_SEND_PORT || '11000', 10);
+const RESPOND_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
 const RESPOND_HOST = '127.0.0.1';
-const AUDITION_RESPONSE_DELAY_MS = parseInt(process.env.MOCK_AUDITION_DELAY_MS || '2000', 10);
+const BPM = parseFloat(process.env.MOCK_BPM || '120');
+const MS_PER_BEAT = 60000 / BPM;
 
 // ============================================================================
 // Color helpers for logging
@@ -42,7 +50,29 @@ function log(category: string, color: string, message: string, ...args: any[]) {
 }
 
 // ============================================================================
-// Mock Ableton Server
+// Mock AbletonOSC State
+// ============================================================================
+
+interface MockState {
+  beatInterval: NodeJS.Timeout | null;
+  currentBeat: number;
+  transportPlaying: boolean;
+  beatListenersActive: boolean;
+  firedClips: Set<string>;      // "trackIndex:clipIndex"
+  mutedTracks: Set<number>;      // Track indices that are muted
+}
+
+const mockState: MockState = {
+  beatInterval: null,
+  currentBeat: 0,
+  transportPlaying: false,
+  beatListenersActive: false,
+  firedClips: new Set(),
+  mutedTracks: new Set(),
+};
+
+// ============================================================================
+// Mock AbletonOSC Server
 // ============================================================================
 
 let receiveSocket: dgram.Socket | null = null;
@@ -72,89 +102,186 @@ function sendToServer(address: string, ...args: (string | number | boolean)[]) {
 }
 
 /**
- * Handle incoming /ygg/* messages from the server
+ * Start beat listener (sends beat events at BPM rate)
+ */
+function startBeatListener() {
+  if (mockState.beatInterval) {
+    log('WARN', colors.yellow, 'Beat listener already running');
+    return;
+  }
+
+  mockState.beatListenersActive = true;
+  mockState.currentBeat = 0;
+
+  mockState.beatInterval = setInterval(() => {
+    if (mockState.transportPlaying) {
+      mockState.currentBeat++;
+      sendToServer('/live/song/get/beat', mockState.currentBeat);
+    }
+  }, MS_PER_BEAT);
+
+  log('MOCK', colors.magenta, `Beat listener started (${BPM} BPM, ${MS_PER_BEAT.toFixed(1)}ms per beat)`);
+}
+
+/**
+ * Stop beat listener
+ */
+function stopBeatListener() {
+  if (mockState.beatInterval) {
+    clearInterval(mockState.beatInterval);
+    mockState.beatInterval = null;
+  }
+  mockState.beatListenersActive = false;
+  log('MOCK', colors.magenta, 'Beat listener stopped');
+}
+
+/**
+ * Start transport (begin sending beats)
+ */
+function startTransport() {
+  if (!mockState.transportPlaying) {
+    mockState.transportPlaying = true;
+    mockState.currentBeat = 0;
+    log('MOCK', colors.blue, 'Transport started');
+  }
+}
+
+/**
+ * Stop transport (pause beat events)
+ */
+function stopTransport() {
+  if (mockState.transportPlaying) {
+    mockState.transportPlaying = false;
+    log('MOCK', colors.blue, 'Transport stopped');
+  }
+}
+
+/**
+ * Continue transport (resume from current position)
+ */
+function continueTransport() {
+  if (!mockState.transportPlaying) {
+    mockState.transportPlaying = true;
+    log('MOCK', colors.blue, 'Transport continued');
+  }
+}
+
+/**
+ * Handle incoming messages from the Yggdrasil server
  */
 function handleMessage(address: string, args: any[]) {
   switch (address) {
-    case '/ygg/audition/start': {
-      const [rowIndex, optionIndex, optionId] = args;
-      log('RECV', colors.cyan, `← /ygg/audition/start`, `row=${rowIndex} option=${optionIndex} id=${optionId}`);
-      log('MOCK', colors.yellow, `  Simulating audio playback for ${AUDITION_RESPONSE_DELAY_MS}ms...`);
-
-      // Simulate audition playback, then send completion
-      setTimeout(() => {
-        log('MOCK', colors.yellow, `  Audition complete for row ${rowIndex}, option ${optionIndex}`);
-        sendToServer('/ableton/audition/done', rowIndex, optionIndex);
-      }, AUDITION_RESPONSE_DELAY_MS);
+    case '/live/test': {
+      log('RECV', colors.cyan, '← /live/test');
+      sendToServer('/live/test', 'ok');
       break;
     }
 
-    case '/ygg/audition/stop': {
-      const [rowIndex, optionIndex] = args;
-      log('RECV', colors.cyan, `← /ygg/audition/stop`, `row=${rowIndex} option=${optionIndex}`);
+    case '/live/song/start_listen/beat': {
+      log('RECV', colors.cyan, '← /live/song/start_listen/beat');
+      startBeatListener();
       break;
     }
 
-    case '/ygg/layer/commit': {
-      const [rowIndex, optionId] = args;
-      log('RECV', colors.cyan, `← /ygg/layer/commit`, `row=${rowIndex} id=${optionId}`);
-      log('MOCK', colors.magenta, `  Layer committed: ${optionId}`);
+    case '/live/song/stop_listen/beat': {
+      log('RECV', colors.cyan, '← /live/song/stop_listen/beat');
+      stopBeatListener();
       break;
     }
 
-    case '/ygg/layer/uncommit': {
-      const [rowIndex] = args;
-      log('RECV', colors.cyan, `← /ygg/layer/uncommit`, `row=${rowIndex}`);
-      log('MOCK', colors.magenta, `  Layer removed from row ${rowIndex}`);
+    case '/live/song/start_playing': {
+      log('RECV', colors.cyan, '← /live/song/start_playing');
+      startTransport();
       break;
     }
 
-    case '/ygg/show/pause': {
-      log('RECV', colors.cyan, `← /ygg/show/pause`);
-      log('MOCK', colors.blue, `  Show paused`);
+    case '/live/song/stop_playing': {
+      log('RECV', colors.cyan, '← /live/song/stop_playing');
+      stopTransport();
       break;
     }
 
-    case '/ygg/show/resume': {
-      log('RECV', colors.cyan, `← /ygg/show/resume`);
-      log('MOCK', colors.blue, `  Show resumed`);
+    case '/live/song/continue_playing': {
+      log('RECV', colors.cyan, '← /live/song/continue_playing');
+      continueTransport();
       break;
     }
 
-    case '/ygg/finale/popular': {
-      const [path] = args;
-      log('RECV', colors.cyan, `← /ygg/finale/popular`, `path=${path}`);
-      log('MOCK', colors.magenta, `  Playing popular path song`);
+    case '/live/song/get/tempo': {
+      log('RECV', colors.cyan, '← /live/song/get/tempo');
+      sendToServer('/live/song/get/tempo', BPM);
       break;
     }
 
-    case '/ygg/finale/timeline': {
-      const [userId, path] = args;
-      log('RECV', colors.cyan, `← /ygg/finale/timeline`, `user=${userId} path=${path}`);
-      log('MOCK', colors.magenta, `  Playing individual timeline for ${userId}`);
+    case '/live/song/get/num_tracks': {
+      log('RECV', colors.cyan, '← /live/song/get/num_tracks');
+      sendToServer('/live/song/get/num_tracks', 32);
+      break;
+    }
+
+    case '/live/clip/fire': {
+      const [trackIndex, clipIndex] = args;
+      log('RECV', colors.cyan, '← /live/clip/fire', `track=${trackIndex} clip=${clipIndex}`);
+      const clipKey = `${trackIndex}:${clipIndex}`;
+      mockState.firedClips.add(clipKey);
+      log('MOCK', colors.yellow, `  Clip fired: track ${trackIndex}, slot ${clipIndex}`);
+      break;
+    }
+
+    case '/live/clip/stop': {
+      const [trackIndex, clipIndex] = args;
+      log('RECV', colors.cyan, '← /live/clip/stop', `track=${trackIndex} clip=${clipIndex}`);
+      const clipKey = `${trackIndex}:${clipIndex}`;
+      mockState.firedClips.delete(clipKey);
+      log('MOCK', colors.yellow, `  Clip stopped: track ${trackIndex}, slot ${clipIndex}`);
+      break;
+    }
+
+    case '/live/track/set/mute': {
+      const [trackIndex, mute] = args;
+      const muteState = mute === 1 ? 'muted' : 'unmuted';
+      log('RECV', colors.cyan, '← /live/track/set/mute', `track=${trackIndex} mute=${muteState}`);
+
+      if (mute === 1) {
+        mockState.mutedTracks.add(trackIndex);
+      } else {
+        mockState.mutedTracks.delete(trackIndex);
+      }
+
+      log('MOCK', colors.yellow, `  Track ${trackIndex} ${muteState}`);
+      break;
+    }
+
+    case '/live/track/get/mute': {
+      const [trackIndex] = args;
+      log('RECV', colors.cyan, '← /live/track/get/mute', `track=${trackIndex}`);
+      const mute = mockState.mutedTracks.has(trackIndex) ? 1 : 0;
+      sendToServer('/live/track/get/mute', trackIndex, mute);
       break;
     }
 
     default:
       log('RECV', colors.dim, `← ${address}`, args);
-      log('WARN', colors.yellow, `  Unknown address: ${address}`);
+      if (!address.includes('/get/')) {
+        log('WARN', colors.yellow, `  Unknown address: ${address}`);
+      }
   }
 }
 
 /**
- * Start the mock Ableton server
+ * Start the mock AbletonOSC server
  */
 function start() {
   console.log(`
 ${colors.bright}${colors.cyan}╔═══════════════════════════════════════════════════════════╗
-║                   Mock Ableton OSC Server                 ║
+║              Mock AbletonOSC Server                       ║
 ╚═══════════════════════════════════════════════════════════╝${colors.reset}
 `);
 
   log('INFO', colors.green, `Configuration:`);
   log('INFO', colors.green, `  Listen on port ${LISTEN_PORT} (receives from Yggdrasil)`);
   log('INFO', colors.green, `  Send to ${RESPOND_HOST}:${RESPOND_PORT} (responds to Yggdrasil)`);
-  log('INFO', colors.green, `  Audition delay: ${AUDITION_RESPONSE_DELAY_MS}ms`);
+  log('INFO', colors.green, `  BPM: ${BPM} (${MS_PER_BEAT.toFixed(1)}ms per beat)`);
   console.log();
 
   // Create send socket
@@ -181,11 +308,6 @@ ${colors.bright}${colors.cyan}╔═══════════════�
     console.log();
     log('INFO', colors.bright, `Waiting for messages from Yggdrasil server...`);
     console.log();
-
-    // Send ready message
-    setTimeout(() => {
-      sendToServer('/ableton/ready');
-    }, 500);
   });
 
   receiveSocket.bind(LISTEN_PORT);
@@ -197,6 +319,8 @@ ${colors.bright}${colors.cyan}╔═══════════════�
 function stop() {
   console.log();
   log('INFO', colors.yellow, 'Shutting down...');
+
+  stopBeatListener();
 
   if (receiveSocket) {
     receiveSocket.close();
