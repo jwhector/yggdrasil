@@ -4,6 +4,19 @@ All notable changes to the Yggdrasil system. Each entry explains **why** a chang
 
 ---
 
+## [2026-02-10] — New Show command
+
+**Why:** During live performance prep, there was no way to start a completely fresh show without restarting the server. `RESET_TO_LOBBY` reuses the same show ID and only resets phase/votes — it doesn't re-read the config file. A "New Show" command lets the performer discard all state and create a brand new show from `config/default-show.json` without a server restart.
+
+**Changes:**
+- **conductor/types.ts**: Added `NEW_SHOW` to `ConductorCommand` union
+- **conductor/conductor.ts**: No-op case for `NEW_SHOW` (prevents unknown command error; actual handling is server-side)
+- **server/socket.ts**: Intercepts `NEW_SHOW` before the conductor, calls a `createNewShow` callback that re-reads config and creates fresh state with a new show ID
+- **server/index.ts**: Provides the `createNewShow` callback to the socket handler
+- **app/controller/page.tsx**: Added "New Show" button in Emergency Controls with confirmation dialog
+
+---
+
 ## [2026-02-09] — AbletonOSC Integration
 
 **Context:** The system was designed around a custom Max for Live device sending bespoke `/ableton/*` messages for audition timing. This required maintaining custom M4L code and limited testing without a full Ableton setup. By switching to the AbletonOSC plugin (ideoforms), we gain direct control over Ableton's Live Object Model via standard OSC, eliminating custom M4L development.

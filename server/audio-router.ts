@@ -9,9 +9,9 @@
  * The audio router handles ALL outbound audio OSC messages.
  *
  * Session Layout:
- * - 32 tracks total (4 per row)
- * - Track index = rowIndex * 4 + optionIndex
- * - Row 0: tracks 0-3, Row 1: tracks 4-7, ..., Row 7: tracks 28-31
+ * - optionsPerRow * rowCount tracks total (optionsPerRow per row)
+ * - Track index = rowIndex * optionsPerRow + optionIndex
+ * - Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), ..., Row (rowCount-1): tracks (optionsPerRow*(rowCount-1))-(optionsPerRow*rowCount-1)
  * - Clips fired at slot 0 (scene 0)
  * - Audition via mute/unmute (smooth transitions, no stop/start glitches)
  * - Layering: each row has its own tracks, committed clips keep playing
@@ -43,11 +43,11 @@ interface AudioRouterState {
 
 /**
  * Calculate Ableton track index from row and option indices.
- * Layout: 32 tracks, 4 per row, grouped sequentially.
- * Row 0: tracks 0-3, Row 1: tracks 4-7, ..., Row 7: tracks 28-31.
+ * Layout: optionsPerRow * rowCount tracks, optionsPerRow per row, grouped sequentially.
+ * Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), ..., Row (rowCount-1): tracks (optionsPerRow*(rowCount-1))-(optionsPerRow*rowCount-1).
  */
-function trackIndex(rowIndex: number, optionIndex: number): number {
-  return rowIndex * 4 + optionIndex;
+function trackIndex(optionsPerRow: number, rowIndex: number, optionIndex: number): number {
+  return rowIndex * optionsPerRow + optionIndex;
 }
 
 function stopAllTracks(oscBridge: OSCBridge): void {
@@ -89,10 +89,10 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
 
             const row = state.rows[cue.rowIndex];
             const optionIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-            const newTrack = trackIndex(cue.rowIndex, optionIdx);
+            const newTrack = trackIndex(state.config.optionsPerRow, cue.rowIndex, optionIdx);
 
             // Check if clips for this row have been fired yet
-            const rowBaseTrk = cue.rowIndex * 4;
+            const rowBaseTrk = cue.rowIndex * state.config.optionsPerRow;
             const rowClipsFired = routerState.firedTracks.has(rowBaseTrk);
 
             
@@ -100,9 +100,9 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
               // Unmute the active option's track
               oscBridge.send('/live/track/set/mute', newTrack, 0);
               routerState.unmutedTracks.add(newTrack);
-              // First audition for this row: fire all 4 clips
-              for (let i = 0; i < 4; i++) {
-                const trk = trackIndex(cue.rowIndex, i);
+              // First audition for this row: fire all optionsPerRow clips
+              for (let i = 0; i < state.config.optionsPerRow; i++) {
+                const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
                 // Ensure muted first
                 // oscBridge.send('/live/track/set/mute', trk, 1);
                 // Fire clip at slot 0
@@ -111,8 +111,8 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
               }
             } else {
               // Mute any previously unmuted track for this row
-              for (let i = 0; i < 4; i++) {
-                const trk = trackIndex(cue.rowIndex, i);
+              for (let i = 0; i < state.config.optionsPerRow; i++) {
+                const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
                 if (routerState.unmutedTracks.has(trk)) {
                   oscBridge.send('/live/track/set/mute', trk, 1);
                   routerState.unmutedTracks.delete(trk);
@@ -132,7 +132,7 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
 
             const row = state.rows[cue.rowIndex];
             const optionIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-            const trk = trackIndex(cue.rowIndex, optionIdx);
+            const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, optionIdx);
 
             // Mute the track
             oscBridge.send('/live/track/set/mute', trk, 1);
@@ -147,8 +147,8 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
             const winnerIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
 
             // Ensure winner is unmuted, all others for this row are muted
-            for (let i = 0; i < 4; i++) {
-              const trk = trackIndex(cue.rowIndex, i);
+            for (let i = 0; i < state.config.optionsPerRow; i++) {
+              const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
               if (i === winnerIdx) {
                 oscBridge.send('/live/track/set/mute', trk, 0); // Unmute winner
                 routerState.unmutedTracks.add(trk);
@@ -163,9 +163,9 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
           case 'uncommit_layer': {
             if (cue.rowIndex === undefined) break;
 
-            // Mute and stop all 4 tracks for the row
-            for (let i = 0; i < 4; i++) {
-              const trk = trackIndex(cue.rowIndex, i);
+            // Mute and stop all option tracks for the row
+            for (let i = 0; i < state.config.optionsPerRow; i++) {
+              const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
               oscBridge.send('/live/track/set/mute', trk, 1);
               oscBridge.send('/live/clip/stop', trk, 0);
               routerState.unmutedTracks.delete(trk);
@@ -189,7 +189,7 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
               if (!row) continue;
               const optionIdx = row.options.findIndex(o => o.id === cue.path![rowIdx]);
               if (optionIdx < 0) continue;
-              const trk = trackIndex(rowIdx, optionIdx);
+              const trk = trackIndex(state.config.optionsPerRow, rowIdx, optionIdx);
 
               // Ensure clip is fired
               if (!routerState.firedTracks.has(trk)) {

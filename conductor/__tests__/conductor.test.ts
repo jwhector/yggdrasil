@@ -24,6 +24,7 @@ function createTestConfig(): ShowConfig {
 
   return {
     rowCount: 3,
+    optionsPerRow: 4,
     factions,
     timing: {
       auditionLoopsPerOption: 2,
@@ -32,6 +33,7 @@ function createTestConfig(): ShowConfig {
       votingWindowMs: 30000,
       revealDurationMs: 10000,
       coupWindowMs: 15000,
+      masterLoopBeats: 4,
     },
     coup: {
       threshold: 0.5,

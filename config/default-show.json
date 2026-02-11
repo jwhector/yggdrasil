@@ -4,6 +4,7 @@
   "description": "Template configuration - replace with actual musical content",
   
   "rowCount": 8,
+  "optionsPerRow": 4,
   
   "factions": [
     { "id": 0, "name": "Faction A", "color": "#FF6B6B" },

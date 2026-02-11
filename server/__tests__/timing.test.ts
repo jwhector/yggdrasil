@@ -13,10 +13,10 @@ import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globa
 import { createTimingEngine, type TimingEngine } from '../timing';
 import { createNullOSCBridge, type OSCBridge } from '../osc';
 import { createInitialState } from '@/conductor/conductor';
-import type { ShowState, ConductorCommand, ConductorEvent, FactionConfig } from '@/conductor/types';
+import type { ShowState, ConductorCommand, ConductorEvent, FactionConfig, ShowConfig } from '@/conductor/types';
 
 // Helper to create test config
-function createTestConfig() {
+function createTestConfig(): ShowConfig {
   const factions: FactionConfig[] = [
     { id: 0, name: 'Faction 0', color: '#ff0000' },
     { id: 1, name: 'Faction 1', color: '#00ff00' },
@@ -27,6 +27,7 @@ function createTestConfig() {
   return {
     rowCount: 2,
     factions,
+    optionsPerRow: 4,
     timing: {
       auditionLoopsPerOption: 2,
       auditionLoopsPerRow: 1,
@@ -279,7 +280,7 @@ describe('Timing Engine', () => {
       expect(mockSendCommand).not.toHaveBeenCalled();
     });
 
-    test('advances after masterLoopBeats beats have elapsed', () => {
+    test('advances at next loop boundary (beat % masterLoopBeats === 0)', () => {
       currentState.rows[0].phase = 'voting';
       currentState.rows[0].currentAuditionIndex = 0;
 
@@ -287,18 +288,17 @@ describe('Timing Engine', () => {
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
-      // First beat records start (beat 10)
-      timingEngine.onOSCMessage('/live/song/get/beat', [10]);
+      // First beat records start (beat 5)
+      timingEngine.onOSCMessage('/live/song/get/beat', [5]);
       expect(mockSendCommand).not.toHaveBeenCalled();
 
-      // Beats 11, 12, 13 — not enough (3 < 4 masterLoopBeats)
-      timingEngine.onOSCMessage('/live/song/get/beat', [11]);
-      timingEngine.onOSCMessage('/live/song/get/beat', [12]);
-      timingEngine.onOSCMessage('/live/song/get/beat', [13]);
+      // Beats 6, 7 — not on loop boundary (6%4=2, 7%4=3)
+      timingEngine.onOSCMessage('/live/song/get/beat', [6]);
+      timingEngine.onOSCMessage('/live/song/get/beat', [7]);
       expect(mockSendCommand).not.toHaveBeenCalled();
 
-      // Beat 14 — 4 beats elapsed (14 - 10 = 4 >= masterLoopBeats)
-      timingEngine.onOSCMessage('/live/song/get/beat', [14]);
+      // Beat 8 — loop boundary (8 % 4 === 0), should advance
+      timingEngine.onOSCMessage('/live/song/get/beat', [8]);
       expect(mockSendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_PHASE' });
     });
 
@@ -404,12 +404,16 @@ describe('Timing Engine', () => {
         { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
       ]);
 
-      // First beat records start
-      timingEngine.onOSCMessage('/live/song/get/beat', [50]);
+      // First beat records start (beat 1)
+      timingEngine.onOSCMessage('/live/song/get/beat', [1]);
       expect(mockSendCommand).not.toHaveBeenCalled();
 
-      // Master loop complete (4 beats)
-      timingEngine.onOSCMessage('/live/song/get/beat', [54]);
+      // Beat 3 — not on loop boundary (3 % 4 = 3)
+      timingEngine.onOSCMessage('/live/song/get/beat', [3]);
+      expect(mockSendCommand).not.toHaveBeenCalled();
+
+      // Beat 4 — loop boundary (4 % 4 === 0), should advance
+      timingEngine.onOSCMessage('/live/song/get/beat', [4]);
       expect(mockSendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_PHASE' });
     });
   });

@@ -438,12 +438,12 @@ function advanceAuditionDuringVoting(state: ShowState, currentRow: Row): Conduct
   // Move to next audition step
   currentRow.currentAuditionIndex++;
 
-  // Calculate total audition steps: 4 options * loopsPerRow
-  const totalAuditionSteps = 4 * loopsPerRow;
+  // Calculate total audition steps: optionsPerRow options * loopsPerRow
+  const totalAuditionSteps = state.config.optionsPerRow * loopsPerRow;
 
   if (currentRow.currentAuditionIndex < totalAuditionSteps) {
     // Audition next option
-    const nextOptionIndex = currentRow.currentAuditionIndex % 4;
+    const nextOptionIndex = currentRow.currentAuditionIndex % state.config.optionsPerRow;
     debug('  Moving to audition step %d (option %d)',
       currentRow.currentAuditionIndex, nextOptionIndex);
 

@@ -14,9 +14,10 @@ import { join } from 'path';
 import { createPersistence } from '../persistence';
 import { createInitialState } from '@/conductor/conductor';
 import type { ShowState, User, Vote, FactionConfig } from '@/conductor/types';
+import { ShowConfig } from '../../conductor';
 
 // Helper to create test config
-function createTestConfig() {
+function createTestConfig(): ShowConfig {
   const factions: FactionConfig[] = [
     { id: 0, name: 'Faction 0', color: '#ff0000' },
     { id: 1, name: 'Faction 1', color: '#00ff00' },
@@ -26,13 +27,16 @@ function createTestConfig() {
 
   return {
     rowCount: 2,
+    optionsPerRow: 4,
     factions,
     timing: {
       auditionLoopsPerOption: 2,
+      auditionLoopsPerRow: 1,
       auditionPerOptionMs: 4000,
       votingWindowMs: 30000,
       revealDurationMs: 10000,
       coupWindowMs: 15000,
+      masterLoopBeats: 4,
     },
     coup: {
       threshold: 0.5,

@@ -78,12 +78,12 @@ export type RowType = 'layer' | 'effect';
 
 /**
  * Options are musically ambiguous — they are NOT tied to specific factions.
- * The 4 factions and 4 options per row is thematic parallelism, not mechanical coupling.
+ * The 4 factions and optionsPerRow options per row is thematic parallelism, not mechanical coupling.
  * A faction wins by having its members align on ANY option.
  */
 export interface Option {
   id: OptionId;
-  index: number;  // 0–3, position within row
+  index: number;  // 0-(optionsPerRow-1), position within row
   audioRef: string;
   harmonicGroup?: string;
 }
@@ -141,7 +141,7 @@ export type ShowPhase =
 
 export interface TimingConfig {
   auditionLoopsPerOption: number;     // How many times each option loops during audition (default: 2)
-  auditionLoopsPerRow: number;        // How many complete cycles through all 4 options (default: 1)
+  auditionLoopsPerRow: number;        // How many complete cycles through all optionsPerRow options (default: 1)
   auditionPerOptionMs: number;        // ms per loop
   votingWindowMs: number;
   revealDurationMs: number;
@@ -161,6 +161,7 @@ export interface LobbyConfig {
 
 export interface ShowConfig {
   rowCount: number;
+  optionsPerRow: number;
   factions: FactionConfig[];
   timing: TimingConfig;
   coup: CoupConfig;
@@ -186,7 +187,7 @@ export interface RowConfig {
 
 export interface OptionConfig {
   id: OptionId;
-  index: number;  // 0–3, position within row
+  index: number;  // 0-(optionsPerRow-1), position within row
   audioRef: string;
   harmonicGroup?: string;
 }

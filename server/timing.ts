@@ -73,7 +73,7 @@ interface BeatTrackingState {
   auditionOptionStartBeat: number | null;
   /** Current row being auditioned */
   rowIndex: number;
-  /** Raw audition index (0-based, maps to option via % 4) */
+  /** Raw audition index (0-based, maps to option via % optionsPerRow) */
   rawAuditionIndex: number;
 }
 
@@ -206,10 +206,10 @@ export function createTimingEngine(
    */
   function handleAuditionPhase(state: ShowState, row: Row): void {
     const rawAuditionIndex = row.currentAuditionIndex ?? 0;
-    const optionIndex = rawAuditionIndex % 4;  // Always 0-3
+    const optionIndex = rawAuditionIndex % state.config.optionsPerRow;  // Always 0-(optionsPerRow-1)
     const timing = state.config.timing;
     const loopsPerRow = timing.auditionLoopsPerRow ?? 1;
-    const currentLoop = Math.floor(rawAuditionIndex / 4) + 1;
+    const currentLoop = Math.floor(rawAuditionIndex / state.config.optionsPerRow) + 1;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // Ableton mode: Track beats, advance on master loop boundary

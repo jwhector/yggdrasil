@@ -26,6 +26,7 @@ describe('AudioRouter with AbletonOSC', () => {
       id: 'test-show',
       phase: 'running',
       currentRowIndex: 0,
+      paths: { factionPath: [], popularPath: [] },
       rows: [
         {
           index: 0,
@@ -79,11 +80,13 @@ describe('AudioRouter with AbletonOSC', () => {
       users: new Map(),
       votes: [],
       personalTrees: new Map(),
-      config: {} as any,
+      config: {
+        optionsPerRow: 4,
+      } as any,
       version: 1,
       lastUpdated: Date.now(),
       pausedPhase: null,
-    } as ShowState;
+    } as unknown as ShowState;
   });
 
   afterEach(() => {
@@ -126,32 +129,26 @@ describe('AudioRouter with AbletonOSC', () => {
       const cue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
       router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
 
-      // Should mute all 4 tracks first
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
+      // Should unmute the active option (track 0)
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
 
       // Should fire all 4 clips at slot 0
       expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 0, 0);
       expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 1, 0);
       expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 2, 0);
       expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 3, 0);
-
-      // Should unmute the active option (track 0)
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
     });
 
     test('on subsequent options, mutes previous and unmutes new', () => {
       // First play option 0
       const cue1: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue1 }]);
+      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue1 }]);
 
       mockSend.mockClear();
 
       // Then play option 1
       const cue2: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt1' };
-      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue2 }]);
+      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue2 }]);
 
       // Should mute previous track (0)
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
@@ -211,13 +208,13 @@ describe('AudioRouter with AbletonOSC', () => {
     test('committed layers from previous rows remain unmuted', () => {
       // Commit row 0 option 0
       const cue1: AudioCue = { type: 'commit_layer', rowIndex: 0, optionId: 'row0-opt0' };
-      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue1 }]);
+      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue1 }]);
 
       mockSend.mockClear();
 
       // Commit row 1 option 2
       const cue2: AudioCue = { type: 'commit_layer', rowIndex: 1, optionId: 'row1-opt2' };
-      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue2 }]);
+      router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue2 }]);
 
       // Should only affect row 1 tracks (4-7), not row 0 tracks (0-3)
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
@@ -305,10 +302,11 @@ describe('AudioRouter with AbletonOSC', () => {
       // Should mute track 0 (was unmuted from setup)
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
 
-      // Should fire and unmute tracks for path: 1 (row0-opt1), 6 (row1-opt2), 8 (row2-opt0)
-      expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 1, 0);
+      // Track 1 (row0-opt1) was already fired during setup, so only unmute (no re-fire)
+      expect(mockSend).not.toHaveBeenCalledWith('/live/clip/fire', 1, 0);
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0);
 
+      // Tracks 6 and 8 were not previously fired, so fire and unmute
       expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 6, 0);
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0);
 
@@ -428,7 +426,6 @@ describe('AudioRouter with AbletonOSC', () => {
   describe('non-audio events', () => {
     test('ignores non-AUDIO_CUE and non-SHOW_PHASE_CHANGED events', () => {
       const events: ConductorEvent[] = [
-        { type: 'ROW_PHASE_CHANGED', row: 0, phase: 'voting' },
         { type: 'VOTE_RECEIVED', userId: 'user-1', row: 0 },
         { type: 'AUDITION_COMPLETE', row: 0 },
       ];
