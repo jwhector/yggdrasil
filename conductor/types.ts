@@ -17,6 +17,7 @@ export type ShowId = string;
 export type SeatId = string;
 export type FactionId = 0 | 1 | 2 | 3;
 export type Timestamp = number;
+export type PlaybackMode = 'session' | 'arrangement';
 
 // ============================================================================
 // Seat Topology
@@ -92,7 +93,7 @@ export interface Row {
   index: number;
   label: string;
   type: RowType;
-  options: [Option, Option, Option, Option];
+  options: Option[];
   phase: RowPhase;
   committedOption: OptionId | null;
   attempts: number;
@@ -168,6 +169,7 @@ export interface ShowConfig {
   lobby: LobbyConfig;
   rows: RowConfig[];
   topology: SeatTopologyConfig;
+  playbackMode: PlaybackMode;
 }
 
 export interface FactionConfig {

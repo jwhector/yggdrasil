@@ -79,6 +79,7 @@ function createTestConfig(): ShowConfig {
       },
     ],
     topology: { type: 'none' },
+    playbackMode: 'session',
   };
 }
 

@@ -14,15 +14,20 @@ This document is the **authoritative source of truth** for the Solo Show system 
 ## Project Overview
 
 ### What This Is
-An interactive live performance system where ~30 audience members collectively build a song in real time. The audience is divided into **4 factions**, each representing a part of the performer's subconscious. The system manages:
-- Real-time audience voting from phones
-- A visible **Song Tree** showing the path of decisions
-- A **coup mechanic** allowing factions to sabotage and redo decisions
-- Personal decision tracking for a finale experience
-- Performer control over show flow
+An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. The audience makes binary choices to layer musical elements, facing rising consensus thresholds ("Doubt") that make deeper commitment harder. In the finale, audience members discover that fragments from all three songs are compatible, and they collaboratively remix them.
 
 ### Core Metaphor
-The audience is not a crowd—it is a fractured mind. Disagreement is psychological conflict. Sabotage is self-sabotage. The show dramatizes the difficulty of coherence and commitment.
+> **"If I can build a song, I can build a life."**
+
+The audience is framed as a mirror of the performer's inner world — not antagonists. Disagreement is internal conflict. A collapsing song attempt is self-sabotage. The finale proves that integration was always possible.
+
+### Design Principles
+1. **Story is uninterrupted.** Audience phones are used only during music-building and finale phases.
+2. **Music is the metaphor.** No external props are required for meaning.
+3. **Central timing, distributed choice.** The system runs on a master musical clock: audience controls *what* and *how*, not *when*.
+4. **Legibility over complexity.** Binary choices, consistent visual cues, minimal UI.
+5. **Safety constraints.** All musical actions are quantized and bounded so outputs remain coherent.
+6. **Finale = discovery + integration.** Audience discovers fragments fit together; performer re-enters to shape (not overwrite).
 
 ---
 
@@ -30,22 +35,23 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
 
 | Term | Definition |
 |------|------------|
-| **Row** | A single decision point in the song. The show consists of 7–8 rows. |
-| **Option** | One of 4 choices available in a row. Options are musically ambiguous and not tied to specific factions. |
-| **Faction** | One of 4 groups the audience is divided into. Factions compete by internal alignment, not by "owning" specific options. |
-| **Audition** | The playback of musical options during the voting phase. Users can vote while listening. |
-| **Faction Vote** | A user's vote for which option should win (contributes to faction coherence). |
-| **Personal Vote** | A user's private vote for their preferred option (used in finale). |
-| **Coherence** | A faction's internal alignment: `(largest agreement bloc) / (faction voters)`. |
-| **Weighted Coherence** | Coherence × multiplier (multiplier > 1 after successful coup on current row). |
-| **Faction Path** | The sequence of committed options, determined by faction coherence. "The song we built." |
-| **Popular Path** | The sequence of options that won the plurality of personal votes. "The song we wanted." |
-| **Coherence Tie** | When 2+ factions share the highest weighted coherence; resolved by random selection. |
-| **Coup** | A faction's one-time ability to reset the current row after commit. |
-| **Coup Meter** | Visual indicator (faction-only) of coup vote progress toward threshold. |
-| **Song Tree** | The visual representation of all rows and the path of committed decisions. |
-| **Personal Tree** | An individual user's sequence of personal votes (private until finale). |
-| **Parallel Timeline** | A user's personal tree + submitted text, visualized during finale. |
+| **Attempt** | One story/song-building cycle. The show has 3 attempts, each tied to a chapter. |
+| **Chapter** | A thematic identity: Ambition (Song 1), Love (Song 2), Avoidance (Song 3). Chapters have consistent colors/icons throughout. |
+| **Layer** | A single musical element within a song attempt. Each attempt targets 5–7 layers. Each layer has a type (Foundation, Pulse, Color, Space, Voice, etc.). |
+| **Option** | One of 2 choices (A or B) within a layer. Binary choice. |
+| **Lock-in** | When a layer's winning option is confirmed and becomes part of the song stack. |
+| **Consensus** | `max(votesA, votesB) / totalVotes` — how aligned the audience is on a choice. |
+| **Doubt** | A rising consensus threshold that activates after early layers. If consensus < doubt threshold, the attempt collapses. |
+| **Collapse** | When an attempt fails its doubt threshold. The song "falls apart" — audio fades/distorts, visual cue plays, system auto-advances to next story phase. |
+| **Song Stack** | The set of locked-in layers for an attempt. May be incomplete if the attempt collapses. |
+| **Fragment** | A single locked-in option from song-building, available in the finale. Fragments that were *not* unlocked (from layers that never got voted on due to collapse) are visible but locked in the finale. |
+| **Active Slot** | One of 7 positions in the finale mix. Each slot holds one fragment at a time. |
+| **Rotation** | The finale mechanic where slots swap out fragments on a quantized cadence (every 8 bars). |
+| **Steward / Stewardship** | When an audience member's queued fragment enters an active slot, they gain temporary control of one safe audio parameter for that slot. |
+| **Triangle Steering** | Continuous audience input during the finale. Each non-stewarding audience member positions a dot on a triangle (Ambition / Love / Avoidance corners), influencing which chapter's fragments get scheduled. |
+| **Centroid** | The server-computed average of all audience triangle positions. Displayed as a single collective dot on the projector. |
+| **Layer Identity** | Consistent color + symbol for each layer type (Foundation, Pulse, etc.), used across all 3 attempts. |
+| **Chapter Identity** | Consistent color + icon for each chapter (Ambition, Love, Avoidance), used across all UIs. |
 
 ---
 
@@ -56,14 +62,14 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
 │                        CLIENTS                                  │
 ├─────────────────┬─────────────────┬─────────────────────────────┤
 │  /audience      │  /projector     │  /controller                │
-│  (30 users)     │  (1 display)    │  (performer)                │
+│  (~40 users)    │  (1 display)    │  (performer/operator)       │
 └────────┬────────┴────────┬────────┴──────────────┬──────────────┘
          │                 │                       │
          └─────────────────┼───────────────────────┘
                            │ WebSocket (Socket.IO)
                            ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                    CUSTOM SERVER (Node.js)                       │
+│                    SERVER (Node.js)                               │
 │  ┌────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
 │  │    Next.js     │  │    Socket.IO     │  │   Persistence    │  │
 │  │  (page routes) │  │    (real-time)   │  │    (SQLite)      │  │
@@ -71,14 +77,19 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
 │                               │                                   │
 │                      ┌────────▼─────────┐                        │
 │                      │    Conductor     │  ← Pure state machine  │
-│                      │   (game logic)   │                        │
+│                      │   (show logic)   │                        │
 │                      └──────────────────┘                        │
 │  ┌──────────────────┐  ┌──────────────────┐                      │
 │  │  Timing Engine   │  │   OSC Bridge     │  ← Ableton Live      │
-│  │ (auto-advance)   │◄─┤  (bidirectional) │    integration       │
-│  └──────────────────┘  └────────┬─────────┘                      │
+│  │ (quantized       │◄─┤  (bidirectional) │    integration       │
+│  │  advance)        │  └────────┬─────────┘                      │
+│  └──────────────────┘          │                                  │
+│  ┌──────────────────┐          │                                  │
+│  │  Audio Metering  │◄─────────┘  ← M4L envelope followers       │
+│  │  (slot energy)   │                                             │
+│  └──────────────────┘                                             │
 └──────────────────────────────────┼──────────────────────────────┘
-                                   │ OSC over UDP
+                                   │ OSC over UDP (localhost)
                                    ▼
                     ┌──────────────────────────────┐
                     │   Ableton Live + AbletonOSC    │
@@ -88,519 +99,737 @@ The audience is not a crowd—it is a fractured mind. Disagreement is psychologi
 
 ### Architecture: Next.js with Custom Server
 
-This project uses Next.js with a custom Node.js server to enable persistent WebSocket connections via Socket.IO. A single process serves both the Next.js pages and the real-time game logic.
+This project uses Next.js with a custom Node.js server to enable persistent WebSocket connections via Socket.IO. A single process serves both the Next.js pages and the real-time show logic.
 
 **Why custom server?**
 - Socket.IO requires persistent connections (not supported by Next.js API routes)
 - Single process simplifies deployment and recovery for live performance
 - All state lives in one place (SQLite + memory)
 
-### Client Routes (Next.js App Router)
+### Deployment Model
 
-**`/audience`** — Audience member UI
-- Joins via seat-specific QR code (encodes seatId)
-- Lobby phase: prompt input ("What lives on your fig tree?") for thematic priming
-- Pre-assignment: "waiting for show to start" state
-- Faction reveal animation (when assigned)
-- Displays faction identity and color
-- Two-vote interface (faction + personal) via drag interaction
-- Coup voting (faction-only visibility of meter)
-- Reconnection-resilient (restores session via stored identifier)
+**Primary: Cloud-hosted server** (e.g., Fly.io, Railway, or similar)
+- Audience phones connect via venue WiFi to public URL
+- Avoids captive portal / "no internet" detection issues on phones
+- WebSocket latency of 20-60ms is acceptable (all musical timing is quantized, voting is discrete, triangle steering is throttled)
+- Choose a deployment region near the performance venue
 
-**`/projector`** — Public display
-- Lobby phase: displays configurable text content (e.g., thematic excerpt or poem)
-- Faction assignment: room-wide reveal animation
-- Song Tree visualization with dual paths:
-  - **Faction path** (solid): the committed options, determined by coherence
-  - **Popular path** (ghost/shadow): the options winning the personal vote plurality
-- Current phase indicator (audition, voting, reveal, coup window)
-- Reveal animation:
-  - Coherence scores for each faction
-  - If tie: tiebreaker visualization (e.g., spinning wheel) before winner revealed
-  - Divergence indicator when faction choice ≠ popular choice
-- Coup trigger animation (ambush reveal, tree "retracts")
-- Finale: popular path song → individual personal tree playback with fig tree text
+**Ableton bridge runs locally** on the performer's machine regardless of server deployment. The local bridge connects to the cloud server via WebSocket and relays OSC commands to/from Ableton on localhost.
 
-**`/controller`** — Performer interface
-- Seat map visualization (occupied seats during lobby)
-- "Assign Factions" button (triggers assignment algorithm)
-- Phase advancement (manual)
-- Show state overview with version number
-- Standard controls:
-  - Pause/resume
-  - Skip row
-  - Restart current row
-  - Manually trigger coup (rehearsal/override)
-  - Adjust timing windows live
-  - Force-advance to finale
-- Emergency recovery controls:
-  - Reset to lobby (with option to preserve users)
-  - Export current state as JSON backup
-  - Import state from JSON backup
-  - Force reconnect all clients
+**Alternative: Local hosting** (compatible but not default)
+- Use an internet-passthrough router (upstream to venue internet) so phones don't trigger captive portal warnings
+- Server runs on performer's machine, audience connects via local IP
+- Lower latency but venue-dependent
 
 ---
 
-## Seat Topology & Faction Assignment
+## Client Routes (Next.js App Router)
 
-Faction assignment balances two goals:
-1. **Equal faction sizes** (hard constraint: no faction more than 1 member larger than another)
-2. **Minimize same-faction adjacency** (soft optimization: discourage neighbors from being in the same faction)
+### `/audience` — Audience Member UI
 
-This encourages cross-faction communication and strategic coordination, since people sitting near each other are likely in different factions.
+**Join flow:**
+- User scans seat-specific QR code → `/audience?seat=<seatId>`
+- System records user-to-seat mapping, assigns persistent userId
+- User sees "waiting for show to begin" screen
 
-### Architecture
+**Story phases (phones down):**
+- Screen goes dark/minimal ("listen" state)
+
+**Song-building phases:**
+- Grid of all layers for the current attempt displayed as squares (up to 12 squares for 6 layers × 2 options)
+- Layers unlock sequentially from top
+- Current layer: both A and B options become selectable (large, tappable squares with layer color + symbol)
+- After vote closes: winning option locks in visually, losing option dims/grays
+- Locked layers show their chosen option prominently
+- Future layers appear as locked/unexplored squares
+- When Doubt is active: threshold displayed clearly ("Need ≥ X%")
+
+**Finale phase:**
+- Fragment selection: grid of layers for the user's assigned chapter only
+- Locked-in winning options from song-building are **enabled** for selection
+- **Locked/grayed**: Both options from unreached layers (due to collapse) AND the losing option from voted layers — all represent "what could have been"
+- User selects exactly one fragment to queue
+- **Triangle steering** (when not stewarding): three-corner triangle (Ambition/Love/Avoidance), user drags dot continuously
+- **Steward mode** (when their fragment is in an active slot): single continuous slider controlling one abstracted parameter ("Intensity" or similar label). Parameter label is configurable. Slider maps to a safe, clamped range.
+
+### `/projector` — Public Display
+
+**Story phases:** Dark or minimal atmospheric display
+
+**Song-building phases:**
+- Top: Song attempt title + chapter color/icon (e.g., "Ambition" with chapter accent)
+- Center: Current layer card — layer symbol + label, Option A (left) vs Option B (right)
+- Stack history: icons of chosen layers so far
+- Meters (when active):
+  - **Consensus bar**: shows leading side and margin
+  - **Doubt meter**: threshold line / rising gauge
+- Collapse animation: visual + audio cue when attempt fails
+
+**Finale phase:**
+- 7 slot cards showing:
+  - Chapter color/icon of active fragment
+  - Fragment name/icon
+  - Steward indicator (unique color/glyph) while active
+  - Energy meter / glow driven by audio metering (from M4L)
+- One collective steering dot on triangle + chapter-accent color blend
+- Phase indicator (Rotating / Frozen / Integration)
+
+### `/controller` — Performer/Operator Interface
+
+**Access:** Secret route + passcode. One primary operator session; optionally allow multiple.
+
+**Core Controls:**
+
+| Category | Controls |
+|----------|----------|
+| **Show Phase** | Start Show, Stop Show, Advance Phase, Jump to Phase (dropdown) |
+| **Voting** | Open Vote, Close Vote, Force Option A/B, Extend Timer (+5s/+10s), Invalidate/Re-run Vote |
+| **Doubt** | Set/adjust threshold (slider or presets), Toggle Doubt active, Force Continue (bypass threshold once), Force Collapse |
+| **Audio** | Transport Play/Stop, Hard Mute/Panic, Per-layer force on/off, Trigger collapse gesture |
+| **Finale** | Start/Stop rotation, Rotation rate (1 or 2 slots per 8 bars), Freeze rotation, Clear/reset queue, Force assign steward, Force insert fragment into slot, Toggle triangle steering on/off |
+| **Emergency** | Pause/Resume show, Export state as JSON, Import state from JSON, Force reconnect all clients, Reset to lobby |
+
+**Metrics/Telemetry:**
+- Connected clients count
+- Vote counts A vs B, consensus percent, time remaining
+- Finale: triangle weights, active slots, current stewards, queue length per chapter, "everyone got a turn" progress
+- System health: WebSocket status, Ableton OSC status, error log tail
+
+---
+
+## Show Phase State Machine
 
 ```
-┌─────────────────────────────────────────┐
-│         SeatTopologyProvider            │  ← Venue-specific configuration
-│  (defines which seats are adjacent)     │
-└─────────────────┬───────────────────────┘
-                  │ AdjacencyGraph
-                  ▼
-┌─────────────────────────────────────────┐
-│        FactionAssigner                  │  ← Reusable algorithm
-│  (balances sizes, minimizes adjacency)  │
-└─────────────────────────────────────────┘
+lobby → opener → attempt_1_story → attempt_1_build →
+                 attempt_2_story → attempt_2_build →
+                 attempt_3_story → attempt_3_build →
+                 finale_setup → finale_rotating → finale_frozen → ended
 ```
 
-### Seat Identification via QR Codes
-
-Each seat has its own QR code encoding the seat ID. When a user scans:
-- They are directed to `/audience?seat=<seatId>`
-- The system records the user-to-seat mapping
-- Faction is NOT yet assigned; user sees a "waiting for show to start" state
-
-This requires printing/placing seat-specific QR codes, but provides precise topology data.
-
-### Join & Assignment Flow
-
-```
-1. LOBBY
-   - Audience scans seat-specific QR codes
-   - Each user joins with their seatId
-   - Faction = null; user sees "waiting" state
-   - Controller shows: "24 joined" + seat map visualization
-
-2. ASSIGNMENT (performer triggers)
-   - Performer presses "Assign Factions" in controller
-   - Algorithm runs (see below)
-   - All users receive faction simultaneously
-   - Users see faction reveal animation on their phones
-   - Projector can show room-wide faction distribution
-
-3. SHOW BEGINS
-   - Performer advances to first row
-   - Normal flow continues
-```
-
-### Assignment Algorithm
+### Phase Details
 
 ```typescript
-function assignFactions(
-  users: UserWithSeat[],
-  graph: AdjacencyGraph
-): Map<UserId, FactionId> {
-  const assignments = new Map<UserId, FactionId>();
-  const factionCounts = [0, 0, 0, 0];
-  
-  // Sort by most-constrained-first (most neighbors already assigned)
-  const sorted = sortByConstraints(users, graph, assignments);
-  
-  for (const user of sorted) {
-    // Get factions of adjacent seats
-    const neighborFactions = graph.getNeighbors(user.seatId)
-      .map(seatId => assignments.get(userAtSeat(seatId)))
-      .filter(f => f !== undefined);
-    
-    // Score each faction: lower is better
-    const scores = [0, 1, 2, 3].map(factionId => {
-      const sizeScore = factionCounts[factionId] * 100;  // Heavy weight on balance
-      const adjacencyScore = neighborFactions.filter(f => f === factionId).length;
-      return { factionId, score: sizeScore + adjacencyScore };
-    });
-    
-    // Pick faction with lowest score
-    scores.sort((a, b) => a.score - b.score);
-    const chosen = scores[0].factionId;
-    
-    assignments.set(user.id visibleTo, chosen);
-    factionCounts[chosen]++;
-  }
-  
-  return assignments;
-}
+type ShowPhase =
+  | 'lobby'              // Audience joining, scanning QR codes
+  | 'opener'             // Performer monologue (phones dark)
+  | 'attempt_story'      // Story phase for current attempt (phones dark)
+  | 'attempt_build'      // Song-building phase for current attempt (phones active)
+  | 'finale_setup'       // Transition to finale, chapter assignment, fragment selection
+  | 'finale_rotating'    // Active finale with slot rotation
+  | 'finale_frozen'      // Rotation frozen, performer takes over
+  | 'ended';
 ```
 
-The heavy weight on `sizeScore` ensures balance is maintained; adjacency is optimized within that constraint.
+**Note:** `attempt_story` and `attempt_build` are parameterized by `currentAttemptIndex` (0, 1, 2).
 
-### Late Joins (After Assignment)
+### Transitions
 
-When a user joins after factions have been assigned:
-1. Identify the smallest faction(s)
-2. Among those, prefer one with fewer adjacent members (if seat is known)
-3. If adjacency can't be satisfied, still assign to smallest faction
+| From | To | Trigger | Notes |
+|------|----|---------|-------|
+| `lobby` | `opener` | Manual (controller) | |
+| `opener` | `attempt_story` | Manual | Sets currentAttemptIndex = 0 |
+| `attempt_story` | `attempt_build` | Manual | Activates layer voting UI |
+| `attempt_build` | `attempt_story` | **Auto** (on collapse) or Manual | Auto-advances after collapse animation; increments attempt index |
+| `attempt_build` | `attempt_story` | Manual | Performer can also manually advance if attempt completes successfully |
+| `attempt_build` (attempt 2) | `finale_setup` | **Auto** (on Song 3 collapse) or Manual | Manual for now; subject to change |
+| `attempt_build` (attempt 2) | `finale_setup` | Manual | If Song 3 completes |
+| `finale_setup` | `finale_rotating` | Manual | After audience selects fragments |
+| `finale_rotating` | `finale_frozen` | Manual | Performer freezes rotation |
+| `finale_frozen` | `ended` | Manual | |
+
+**Important:** The transition from the last attempt (Song 3) to finale is **manual** regardless of whether it collapses or completes. All other collapse → next story transitions are automatic.
+
+---
+
+## Song-Building Phase — Detailed Mechanics
+
+### Layer Structure
+
+Each attempt has a configured layer plan (target: 5–7 layers). Layers are displayed as a grid of squares on audience phones from the start.
 
 ```typescript
-function assignLatecomer(
-  user: UserWithSeat,
-  state: ShowState,
-  graph: AdjacencyGraph
-): FactionId {
-  const factionCounts = countFactionMembers(state);
-  const minCount = Math.min(...factionCounts);
-  
-  // Factions tied for smallest
-  const smallestFactions = [0, 1, 2, 3].filter(f => factionCounts[f] === minCount);
-  
-  if (smallestFactions.length === 1 || !user.seatId) {
-    return smallestFactions[0];
-  }
-  
-  // Among smallest, pick one with fewest adjacent members
-  const neighborFactions = graph.getNeighbors(user.seatId)
-    .map(seatId => getUserAtSeat(seatId)?.faction)
-    .filter(f => f !== undefined);
-  
-  let best = smallestFactions[0];
-  let bestAdjacency = Infinity;
-  
-  for (const factionId of smallestFactions) {
-    const adjacentCount = neighborFactions.filter(f => f === factionId).length;
-    if (adjacentCount < bestAdjacency) {
-      best = factionId;
-      bestAdjacency = adjacentCount;
-    }
-  }
-  
-  return best;
+interface LayerPlan {
+  layers: LayerConfig[];
 }
+
+interface LayerConfig {
+  index: number;              // 0-indexed position in the attempt
+  type: LayerType;            // Foundation, Pulse, Color, Space, Voice, etc.
+  optionA: AudioReference;    // Ableton clip reference
+  optionB: AudioReference;    // Ableton clip reference
+  labelA: string;             // Short emotional tagline for A
+  labelB: string;             // Short emotional tagline for B
+  doubtThreshold: number | null;  // null = no threshold (simple majority wins)
+}
+
+type LayerType =
+  | 'foundation'   // The bed / the ground
+  | 'pulse'        // Heartbeat / drive
+  | 'color'        // Warmth / sharpness
+  | 'space'        // Intimate / distant
+  | 'voice'        // Clear / masked
+  | string;        // Extensible for custom types
 ```
 
-### Topology Providers
+### Layer Phase Transitions (within `attempt_build`)
 
-Different venues need different adjacency definitions. The system supports pluggable topology providers:
+```
+locked → auditioning → voting → resolving → locked_in
+                                    │
+                                    ▼ (if consensus < doubt threshold)
+                                collapsed (attempt ends)
+```
 
 ```typescript
-interface SeatTopologyProvider {
-  type: string;
-  buildGraph(seats: SeatId[]): AdjacencyGraph;
+type LayerPhase =
+  | 'locked'        // Not yet reached; displayed as unexplored square
+  | 'auditioning'   // Playing A and B previews
+  | 'voting'        // Vote window open, audience selecting A or B
+  | 'resolving'     // Vote closed, calculating result, displaying outcome
+  | 'locked_in'     // Option chosen, layer committed to song stack
+  | 'collapsed';    // Attempt failed at this layer (doubt exceeded consensus)
+```
+
+### Vote & Consensus
+
+```typescript
+interface LayerVote {
+  userId: UserId;
+  attemptIndex: number;
+  layerIndex: number;
+  choice: 'A' | 'B';
+  timestamp: number;
 }
 
-interface AdjacencyGraph {
-  getNeighbors(seatId: SeatId): SeatId[];
+function calculateConsensus(votes: LayerVote[]): {
+  consensus: number;       // 0.0 to 1.0
+  winner: 'A' | 'B';
+  votesA: number;
+  votesB: number;
+  totalVotes: number;
+} {
+  const votesA = votes.filter(v => v.choice === 'A').length;
+  const votesB = votes.filter(v => v.choice === 'B').length;
+  const total = votesA + votesB;
+  if (total === 0) return { consensus: 0, winner: 'A', votesA: 0, votesB: 0, totalVotes: 0 };
+
+  const winner = votesA >= votesB ? 'A' : 'B';
+  const consensus = Math.max(votesA, votesB) / total;
+  return { consensus, winner, votesA, votesB, totalVotes: total };
 }
 ```
 
-**Built-in providers:**
+### Doubt Threshold
 
-| Type | Adjacency Definition | Use Case |
-|------|---------------------|----------|
-| `theater_rows` | Left, right, and seats directly in front/behind | Traditional theater seating |
-| `tables` | Everyone at same table is adjacent | Cabaret, banquet seating |
-| `grid` | 4-directional or 8-directional neighbors | General grid layouts |
-| `none` | No adjacency data; balance-only | Unknown venue or fallback |
+- **Early layers** (typically layers 0–1): `doubtThreshold = null` → simple majority wins, no minimum consensus.
+- **Later layers**: `doubtThreshold` is a configured value (e.g., 0.65, 0.75, 0.85). If the winning option's consensus is below this threshold, the attempt collapses.
 
-Topology is configured per-show in the show config file.
+Example threshold schedule (tunable per attempt):
+| Layer | Threshold |
+|-------|-----------|
+| 0–1 | None (simple majority) |
+| 2 | 65% |
+| 3 | 75% |
+| 4 | 85% |
+| 5+ | 90% |
+
+**Thematic framing:** "As we go deeper, I need more of myself to agree."
+
+### Collapse Behavior
+
+When `consensus < doubtThreshold`:
+1. Current layer enters `collapsed` phase
+2. **Audio**: Collapse gesture triggers (master return track effects activate — "womp-womp" distortion/decay)
+3. **Visual**: Doubt meter visibly exceeds consensus bar on projector; phone UI shows collapse state
+4. **System**: After collapse animation duration, auto-advances to next `attempt_story` phase
+5. **Data**: All locked-in layers from this attempt are preserved as available finale fragments. Layers that were never reached are marked as `unreached`.
+
+**Exception:** Song 3 collapse → transition to finale is **manual** (performer triggers).
+
+### Song Stack & Fragment Generation
+
+After each attempt (whether completed or collapsed), the system records:
+
+```typescript
+interface AttemptResult {
+  attemptIndex: number;                // 0, 1, 2
+  chapter: Chapter;                    // 'ambition' | 'love' | 'avoidance'
+  layers: LayerResult[];
+  completed: boolean;                  // True if all layers were reached and passed
+  collapsedAtLayer: number | null;     // Layer index where collapse occurred, or null
+}
+
+interface LayerResult {
+  layerIndex: number;
+  type: LayerType;
+  status: 'locked_in' | 'unreached';  // unreached = never got to vote on this layer
+  chosenOption: 'A' | 'B' | null;     // null if unreached
+  consensus: number | null;            // null if unreached
+}
+```
+
+**Fragment availability for finale:**
+- `locked_in` layers with `chosenOption = 'A'` or `'B'` → the *chosen* option becomes a **selectable** finale fragment
+- `locked_in` layers → the *unchosen* (losing) option appears visible but **locked/grayed** ("what could have been")
+- `unreached` layers → both options appear visible but **locked/grayed** ("what could have been")
+
+---
+
+## Finale System — Detailed Mechanics
+
+### Overview
+After Song 3, the performer transitions to the finale. The audience discovers that fragments from all three songs are compatible and collectively remixes them.
+
+### Chapter Assignment
+At `finale_setup`:
+- Server randomly assigns each audience member to one of three chapters (Ambition / Love / Avoidance)
+- Assignment is an even split (±1 per chapter for ~40 users)
+- Assignment is permanent for the finale duration
+
+### Fragment Selection
+Each audience member sees a grid of layers for their assigned chapter only:
+- **Selectable**: Options that were locked in during song-building for that chapter
+- **Locked/grayed**: Both options from layers that were `unreached` (due to collapse)
+- **Not shown**: The losing option from layers that were voted on (only the winner appears)
+- User selects exactly **one** fragment to queue
+
+```typescript
+interface FragmentSelection {
+  userId: UserId;
+  attemptIndex: number;     // Which song attempt this fragment is from
+  layerIndex: number;       // Which layer
+  option: 'A' | 'B';       // Which option (always the one that won)
+  chapter: Chapter;
+}
+```
+
+### Fragment Metadata
+
+```typescript
+interface Fragment {
+  id: string;                          // Unique identifier
+  attemptIndex: number;
+  layerIndex: number;
+  option: 'A' | 'B';
+  chapter: Chapter;
+  layerType: LayerType;
+  displayName: string;                 // Human-readable name for UI
+  audioRef: AudioReference;            // Ableton track/clip identifier
+  safeParameter: SafeParameter;        // The parameter stewards control
+}
+
+interface SafeParameter {
+  name: string;                        // Internal parameter name
+  displayLabel: string;                // What the user sees (e.g., "Intensity")
+  abletonMapping: AbletonParamRef;     // Track index + device index + param index
+  min: number;                         // Clamped minimum (0.0–1.0)
+  max: number;                         // Clamped maximum (0.0–1.0)
+  defaultValue: number;                // Neutral position
+  smoothingMs: number;                 // Parameter change smoothing (prevent zipper noise)
+}
+```
+
+### Master Clock
+- Global **master loop** governs all changes
+- Quantization unit: **8 bars**
+- All slot changes happen on quantized boundaries with short crossfades
+
+### Active Slots
+- The finale mix has **7 active slots**
+- Each slot holds one fragment at a time
+- Slot changes happen quantized to 8-bar boundaries with ~1-bar crossfades
+
+### Rotation
+- Primary cadence: every 8 bars, rotate out **2 slots** and rotate in **2 new fragments** from the queue
+- Operator can adjust rate: 1 or 2 slots per cycle
+- Operator can **freeze** rotation (lock current mix)
+
+### Queue & Scheduling
+
+```typescript
+interface FinaleQueue {
+  entries: QueueEntry[];
+}
+
+interface QueueEntry {
+  userId: UserId;
+  fragment: Fragment;
+  chapter: Chapter;
+  enqueuedAt: number;
+  hasBeenSteward: boolean;    // Tracks whether this user has had a turn
+}
+```
+
+**Scheduling algorithm** (each rotation tick):
+1. **Fairness first**: Prioritize queue entries from users who have NOT yet stewarded
+2. **Chapter weighting**: Among equally fair candidates, bias toward chapters with higher centroid weight
+3. **Diversity nudge**: If a chapter hasn't been featured recently, boost its scheduling priority slightly
+
+**Effectively one pick**: The queue is expected to be long enough that most users get exactly one turn. No re-queuing is supported.
+
+### Stewardship
+
+When a user's queued fragment enters an active slot:
+1. Their phone enters **Steward Mode**
+2. They see a single continuous slider
+3. Slider label is the fragment's `safeParameter.displayLabel` (configurable, e.g., "Intensity")
+4. Slider maps to the configured Ableton parameter within the safe clamped range
+5. Parameter changes are smoothed (configurable `smoothingMs`) to prevent zipper noise
+6. When rotation swaps out their fragment, stewardship ends and their slider returns to default
+
+**Constraints:**
+- Steward cannot mute other layers or affect tempo/key
+- Parameter range is clamped to musically safe bounds
+- Only the slot's designated safe parameter is exposed
+
+### Triangle Steering
+
+**Audience UX** (when NOT stewarding):
+- Three-corner triangle: Ambition / Love / Avoidance
+- User drags a dot continuously within the triangle
+- Position yields barycentric weights: `wA + wL + wV = 1`
+
+**Data flow:**
+- Client throttles position updates to every ~250ms
+- Server receives positions, computes centroid (average of all active triangle positions)
+- Server broadcasts centroid to projector at ~3-4 Hz
+- Projector interpolates between received positions for smooth animation
+
+**Nudges:**
+- **Auto-recenter drift**: If a user doesn't touch the triangle for a configurable duration, their dot gently drifts toward center (equal weights)
+- **Underrepresented glow**: If a chapter hasn't been featured in active slots recently, its triangle corner subtly glows on audience phones
+
+**Effect on scheduling**: Centroid weights influence which chapter's fragments get priority in rotation (see scheduling algorithm above).
+
+---
+
+## Audio Engine & Ableton Integration
+
+### Track Layout
+
+**Song-building tracks** (3 attempts × up to 7 layers × 2 options):
+- Track index: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`
+  - `optionOffset`: 0 for Option A, 1 for Option B
+- With 7 max layers per attempt: 42 tracks total (tracks 0–41)
+- Example: Attempt 0, Layer 2, Option B = `0 * 14 + 2 * 2 + 1 = track 5`
+- Example: Attempt 1, Layer 0, Option A = `1 * 14 + 0 * 2 + 0 = track 14`
+- Example: Attempt 2, Layer 3, Option A = `2 * 14 + 3 * 2 + 0 = track 34`
+
+**Finale fragment tracks** are a **subset** of the song-building tracks. When a fragment is activated in a finale slot, it references the same Ableton track/clip that was used during song-building.
+
+**Collapse gesture**: A master return track with specific effects (distortion, filter sweep, reverb tail) that are enabled briefly during collapse. All song-building tracks route through this return.
+
+### Playback Modes
+
+**Song-building:**
+- Audition: Briefly unmute/solo Option A, then Option B (quantized transitions)
+- Lock-in: Unmute chosen option's track, mute unchosen
+- Stack accumulates: previously locked layers stay unmuted
+
+**Collapse:**
+- Enable collapse return track effects
+- Rapid fade or filter sweep on all active tracks
+- After gesture completes, mute all tracks for the collapsed attempt
+
+**Finale:**
+- Slot activation = unmute the fragment's track
+- Slot deactivation = mute + crossfade (~1 bar)
+- Stewardship parameter changes sent as OSC parameter updates
+
+### OSC Protocol
+
+Uses the **AbletonOSC** plugin (by ideoforms). All addresses follow the `/live/*` namespace.
+
+**Server → AbletonOSC (Port 11000)**
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `/live/test` | - | Connectivity test |
+| `/live/song/start_listen/beat` | - | Subscribe to beat events |
+| `/live/song/stop_listen/beat` | - | Unsubscribe from beat events |
+| `/live/song/start_playing` | - | Start global transport |
+| `/live/song/stop_playing` | - | Stop global transport |
+| `/live/song/continue_playing` | - | Resume from current position |
+| `/live/clip/fire` | `trackIndex`, `clipIndex` | Fire clip (always slot 0) |
+| `/live/clip/stop` | `trackIndex`, `clipIndex` | Stop clip |
+| `/live/track/set/mute` | `trackIndex`, `mute` | Mute (1) / unmute (0) track |
+| `/live/device/set/parameter/value` | `trackIndex`, `deviceIndex`, `paramIndex`, `value` | Set device parameter (stewardship control) |
+| `/live/return/set/mute` | `returnIndex`, `mute` | Mute/unmute return track (collapse gesture) |
+
+**AbletonOSC → Server (Port 11001)**
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `/live/test` | `response` | Connectivity test response |
+| `/live/song/get/beat` | `beatNumber` | Beat event (when subscribed) |
+
+### Audio Metering (M4L → Server → Projector)
+
+Max for Live envelope follower devices on each of the 7 finale slot tracks send RMS energy levels via OSC.
+
+**M4L → Server (Port 11001 or dedicated port)**
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `/meter/slot/<N>` | `rmsLevel: float` | Energy level for slot N (0–6), range 0.0–1.0 |
+
+- Send rate: ~15-30 Hz per slot (configurable in M4L device)
+- Server aggregates and broadcasts to projector at ~10 Hz
+- Projector uses levels to drive glow/pulse animations on slot cards
+
+### Fallback Mode (No Ableton)
+
+When OSC bridge is not connected:
+- Timing engine uses JS timers for all phases
+- Audio cues are logged but not sent
+- System is fully functional for UI/logic testing
+
+### Environment Variables
+
+```bash
+# Server
+PORT=3000
+DATABASE_PATH=./db/show.sqlite
+
+# Timing
+TIMING_ENGINE_ENABLED=true
+
+# OSC
+OSC_ENABLED=true
+OSC_SEND_PORT=11000
+OSC_RECEIVE_PORT=11001
+OSC_HOST=127.0.0.1
+MOCK_BPM=120                    # For testing without Ableton
+
+# Audio Metering
+METERING_ENABLED=true
+METERING_PORT=11001             # Can share with OSC receive port
+METERING_BROADCAST_HZ=10       # How often to push to projector
+```
 
 ---
 
 ## Data Models
 
 ### User
+
 ```typescript
 interface User {
-  id: string;              // Persistent across reconnection (stored client-side)
-  seatId: SeatId | null;   // From QR code, null if unknown
-  faction: FactionId | null;  // null until assignment phase completes
+  id: UserId;                   // Persistent across reconnection (stored client-side)
+  seatId: SeatId | null;        // From QR code scan; null if joined without QR
   connected: boolean;
-  joinedAt: timestamp;
-}
-```
-
-### Faction
-```typescript
-type FactionId = 0 | 1 | 2 | 3;
-
-interface Faction {
-  id: FactionId;
-  coupUsed: boolean;                    // Each faction may coup once per show
-  coupMultiplier: number;               // 1.0 default, 1.5 after successful coup on current row
-  currentRowCoupVotes: Set<UserId>;     // Users who voted to coup this row
-}
-```
-
-### Row & Options
-
-**Important:** The 4 factions and 4 options per row are a thematic parallelism, not a mechanical coupling. Options are musically ambiguous—they are not "owned by" or "representing" specific factions. A faction wins by having its members align on *any* option, not by championing a designated option.
-
-```typescript
-interface Row {
-  index: number;                        // 0-indexed row number
-  options: [Option, Option, Option, Option];  // Four ambiguous choices
-  phase: RowPhase;
-  committedOption: OptionId | null;     // Set after reveal
-  attempts: number;                     // Increments after each coup on this row
-  currentAuditionIndex: number | null;  // Used during 'voting' phase for audition playback (0-3)
-  auditionComplete: boolean;             // True when all options have been heard
-}
-
-type RowPhase =
-  | 'pending'
-  | 'voting'        // Includes audition playback - users vote while listening
-  | 'revealing'
-  | 'coup_window'
-  | 'committed';
-
-interface Option {
-  id: OptionId;
-  index: number;                        // 0–3, position in row
-  musicalData: AudioReference;          // Adapter-specific, opaque to Conductor
-}
-```
-
-### Vote
-```typescript
-interface Vote {
-  odId: UserId;
-  rowIndex: number;
-  factionVote: OptionId;
-  personalVote: OptionId;
-  timestamp: timestamp;
-  attempt: number;                      // Which attempt of this row (for coup tracking)
-}
-```
-
-### Personal Tree (for Finale)
-
-The personal tree tracks each user's private votes (separate from faction votes) and their response to the lobby prompt. This data is used during the finale to play back each person's "song that could've been" alongside their imagined alternate life.
-
-```typescript
-interface PersonalTree {
-  userId: UserId;
-  path: OptionId[];                     // One entry per row (personal votes)
-  figTreeResponse: string | null;       // Response to lobby prompt, displayed during finale
+  joinedAt: number;
+  finaleChapter: Chapter | null;   // Assigned at finale_setup; null before then
 }
 ```
 
 ### Show State
+
 ```typescript
 interface ShowState {
-  id: string;                           // Unique show instance
+  id: string;                          // Unique show instance
   phase: ShowPhase;
-  currentRowIndex: number;
-  rows: Row[];
-  factions: [Faction, Faction, Faction, Faction];
+  currentAttemptIndex: number;         // 0, 1, 2
+  attempts: AttemptState[];            // Length 3, pre-initialized
   users: Map<UserId, User>;
-  votes: Vote[];
-  personalTrees: Map<UserId, PersonalTree>;
+  finaleState: FinaleState | null;     // Populated at finale_setup
   config: ShowConfig;
+  version: number;                     // Increments on every state change
+  lastUpdated: number;                 // Wall clock time
+  paused: boolean;
 }
 
-type ShowPhase =
-  | 'lobby'           // Audience joining, factions not yet assigned, fig tree prompt
-  | 'assigning'       // Brief phase during faction assignment (reveal animation)
-  | 'running'         // Main show loop
-  | 'finale'          // Playing back personal timelines
-  | 'ended';
+interface AttemptState {
+  index: number;                       // 0, 1, 2
+  chapter: Chapter;                    // 'ambition' | 'love' | 'avoidance'
+  layerPlan: LayerConfig[];
+  currentLayerIndex: number;
+  currentLayerPhase: LayerPhase;
+  layerResults: LayerResult[];         // Populated as layers resolve
+  votes: LayerVote[];                  // All votes for this attempt
+  status: 'pending' | 'in_progress' | 'completed' | 'collapsed';
+  collapsedAtLayer: number | null;
+}
 
+type Chapter = 'ambition' | 'love' | 'avoidance';
+
+interface FinaleState {
+  chapterAssignments: Map<UserId, Chapter>;
+  queue: QueueEntry[];
+  activeSlots: (ActiveSlot | null)[];  // Length 7; null = empty slot
+  trianglePositions: Map<UserId, TrianglePosition>;
+  centroid: TrianglePosition;          // Computed average
+  rotationActive: boolean;
+  rotationRate: 1 | 2;                // Slots per 8-bar cycle
+  frozen: boolean;
+  stewardshipLog: StewardshipEntry[]; // Who has stewarded
+}
+
+interface ActiveSlot {
+  slotIndex: number;                   // 0–6
+  fragment: Fragment;
+  stewardUserId: UserId;
+  parameterValue: number;              // Current safe parameter value
+  activatedAtBeat: number;
+  energyLevel: number;                 // From audio metering (0.0–1.0)
+}
+
+interface TrianglePosition {
+  wAmbition: number;                   // 0.0–1.0, all three sum to 1.0
+  wLove: number;
+  wAvoidance: number;
+}
+
+interface StewardshipEntry {
+  userId: UserId;
+  slotIndex: number;
+  fragment: Fragment;
+  startBeat: number;
+  endBeat: number | null;              // null if still active
+}
+```
+
+### Show Config
+
+```typescript
 interface ShowConfig {
-  rowCount: number;                     // 7–8
-  coupThreshold: number;                // Fraction of faction required (e.g., 0.5)
-  coupMultiplierBonus: number;          // e.g., 0.5 (for 1.5x total)
-  timingDefaults: {
-    auditionLoopsPerOption: number;     // How many times each option loops during audition (default: 2)
-    auditionPerOptionMs: number;        // ms per loop
-    votingWindow: number;               // ms
-    revealDuration: number;             // ms
-    coupWindow: number;                 // ms
-  };
+  maxLayersPerAttempt: number;         // Used for track index calculation (default: 7)
+  attempts: AttemptConfig[];           // Length 3
+  finale: FinaleConfig;
+  timing: TimingConfig;
   lobby: {
-    projectorContent: string;           // Text displayed on projector during lobby (e.g., thematic excerpt)
-    audiencePrompt: string;             // Prompt shown to audience (e.g., "What lives on your fig tree?")
+    waitingMessage: string;            // Text displayed while waiting
   };
-  rowConfigurations: RowConfig[];       // Pre-configured musical options per row
+  seatIds: SeatId[];                   // Known seats for QR code generation
+}
+
+interface AttemptConfig {
+  chapter: Chapter;
+  title: string;                       // Display name (e.g., "Ambition")
+  layers: LayerConfig[];               // 5–7 layers per attempt
+}
+
+interface FinaleConfig {
+  slotCount: number;                   // Default: 7
+  rotationBars: number;                // Default: 8
+  defaultRotationRate: 1 | 2;          // Slots per cycle
+  triangleDriftTimeoutMs: number;      // How long before idle dots drift to center
+  triangleDriftSpeedMs: number;        // How fast drift occurs
+  fragments: Fragment[];               // Pre-configured fragment library (populated from attempt results + config)
+}
+
+interface TimingConfig {
+  auditionDurationMs: number;          // Per-option audition preview
+  votingWindowMs: number;              // How long voting stays open
+  resolveAnimationMs: number;          // Result display duration
+  collapseAnimationMs: number;         // Collapse gesture duration before auto-advance
+  autoAdvanceToStoryMs: number;        // Delay after collapse before transitioning
 }
 ```
 
 ---
 
-## State Machine: Conductor
+## Conductor (Pure State Machine)
 
-The **Conductor** is a pure logic module with no I/O. It receives commands, validates them, updates state, and emits events. The server wraps the Conductor with WebSocket I/O and persistence.
-
-### Row Phase Transitions
-
-```
-pending → voting (with audition) → revealing → coup_window → committed
-                                                   │
-                                                   ▼ (if coup triggered)
-                                              voting (attempt + 1, reset audition)
-```
-
-**Note:** The `voting` phase includes both audition playback and vote collection. The conductor tracks `auditionComplete: boolean` to manage the transition from audition to voting window within the same phase.
+The Conductor is a pure logic module with no I/O. It receives commands, validates them, updates state, and emits events. The server wraps it with WebSocket I/O and persistence.
 
 ### Commands (Input)
 
 ```typescript
 type ConductorCommand =
+  // Show flow
   | { type: 'ADVANCE_PHASE' }
-  | { type: 'SUBMIT_VOTE'; userId: UserId; factionVote: OptionId; personalVote: OptionId }
-  | { type: 'SUBMIT_COUP_VOTE'; userId: UserId }
+  | { type: 'JUMP_TO_PHASE'; phase: ShowPhase; attemptIndex?: number }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
-  | { type: 'SKIP_ROW' }
-  | { type: 'RESTART_ROW' }
-  | { type: 'TRIGGER_COUP'; factionId: FactionId }   // Manual override
-  | { type: 'SET_TIMING'; timings: Partial<TimingConfig> }
-  | { type: 'FORCE_FINALE' }
-  | { type: 'SUBMIT_PARALLEL_TEXT'; userId: UserId; text: string }
-  | { type: 'USER_CONNECT'; userId: UserId }
-  | { type: 'USER_DISCONNECT'; userId: UserId };
+
+  // Song-building
+  | { type: 'START_AUDITION' }                          // Begin auditioning current layer
+  | { type: 'OPEN_VOTING' }                             // Open vote window
+  | { type: 'CLOSE_VOTING' }                            // Manually close vote window
+  | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
+  | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }        // Override vote result
+  | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
+  | { type: 'RERUN_VOTE' }                              // Invalidate and re-audition
+  | { type: 'FORCE_CONTINUE' }                          // Bypass threshold once
+  | { type: 'FORCE_COLLAPSE' }                          // End attempt immediately
+
+  // Doubt
+  | { type: 'SET_THRESHOLD'; layerIndex: number; threshold: number | null }
+  | { type: 'TOGGLE_DOUBT'; active: boolean }
+
+  // Finale
+  | { type: 'SETUP_FINALE' }                            // Assign chapters, populate fragments
+  | { type: 'SELECT_FRAGMENT'; userId: UserId; fragmentId: string }
+  | { type: 'UPDATE_TRIANGLE'; userId: UserId; position: TrianglePosition }
+  | { type: 'UPDATE_STEWARD_PARAM'; userId: UserId; value: number }
+  | { type: 'START_ROTATION' }
+  | { type: 'STOP_ROTATION' }
+  | { type: 'FREEZE_ROTATION' }
+  | { type: 'SET_ROTATION_RATE'; rate: 1 | 2 }
+  | { type: 'FORCE_ASSIGN_STEWARD'; userId: UserId; slotIndex: number }
+  | { type: 'FORCE_INSERT_FRAGMENT'; fragmentId: string; slotIndex: number }
+  | { type: 'CLEAR_QUEUE' }
+  | { type: 'TOGGLE_TRIANGLE'; active: boolean }
+
+  // Audio
+  | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
+  | { type: 'AUDIO_PANIC' }                             // Hard mute all
+  | { type: 'TRIGGER_COLLAPSE_GESTURE' }
+
+  // Connection
+  | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
+  | { type: 'USER_DISCONNECT'; userId: UserId }
+
+  // Recovery
+  | { type: 'EXPORT_STATE' }
+  | { type: 'IMPORT_STATE'; state: ShowState }
+  | { type: 'FORCE_RECONNECT_ALL' }
+  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean };
 ```
 
 ### Events (Output)
 
 ```typescript
 type ConductorEvent =
-  | { type: 'PHASE_CHANGED'; row: number; phase: RowPhase }
-  | { type: 'VOTE_RECEIVED'; userId: UserId; row: number }
-  | { type: 'REVEAL'; row: number; results: RevealPayload }
-  | { type: 'COUP_METER_UPDATE'; factionId: FactionId; progress: number }  // 0–1
-  | { type: 'COUP_TRIGGERED'; factionId: FactionId; row: number }
-  | { type: 'ROW_COMMITTED'; row: number; optionId: OptionId }
-  | { type: 'SHOW_PHASE_CHANGED'; phase: ShowPhase }
-  | { type: 'FINALE_TIMELINE'; userId: UserId; path: OptionId[]; text: string }
-  | { type: 'AUDIO_CUE'; cue: AudioCue };   // Passed to AudioAdapter
+  // Show flow
+  | { type: 'SHOW_PHASE_CHANGED'; phase: ShowPhase; attemptIndex?: number }
+  | { type: 'PAUSED' }
+  | { type: 'RESUMED' }
 
-interface RevealPayload {
-  rowIndex: number;
-  factionResults: {
-    factionId: FactionId;
-    rawCoherence: number;
-    weightedCoherence: number;
-    voteCount: number;
-    votedForOption: OptionId;           // Which option this faction's bloc voted for
-  }[];
-  tie: {
-    occurred: boolean;
-    tiedFactionIds: FactionId[];        // Empty if no tie
-  };
-  winningOptionId: OptionId;            // Resolved winner (random if tie)
-  winningFactionId: FactionId;          // Resolved winner (random if tie)
-  popularVote: {
-    optionId: OptionId;                 // Option with most personal votes
-    voteCount: number;
-    divergedFromFaction: boolean;       // True if popular ≠ faction choice
-  };
-}
-```
+  // Song-building
+  | { type: 'LAYER_PHASE_CHANGED'; attemptIndex: number; layerIndex: number; phase: LayerPhase }
+  | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
+  | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
+  | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
+  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; consensus: number; threshold: number }
+  | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
 
-### Tie Handling
+  // Finale
+  | { type: 'FINALE_SETUP_COMPLETE'; chapterAssignments: Map<UserId, Chapter>; availableFragments: Fragment[] }
+  | { type: 'FRAGMENT_QUEUED'; userId: UserId; fragment: Fragment }
+  | { type: 'SLOT_ACTIVATED'; slotIndex: number; fragment: Fragment; stewardUserId: UserId }
+  | { type: 'SLOT_DEACTIVATED'; slotIndex: number }
+  | { type: 'STEWARDSHIP_STARTED'; userId: UserId; slotIndex: number }
+  | { type: 'STEWARDSHIP_ENDED'; userId: UserId; slotIndex: number }
+  | { type: 'CENTROID_UPDATED'; centroid: TrianglePosition }
+  | { type: 'ROTATION_TICK'; newSlots: ActiveSlot[]; removedSlots: number[] }
 
-When two or more factions have identical weighted coherence:
+  // Audio
+  | { type: 'AUDIO_CUE'; cue: AudioCue }
+  | { type: 'METER_UPDATE'; slots: { slotIndex: number; energy: number }[] }
 
-1. **Detection**: After calculating weighted coherence, identify all factions sharing the maximum value
-2. **Visualization**: Projector highlights tied factions, plays tiebreaker animation (e.g., spinning wheel)
-3. **Resolution**: Random selection among tied factions (fully random, not seeded)
-4. **Reveal continues**: Winning faction/option announced, path drawn
+  // State
+  | { type: 'STATE_UPDATED'; version: number };
 
-```typescript
-function resolveTie(tiedFactionIds: FactionId[]): FactionId {
-  const randomIndex = Math.floor(Math.random() * tiedFactionIds.length);
-  return tiedFactionIds[randomIndex];
-}
-```
-
-### Coherence Calculation
-
-Coherence measures how aligned a faction is internally—regardless of *which* option they align on. A faction doesn't "own" an option; it wins by having its members vote together.
-
-```typescript
-function calculateCoherence(factionId: FactionId, votes: Vote[], rowIndex: number, attempt: number): number {
-  const factionVotes = votes.filter(v => 
-    getUserFaction(v.userId) === factionId && 
-    v.rowIndex === rowIndex && 
-    v.attempt === attempt
-  );
-  
-  if (factionVotes.length === 0) return 0;
-  
-  // Count how many faction members voted for each option
-  const voteCounts = countBy(factionVotes, v => v.factionVote);
-  // The largest bloc determines coherence
-  const largestBloc = Math.max(...Object.values(voteCounts));
-  
-  return largestBloc / factionVotes.length;
-}
-
-function calculateWeightedCoherence(factionId: FactionId, state: ShowState): number {
-  const raw = calculateCoherence(factionId, state.votes, state.currentRowIndex, currentAttempt);
-  const multiplier = state.factions[factionId].coupMultiplier;
-  return raw * multiplier;  // Can exceed 1.0 (up to 1.5)
-}
-```
-
-**Example:** If Faction A has 8 members and 6 vote for Option 2 while 2 vote for Option 0, Faction A's coherence is 6/8 = 75%. If Faction B has 7 members and all 7 vote for Option 1, Faction B's coherence is 100%. Faction B wins despite having fewer members.
-
-### Dual Path Tracking
-
-The system tracks two parallel paths through the Song Tree:
-
-| Path | Calculation | Visual | Meaning |
-|------|-------------|--------|---------|
-| **Faction Path** | Winner of coherence competition | Solid line | "The song we built through conviction" |
-| **Popular Path** | Plurality of personal votes | Ghost/shadow line | "The song we secretly wanted" |
-
-```typescript
-interface DualPaths {
-  factionPath: OptionId[];    // Committed options (coherence winners)
-  popularPath: OptionId[];    // Personal vote plurality winners
-}
-
-function calculatePopularWinner(votes: Vote[], rowIndex: number): OptionId {
-  const personalVotes = votes
-    .filter(v => v.rowIndex === rowIndex)
-    .map(v => v.personalVote);
-  
-  const counts = countBy(personalVotes, v => v);
-  return maxBy(Object.entries(counts), ([_, count]) => count)[0];
-}
-```
-
-**Real-time feedback:** After each reveal, the projector shows both paths. When they diverge, it's visually apparent—the room chose one thing, but wanted another. This gives immediate meaning to the personal vote without revealing the individual-level finale.
-
-**Reveal display:** "Faction 2 chose Option A. The room wanted Option C."
-
-### Coup Logic
-
-```typescript
-function processCoupVote(state: ShowState, userId: UserId): ConductorEvent[] {
-  const faction = state.factions[getUserFaction(userId)];
-  
-  // Validation
-  if (faction.coupUsed) return [];
-  if (state.rows[state.currentRowIndex].phase !== 'coup_window') return [];
-  
-  faction.currentRowCoupVotes.add(userId);
-  
-  const factionMembers = countFactionMembers(state, faction.id);
-  const progress = faction.currentRowCoupVotes.size / factionMembers;
-  
-  const events: ConductorEvent[] = [
-    { type: 'COUP_METER_UPDATE', factionId: faction.id, progress }
-  ];
-  
-  if (progress >= state.config.coupThreshold) {
-    faction.coupUsed = true;
-    faction.coupMultiplier = 1 + state.config.coupMultiplierBonus;
-    state.rows[state.currentRowIndex].attempts += 1;
-    state.rows[state.currentRowIndex].phase = 'auditioning';
-    
-    events.push({ type: 'COUP_TRIGGERED', factionId: faction.id, row: state.currentRowIndex });
-  }
-  
-  return events;
+interface VoteResult {
+  winner: 'A' | 'B';
+  consensus: number;
+  votesA: number;
+  votesB: number;
+  totalVotes: number;
+  thresholdMet: boolean;       // True if consensus >= doubt threshold (or no threshold)
+  doubtThreshold: number | null;
 }
 ```
 
@@ -608,60 +837,53 @@ function processCoupVote(state: ShowState, userId: UserId): ConductorEvent[] {
 
 ## WebSocket Protocol
 
-### Namespaces / Rooms
-- Each client joins a room based on mode: `audience`, `projector`, `controller`
-- Audience members also join faction-specific rooms: `faction:0`, `faction:1`, etc.
-- Coup meter updates are broadcast only to faction rooms (hidden until triggered)
-
-### State Serialization
-`ShowState` contains `Map` and `Set` objects which don't survive JSON serialization. The server serializes state before sending (converting Maps to `[key, value][]` arrays and Sets to arrays), and clients deserialize after receiving. See `lib/serialization.ts` for implementation.
+### State Sync Strategy
+Full state syncs on every mutation (same as old architecture — proven approach for ~40 users):
+- **Controller**: Full serialized state
+- **Projector**: Public filtered state (no individual user details)
+- **Audience**: Personalized state (their chapter, their votes, their stewardship status, their triangle position)
 
 ### Client → Server Events
 
 | Event | Payload | Sender |
 |-------|---------|--------|
-| `join` | `{ userId?, mode }` | All |
-| `vote` | `{ factionVote, personalVote }` | Audience |
-| `coup_vote` | `{}` | Audience |
-| `fig_tree_response` | `{ text }` | Audience |
+| `join` | `{ userId?, seatId?, mode }` | All |
+| `reconnect` | `{ userId, showId, lastVersion }` | All |
+| `vote` | `{ choice: 'A' \| 'B' }` | Audience |
+| `select_fragment` | `{ fragmentId }` | Audience |
+| `triangle_update` | `{ wAmbition, wLove, wAvoidance }` | Audience (throttled ~250ms) |
+| `steward_param` | `{ value: number }` | Audience (stewarding) |
 | `command` | `ConductorCommand` | Controller |
 
 ### Server → Client Events
 
-**Primary Event:**
-| Event | Payload | Recipients | When |
-|-------|---------|------------|------|
-| `state_sync` | `ShowState` (filtered by recipient) | All | **On every state change** + initial connect |
+| Event | Payload | Recipients |
+|-------|---------|------------|
+| `state_sync` | `ShowState` (filtered) | All (on every state change + connect) |
+| `identity` | `{ userId }` | New audience members |
+| `error` | `{ message }` | Controller |
+| `meter` | `{ slots: [{index, energy}] }` | Projector (~10 Hz) |
 
-**State Sync Strategy:**
-The system uses **full state syncs** rather than granular event broadcasting. After any state mutation, the server broadcasts the complete filtered state to each client type:
-- **Controller**: Full serialized state (Maps/Sets converted to arrays)
-- **Projector**: Public filtered state (rows, paths, factions, no user details)
-- **Audience**: Personalized filtered state (their faction, votes, current row)
-
-This eliminates the possibility of state drift between client and server. The client simply replaces its entire state on each update rather than manually patching specific fields. The trade-off is higher bandwidth (~10-50KB per update), which is acceptable for ~30 users with infrequent state changes.
-
-**Special Purpose Events:**
-Some events are still emitted for specific non-state purposes:
-- `error`: Sent to controller for visibility into invalid commands
-- `identity`: Sent to new audience members with their assigned userId
+**Note on metering**: Audio meter updates are sent as a separate high-frequency event to the projector only, NOT as part of state_sync (which would be too slow/heavy for ~10 Hz visual updates).
 
 ---
 
 ## Persistence Layer
 
-### Why SQLite
-- Single-file database, trivial deployment
-- Survives server restart
-- Can be backed up by copying one file
-- Sufficient for 30 concurrent users
+### SQLite with WAL Mode
 
-### Tables
+```sql
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+```
+
+### Schema
 
 ```sql
 CREATE TABLE shows (
   id TEXT PRIMARY KEY,
   state JSON NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -669,7 +891,8 @@ CREATE TABLE shows (
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
   show_id TEXT NOT NULL,
-  faction INTEGER NOT NULL,
+  seat_id TEXT,
+  finale_chapter TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
@@ -678,24 +901,26 @@ CREATE TABLE votes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  row_index INTEGER NOT NULL,
-  attempt INTEGER NOT NULL,
-  faction_vote INTEGER NOT NULL,
-  personal_vote INTEGER NOT NULL,
+  attempt_index INTEGER NOT NULL,
+  layer_index INTEGER NOT NULL,
+  choice TEXT NOT NULL CHECK(choice IN ('A', 'B')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE TABLE fig_tree_responses (
+CREATE TABLE fragment_selections (
   user_id TEXT PRIMARY KEY,
   show_id TEXT NOT NULL,
-  text TEXT NOT NULL,
+  fragment_id TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 ```
+
+### Persistence Strategy
+Persist after EVERY state change (atomic SQLite transactions). Same pattern as old architecture.
 
 ### Recovery Protocol
 On server start:
@@ -707,413 +932,149 @@ On server start:
 
 ## Recovery & Robustness
 
-This system runs during live performances. Failures must be recoverable without losing show state or audience engagement.
+Carried forward from old architecture — same principles apply:
 
-### Design Principles
+1. **Persist on every state change** (not periodic batches)
+2. **Atomic writes** (SQLite transactions)
+3. **Stateless clients** (all truth on server)
+4. **Automatic reconnection** (exponential backoff: 1s, 2s, 4s, max 10s)
+5. **Graceful degradation** (show continues if some phones disconnect)
 
-1. **Persist on every state change** — not periodic batches
-2. **Atomic writes** — use SQLite transactions, never partial state
-3. **Stateless clients** — all truth lives on server; clients are views
-4. **Automatic reconnection** — clients retry without user intervention
-5. **Graceful degradation** — show continues even if some clients disconnect
+### Heartbeat
+```
+Server pings every 15 seconds
+Client responds within 5 seconds
+2 missed pongs = marked disconnected
+```
 
 ### State Versioning
-
-Every state mutation increments a monotonic version number:
-
-```typescript
-interface ShowState {
-  // ... existing fields ...
-  version: number;              // Increments on every state change
-  lastUpdated: Timestamp;       // Wall clock time of last change
-}
-```
-
-Clients track the last version they received. On reconnect, if versions match, minimal sync needed. If versions differ, full state sync.
-
-### Persistence Strategy
-
-```typescript
-// Persist after EVERY state change, wrapped in transaction
-async function persistState(state: ShowState): Promise<void> {
-  await db.run('BEGIN IMMEDIATE');
-  try {
-    await db.run(
-      'UPDATE shows SET state = ?, version = ?, updated_at = ? WHERE id = ?',
-      [JSON.stringify(state), state.version, Date.now(), state.id]
-    );
-    await db.run('COMMIT');
-  } catch (e) {
-    await db.run('ROLLBACK');
-    throw e;
-  }
-}
-```
-
-SQLite with WAL (Write-Ahead Logging) mode enabled for crash resilience:
-```sql
-PRAGMA journal_mode=WAL;
-PRAGMA synchronous=NORMAL;
-```
+Every mutation increments `version`. On reconnect, if versions match → minimal sync. If different → full state sync.
 
 ### Backup Snapshots
+Rolling backup files: `show-{showId}-{version}-{timestamp}.json`
 
-Periodic backup files for catastrophic recovery:
-
-```typescript
-interface BackupConfig {
-  enabled: boolean;
-  intervalMs: number;           // e.g., 60000 (every minute)
-  directory: string;            // e.g., './backups'
-  maxBackups: number;           // Rolling window, e.g., 10
-}
-```
-
-Backup filename format: `show-{showId}-{version}-{timestamp}.json`
-
-### Client Reconnection Protocol
-
-**Client-side (localStorage):**
-```typescript
-interface StoredClientIdentity {
-  odId: UserId;
-  odShowId: ShowId;
-  seatId: SeatId | null;
-}
-```
-
-**Reconnection flow:**
-```
-1. Client detects disconnect (WebSocket close/error)
-2. Client enters "reconnecting" UI state
-3. Client attempts reconnect with exponential backoff (1s, 2s, 4s, max 10s)
-4. On connect, client sends: { type: 'RECONNECT', userId, showId, lastVersion }
-5. Server validates userId exists and belongs to showId
-6. Server sends full state sync (or delta if versions close)
-7. Client resumes normal operation
-```
-
-**Heartbeat system:**
-```typescript
-// Server pings every 15 seconds
-// Client must respond within 5 seconds
-// 2 missed pongs = client marked disconnected
-const HEARTBEAT_INTERVAL_MS = 15000;
-const HEARTBEAT_TIMEOUT_MS = 5000;
-const MAX_MISSED_HEARTBEATS = 2;
-```
-
-### Controller Emergency Actions
-
-The controller interface includes emergency controls for live recovery:
-
-| Action | Effect | When to Use |
-|--------|--------|-------------|
-| **Pause** | Freezes show, all clients see "paused" | Technical difficulties, need to regroup |
-| **Resume** | Continues from paused state | Ready to continue |
-| **Restart Row** | Resets current row to `pending` | Row got corrupted or confused |
-| **Skip Row** | Commits current row with current leader, advances | Row is stuck, need to move on |
-| **Reset to Lobby** | Clears all progress, returns to lobby | Full restart needed |
-| **Export State** | Downloads current state as JSON | Manual backup before risky action |
-| **Import State** | Loads state from JSON file | Restore from backup |
-| **Force Reconnect All** | Server sends reconnect signal to all clients | Sync issues across clients |
-
-```typescript
-type EmergencyCommand =
-  | { type: 'PAUSE' }
-  | { type: 'RESUME' }
-  | { type: 'RESTART_ROW' }
-  | { type: 'SKIP_ROW' }
-  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean }
-  | { type: 'EXPORT_STATE' }
-  | { type: 'IMPORT_STATE'; state: ShowState }
-  | { type: 'FORCE_RECONNECT_ALL' };
-```
-
-### Recovery Scenarios
-
-**Server crash mid-show:**
-1. Server restarts automatically (process manager like PM2)
-2. Server loads state from SQLite on boot
-3. Clients detect disconnect, enter reconnecting state
-4. Clients reconnect, receive state sync
-5. Show resumes from last persisted state (worst case: lose in-flight votes from current phase)
-
-**Projector computer crashes:**
-1. Restart projector, navigate to `/projector`
-2. Projector connects, receives full state sync
-3. Song Tree redraws with current state
-4. No data loss (projector is stateless view)
-
-**All clients disconnect (network outage):**
-1. Server continues running, state unchanged
-2. When network recovers, clients reconnect automatically
-3. State sync restores everyone to current position
-4. Votes already cast are preserved; in-flight actions may be lost
-
-**Database corruption:**
-1. Stop server
-2. Restore from most recent backup file
-3. Restart server with restored state
-4. Clients reconnect automatically
-
-**Need to restart from scratch:**
-1. Controller triggers "Reset to Lobby"
-2. Choose whether to preserve user assignments or full reset
-3. All clients receive lobby state
-4. Show begins fresh
-
-### Failure Modes and Mitigations
-
-| Failure | Detection | Mitigation |
-|---------|-----------|------------|
-| Single client disconnect | Missed heartbeats | Mark disconnected, allow reconnect |
-| Server crash | Process exit | Auto-restart via PM2, state in SQLite |
-| SQLite corruption | Read failure | Restore from backup |
-| Network partition | Multiple missed heartbeats | Pause show, wait for recovery |
-| State desync | Version mismatch on reconnect | Full state sync |
-| Vote lost in transit | N/A (no confirmation) | Accept as edge case; votes are cheap |
-
-### Testing Recovery
-
-Before each performance, run through:
-1. Kill server process, verify it restarts and state survives
-2. Disconnect a client, verify reconnection works
-3. Trigger "Reset to Lobby" and verify clean slate
-4. Export state, modify something, import state, verify restore
+### Safety / Fallback Modes
+- **No Phones Mode**: Controller runs deterministic sequence if audience network fails
+- **Projection Only Mode**: Continue visuals even if some phones drop
+- **Audio Only Mode**: Continue Ableton performance if web UI fails
 
 ---
 
-## Timing Engine & OSC Protocol
+## Visual Identity System
 
-### Hybrid Timing Architecture
+### Chapter Identity (consistent across all UIs)
 
-The system uses a **hybrid timing approach** where:
-- **Ableton Live** controls musical timing (audition loops, tempo-synced events)
-- **Server** controls game logic timing (voting windows, coup windows, reveals)
+| Chapter | Color | Icon | Usage |
+|---------|-------|------|-------|
+| Ambition | TBD | TBD | Song 1, finale triangle corner, fragment badges |
+| Love | TBD | TBD | Song 2, finale triangle corner, fragment badges |
+| Avoidance | TBD | TBD | Song 3, finale triangle corner, fragment badges |
 
-This ensures sample-accurate musical transitions while keeping game logic simple.
+### Layer Identity (consistent across all 3 attempts)
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                           Server                                          │
-│  ┌─────────────────────┐     ┌─────────────────────┐                     │
-│  │    Timing Engine    │◄────│     OSC Bridge      │                     │
-│  │  (schedules timers, │     │  (UDP bidirectional)│                     │
-│  │   sends commands)   │     │                     │                     │
-│  └──────────┬──────────┘     └──────────┬──────────┘                     │
-│             │                           │                                 │
-│             │ ADVANCE_PHASE             │ OSC over UDP                    │
-│             ▼                           │                                 │
-│  ┌─────────────────────┐                │                                 │
-│  │     Conductor       │                │                                 │
-│  │  (pure game logic)  │                │                                 │
-│  └─────────────────────┘                │                                 │
-│  ┌─────────────────────┐                │                                 │
-│  │   Audio Router      │◄───────────────┘                                 │
-│  │ (AUDIO_CUE → OSC)   │                                                  │
-│  └─────────────────────┘                                                  │
-└─────────────────────────────────────────┼─────────────────────────────────┘
-                                          │
-                    ┌─────────────────────▼─────────────────────┐
-                    │   Ableton Live + AbletonOSC Plugin         │
-                    │  (ideoforms)                               │
-                    │  - Exposes Live Object Model via /live/*   │
-                    │  - Listens on port 11000                   │
-                    │  - Responds on port 11001                  │
-                    └────────────────────────────────────────────┘
-```
+| Layer Type | Color | Symbol | Label |
+|------------|-------|--------|-------|
+| Foundation | Deep red | ■ | "The ground" |
+| Pulse | Bright yellow | ▲ | "The heartbeat" |
+| Color | Purple | ● | "The warmth" |
+| Space | Blue | ~ | "The distance" |
+| Voice | White | ✦ | "The voice" |
 
-### Timing Responsibilities by Phase
+*These are placeholders — lock before production.*
 
-| Row Phase | Timing Owner | Mechanism | Notes |
-|-----------|--------------|-----------|-------|
-| `voting` (audition) | **Ableton** | Beat subscription via `/live/song/get/beat` | Server counts beats to detect master loop completion (e.g., 32 beats = 8 bars). Clips loop naturally within the master loop duration |
-| `voting` (after audition) | **Server** | JS timer (`votingWindowMs`) | Non-musical, slight drift OK. Timer starts after audition complete |
-| `revealing` | **Server** | JS timer (`revealDurationMs`) | Can be extended for Ableton cues |
-| `coup_window` | **Server** | JS timer (`coupWindowMs`) | Non-musical timing |
-| `committed` | **Manual** | N/A | Performer controls row transitions |
-
-### OSC Protocol
-
-This system uses the **AbletonOSC** plugin (by ideoforms) which exposes Ableton Live's Live Object Model via standard OSC addresses. All addresses follow the `/live/*` namespace.
-
-**Session Layout Convention:**
-- **32 tracks total** (4 tracks per row × 8 rows)
-- Track index calculated as: `rowIndex * 4 + optionIndex`
-  - Row 0: tracks 0-3
-  - Row 1: tracks 4-7
-  - Row 2: tracks 8-11
-  - ...
-  - Row 7: tracks 28-31
-- All clips fire at slot 0 (scene 0)
-- Audition uses mute/unmute for smooth transitions (no stop/start glitches)
-- Layering works because each row has its own set of tracks
-
-**Server → AbletonOSC (Port 11000 by default)**
-
-| Address | Arguments | Description |
-|---------|-----------|-------------|
-| `/live/test` | - | Connectivity test (AbletonOSC responds with 'ok') |
-| `/live/song/start_listen/beat` | - | Subscribe to beat events |
-| `/live/song/stop_listen/beat` | - | Unsubscribe from beat events |
-| `/live/song/start_playing` | - | Start global transport |
-| `/live/song/stop_playing` | - | Stop global transport (pause) |
-| `/live/song/continue_playing` | - | Resume transport from current position |
-| `/live/clip/fire` | `trackIndex: int`, `clipIndex: int` | Fire clip at track/slot (always slot 0) |
-| `/live/clip/stop` | `trackIndex: int`, `clipIndex: int` | Stop clip at track/slot |
-| `/live/track/set/mute` | `trackIndex: int`, `mute: int` | Set track mute (1 = muted, 0 = unmuted) |
-
-**AbletonOSC → Server (Port 11001 by default)**
-
-| Address | Arguments | Description |
-|---------|-----------|-------------|
-| `/live/test` | `response: string` | Connectivity test response (sends 'ok') |
-| `/live/song/get/beat` | `beatNumber: int` | Beat event (sent when subscribed) |
-| `/live/song/get/tempo` | `bpm: float` | Tempo response |
-
-### Fallback Mode
-
-When AbletonOSC is not connected (no OSC bridge available), the timing engine uses JS timers for all phases:
-- Audition timing: `auditionPerOptionMs * auditionLoopsPerOption`
-- All other phases: Configured durations in `TimingConfig`
-
-This enables testing and rehearsal without Ableton running. The audio router still sends OSC messages in this mode, but they are not received by any listener.
-
-### Environment Variables
-
-```bash
-TIMING_ENGINE_ENABLED=true|false  # Default: true
-OSC_ENABLED=true|false            # Default: true
-OSC_SEND_PORT=11000               # Port AbletonOSC listens on (default: 11000)
-OSC_RECEIVE_PORT=11001            # Port AbletonOSC sends from (default: 11001)
-OSC_HOST=127.0.0.1                # AbletonOSC host (for remote setups)
-MOCK_BPM=120                      # BPM for mock Ableton simulator (testing only)
-```
-
-### Version Check Safety
-
-The timing engine uses **version checking** to prevent stale timer fires:
-1. When scheduling a timer, record the current `state.version`
-2. When timer fires, compare recorded version to current version
-3. If versions differ, skip the automatic advance (manual action took precedence)
-
-This ensures manual controller actions always override automatic timing.
-
----
-
-## Audio Adapter Interface
-
-The adapter is a pluggable module that translates Conductor events into audio system commands.
-
-```typescript
-interface AudioAdapter {
-  // Called when show configuration is loaded
-  initialize(config: ShowConfig): Promise<void>;
-  
-  // Called during audition phase
-  playOption(rowIndex: number, optionId: OptionId): Promise<void>;
-  stopOption(rowIndex: number, optionId: OptionId): Promise<void>;
-  
-  // Called when a row is committed
-  commitLayer(rowIndex: number, optionId: OptionId): Promise<void>;
-  
-  // Called on coup (remove last committed layer)
-  uncommitLayer(rowIndex: number): Promise<void>;
-  
-  // Called during finale — "The song we wanted"
-  playPopularPath(path: OptionId[]): Promise<void>;
-  
-  // Called during finale — individual timelines
-  playPersonalTimeline(path: OptionId[]): Promise<void>;
-  
-  // Cleanup
-  dispose(): Promise<void>;
-}
-
-// MVP implementation
-class NullAdapter implements AudioAdapter {
-  async initialize(config: ShowConfig) { console.log('[Audio] Initialize', config); }
-  async playOption(row: number, option: OptionId) { console.log('[Audio] Play', row, option); }
-  async stopOption(row: number, option: OptionId) { console.log('[Audio] Stop', row, option); }
-  async commitLayer(row: number, option: OptionId) { console.log('[Audio] Commit', row, option); }
-  async uncommitLayer(row: number) { console.log('[Audio] Uncommit', row); }
-  async playPopularPath(path: OptionId[]) { console.log('[Audio] Popular Path', path); }
-  async playPersonalTimeline(path: OptionId[]) { console.log('[Audio] Timeline', path); }
-  async dispose() { console.log('[Audio] Dispose'); }
-}
-```
+### Option Identity (A vs B within a layer)
+- Option A: layer color, **solid** style
+- Option B: layer color, **outlined** style
 
 ---
 
 ## Folder Structure
 
 ```
-yggdrasil/
+solo-show/
 ├── ARCHITECTURE.md              # This document (source of truth)
-├── CHANGELOG.md                 # Human-readable change history
-├── CLAUDE.md                    # Claude Code agent context
+├── CHANGELOG.md                 # Human-readable change history with intent
+├── CLAUDE.md                    # AI agent instructions and context
+├── DECISIONS.md                 # Open questions and resolved decisions
 ├── README.md                    # Setup and run instructions
 │
 ├── conductor/                   # Pure game logic (no I/O)
 │   ├── index.ts                 # Exports
-│   ├── conductor.ts             # State machine
-│   ├── coherence.ts             # Scoring logic
-│   ├── coup.ts                  # Coup mechanics
-│   ├── assignment.ts            # Faction assignment algorithm
+│   ├── conductor.ts             # State machine (show phases + layer phases)
+│   ├── consensus.ts             # Vote tallying + doubt threshold logic
+│   ├── finale.ts                # Queue scheduling, rotation, stewardship, triangle
+│   ├── fragments.ts             # Fragment generation from attempt results
 │   ├── types.ts                 # Shared type definitions
 │   └── __tests__/               # Unit tests
 │
 ├── server/                      # Custom server (Next.js + Socket.IO)
-│   ├── index.ts                 # Entry point — creates HTTP server, attaches Next.js and Socket.IO
+│   ├── index.ts                 # Entry point
 │   ├── socket.ts                # Socket.IO event handlers
 │   ├── persistence.ts           # SQLite layer
-│   ├── recovery.ts              # State recovery and backup logic
-│   ├── timing.ts                # Hybrid timing engine (Ableton + JS timers)
-│   ├── osc.ts                   # OSC bridge for Ableton communication
+│   ├── recovery.ts              # State recovery and backup
+│   ├── timing.ts                # Quantized timing engine
+│   ├── osc.ts                   # OSC bridge for Ableton
 │   ├── audio-router.ts          # Maps AUDIO_CUE events to OSC messages
-│   ├── __tests__/               # Server unit tests
+│   ├── metering.ts              # Audio metering aggregation (M4L → projector)
+│   ├── __tests__/
 │   └── tools/
-│       └── osc-mock-ableton.ts  # Mock Ableton OSC responder for testing
+│       └── osc-mock-ableton.ts  # Mock Ableton for testing
 │
 ├── app/                         # Next.js App Router (pages)
-│   ├── layout.tsx               # Root layout
+│   ├── layout.tsx
 │   ├── page.tsx                 # Landing/redirect
 │   ├── audience/
-│   │   └── page.tsx             # Audience UI
+│   │   └── page.tsx
 │   ├── projector/
-│   │   └── page.tsx             # Projector display
+│   │   └── page.tsx
 │   └── controller/
-│       └── page.tsx             # Performer controls
+│       └── page.tsx
 │
 ├── components/                  # React components
-│   ├── SongTree.tsx             # Dual-path tree visualization
-│   ├── VoteInterface.tsx        # Two-vote drag interface
-│   ├── CoupMeter.tsx            # Faction-only coup progress
-│   ├── FigTreeInput.tsx         # Lobby prompt input
-│   ├── TiebreakerAnimation.tsx  # Spinning wheel / tie resolution
-│   ├── FactionReveal.tsx        # Assignment reveal animation
-│   └── FinaleTimeline.tsx       # Individual timeline display
+│   ├── song-building/
+│   │   ├── LayerGrid.tsx        # Grid of all layers (squares)
+│   │   ├── LayerSquare.tsx      # Single layer square (locked/active/completed)
+│   │   ├── OptionCard.tsx       # A/B option within active layer
+│   │   ├── ConsensusBar.tsx     # Vote result visualization
+│   │   └── DoubtMeter.tsx       # Rising threshold gauge
+│   ├── finale/
+│   │   ├── FragmentSelector.tsx # Chapter-specific fragment grid
+│   │   ├── TriangleSteering.tsx # Barycentric triangle input
+│   │   ├── StewardSlider.tsx    # Parameter control slider
+│   │   ├── SlotCard.tsx         # Single active slot display
+│   │   └── SlotGrid.tsx         # 7-slot projector display
+│   ├── shared/
+│   │   ├── ChapterBadge.tsx     # Chapter color/icon badge
+│   │   ├── LayerIcon.tsx        # Layer type color/symbol
+│   │   └── PhaseIndicator.tsx   # Current phase display
+│   └── controller/
+│       ├── ShowControls.tsx     # Phase control buttons
+│       ├── VotingControls.tsx   # Vote management
+│       ├── DoubtControls.tsx    # Threshold adjustment
+│       ├── FinaleControls.tsx   # Rotation/queue management
+│       └── MetricsPanel.tsx     # Telemetry dashboard
 │
-├── hooks/                       # React hooks
+├── hooks/
 │   ├── useSocket.ts             # Socket.IO connection + reconnection
-│   └── useShowState.ts          # Client-side state management
+│   ├── useShowState.ts          # Client-side state management
+│   └── useTriangle.ts           # Triangle position input + throttling
 │
-├── lib/                         # Shared utilities
+├── lib/
 │   ├── socket-client.ts         # Socket.IO client setup
-│   └── storage.ts               # localStorage helpers for client identity
-│
-├── public/                      # Static assets
+│   ├── storage.ts               # localStorage for client identity
+│   ├── serialization.ts         # Map/Set JSON serialization
+│   └── identity.ts              # Chapter/layer color+symbol mappings
 │
 ├── config/
-│   └── default-show.json        # Pre-configured rows and options
+│   ├── default-show.json        # Pre-configured attempts, layers, fragments
+│   └── ableton-layout.json      # Track index mappings
 │
 ├── db/
 │   └── schema.sql               # SQLite schema
 │
-├── next.config.js               # Next.js configuration
-├── tsconfig.json                # TypeScript configuration
-├── package.json                 # Dependencies and scripts
+├── next.config.js
+├── tsconfig.json
+├── package.json
 └── .gitignore
 ```
 
@@ -1123,130 +1084,53 @@ yggdrasil/
 
 ### Context Management
 
-This repository is designed to be worked on with AI coding assistants. To maintain coherence:
+1. **ARCHITECTURE.md is the source of truth.** Read this file first. If changes contradict it, update this document first or flag the contradiction.
 
-1. **ARCHITECTURE.md is the source of truth.** If you're an AI agent, read this file first before making any changes. If your changes would contradict this document, update this document first or flag the contradiction.
-
-2. **CHANGELOG.md tracks intent, not just diffs.** Each entry should explain *why* a change was made, not just what changed. Format:
+2. **CHANGELOG.md tracks intent, not just diffs:**
    ```markdown
    ## [Date] — Brief title
    **Context:** Why this change is happening
    **Changes:** What was modified
-   **Implications:** What else might need to change as a result
+   **Implications:** What else might need to change
    ```
 
-3. **Types are documentation.** The `conductor/src/types.ts` file defines the shared language. Changes to types should be rare and deliberate.
+3. **Types are documentation.** `conductor/types.ts` defines the shared language. Changes to types should be rare and deliberate.
 
-4. **Test names are specifications.** Write test names as complete sentences that describe behavior:
+4. **Test names are specifications:**
    ```typescript
-   test('a faction that has used their coup cannot vote to coup again', ...)
-   test('weighted coherence is applied only on the row where the coup occurred', ...)
+   test('attempt collapses when consensus is below doubt threshold', ...)
+   test('unreached layers are marked as locked fragments in the finale', ...)
+   test('stewardship ends when fragment is rotated out of active slot', ...)
    ```
 
 ### Making Changes
 
-When an AI agent (or human) needs to modify the system:
-
-1. **Start by stating the goal** in plain language.
-2. **Check ARCHITECTURE.md** for relevant sections.
-3. **Identify affected components** (Conductor? Server? Client? All three?).
-4. **Make changes to types first** if data structures are changing.
-5. **Update tests** to reflect new expected behavior.
-6. **Update ARCHITECTURE.md** if the change affects system design.
-7. **Add CHANGELOG.md entry** explaining the change.
+1. State the goal in plain language
+2. Check ARCHITECTURE.md for relevant sections
+3. Identify affected components (Conductor? Server? Client? All?)
+4. Make type changes first if data structures are changing
+5. Update tests to reflect new behavior
+6. Update ARCHITECTURE.md if system design is affected
+7. Add CHANGELOG.md entry
 
 ### Handling Design Uncertainty
 
-Some aspects of this system are intentionally deferred (e.g., finale sequencing algorithm, specific musical decisions). When you encounter these:
-
-1. **Don't invent solutions** that aren't specified.
-2. **Implement the minimal interface** that allows the feature to be plugged in later.
-3. **Add a `// TODO: [description]` comment** at the integration point.
-4. **Document the open question** in a `DECISIONS.md` file if one doesn't exist.
-
-### Recovery from Errors
-
-If the codebase gets into a confusing state:
-
-1. **ARCHITECTURE.md is the canonical reference.** Revert code to match the spec, not vice versa.
-2. **Run tests.** The Conductor package should have comprehensive unit tests.
-3. **Check types compile.** Type errors usually indicate structural problems.
-4. **Re-read recent CHANGELOG.md entries** to understand recent evolution.
+1. Don't invent solutions that aren't specified
+2. Implement the minimal interface that allows the feature to be plugged in later
+3. Add `// TODO: [description]` at integration points
+4. Document open questions in DECISIONS.md
 
 ---
 
 ## Open Questions (To Be Resolved)
 
-These items are acknowledged but intentionally deferred:
-
-- [ ] Finale sequencing algorithm (harmonic distance sorting)
-- [ ] Specific faction identities/names/colors
-- [ ] Exact timing values for each phase
-- [ ] Musical content and row configurations
+- [ ] Exact number of layers per attempt (target 5–7)
+- [ ] Exact threshold schedule for Doubt per layer per attempt
+- [ ] Locked color/symbol assignments for layers + chapters
+- [ ] Audition cadence (A/B preview duration and transition style)
+- [ ] Specific fragment display names
+- [ ] Stewardship parameter assignments per fragment
+- [ ] Finale rotation freeze behavior and when performer takes over
 - [ ] Projector visual design and animations
-- [ ] Performer controller hardware/UX
-- [ ] Deployment environment (local network? cloud?)
-
----
-
-## Appendix: Example Show Flow
-
-```
-1. LOBBY
-   - Projector displays thematic excerpt (e.g., "Fig Tree" passage)
-   - Audience scans seat-specific QR codes, joins with seatId
-   - User sees prompt: "What lives on your fig tree?"
-   - User submits their response (stored for finale)
-   - Faction is null; users see "waiting" state after submission
-   - Performer sees controller: "24 joined" + seat map showing occupied seats
-   
-2. ASSIGNMENT
-   - Performer presses "Assign Factions"
-   - Algorithm runs (balance + minimize adjacency)
-   - All users receive faction simultaneously
-   - Users see faction reveal animation on their phones
-   - Projector shows room-wide faction distribution animation
-
-3. ROW 0: AUDITIONING
-   - Option 0 plays
-   - Option 1 plays
-   - Option 2 plays
-   - Option 3 plays
-   - Performer advances to voting
-
-3. ROW 0: VOTING
-   - Audience drags two tokens: faction vote (colored) + personal vote (white)
-   - 10 seconds pass (or performer advances)
-
-4. ROW 0: REVEALING
-   - Projector shows coherence bars filling
-   - Winner announced (highest weighted coherence)
-   - Tree path draws from root to winning option
-
-5. ROW 0: COUP WINDOW
-   - Faction 2 members see their coup meter
-   - 3 of 7 vote to coup → meter at 43%
-   - Threshold is 50% → not triggered
-   - Window closes, row commits
-
-6. ROW 0: COMMITTED
-   - Audio layer locks in
-   - Performer advances to Row 1
-
-... (repeat for rows 1–7) ...
-
-7. FINALE — THE SONG WE WANTED
-   - Projector transitions from faction path to popular path
-   - "The song we wanted" plays: the popular path in full
-   - Visual shows the shadow path becoming solid, the faction path fading
-
-8. FINALE — INDIVIDUAL TIMELINES
-   - Each user's personal tree highlighted on projector in sequence
-   - Their audio path plays (one loop)
-   - Their fig tree response (from lobby) appears
-   - ~30 iterations, harmonically sorted for smooth transitions
-
-9. ENDED
-   - Show concludes
-   - Data persisted for analysis
-```
+- [ ] Controller hardware/UX details
+- [ ] Musical content (Ableton session design)

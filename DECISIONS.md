@@ -1,351 +1,150 @@
-# Design Decisions
+# DECISIONS.md — Design Decisions Log
 
-This file tracks open questions, deferred decisions, and the reasoning behind resolved choices. It serves as a log of design thinking for the Solo Show system.
+## How to Use This File
+- **Open**: Decisions that need to be made before implementation can proceed
+- **Resolved**: Decisions that have been made, with rationale recorded
+- **Deferred**: Acknowledged but intentionally pushed to later
 
----
-
-## Open Questions
-
-These items are acknowledged but intentionally deferred. When resolving, move to the "Resolved" section with explanation.
-
-### Faction Reveal Animation
-
-**Question:** What should the faction reveal animation look like on audience phones and projector?
-
-**Current thinking:**
-- Audience phone: Brief suspenseful build, then their faction color/identity fills the screen
-- Projector: Could show the room/seat map with colors appearing, or an abstract visualization
-
-**Considerations:**
-- Should feel ceremonial—this is the moment they become "part of the mind"
-- Duration: Long enough to feel meaningful, short enough to maintain energy (3-5 seconds?)
-- Should projector and phones be synchronized or can they be independent?
-
-**Blocked by:** Visual design decisions, prototyping
-
----
-
-### Finale Sequencing Algorithm
-
-**Question:** How should personal timelines be ordered during the finale to minimize jarring harmonic transitions?
-
-**Current thinking:** 
-- One decision point will determine key (designed into the music)
-- Group timelines by key, then by similarity within key
-- Exact algorithm TBD after musical content is created
-
-**Blocked by:** Musical content decisions
-
-**Integration point:** `server/src/finale.ts` (to be created)
-
----
-
-### Faction Identities
-
-**Question:** What are the four factions called? What do they represent? What are their colors?
-
-**Current thinking:**
-- Each represents an internal psychological force
-- Examples: ambition, fear, joy, control, chaos, desire, caution
-- Final identities should feel distinct but not prescriptive
-
-**Blocked by:** Artistic decision, not technical
-
-**Integration point:** `config/default-show.json`, client theme constants
-
----
-
-### Timing Values
-
-**Question:** What are the exact durations for each phase?
-
-**Current estimates:**
-- Audition per option: ~10 seconds
-- Voting window: ~10 seconds
-- Reveal duration: ~5 seconds
-- Coup window: ~10 seconds
-
-**Resolution path:** Rehearsal and iteration
-
-**Integration point:** `config/default-show.json`
-
----
-
-### Deployment Environment
-
-**Question:** Where will this run during performances?
-
-**Options:**
-- Local network (performer's laptop as server, audience on WiFi)
-- Cloud deployment (more reliable, but requires internet)
-- Hybrid (cloud server, local audio)
-
-**Considerations:**
-- Venue WiFi reliability
-- Latency requirements
-- Crash recovery needs
-
-**Blocked by:** Venue decisions, testing
-
----
-
-### Controller Hardware
-
-**Question:** What physical interface will the performer use?
-
-**Options:**
-- Laptop keyboard shortcuts
-- MIDI controller (already have piano keyboard)
-- Dedicated foot pedal for hands-free
-- Tablet as wireless controller
-
-**Current thinking:** Support keyboard shortcuts as baseline, design for future hardware flexibility
-
----
-
-### Projector Visual Design
-
-**Question:** What should the Song Tree and other visualizations look like?
-
-**Considerations:**
-- Legible from back of room
-- Emotionally expressive (colors, motion)
-- Coup animations should feel like rupture/glitch
-- Finale should feel like expansion/possibility
-
-**Blocked by:** Artistic decision, prototyping
+When resolving a decision, move it from Open to Resolved with the date and reasoning. Don't delete entries.
 
 ---
 
 ## Resolved Decisions
 
-### Hybrid Timing with Ableton Live (Resolved)
+### R1: Audience structure — No factions
+**Date:** 2025-02-26
+**Decision:** The new show has no factions. Audience is unified. All voting is collective.
+**Rationale:** The show metaphor shifted from "fractured mind with competing factions" to "one mind facing doubt." Binary choices + consensus threshold replaces coherence competition.
+**Impact:** Removed faction assignment, coherence calculation, coup mechanics, faction rooms, dual path tracking.
 
-**Decision:** Use a hybrid timing architecture where Ableton Live controls musical timing (audition loops) via OSC, while the server controls game logic timing (voting, coup windows) via JS timers.
+### R2: Voting — Binary (A/B) instead of 4 options
+**Date:** 2025-02-26
+**Decision:** Each layer presents exactly 2 options.
+**Rationale:** Legibility over complexity. Binary choices are instantly understandable for a lay audience. The interesting mechanic is the *consensus threshold*, not option complexity.
 
-**Reasoning:**
-- Musical timing requires sample-accuracy; Ableton handles tempo, loops, and quantization natively
-- Game logic timing (voting windows) doesn't need musical precision; JS timers are sufficient
-- Bidirectional OSC enables the server to send commands and receive timing cues
-- Fallback mode (JS timers only) enables testing without Ableton running
-- Version checking prevents stale timer fires when manual advances occur
+### R3: Collapse behavior — Auto-advance to next story
+**Date:** 2025-02-26
+**Decision:** When an attempt collapses (consensus < doubt), the system auto-advances to the next `attempt_story` phase after the collapse animation.
+**Rationale:** Keeps the show moving. Performer doesn't need to manually handle the transition (they'll be performing a narrative beat during the collapse). Exception: Song 3 → finale transition is manual.
 
-**Architecture:**
-- `server/osc.ts`: Bidirectional OSC bridge (UDP, ports 9000/9001)
-- `server/timing.ts`: Timing engine that observes state changes and schedules advances
-- Conductor remains pure: timing logic lives entirely in server layer
-- `ADVANCE_PHASE` commands are sent like any other command (manual or automatic)
+### R4: Fragment availability — All locked-in layers, regardless of completion
+**Date:** 2025-02-26
+**Decision:** Any layer that was voted on and locked in during any attempt is available as a finale fragment, even if the attempt later collapsed. Unreached layers appear visible but locked.
+**Rationale:** Most/all songs are expected to be incomplete. This makes the collapse meaningful (fewer fragments available) without making the finale impossible.
 
-**Key design choices:**
-- Row transitions remain manual (performer controls pacing)
-- Pause/resume uses fresh restart (timer restarts from scratch)
-- Timing engine enabled by default
-- Audition timing via AbletonOSC beat subscription (`/live/song/get/beat`); other phases use JS timers
+### R5: Finale fragment visibility — Show locked "could have beens"
+**Date:** 2025-02-26
+**Decision:** In the finale, ALL options from a user's assigned chapter are displayed. Winning (locked-in) options are selectable. Losing options from voted layers AND both options from unreached layers appear visible but locked/grayed — representing "what could have been."
+**Rationale:** Showing locked fragments reinforces the "what could have been" theme. The full grid gives the audience a complete picture of the song's potential, making the gaps from collapse feel tangible.
 
-**Date:** Phase 3 implementation
+### R6: Chapter assignment — Random even split
+**Date:** 2025-02-26
+**Decision:** At finale setup, audience members are randomly assigned to one of three chapters with an even split (±1).
+**Rationale:** Simplest fair approach. Considered: pattern-based assignment from voting behavior, or self-selection. Random avoids gaming and keeps implementation simple.
 
----
+### R7: Fragment selection — One pick per user, from assigned chapter
+**Date:** 2025-02-26
+**Decision:** Each user selects one fragment from their assigned chapter's available (locked-in) options. No re-queuing.
+**Rationale:** Finale duration is limited; queue will barely get through once. One meaningful choice per person.
 
-### Next.js with Custom Server (Resolved)
+### R8: Stewardship = fragment ownership
+**Date:** 2025-02-26
+**Decision:** When your queued fragment enters an active slot, you automatically become the steward.
+**Rationale:** Creates a direct ownership arc: you chose it, you queued it, you shape it. No separate stewardship assignment needed.
 
-**Decision:** Use Next.js with a custom Node.js server (Option A: single process) rather than separate frontend and backend services.
+### R9: Phone UI — Grid of all layers displayed at once
+**Date:** 2025-02-26
+**Decision:** During song-building, all layers for the current attempt are displayed simultaneously as squares (up to 12 squares for 6 layers × 2 options). Layers unlock sequentially.
+**Rationale:** Gives audience a sense of progress and stakes — they can see how many layers remain and watch the stack build. Experimental; may need adjustment based on screen size testing.
 
-**Reasoning:**
-- Socket.IO requires persistent WebSocket connections (not supported by Next.js API routes)
-- Single process simplifies deployment and recovery for live performance
-- ~30 users doesn't require horizontal scaling
-- All state lives in one place (SQLite + memory), easier to reason about
-- Simpler to monitor and restart during a live show
+### R10: Seat-specific QR codes — Kept for future-proofing
+**Date:** 2025-02-26
+**Decision:** Keep seat-specific QR codes even though no current mechanic uses seat topology.
+**Rationale:** Provides persistent identity mapping and seat visualization on controller. May be useful for future spatial mechanics.
 
-**Trade-offs:**
-- Custom server disables some Next.js optimizations (ISR, edge functions)
-- These optimizations aren't needed for this use case (all pages are dynamic)
+### R11: Deployment — Cloud-hosted default
+**Date:** 2025-02-26
+**Decision:** Plan for cloud hosting as default. Keep architecture compatible with local deployment.
+**Rationale:** Avoids phone captive-portal / "no internet" warnings that occur on local-only WiFi networks. Ableton OSC bridge always runs locally regardless.
 
-**Date:** Initial design
+### R12: Audio metering — First-class feature
+**Date:** 2025-02-26
+**Decision:** Include M4L envelope followers → OSC → projector as a core feature, not a bolt-on.
+**Rationale:** Low implementation cost (~2-3 hours), high visual payoff for finale slot cards. Dedicated high-frequency broadcast (not through state_sync).
 
----
+### R13: Stewardship parameter — Configurable, continuous, abstracted
+**Date:** 2025-02-26
+**Decision:** Each fragment has a configurable safe parameter. UI shows a continuous slider with an abstracted label (e.g., "Intensity"). Maps to a clamped Ableton parameter with smoothing.
+**Rationale:** Performer needs musical control over what gets exposed. Abstracted label avoids jargon. Continuous slider gives satisfying real-time feedback.
 
-### Recovery & Persistence Strategy (Resolved)
+### R14: Collapse audio — Master return track effects
+**Date:** 2025-02-26
+**Decision:** Collapse gesture uses a master return track with effects (distortion, filter sweep, etc.) that are enabled briefly, rather than dedicated collapse tracks.
+**Rationale:** Avoids duplicating tracks. All song-building tracks route through the return; enabling it creates the "womp-womp" effect on whatever is currently playing.
 
-**Decision:** The system persists state to SQLite on every state change (not periodic), uses state versioning for sync verification, and provides controller emergency actions for live recovery.
-
-**Reasoning:**
-- Live performance cannot tolerate data loss; every vote matters
-- State versioning enables efficient reconnection (full sync only if version mismatch)
-- SQLite with WAL mode provides crash resilience without complex infrastructure
-- Controller emergency actions give performer control during technical difficulties
-- Automatic client reconnection with exponential backoff minimizes audience disruption
-
-**Key mechanisms:**
-- `ShowState.version` increments on every change
-- Persist after every state mutation, wrapped in transaction
-- Clients store identity in localStorage, reconnect automatically
-- Heartbeat system detects disconnections within ~30 seconds
-- Controller can pause, reset, export/import state
-
-**Date:** Initial design
-
----
-
-### Audition Loop Count (Resolved)
-
-**Decision:** Each option loops twice during audition by default, configurable via `auditionLoopsPerOption` in timing config.
-
-**Reasoning:**
-- Single loop is too short for audience to absorb the musical content
-- Two loops provides: first loop to hear it, second loop to form an opinion
-- Configurable because optimal loop count depends on musical content length and complexity
-
-**Date:** Initial design
+### R15: Song 3 → Finale transition — Manual
+**Date:** 2025-02-26
+**Decision:** When Song 3 collapses or completes, the transition to the finale is performer-triggered (manual), unlike Songs 1→2 and 2→3 which auto-advance.
+**Rationale:** The performer needs a narrative beat between the last attempt and the finale. This may change later.
 
 ---
 
-### Dual Path Tracking — Faction vs Popular (Resolved)
+## Open Decisions
 
-**Decision:** The system tracks two parallel paths through the Song Tree: the faction path (determined by coherence) and the popular path (determined by personal vote plurality). Both are visualized on the projector—faction as solid, popular as ghost/shadow.
+### O1: Exact layer count per attempt
+**Status:** Open
+**Options:** 5, 6, or 7 layers per attempt
+**Considerations:** More layers = more fragments for finale but higher collapse risk and longer build phases. 6 layers (12 squares on phone) is the current working assumption.
+**Blocked by:** Musical content design
 
-**Reasoning:**
-- Gives immediate feedback for personal votes without revealing the individual-level finale
-- Creates visible narrative tension: "the room chose X, but wanted Y"
-- Enables a three-part finale: faction song → popular song → individual timelines
-- The divergence between paths is thematically rich—conviction vs. desire
+### O2: Exact doubt threshold schedule
+**Status:** Open
+**Current assumption:** Layers 0-1 no threshold, Layer 2 = 65%, Layer 3 = 75%, Layer 4 = 85%, Layer 5+ = 90%
+**Considerations:** Should thresholds be identical across all 3 attempts, or escalate? (e.g., Song 3 has higher base thresholds)
+**Blocked by:** Playtesting
 
-**Finale structure enabled:**
-1. "The song we built" (faction path) — heard throughout the show
-2. "The song we wanted" (popular path) — played in full during finale
-3. "The songs you imagined" (individual timelines) — personal paths with fig tree responses
+### O3: Chapter + layer color/symbol assignments
+**Status:** Open
+**Current assumption:** Placeholder values in ARCHITECTURE.md
+**Blocked by:** Visual design
 
-**Date:** Initial design
+### O4: Audition cadence
+**Status:** Open
+**Questions:** How long is each A/B preview? Cross-fade or hard cut? Loop once or twice? Same duration across all layers?
+**Blocked by:** Musical content design
 
----
+### O5: Fragment display names
+**Status:** Open
+**Questions:** Are these auto-generated from layer type + chapter (e.g., "Ambition: Foundation A")? Or hand-curated evocative names?
+**Blocked by:** Content design
 
-### Coherence Tie Handling (Resolved)
+### O6: Projector visual design
+**Status:** Open
+**Notes:** Current spec defines layout requirements and data, not visual style. Theatrical, not analytical.
+**Blocked by:** Visual design collaboration
 
-**Decision:** When two or more factions have identical weighted coherence, the winner is selected by fully random choice. A tiebreaker visualization (e.g., spinning wheel) plays on the projector before revealing the winner.
+### O7: Finale freeze → performer takeover UX
+**Status:** Open
+**Questions:** When rotation freezes, what does the projector show? Does the performer get any special controls beyond what the controller already offers?
+**Blocked by:** Performance design / rehearsal
 
-**Reasoning:**
-- Ties are possible, especially with small faction sizes
-- Random selection is fair and creates dramatic tension
-- Visual tiebreaker makes the randomness theatrical rather than arbitrary
-- No seeding needed; full randomness is appropriate for live performance
-
-**Flow:**
-1. Reveal shows coherence bars filling
-2. Tied factions highlight/pulse
-3. Tiebreaker animation plays
-4. Winner lands
-5. Path draws to winning option
-
-**Date:** Initial design
-
----
-
-### Fig Tree Prompt in Lobby (Resolved)
-
-**Decision:** During lobby, the projector displays a thematic excerpt (operator provides) and audience members respond to a prompt ("What lives on your fig tree?"). This response is stored and displayed during their finale moment.
-
-**Reasoning:**
-- Primes the audience with the show's central metaphor without heavy-handed explanation
-- Gives people time to reflect and write something meaningful (vs. rushed finale_setup)
-- Makes the lobby phase feel like part of the experience, not just waiting
-- The "fig tree" framing directly connects to the show's theme of paths not taken
-
-**Alternatives considered:**
-- Collecting text during a separate `finale_setup` phase (felt rushed, broke momentum)
-- Not collecting text at all (lost the personal/poetic connection in finale)
-
-**Date:** Initial design
+### O8: Ableton session template
+**Status:** Open
+**Notes:** Track layout formula is defined (attemptIndex × maxLayers × 2 + layerIndex × 2 + optionOffset). Actual clip content and return track effects TBD.
+**Blocked by:** Musical composition
 
 ---
 
-### Seat-Aware Faction Assignment (Resolved)
+## Deferred Decisions
 
-**Decision:** Faction assignment happens after join (not during), uses seat-specific QR codes to know seating layout, and optimizes to minimize same-faction adjacency while maintaining perfect faction balance.
+### D1: Multiple operator sessions
+**Status:** Deferred
+**Notes:** Spec allows it but not prioritized. Single operator is sufficient for now.
 
-**Reasoning:**
-- Minimizing adjacency encourages cross-faction communication and strategy
-- People sitting together will need to coordinate across faction lines, which creates interesting social dynamics
-- Balance is a hard constraint (no faction more than 1 larger than another); adjacency is soft optimization
-- Seat-specific QR codes provide precise topology data with minimal user friction
+### D2: Seat topology mechanics
+**Status:** Deferred
+**Notes:** Seat IDs are collected but no spatial mechanics currently use them. May add spatial features later.
 
-**Flow:**
-1. Users scan seat-specific QR codes during lobby phase
-2. Performer triggers "Assign Factions" when ready
-3. Algorithm runs, optimizing for balance + separation
-4. All users receive faction assignment simultaneously with reveal animation
-
-**Late joins:** Prioritize smallest faction; use adjacency as tiebreaker among equally-small factions.
-
-**Date:** Initial design
-
----
-
-### Options Are Not Faction-Owned (Resolved)
-
-**Decision:** The 4 options per row are musically ambiguous and not tied to specific factions. The parallelism of 4 factions and 4 options is thematic, not mechanical.
-
-**Reasoning:** 
-- Keeps options musically flexible—the performer can design sounds without constraining them to faction identities
-- A faction wins by internal alignment on *any* option, which makes coherence feel like genuine consensus rather than loyalty
-- Avoids the audience feeling like they're "supposed to" vote for their faction's option
-- Supports the psychological metaphor: parts of the self don't inherently "own" specific choices; they compete by conviction
-
-**Implications:** Options have an `index` (0–3) for position within the row, but no `factionId`. Coherence is calculated by how many faction members voted for the same option (whichever one that is).
-
-**Date:** Initial design clarification
-
----
-
-### Hidden Coup Meters (Resolved)
-
-**Decision:** Coup meters are visible only to the faction considering the coup, not to other factions or the projector.
-
-**Reasoning:** Creates ambush mechanic; coups feel like sudden ruptures rather than telegraphed events. Supports the narrative of self-sabotage coming from an unexpected place.
-
-**Date:** Initial design
-
----
-
-### Two-Vote System (Resolved)
-
-**Decision:** Users cast two simultaneous votes per row: a faction vote (contributes to winning) and a personal vote (recorded for finale).
-
-**Reasoning:** Literalizes the tension between "what I want" and "what I'm supposed to be." Mirrors the show's theme of internal conflict. Personal tree enables individualized finale without affecting main gameplay.
-
-**Date:** Initial design
-
----
-
-### Coherence Over Popularity (Resolved)
-
-**Decision:** Winning is determined by highest faction coherence (internal alignment), not by total votes.
-
-**Reasoning:** Rewards coordination and decisiveness, not just size. Creates interesting dynamics where a small aligned faction can beat a large divided one. Supports the metaphor of integration vs. fragmentation.
-
-**Date:** Initial design
-
----
-
-### Anonymous Finale Timelines (Resolved)
-
-**Decision:** When a personal timeline plays during the finale, it's anonymous on the projector. The individual knows it's theirs because of their submitted parallel life text.
-
-**Reasoning:** Preserves intimacy of personal choices. The text ("a life I could have lived") is the identifier, not public attribution.
-
-**Date:** Initial design
-
----
-
-<!-- Template for resolved decisions:
-
-### Decision Title (Resolved)
-
-**Decision:** What was decided
-
-**Reasoning:** Why this choice was made
-
-**Alternatives considered:** What else was on the table (optional)
-
-**Date:** When resolved
-
--->
+### D3: Variable attempt count
+**Status:** Deferred
+**Notes:** Currently hardcoded to 3 attempts. Could be made configurable but no current need.

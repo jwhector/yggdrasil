@@ -106,7 +106,7 @@ export function AuditionVoteInterface({
       {/* Now playing indicator */}
       {currentAuditionIndex !== null && (
         <div style={styles.nowPlaying}>
-          Now playing: Option {(currentAuditionIndex % 4) + 1}
+          Now playing: Option {(currentAuditionIndex % options.length) + 1}
         </div>
       )}
 
@@ -141,7 +141,7 @@ export function AuditionVoteInterface({
         {options.map((option, index) => {
           const hasFactionVote = factionVote === option.id;
           const hasPersonalVote = personalVote === option.id;
-          const isPlaying = index === (currentAuditionIndex ?? -1) % 4;
+          const isPlaying = index === (currentAuditionIndex ?? -1) % options.length;
 
           return (
             <div

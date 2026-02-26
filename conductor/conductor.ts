@@ -422,8 +422,8 @@ function advanceAuditionDuringVoting(state: ShowState, currentRow: Row): Conduct
   debug('  advanceAuditionDuringVoting: auditionIndex=%d, loopsPerRow=%d',
     currentRow.currentAuditionIndex, loopsPerRow);
 
-  // Calculate the actual option index (0-3) from the raw audition index
-  const currentOptionIndex = currentRow.currentAuditionIndex % 4;
+  // Calculate the actual option index from the raw audition index
+  const currentOptionIndex = currentRow.currentAuditionIndex % state.config.optionsPerRow;
 
   // Stop current option audio
   events.push({

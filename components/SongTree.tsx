@@ -64,7 +64,6 @@ type LayoutMode = 'grid' | 'tree' | 'transitioning';
 
 const SVG_WIDTH = 800;
 const SVG_HEIGHT = 700;
-const OPTIONS_PER_ROW = 4;
 
 const FACTION_COLORS = ['#e05c5c', '#5cb8e0', '#5ce08a', '#e0c55c'];
 const DOT_RADIUS = 8;
@@ -101,7 +100,7 @@ function deltaPosition(
   config: LayoutConfig,
   jitter: Record<string, { dx: number; dy: number }>
 ): Point {
-  const { width, height } = config;
+  const { width, height, options: optionsPerRow } = config;
 
   // Bottom-to-top Y positioning with increasing spacing toward the top
   const y0 = height - 60;
@@ -115,8 +114,8 @@ function deltaPosition(
   // Spread increases as a power curve — tight at the root, wide at the tips
   const spread = 20 + Math.pow(row, 1.8) * 14;
 
-  // 4 options evenly distributed across the spread
-  const offsets = [-1.5, -0.5, 0.5, 1.5];
+  // Options evenly distributed across the spread
+  const offsets = Array.from({ length: optionsPerRow }, (_, i) => i - (optionsPerRow - 1) / 2);
   let x = width / 2 + offsets[option] * spread;
 
   // Apply stable jitter — increases with row for organic feel
@@ -153,7 +152,7 @@ function interpolatedPosition(
  * Jitter magnitude increases with row index — tight at root, loose at tips.
  * Row 0 gets no jitter (common source), higher rows spread organically.
  */
-function generateDeltaJitter(seed: number, numRows: number): Record<string, { dx: number; dy: number }> {
+function generateDeltaJitter(seed: number, numRows: number, optionsPerRow: number): Record<string, { dx: number; dy: number }> {
   let s = seed;
   const rand = () => {
     s = (s * 16807 + 0) % 2147483647;
@@ -162,7 +161,7 @@ function generateDeltaJitter(seed: number, numRows: number): Record<string, { dx
 
   const jitter: Record<string, { dx: number; dy: number }> = {};
   for (let row = 0; row < numRows; row++) {
-    for (let opt = 0; opt < OPTIONS_PER_ROW; opt++) {
+    for (let opt = 0; opt < optionsPerRow; opt++) {
       // Scale jitter: none at row 0, increasing toward top rows
       const magnitude = row <= 1 ? 0 : Math.pow(row - 1, 1.2) * 4;
       jitter[`${row}-${opt}`] = {
@@ -382,6 +381,7 @@ export const SongTree = memo(function SongTree({
   currentFinaleTimeline,
   factionColors = FACTION_COLORS,
   audienceTimelines,
+  config,
 }: SongTreeProps) {
   // Defensive check: ensure rows exist
   if (!rows || rows.length === 0) {
@@ -393,6 +393,9 @@ export const SongTree = memo(function SongTree({
       </div>
     );
   }
+
+  // Derive optionsPerRow from config or rows data
+  const optionsPerRow = config?.optionsPerRow ?? rows[0]?.options.length ?? 4;
 
   // Layout state - always start in grid mode, let useEffect handle transition
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
@@ -413,7 +416,7 @@ export const SongTree = memo(function SongTree({
     for (let i = 0; i < 30; i++) {
       const path: string[] = [];
       for (let r = 0; r < numRows; r++) {
-        const optionIdx = Math.floor(rand() * OPTIONS_PER_ROW);
+        const optionIdx = Math.floor(rand() * optionsPerRow);
         path.push(`r${r}-opt${optionIdx}`);
       }
       timelines.push({
@@ -424,7 +427,7 @@ export const SongTree = memo(function SongTree({
       });
     }
     return timelines;
-  }, [rows.length]);
+  }, [rows.length, optionsPerRow]);
 
   // Accumulated audience timelines for finale
   const [revealedTimelines, setRevealedTimelines] = useState<FinaleTimeline[]>([]);
@@ -433,7 +436,7 @@ export const SongTree = memo(function SongTree({
   const effectiveTimelines = audienceTimelines ?? (showPhase === 'finale' ? mockTimelines : []);
 
   // Generate stable delta jitter
-  const deltaJitter = useMemo(() => generateDeltaJitter(123, rows.length), [rows.length]);
+  const deltaJitter = useMemo(() => generateDeltaJitter(123, rows.length, optionsPerRow), [rows.length, optionsPerRow]);
 
   // Layout configuration
   const layoutConfig: LayoutConfig = useMemo(
@@ -441,9 +444,9 @@ export const SongTree = memo(function SongTree({
       width: SVG_WIDTH,
       height: SVG_HEIGHT,
       rows: rows.length,
-      options: OPTIONS_PER_ROW,
+      options: optionsPerRow,
     }),
-    [rows.length]
+    [rows.length, optionsPerRow]
   );
 
   // Transition animation when entering finale
@@ -667,7 +670,7 @@ export const SongTree = memo(function SongTree({
 
           const leftPos = getPosition(row.index, 0);
           const labelX = isTreeMode
-            ? Math.min(leftPos.x, getPosition(row.index, OPTIONS_PER_ROW - 1).x) - 30
+            ? Math.min(leftPos.x, getPosition(row.index, optionsPerRow - 1).x) - 30
             : leftPos.x - 40;
 
           return (

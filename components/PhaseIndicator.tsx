@@ -15,6 +15,7 @@ export interface PhaseIndicatorProps {
   auditionComplete: boolean;
   rowIndex: number;
   rowLabel: string;
+  optionsPerRow: number;
 }
 
 /**
@@ -23,7 +24,8 @@ export interface PhaseIndicatorProps {
 function getPhaseInfo(
   phase: RowPhase,
   currentAuditionIndex: number | null,
-  auditionComplete: boolean
+  auditionComplete: boolean,
+  optionsPerRow: number
 ): {
   text: string;
   color: string;
@@ -39,9 +41,9 @@ function getPhaseInfo(
     case 'voting':
       // Show audition progress if still auditioning, otherwise show voting
       if (!auditionComplete && currentAuditionIndex !== null) {
-        const optionNum = (currentAuditionIndex % 4) + 1;
+        const optionNum = (currentAuditionIndex % optionsPerRow) + 1;
         return {
-          text: `Auditioning Option ${optionNum}/4`,
+          text: `Auditioning Option ${optionNum}/${optionsPerRow}`,
           color: '#60a5fa',
           backgroundColor: 'rgba(96, 165, 250, 0.1)',
         };
@@ -84,8 +86,9 @@ export function PhaseIndicator({
   auditionComplete,
   rowIndex,
   rowLabel,
+  optionsPerRow,
 }: PhaseIndicatorProps) {
-  const phaseInfo = getPhaseInfo(phase, currentAuditionIndex, auditionComplete);
+  const phaseInfo = getPhaseInfo(phase, currentAuditionIndex, auditionComplete, optionsPerRow);
 
   // Log the currentAuditionIndex for debugging
   console.log('[PhaseIndicator] currentAuditionIndex:', currentAuditionIndex);

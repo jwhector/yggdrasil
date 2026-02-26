@@ -132,6 +132,7 @@ export default function ProjectorPage() {
             auditionComplete={projectorState.rows[projectorState.currentRowIndex]?.auditionComplete || false}
             rowIndex={projectorState.currentRowIndex}
             rowLabel={(projectorState as any).config?.rows[projectorState.currentRowIndex]?.label || `Row ${projectorState.currentRowIndex}`}
+            optionsPerRow={projectorState.rows[projectorState.currentRowIndex]?.options.length ?? 4}
           />
           <SongTree
             rows={projectorState.rows}

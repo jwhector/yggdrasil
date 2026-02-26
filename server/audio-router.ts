@@ -8,17 +8,23 @@
  * The timing engine handles scheduling but does NOT send audio OSC messages.
  * The audio router handles ALL outbound audio OSC messages.
  *
- * Session Layout:
+ * Track Layout (shared by both modes):
  * - optionsPerRow * rowCount tracks total (optionsPerRow per row)
  * - Track index = rowIndex * optionsPerRow + optionIndex
- * - Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), ..., Row (rowCount-1): tracks (optionsPerRow*(rowCount-1))-(optionsPerRow*rowCount-1)
- * - Clips fired at slot 0 (scene 0)
+ * - Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), etc.
  * - Audition via mute/unmute (smooth transitions, no stop/start glitches)
  * - Layering: each row has its own tracks, committed clips keep playing
+ *
+ * Playback Modes (mutually exclusive, set via ShowConfig.playbackMode):
+ * - Session View ('session', default): Fires clips at slot 0 (scene 0) per row.
+ *   Tracks which clips have been fired via firedTracks set.
+ *   Ableton ignores arrangement view when session clips are fired.
+ * - Arrangement View ('arrangement'): Uses global transport (start/stop).
+ *   No clips are ever fired. Tracks whether transport has been started.
  */
 
 import type { OSCBridge } from './osc';
-import type { ShowState, ConductorEvent, ShowPhase } from '../conductor/types';
+import type { ShowState, ConductorEvent, ShowPhase, PlaybackMode } from '../conductor/types';
 
 /**
  * Audio router interface
@@ -35,16 +41,18 @@ export interface AudioRouter {
  */
 interface AudioRouterState {
   lastKnownPhase: ShowPhase | null;
-  /** Set of track indices with clips currently fired (playing, possibly muted) */
+  /** Set of track indices with clips currently fired — session mode only */
   firedTracks: Set<number>;
   /** Set of track indices currently unmuted (audible) */
   unmutedTracks: Set<number>;
+  /** Whether the global transport has been started — arrangement mode only */
+  transportStarted: boolean;
 }
 
 /**
  * Calculate Ableton track index from row and option indices.
  * Layout: optionsPerRow * rowCount tracks, optionsPerRow per row, grouped sequentially.
- * Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), ..., Row (rowCount-1): tracks (optionsPerRow*(rowCount-1))-(optionsPerRow*rowCount-1).
+ * Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), etc.
  */
 function trackIndex(optionsPerRow: number, rowIndex: number, optionIndex: number): number {
   return rowIndex * optionsPerRow + optionIndex;
@@ -64,15 +72,30 @@ function stopAllTracks(oscBridge: OSCBridge): void {
  * Create an audio router that translates conductor events to AbletonOSC messages
  *
  * @param oscBridge - OSC bridge for sending messages to Ableton
+ * @param playbackMode - 'session' for clip-based (default) or 'arrangement' for transport-based
  * @returns AudioRouter instance
  */
-export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
+export function createAudioRouter(oscBridge: OSCBridge, playbackMode: PlaybackMode = 'session'): AudioRouter {
   // Internal state tracking
   const routerState: AudioRouterState = {
     lastKnownPhase: null,
     firedTracks: new Set<number>(),
     unmutedTracks: new Set<number>(),
+    transportStarted: false,
   };
+
+  /**
+   * Mute all currently-unmuted tracks for a given row
+   */
+  function muteRowTracks(state: ShowState, rowIndex: number): void {
+    for (let i = 0; i < state.config.optionsPerRow; i++) {
+      const trk = trackIndex(state.config.optionsPerRow, rowIndex, i);
+      if (routerState.unmutedTracks.has(trk)) {
+        oscBridge.send('/live/track/set/mute', trk, 1);
+        routerState.unmutedTracks.delete(trk);
+      }
+    }
+  }
 
   /**
    * Handle state changes - called after every command is processed
@@ -91,35 +114,35 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
             const optionIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
             const newTrack = trackIndex(state.config.optionsPerRow, cue.rowIndex, optionIdx);
 
-            // Check if clips for this row have been fired yet
-            const rowBaseTrk = cue.rowIndex * state.config.optionsPerRow;
-            const rowClipsFired = routerState.firedTracks.has(rowBaseTrk);
+            if (playbackMode === 'session') {
+              // Session View: fire clips on first audition for this row, then mute/unmute
+              const rowBaseTrk = cue.rowIndex * state.config.optionsPerRow;
+              const rowClipsFired = routerState.firedTracks.has(rowBaseTrk);
 
-            
-            if (!rowClipsFired) {
-              // Unmute the active option's track
-              oscBridge.send('/live/track/set/mute', newTrack, 0);
-              routerState.unmutedTracks.add(newTrack);
-              // First audition for this row: fire all optionsPerRow clips
-              for (let i = 0; i < state.config.optionsPerRow; i++) {
-                const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
-                // Ensure muted first
-                // oscBridge.send('/live/track/set/mute', trk, 1);
-                // Fire clip at slot 0
-                oscBridge.send('/live/clip/fire', trk, 0);
-                routerState.firedTracks.add(trk);
+              if (!rowClipsFired) {
+                // Unmute the active option's track
+                oscBridge.send('/live/track/set/mute', newTrack, 0);
+                routerState.unmutedTracks.add(newTrack);
+                // First audition for this row: fire all optionsPerRow clips
+                for (let i = 0; i < state.config.optionsPerRow; i++) {
+                  const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
+                  oscBridge.send('/live/clip/fire', trk, 0);
+                  routerState.firedTracks.add(trk);
+                }
+              } else {
+                // Mute previously unmuted tracks for this row, then unmute new
+                muteRowTracks(state, cue.rowIndex);
+                oscBridge.send('/live/track/set/mute', newTrack, 0);
+                routerState.unmutedTracks.add(newTrack);
               }
             } else {
-              // Mute any previously unmuted track for this row
-              for (let i = 0; i < state.config.optionsPerRow; i++) {
-                const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
-                if (routerState.unmutedTracks.has(trk)) {
-                  oscBridge.send('/live/track/set/mute', trk, 1);
-                  routerState.unmutedTracks.delete(trk);
-                }
+              // Arrangement View: ensure transport is playing, then mute/unmute
+              if (!routerState.transportStarted) {
+                routerState.transportStarted = true;
+                oscBridge.send('/live/song/start_playing');
               }
-              // oscBridge.send('/live/song/set/current_song_time', 0);
-              // Unmute the active option's track
+              // Mute previously unmuted tracks for this row, then unmute new
+              muteRowTracks(state, cue.rowIndex);
               oscBridge.send('/live/track/set/mute', newTrack, 0);
               routerState.unmutedTracks.add(newTrack);
             }
@@ -163,13 +186,17 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
           case 'uncommit_layer': {
             if (cue.rowIndex === undefined) break;
 
-            // Mute and stop all option tracks for the row
+            // Mute all option tracks for the row
             for (let i = 0; i < state.config.optionsPerRow; i++) {
               const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
               oscBridge.send('/live/track/set/mute', trk, 1);
-              oscBridge.send('/live/clip/stop', trk, 0);
               routerState.unmutedTracks.delete(trk);
-              routerState.firedTracks.delete(trk);
+
+              if (playbackMode === 'session') {
+                // Session: also stop clips and clear fired state
+                oscBridge.send('/live/clip/stop', trk, 0);
+                routerState.firedTracks.delete(trk);
+              }
             }
             break;
           }
@@ -191,11 +218,14 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
               if (optionIdx < 0) continue;
               const trk = trackIndex(state.config.optionsPerRow, rowIdx, optionIdx);
 
-              // Ensure clip is fired
-              if (!routerState.firedTracks.has(trk)) {
-                oscBridge.send('/live/clip/fire', trk, 0);
-                routerState.firedTracks.add(trk);
+              if (playbackMode === 'session') {
+                // Session: ensure clip is fired
+                if (!routerState.firedTracks.has(trk)) {
+                  oscBridge.send('/live/clip/fire', trk, 0);
+                  routerState.firedTracks.add(trk);
+                }
               }
+              // Arrangement: transport should already be running; just unmute
 
               // Unmute the track
               oscBridge.send('/live/track/set/mute', trk, 0);
@@ -213,6 +243,7 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
       if (event.type === 'SHOW_RESET') {
         routerState.firedTracks.clear();
         routerState.unmutedTracks.clear();
+        routerState.transportStarted = false;
         stopAllTracks(oscBridge);
         oscBridge.send('/live/song/stop_playing');
         oscBridge.send('/live/song/set/current_song_time', 0);
@@ -241,6 +272,7 @@ export function createAudioRouter(oscBridge: OSCBridge): AudioRouter {
     routerState.lastKnownPhase = null;
     routerState.firedTracks.clear();
     routerState.unmutedTracks.clear();
+    routerState.transportStarted = false;
   }
 
   return {

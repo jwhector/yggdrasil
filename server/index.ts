@@ -219,7 +219,7 @@ async function main() {
   }
 
   // Create and register audio router
-  const audioRouter = createAudioRouter(oscBridge);
+  const audioRouter = createAudioRouter(oscBridge, currentState?.config?.playbackMode ?? 'session');
   stateChangeHooks.push((state, events) => {
     audioRouter.handleStateChange(state, events);
   });

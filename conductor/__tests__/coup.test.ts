@@ -106,6 +106,7 @@ function createTestState(overrides?: Partial<ShowState>): ShowState {
       },
       rows: [],
       topology: { type: 'none' },
+      playbackMode: 'session',
     } as ShowConfig,
     pausedPhase: null,
   };

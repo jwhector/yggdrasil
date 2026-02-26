@@ -4,7 +4,8 @@
   "description": "Template configuration - replace with actual musical content",
   
   "rowCount": 8,
-  "optionsPerRow": 4,
+  "optionsPerRow": 5,
+  "playbackMode": "arrangement",
   
   "factions": [
     { "id": 0, "name": "Faction A", "color": "#FF6B6B" },
@@ -34,7 +35,7 @@
     "votingWindowMs": 10000,
     "revealDurationMs": 5000,
     "coupWindowMs": 10000,
-    "masterLoopBeats": 31
+    "masterLoopBeats": 8
   },
   
   "coup": {
@@ -51,7 +52,8 @@
         { "id": "r0-opt0", "index": 0, "audioRef": "row0/option0" },
         { "id": "r0-opt1", "index": 1, "audioRef": "row0/option1" },
         { "id": "r0-opt2", "index": 2, "audioRef": "row0/option2" },
-        { "id": "r0-opt3", "index": 3, "audioRef": "row0/option3" }
+        { "id": "r0-opt3", "index": 3, "audioRef": "row0/option3" },
+        { "id": "r0-opt4", "index": 4, "audioRef": "row0/option4" }
       ]
     },
     {
@@ -62,7 +64,8 @@
         { "id": "r1-opt0", "index": 0, "audioRef": "row1/option0" },
         { "id": "r1-opt1", "index": 1, "audioRef": "row1/option1" },
         { "id": "r1-opt2", "index": 2, "audioRef": "row1/option2" },
-        { "id": "r1-opt3", "index": 3, "audioRef": "row1/option3" }
+        { "id": "r1-opt3", "index": 3, "audioRef": "row1/option3" },
+        { "id": "r1-opt4", "index": 4, "audioRef": "row1/option4" }
       ]
     },
     {
@@ -73,7 +76,8 @@
         { "id": "r2-opt0", "index": 0, "audioRef": "row2/option0" },
         { "id": "r2-opt1", "index": 1, "audioRef": "row2/option1" },
         { "id": "r2-opt2", "index": 2, "audioRef": "row2/option2" },
-        { "id": "r2-opt3", "index": 3, "audioRef": "row2/option3" }
+        { "id": "r2-opt3", "index": 3, "audioRef": "row2/option3" },
+        { "id": "r2-opt4", "index": 4, "audioRef": "row2/option4" }
       ]
     },
     {
@@ -85,7 +89,8 @@
         { "id": "r3-opt0", "index": 0, "audioRef": "row3/option0" },
         { "id": "r3-opt1", "index": 1, "audioRef": "row3/option1" },
         { "id": "r3-opt2", "index": 2, "audioRef": "row3/option2" },
-        { "id": "r3-opt3", "index": 3, "audioRef": "row3/option3" }
+        { "id": "r3-opt3", "index": 3, "audioRef": "row3/option3" },
+        { "id": "r3-opt4", "index": 4, "audioRef": "row3/option4" }
       ]
     },
     {
@@ -96,7 +101,8 @@
         { "id": "r4-opt0", "index": 0, "audioRef": "row4/option0" },
         { "id": "r4-opt1", "index": 1, "audioRef": "row4/option1" },
         { "id": "r4-opt2", "index": 2, "audioRef": "row4/option2" },
-        { "id": "r4-opt3", "index": 3, "audioRef": "row4/option3" }
+        { "id": "r4-opt3", "index": 3, "audioRef": "row4/option3" },
+        { "id": "r4-opt4", "index": 4, "audioRef": "row4/option4" }
       ]
     },
     {
@@ -109,7 +115,8 @@
         { "id": "r5-opt0", "index": 0, "audioRef": "row5/option0", "harmonicGroup": "A" },
         { "id": "r5-opt1", "index": 1, "audioRef": "row5/option1", "harmonicGroup": "A" },
         { "id": "r5-opt2", "index": 2, "audioRef": "row5/option2", "harmonicGroup": "B" },
-        { "id": "r5-opt3", "index": 3, "audioRef": "row5/option3", "harmonicGroup": "B" }
+        { "id": "r5-opt3", "index": 3, "audioRef": "row5/option3", "harmonicGroup": "B" },
+        { "id": "r5-opt4", "index": 4, "audioRef": "row5/option4", "harmonicGroup": "B" }
       ]
     },
     {
@@ -120,7 +127,8 @@
         { "id": "r6-opt0", "index": 0, "audioRef": "row6/option0" },
         { "id": "r6-opt1", "index": 1, "audioRef": "row6/option1" },
         { "id": "r6-opt2", "index": 2, "audioRef": "row6/option2" },
-        { "id": "r6-opt3", "index": 3, "audioRef": "row6/option3" }
+        { "id": "r6-opt3", "index": 3, "audioRef": "row6/option3" },
+        { "id": "r6-opt4", "index": 4, "audioRef": "row6/option4" }
       ]
     },
     {
@@ -131,7 +139,8 @@
         { "id": "r7-opt0", "index": 0, "audioRef": "row7/option0" },
         { "id": "r7-opt1", "index": 1, "audioRef": "row7/option1" },
         { "id": "r7-opt2", "index": 2, "audioRef": "row7/option2" },
-        { "id": "r7-opt3", "index": 3, "audioRef": "row7/option3" }
+        { "id": "r7-opt3", "index": 3, "audioRef": "row7/option3" },
+        { "id": "r7-opt4", "index": 4, "audioRef": "row7/option4" }
       ]
     }
   ]
