@@ -376,6 +376,9 @@ export type ConductorCommand =
   | { type: 'CLEAR_QUEUE' }
   | { type: 'TOGGLE_TRIANGLE'; active: boolean }
 
+  // Rotation
+  | { type: 'PERFORM_ROTATION_TICK'; beat: number }
+
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
   | { type: 'AUDIO_PANIC' }

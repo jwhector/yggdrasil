@@ -30,7 +30,7 @@ import { setupSocketHandlers, broadcastEvents } from './socket';
 import { createAndPruneBackup } from './backup';
 import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
-import { createAudioRouter, type AudioRouter } from './audio-router';
+import { createAudioRouter, type AudioRouter, type AbletonLayoutConfig } from './audio-router';
 import { createMeteringService } from './metering';
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -42,6 +42,7 @@ const DATA_DIR = './data';
 const DB_PATH = join(DATA_DIR, 'yggdrasil.db');
 const BACKUPS_DIR = join(DATA_DIR, 'backups');
 const CONFIG_PATH = join(process.cwd(), 'config', 'default-show.json');
+const ABLETON_LAYOUT_PATH = join(process.cwd(), 'config', 'ableton-layout.json');
 
 // Backup configuration
 const PERIODIC_BACKUP_ENABLED = process.env.PERIODIC_BACKUP === 'true';
@@ -219,14 +220,30 @@ async function main() {
     });
   }
 
+  // Load Ableton layout config
+  let abletonLayoutConfig: Partial<AbletonLayoutConfig> = {};
+  try {
+    abletonLayoutConfig = JSON.parse(readFileSync(ABLETON_LAYOUT_PATH, 'utf-8'));
+    console.log('[Server] Loaded Ableton layout config');
+  } catch {
+    console.log('[Server] No ableton-layout.json found, using defaults');
+  }
+
   // Create and register audio router
-  const audioRouter = createAudioRouter(oscBridge);
+  const audioRouter = createAudioRouter(oscBridge, abletonLayoutConfig);
   stateChangeHooks.push((state, events) => {
     audioRouter.handleStateChange(state, events);
   });
 
-  // Create metering service (wires OSC → projector in Phase 4)
+  // Create metering service and wire OSC → projector
   const meteringService = createMeteringService(io);
+  const FINALE_SLOT_COUNT = abletonLayoutConfig.finaleSlotCount ?? 7;
+  for (let i = 0; i < FINALE_SLOT_COUNT; i++) {
+    oscBridge.on(`/meter/slot/${i}`, (level: number) => {
+      meteringService.updateSlotLevel(i, level);
+    });
+  }
+  console.log(`[Server] Metering wired for ${FINALE_SLOT_COUNT} slots`);
 
   // Start OSC bridge and timing engine
   try {

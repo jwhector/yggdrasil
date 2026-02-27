@@ -1,666 +1,550 @@
 /**
- * Audio Router Tests - AbletonOSC Protocol
+ * Audio Router Tests (NEW SYSTEM)
+ *
+ * Tests that AUDIO_CUE events are correctly translated to AbletonOSC messages.
  */
 
-import { createAudioRouter } from '../audio-router';
-import { createNullOSCBridge } from '../osc';
-import type { ShowState, ConductorEvent, AudioCue } from '../../conductor/types';
+import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { createAudioRouter, computeTrackIndex, type AudioRouter, type AbletonLayoutConfig } from '../audio-router';
+import { createNullOSCBridge, type OSCBridge } from '../osc';
+import { createInitialState } from '../../conductor/conductor';
+import type {
+  ShowState,
+  ShowConfig,
+  AttemptConfig,
+  LayerConfig,
+  AudioReference,
+  Fragment,
+} from '../../conductor/types';
 
-function createMockState(): ShowState {
-  return {
-    id: 'test-show',
-    phase: 'running',
-    currentRowIndex: 0,
-    paths: { factionPath: [], popularPath: [] },
-    rows: [
-      {
-        index: 0,
-        options: [
-          { id: 'row0-opt0', index: 0, audioRef: 'row0/option0' },
-          { id: 'row0-opt1', index: 1, audioRef: 'row0/option1' },
-          { id: 'row0-opt2', index: 2, audioRef: 'row0/option2' },
-          { id: 'row0-opt3', index: 3, audioRef: 'row0/option3' },
-        ],
-        phase: 'voting',
-        committedOption: null,
-        attempts: 0,
-        currentAuditionIndex: 0,
-        auditionComplete: false,
-      },
-      {
-        index: 1,
-        options: [
-          { id: 'row1-opt0', index: 0, audioRef: 'row1/option0' },
-          { id: 'row1-opt1', index: 1, audioRef: 'row1/option1' },
-          { id: 'row1-opt2', index: 2, audioRef: 'row1/option2' },
-          { id: 'row1-opt3', index: 3, audioRef: 'row1/option3' },
-        ],
-        phase: 'pending',
-        committedOption: null,
-        attempts: 0,
-        currentAuditionIndex: null,
-        auditionComplete: false,
-      },
-      {
-        index: 2,
-        options: [
-          { id: 'row2-opt0', index: 0, audioRef: 'row2/option0' },
-          { id: 'row2-opt1', index: 1, audioRef: 'row2/option1' },
-          { id: 'row2-opt2', index: 2, audioRef: 'row2/option2' },
-          { id: 'row2-opt3', index: 3, audioRef: 'row2/option3' },
-        ],
-        phase: 'pending',
-        committedOption: null,
-        attempts: 0,
-        currentAuditionIndex: null,
-        auditionComplete: false,
-      },
-    ],
-    factions: [
-      { id: 0, coupUsed: false, coupMultiplier: 1.0, currentRowCoupVotes: new Set() },
-      { id: 1, coupUsed: false, coupMultiplier: 1.0, currentRowCoupVotes: new Set() },
-      { id: 2, coupUsed: false, coupMultiplier: 1.0, currentRowCoupVotes: new Set() },
-      { id: 3, coupUsed: false, coupMultiplier: 1.0, currentRowCoupVotes: new Set() },
-    ],
-    users: new Map(),
-    votes: [],
-    personalTrees: new Map(),
-    config: {
-      optionsPerRow: 4,
-    } as any,
-    version: 1,
-    lastUpdated: Date.now(),
-    pausedPhase: null,
-  } as unknown as ShowState;
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+const TEST_LAYOUT: AbletonLayoutConfig = {
+  maxLayersPerAttempt: 7,
+  attemptCount: 3,
+  collapseReturnTrackIndex: 0,
+  finaleSlotCount: 7,
+};
+
+function makeAudioRef(index: number): AudioReference {
+  return { trackIndex: index };
 }
 
-describe('AudioRouter with AbletonOSC', () => {
+function makeLayerConfig(index: number): LayerConfig {
+  return {
+    index,
+    type: 'foundation',
+    optionA: makeAudioRef(index * 2),
+    optionB: makeAudioRef(index * 2 + 1),
+    labelA: `Layer ${index} A`,
+    labelB: `Layer ${index} B`,
+    doubtThreshold: null,
+  };
+}
+
+function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): AttemptConfig {
+  return {
+    chapter,
+    title: chapter,
+    layers: [0, 1, 2].map(i => makeLayerConfig(i)),
+  };
+}
+
+function createTestConfig(): ShowConfig {
+  return {
+    maxLayersPerAttempt: 7,
+    attempts: [
+      makeAttemptConfig('ambition'),
+      makeAttemptConfig('love'),
+      makeAttemptConfig('avoidance'),
+    ],
+    finale: {
+      slotCount: 7,
+      rotationBars: 8,
+      defaultRotationRate: 2,
+      triangleDriftTimeoutMs: 10000,
+      triangleDriftSpeedMs: 3000,
+      fragments: [],
+    },
+    timing: {
+      auditionDurationMs: 4000,
+      votingWindowMs: 30000,
+      resolveAnimationMs: 5000,
+      collapseAnimationMs: 3000,
+      autoAdvanceToStoryMs: 2000,
+    },
+    lobby: { waitingMessage: 'Welcome' },
+    seatIds: [],
+  };
+}
+
+function createTestState(): ShowState {
+  return createInitialState(createTestConfig(), 'test-show');
+}
+
+function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B'): Fragment {
+  const trackIndex = computeTrackIndex(attemptIndex, layerIndex, option, 7);
+  return {
+    id: `frag-${attemptIndex}-${layerIndex}-${option}`,
+    attemptIndex,
+    layerIndex,
+    option,
+    chapter: 'ambition',
+    layerType: 'foundation',
+    displayName: `Fragment ${attemptIndex}.${layerIndex}.${option}`,
+    audioRef: { trackIndex },
+    safeParameter: {
+      name: 'intensity',
+      displayLabel: 'Intensity',
+      abletonMapping: { trackIndex, deviceIndex: 0, paramIndex: 1 },
+      min: 0.1,
+      max: 0.9,
+      defaultValue: 0.5,
+      smoothingMs: 50,
+    },
+  };
+}
+
+/** Helper to send a single AUDIO_CUE event through the router */
+function sendCue(router: AudioRouter, state: ShowState, cue: any): void {
+  router.handleStateChange(state, [{ type: 'AUDIO_CUE', cue }]);
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe('computeTrackIndex', () => {
+  test('attempt 0, layer 0, option A = 0', () => {
+    expect(computeTrackIndex(0, 0, 'A', 7)).toBe(0);
+  });
+
+  test('attempt 0, layer 0, option B = 1', () => {
+    expect(computeTrackIndex(0, 0, 'B', 7)).toBe(1);
+  });
+
+  test('attempt 0, layer 2, option B = 5', () => {
+    expect(computeTrackIndex(0, 2, 'B', 7)).toBe(5);
+  });
+
+  test('attempt 1, layer 0, option A = 14', () => {
+    expect(computeTrackIndex(1, 0, 'A', 7)).toBe(14);
+  });
+
+  test('attempt 2, layer 6, option B = 41', () => {
+    expect(computeTrackIndex(2, 6, 'B', 7)).toBe(41);
+  });
+
+  test('attempt 1, layer 3, option A = 20', () => {
+    expect(computeTrackIndex(1, 3, 'A', 7)).toBe(20);
+  });
+});
+
+describe('AudioRouter', () => {
+  let oscBridge: OSCBridge;
   let mockSend: jest.Mock;
-  let oscBridge: ReturnType<typeof createNullOSCBridge>;
-  let router: ReturnType<typeof createAudioRouter>;
-  let mockState: ShowState;
+  let router: AudioRouter;
+  let state: ShowState;
 
-  describe('Session View mode (default)', () => {
-    beforeEach(() => {
-      oscBridge = createNullOSCBridge();
-      mockSend = jest.fn();
-      oscBridge.send = mockSend;
-      router = createAudioRouter(oscBridge);
-      mockState = createMockState();
+  beforeEach(() => {
+    oscBridge = createNullOSCBridge();
+    mockSend = jest.fn();
+    oscBridge.send = mockSend;
+    router = createAudioRouter(oscBridge, TEST_LAYOUT);
+    state = createTestState();
+  });
+
+  afterEach(() => {
+    router.dispose();
+  });
+
+  // --------------------------------------------------------------------------
+  // audition_start
+  // --------------------------------------------------------------------------
+
+  describe('audition_start', () => {
+    test('starts transport on first audition', () => {
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
     });
 
-    afterEach(() => {
-      router.dispose();
+    test('unmutes the specified option track', () => {
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+
+      // Track 0 (attempt 0, layer 0, A)
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
     });
 
-    describe('trackIndex utility', () => {
-      test('row 0, option 0 => track 0', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
+    test('mutes the other option for the same layer', () => {
+      // First unmute A
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+      mockSend.mockClear();
 
-        // Should fire all 4 clips and unmute track 0
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
+      // Now audition B — should mute A first
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
       });
 
-      test('row 0, option 3 => track 3', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt3' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 0);
-      });
-
-      test('row 1, option 0 => track 4', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 1, optionId: 'row1-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
-      });
-
-      test('row 2, option 3 => track 11', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 2, optionId: 'row2-opt3' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 11, 0);
-      });
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1); // mute A
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0); // unmute B
     });
 
-    describe('play_option cue', () => {
-      test('fires all 4 clips for a row on first audition and unmutes active option', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
+    test('does not start transport again on subsequent calls', () => {
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+      mockSend.mockClear();
 
-        // Should unmute the active option (track 0)
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
-
-        // Should fire all 4 clips at slot 0
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 0, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 1, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 2, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 3, 0);
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 1, option: 'A',
       });
 
-      test('on subsequent options, mutes previous and unmutes new', () => {
-        // First play option 0
-        const cue1: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue1 }]);
-
-        mockSend.mockClear();
-
-        // Then play option 1
-        const cue2: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt1' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue2 }]);
-
-        // Should mute previous track (0)
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        // Should unmute new track (1)
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0);
-        // Should NOT fire clips again (already fired on first audition)
-        expect(mockSend).not.toHaveBeenCalledWith('/live/clip/fire', 0, 0);
-      });
-
-      test('does not send if rowIndex is missing', () => {
-        const cue: AudioCue = { type: 'play_option', optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-
-      test('does not send if optionId is missing', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 0 };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('stop_option cue', () => {
-      test('mutes the option track', () => {
-        const cue: AudioCue = { type: 'stop_option', rowIndex: 0, optionId: 'row0-opt1' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-        expect(mockSend).toHaveBeenCalledTimes(1);
-      });
-
-      test('does not send if rowIndex is missing', () => {
-        const cue: AudioCue = { type: 'stop_option', optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('commit_layer cue', () => {
-      test('unmutes winner and mutes others for the row', () => {
-        const cue: AudioCue = { type: 'commit_layer', rowIndex: 0, optionId: 'row0-opt2' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Track 2 (winner) should be unmuted
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0);
-        // Tracks 0, 1, 3 (losers) should be muted
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
-
-        expect(mockSend).toHaveBeenCalledTimes(4);
-      });
-
-      test('committed layers from previous rows remain unmuted', () => {
-        // Commit row 0 option 0
-        const cue1: AudioCue = { type: 'commit_layer', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue1 }]);
-
-        mockSend.mockClear();
-
-        // Commit row 1 option 2
-        const cue2: AudioCue = { type: 'commit_layer', rowIndex: 1, optionId: 'row1-opt2' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue2 }]);
-
-        // Should only affect row 1 tracks (4-7), not row 0 tracks (0-3)
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // Winner
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 7, 1);
-
-        // Should NOT call track 0 (row 0)
-        expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, expect.anything());
-      });
-
-      test('does not send if optionId is missing', () => {
-        const cue: AudioCue = { type: 'commit_layer', rowIndex: 0 };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('uncommit_layer cue (coup)', () => {
-      test('mutes and stops all 4 tracks for the row', () => {
-        const cue: AudioCue = { type: 'uncommit_layer', rowIndex: 0 };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Should mute all 4 tracks
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
-
-        // Should stop all 4 clips
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/stop', 0, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/stop', 1, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/stop', 2, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/stop', 3, 0);
-
-        expect(mockSend).toHaveBeenCalledTimes(8);
-      });
-
-      test('clears fired state so clips are re-fired on next audition', () => {
-        // First audition to fire clips
-        const playCue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: playCue }]);
-
-        mockSend.mockClear();
-
-        // Uncommit
-        const uncommitCue: AudioCue = { type: 'uncommit_layer', rowIndex: 0 };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: uncommitCue }]);
-
-        mockSend.mockClear();
-
-        // Play again - should re-fire clips
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: playCue }]);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 0, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 1, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 2, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 3, 0);
-      });
-
-      test('does not send if rowIndex is missing', () => {
-        const cue: AudioCue = { type: 'uncommit_layer' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('play_timeline cue (finale)', () => {
-      test('mutes all current tracks and unmutes path tracks', () => {
-        // Set up some unmuted tracks first
-        const setupCue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: setupCue }]);
-
-        mockSend.mockClear();
-
-        // Play timeline
-        const cue: AudioCue = {
-          type: 'play_timeline',
-          path: ['row0-opt1', 'row1-opt2', 'row2-opt0'],
-        };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Should mute track 0 (was unmuted from setup)
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-
-        // Track 1 (row0-opt1) was already fired during setup, so only unmute (no re-fire)
-        expect(mockSend).not.toHaveBeenCalledWith('/live/clip/fire', 1, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0);
-
-        // Tracks 6 and 8 were not previously fired, so fire and unmute
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 6, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 8, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 8, 0);
-      });
-
-      test('fires clips for tracks not previously fired', () => {
-        const cue: AudioCue = {
-          type: 'play_timeline',
-          path: ['row0-opt0', 'row1-opt1'],
-        };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Should fire both clips since neither was fired before
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 0, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 5, 0);
-      });
-
-      test('does not send if path is missing', () => {
-        const cue: AudioCue = { type: 'play_timeline' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-
-      test('handles empty path array', () => {
-        const cue: AudioCue = { type: 'play_timeline', path: [] };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('SHOW_PHASE_CHANGED event', () => {
-      test('entering paused phase sends /live/song/stop_playing', () => {
-        const events: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'paused' },
-        ];
-        router.handleStateChange(mockState, events);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
-        expect(mockSend).toHaveBeenCalledTimes(1);
-      });
-
-      test('resuming from paused sends /live/song/continue_playing', () => {
-        // First pause
-        const pauseEvents: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'paused' },
-        ];
-        router.handleStateChange(mockState, pauseEvents);
-
-        mockSend.mockClear();
-
-        // Then resume
-        const resumeEvents: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'running' },
-        ];
-        router.handleStateChange(mockState, resumeEvents);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/song/continue_playing');
-        expect(mockSend).toHaveBeenCalledTimes(1);
-      });
-
-      test('changing from running to finale does not send pause or resume', () => {
-        mockState.phase = 'running';
-        const events: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'finale' },
-        ];
-        router.handleStateChange(mockState, events);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-
-      test('entering running phase initially does not send resume', () => {
-        const events: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'running' },
-        ];
-        router.handleStateChange(mockState, events);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('multiple events', () => {
-      test('handles multiple AUDIO_CUE events in sequence', () => {
-        const events: ConductorEvent[] = [
-          { type: 'AUDIO_CUE', cue: { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' } },
-          { type: 'AUDIO_CUE', cue: { type: 'stop_option', rowIndex: 0, optionId: 'row0-opt0' } },
-          { type: 'AUDIO_CUE', cue: { type: 'commit_layer', rowIndex: 0, optionId: 'row0-opt1' } },
-        ];
-        router.handleStateChange(mockState, events);
-
-        // First cue fires 4 clips + mutes + unmutes
-        expect(mockSend).toHaveBeenCalledWith('/live/clip/fire', 0, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
-
-        // Second cue mutes track 0
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-
-        // Third cue sets final mute states
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0);
-      });
-
-      test('handles audio cue and phase change together', () => {
-        const events: ConductorEvent[] = [
-          { type: 'AUDIO_CUE', cue: { type: 'commit_layer', rowIndex: 0, optionId: 'row0-opt2' } },
-          { type: 'SHOW_PHASE_CHANGED', phase: 'paused' },
-        ];
-        router.handleStateChange(mockState, events);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
-      });
-    });
-
-    describe('non-audio events', () => {
-      test('ignores non-AUDIO_CUE and non-SHOW_PHASE_CHANGED events', () => {
-        const events: ConductorEvent[] = [
-          { type: 'VOTE_RECEIVED', userId: 'user-1', row: 0 },
-          { type: 'AUDITION_COMPLETE', row: 0 },
-        ];
-        router.handleStateChange(mockState, events);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-
-      test('handles empty events array', () => {
-        const events: ConductorEvent[] = [];
-        router.handleStateChange(mockState, events);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
-    });
-
-    describe('dispose', () => {
-      test('dispose clears internal state', () => {
-        // Pause to set internal state
-        const pauseEvents: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'paused' },
-        ];
-        router.handleStateChange(mockState, pauseEvents);
-
-        // Dispose
-        router.dispose();
-        mockSend.mockClear();
-
-        // Try to resume - should not send resume since state was cleared
-        const resumeEvents: ConductorEvent[] = [
-          { type: 'SHOW_PHASE_CHANGED', phase: 'running' },
-        ];
-        router.handleStateChange(mockState, resumeEvents);
-
-        expect(mockSend).not.toHaveBeenCalled();
-      });
+      expect(mockSend).not.toHaveBeenCalledWith('/live/song/start_playing');
     });
   });
 
-  describe('Arrangement View mode', () => {
+  // --------------------------------------------------------------------------
+  // audition_stop
+  // --------------------------------------------------------------------------
+
+  describe('audition_stop', () => {
+    test('mutes the specified track', () => {
+      // First unmute it
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+      mockSend.mockClear();
+
+      sendCue(router, state, {
+        type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+    });
+
+    test('is idempotent — muting already-muted track sends no OSC', () => {
+      // Track 0 was never unmuted
+      sendCue(router, state, {
+        type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // lock_in
+  // --------------------------------------------------------------------------
+
+  describe('lock_in', () => {
+    test('unmutes winner and mutes loser', () => {
+      // Setup: audition B so it's unmuted
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
+      });
+      mockSend.mockClear();
+
+      sendCue(router, state, {
+        type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0); // unmute A (winner)
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1); // mute B (loser)
+    });
+
+    test('previously locked layers stay unmuted (stacking)', () => {
+      // Lock layer 0 with winner A
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+      sendCue(router, state, {
+        type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
+      });
+
+      // Audition layer 1 option A first, then lock in A
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 1, option: 'A',
+      });
+      mockSend.mockClear();
+
+      sendCue(router, state, {
+        type: 'lock_in', attemptIndex: 0, layerIndex: 1, winner: 'A',
+      });
+
+      // Layer 1: A (track 2) already unmuted by audition → no unmute call
+      // Layer 1: B (track 3) was never unmuted → no mute call either (idempotent)
+      // But layer 0 track (track 0) must NOT be mentioned — still unmuted
+      expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, expect.anything());
+      // Track 1 (layer 0 B) also not mentioned
+      expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 1, expect.anything());
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // collapse_gesture
+  // --------------------------------------------------------------------------
+
+  describe('collapse_gesture', () => {
     beforeEach(() => {
-      oscBridge = createNullOSCBridge();
-      mockSend = jest.fn();
-      oscBridge.send = mockSend;
-      router = createAudioRouter(oscBridge, 'arrangement');
-      mockState = createMockState();
+      jest.useFakeTimers();
     });
 
     afterEach(() => {
-      router.dispose();
+      jest.useRealTimers();
     });
 
-    describe('play_option cue', () => {
-      test('starts global transport on first play and unmutes active track', () => {
-        const cue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Should start transport
-        expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
-        // Should unmute active track
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
-        // Should NOT fire any clips
-        expect(mockSend).not.toHaveBeenCalledWith('/live/clip/fire', expect.anything(), expect.anything());
+    test('enables return track effects immediately', () => {
+      sendCue(router, state, {
+        type: 'collapse_gesture', attemptIndex: 0,
       });
 
-      test('does not start transport again on subsequent play_option for same row', () => {
-        // First play
-        const cue1: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue1 }]);
-        mockSend.mockClear();
-
-        // Second play (different option, same row)
-        const cue2: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt1' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue2 }]);
-
-        // Should NOT call start_playing again
-        expect(mockSend).not.toHaveBeenCalledWith('/live/song/start_playing');
-        // Should mute old, unmute new
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0);
-      });
-
-      test('does not start transport again for a different row', () => {
-        // Play row 0
-        const cue1: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue1 }]);
-        mockSend.mockClear();
-
-        // Play row 1 -- transport already started
-        const cue2: AudioCue = { type: 'play_option', rowIndex: 1, optionId: 'row1-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: cue2 }]);
-
-        expect(mockSend).not.toHaveBeenCalledWith('/live/song/start_playing');
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
-      });
-
-      test('never fires clips regardless of how many options are played', () => {
-        // Play several options across rows
-        const cues: AudioCue[] = [
-          { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' },
-          { type: 'play_option', rowIndex: 0, optionId: 'row0-opt1' },
-          { type: 'play_option', rowIndex: 1, optionId: 'row1-opt2' },
-        ];
-        for (const cue of cues) {
-          router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-        }
-
-        expect(mockSend).not.toHaveBeenCalledWith('/live/clip/fire', expect.anything(), expect.anything());
-      });
+      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
     });
 
-    describe('uncommit_layer cue', () => {
-      test('mutes all row tracks but does not stop clips', () => {
-        const cue: AudioCue = { type: 'uncommit_layer', rowIndex: 0 };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Should mute all 4 tracks
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
-
-        // Should NOT stop any clips
-        expect(mockSend).not.toHaveBeenCalledWith('/live/clip/stop', expect.anything(), expect.anything());
-
-        expect(mockSend).toHaveBeenCalledTimes(4);
+    test('mutes all attempt tracks after collapseAnimationMs', () => {
+      // Unmute some tracks first
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
       });
+      sendCue(router, state, {
+        type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
+      });
+      mockSend.mockClear();
+
+      sendCue(router, state, {
+        type: 'collapse_gesture', attemptIndex: 0,
+      });
+
+      // Before timer fires: only return track unmuted
+      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
+      const muteCallsBefore = mockSend.mock.calls.filter(
+        (c: any[]) => c[0] === '/live/track/set/mute' && c[2] === 1,
+      );
+      expect(muteCallsBefore.length).toBe(0);
+
+      mockSend.mockClear();
+
+      // Advance timer (collapseAnimationMs = 3000)
+      jest.advanceTimersByTime(3000);
+
+      // Track 0 was unmuted, so it should be muted
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+      // Return track re-muted
+      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 1);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // slot_activate / slot_deactivate
+  // --------------------------------------------------------------------------
+
+  describe('slot_activate', () => {
+    test('unmutes fragment track and starts transport', () => {
+      const fragment = makeFragment(0, 2, 'B'); // track 5
+
+      sendCue(router, state, {
+        type: 'slot_activate', slotIndex: 0, fragment,
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
+    });
+  });
+
+  describe('slot_deactivate', () => {
+    test('mutes the track that was activated for this slot', () => {
+      const fragment = makeFragment(0, 2, 'B'); // track 5
+
+      // Activate then deactivate
+      sendCue(router, state, {
+        type: 'slot_activate', slotIndex: 3, fragment,
+      });
+      mockSend.mockClear();
+
+      sendCue(router, state, {
+        type: 'slot_deactivate', slotIndex: 3,
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 1);
     });
 
-    describe('play_timeline cue', () => {
-      test('unmutes path tracks without firing clips', () => {
-        const cue: AudioCue = {
-          type: 'play_timeline',
-          path: ['row0-opt0', 'row1-opt1'],
-        };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-
-        // Should unmute path tracks
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
-
-        // Should NOT fire clips
-        expect(mockSend).not.toHaveBeenCalledWith('/live/clip/fire', expect.anything(), expect.anything());
+    test('does nothing if slot was never activated', () => {
+      sendCue(router, state, {
+        type: 'slot_deactivate', slotIndex: 5,
       });
 
-      test('mutes previously unmuted tracks before unmuting path', () => {
-        // Set up: play an option to get a track unmuted
-        const setupCue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: setupCue }]);
-        mockSend.mockClear();
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
 
-        // Play timeline with different option
-        const cue: AudioCue = {
-          type: 'play_timeline',
-          path: ['row0-opt1', 'row1-opt2'],
-        };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
+  // --------------------------------------------------------------------------
+  // steward_param
+  // --------------------------------------------------------------------------
 
-        // Should mute track 0 (was unmuted from setup)
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        // Should unmute path tracks
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0);
+  describe('steward_param', () => {
+    test('sends device parameter value to correct Ableton mapping', () => {
+      const fragment = makeFragment(1, 0, 'A'); // track 14
+
+      // Set up finale state with an active slot
+      state.finaleState = {
+        chapterAssignments: new Map(),
+        queue: [],
+        activeSlots: Array(7).fill(null),
+        trianglePositions: new Map(),
+        centroid: { wAmbition: 1 / 3, wLove: 1 / 3, wAvoidance: 1 / 3 },
+        rotationActive: false,
+        rotationRate: 2,
+        frozen: false,
+        stewardshipLog: [],
+        triangleActive: true,
+      };
+      state.finaleState.activeSlots[2] = {
+        slotIndex: 2,
+        fragment,
+        stewardUserId: 'user-1',
+        parameterValue: 0.5,
+        activatedAtBeat: 0,
+        energyLevel: 0,
+      };
+
+      sendCue(router, state, {
+        type: 'steward_param', slotIndex: 2, value: 0.7,
       });
+
+      expect(mockSend).toHaveBeenCalledWith(
+        '/live/device/set/parameter/value',
+        14, // trackIndex from abletonMapping
+        0,  // deviceIndex
+        1,  // paramIndex
+        0.7,
+      );
     });
 
-    describe('shared behavior (identical to session mode)', () => {
-      test('stop_option mutes the track', () => {
-        const cue: AudioCue = { type: 'stop_option', rowIndex: 0, optionId: 'row0-opt1' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
+    test('does nothing if slot is empty', () => {
+      state.finaleState = {
+        chapterAssignments: new Map(),
+        queue: [],
+        activeSlots: Array(7).fill(null),
+        trianglePositions: new Map(),
+        centroid: { wAmbition: 1 / 3, wLove: 1 / 3, wAvoidance: 1 / 3 },
+        rotationActive: false,
+        rotationRate: 2,
+        frozen: false,
+        stewardshipLog: [],
+        triangleActive: true,
+      };
 
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-        expect(mockSend).toHaveBeenCalledTimes(1);
+      sendCue(router, state, {
+        type: 'steward_param', slotIndex: 2, value: 0.7,
       });
 
-      test('commit_layer unmutes winner and mutes others', () => {
-        const cue: AudioCue = { type: 'commit_layer', rowIndex: 0, optionId: 'row0-opt2' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
 
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 1);
-        expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
-        expect(mockSend).toHaveBeenCalledTimes(4);
-      });
+  // --------------------------------------------------------------------------
+  // transport
+  // --------------------------------------------------------------------------
 
-      test('pause sends stop_playing', () => {
-        router.handleStateChange(mockState, [{ type: 'SHOW_PHASE_CHANGED', phase: 'paused' }]);
+  describe('transport', () => {
+    test('play sends start_playing', () => {
+      sendCue(router, state, { type: 'transport', action: 'play' });
 
-        expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
-      });
-
-      test('resume from pause sends continue_playing', () => {
-        router.handleStateChange(mockState, [{ type: 'SHOW_PHASE_CHANGED', phase: 'paused' }]);
-        mockSend.mockClear();
-
-        router.handleStateChange(mockState, [{ type: 'SHOW_PHASE_CHANGED', phase: 'running' }]);
-
-        expect(mockSend).toHaveBeenCalledWith('/live/song/continue_playing');
-      });
+      expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
     });
 
-    describe('SHOW_RESET resets transportStarted', () => {
-      test('transport is restarted after show reset', () => {
-        // Start transport via play_option
-        const playCue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: playCue }]);
-        expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
-        mockSend.mockClear();
+    test('stop sends stop_playing', () => {
+      sendCue(router, state, { type: 'transport', action: 'stop' });
 
-        // Reset show
-        router.handleStateChange(mockState, [{ type: 'SHOW_RESET', preservedUsers: false }]);
-        mockSend.mockClear();
-
-        // Play again - should restart transport
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue: playCue }]);
-        expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
-      });
+      expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
     });
+  });
 
-    describe('dispose', () => {
-      test('dispose resets transportStarted so transport restarts on next use', () => {
-        // Start transport
-        const cue: AudioCue = { type: 'play_option', rowIndex: 0, optionId: 'row0-opt0' };
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-        mockSend.mockClear();
+  // --------------------------------------------------------------------------
+  // panic
+  // --------------------------------------------------------------------------
 
-        // Dispose and recreate
-        router.dispose();
-        router = createAudioRouter(oscBridge, 'arrangement');
+  describe('panic', () => {
+    test('mutes all 42 tracks', () => {
+      sendCue(router, state, { type: 'panic' });
 
-        // Play again - should start transport fresh
-        router.handleStateChange(mockState, [{ type: 'AUDIO_CUE', cue }]);
-        expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
+      const muteCalls = mockSend.mock.calls.filter(
+        (c: any[]) => c[0] === '/live/track/set/mute' && c[2] === 1,
+      );
+      expect(muteCalls.length).toBe(42); // 3 * 7 * 2
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Non-AudioCue events
+  // --------------------------------------------------------------------------
+
+  describe('SHOW_RESET', () => {
+    test('mutes all tracks, stops transport, clears state', () => {
+      // Set up some state
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
       });
+      mockSend.mockClear();
+
+      router.handleStateChange(state, [
+        { type: 'SHOW_RESET', preservedUsers: false },
+      ]);
+
+      // All 42 tracks muted
+      const muteCalls = mockSend.mock.calls.filter(
+        (c: any[]) => c[0] === '/live/track/set/mute' && c[2] === 1,
+      );
+      expect(muteCalls.length).toBe(42);
+
+      // Transport stopped
+      expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
+    });
+  });
+
+  describe('PAUSED', () => {
+    test('stops transport', () => {
+      router.handleStateChange(state, [{ type: 'PAUSED' }]);
+
+      expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
+    });
+  });
+
+  describe('RESUMED', () => {
+    test('continues transport', () => {
+      router.handleStateChange(state, [{ type: 'RESUMED' }]);
+
+      expect(mockSend).toHaveBeenCalledWith('/live/song/continue_playing');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Idempotency
+  // --------------------------------------------------------------------------
+
+  describe('idempotency', () => {
+    test('unmuting an already-unmuted track does not send duplicate OSC', () => {
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+      mockSend.mockClear();
+
+      // Try to unmute track 0 again via another audition_start
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+      });
+
+      // No unmute call for track 0 (already unmuted)
+      expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
     });
   });
 });

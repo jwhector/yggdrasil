@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## 2026-02-27 — Phase 4: OSC Bridge & Audio Router
+
+**Context:** Migration Phase 4 — rewrite the Ableton integration for the new track layout (3 attempts × 7 layers × 2 options = 42 tracks), new AudioCue types, and new timing phases.
+
+**Rewritten:**
+- `server/audio-router.ts` — Full rewrite. Maps all 9 AudioCue variants to AbletonOSC messages. Track index formula: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`. Arrangement mode only (mute/unmute, no clip firing). Collapse gesture uses return track enable + delayed mute. Finale slot activate/deactivate uses internal slot→track mapping. Steward param sends `/live/device/set/parameter/value`. Handles SHOW_RESET, PAUSED, RESUMED.
+- `server/timing.ts` — Full rewrite. Schedules `auditionDurationMs` → OPEN_VOTING and `votingWindowMs` → CLOSE_VOTING on layer phase changes. Finale rotation via OSC beat tracking (fires PERFORM_ROTATION_TICK every rotationBars × 4 beats) or JS interval fallback. Version-check safety preserved.
+- `server/__tests__/audio-router.test.ts` — 28 tests covering all AudioCue types, track index formula, stacking behavior, collapse timing, slot mapping, idempotency, and lifecycle events.
+- `server/__tests__/timing.test.ts` — 14 tests covering audition/voting timers, version-check safety, pause behavior, rotation (both OSC and fallback modes), and lifecycle.
+
+**Updated:**
+- `conductor/types.ts` — Added `PERFORM_ROTATION_TICK` command variant (timing engine → conductor rotation pipeline)
+- `conductor/conductor.ts` — Added PERFORM_ROTATION_TICK handler (routes to `performRotationTick()`)
+- `server/index.ts` — Loads `config/ableton-layout.json`, passes layout config to audio router, wires `/meter/slot/<N>` OSC handlers to metering service
+- `server/tools/osc-mock-ableton.ts` — Added `/live/return/set/mute` and `/live/device/set/parameter/value` handlers. Added mock meter data generation (~20 Hz when transport playing). Updated num_tracks to 42.
+
+**New files:**
+- `config/ableton-layout.json` — Track mapping defaults (maxLayersPerAttempt: 7, attemptCount: 3, collapseReturnTrackIndex: 0, finaleSlotCount: 7)
+
+**No changes needed:**
+- `server/osc.ts` — Clean I/O layer, fully reusable as-is
+- `server/metering.ts` — Phase 3 stub was complete; only OSC wiring added in server/index.ts
+
+**Key behaviors:**
+- Audition: starts transport on first audition, mutes other option for same layer, unmutes active option
+- Lock-in: unmutes winner, mutes loser; previously locked layers stay unmuted (stacking)
+- Collapse: enables return track effects immediately, schedules cleanup (mute all attempt tracks + re-mute return) after collapseAnimationMs
+- Finale slots: tracks internal slotIndex→trackIndex mapping for deactivation (avoids race condition with conductor state)
+- Steward param: looks up AbletonParamRef from state, sends raw value (smoothing handled by Ableton device)
+- Panic: mutes all 42 tracks
+- Rotation timing: OSC mode counts beats from AbletonOSC; fallback mode uses JS interval based on BPM
+
+**Test results:** 198 tests pass across 9 suites. `tsc --noEmit` clean for server/ and conductor/.
+
+---
+
 ## 2026-02-27 — Phase 3: Server Layer — Socket.IO & Persistence
 
 **Context:** Migration Phase 3 — rewire the server to use the new Conductor. Update persistence, socket events, state sync, and backup. Add metering stub.

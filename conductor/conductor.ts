@@ -155,6 +155,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     case 'TOGGLE_TRIANGLE':
       return handleToggleTriangle(state, command.active);
 
+    // Rotation
+    case 'PERFORM_ROTATION_TICK':
+      return performRotationTick(state, command.beat);
+
     // Audio
     case 'AUDIO_TRANSPORT':
       return [{ type: 'AUDIO_CUE', cue: { type: 'transport', action: command.action } }];

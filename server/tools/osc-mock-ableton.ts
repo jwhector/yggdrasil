@@ -55,20 +55,24 @@ function log(category: string, color: string, message: string, ...args: any[]) {
 
 interface MockState {
   beatInterval: NodeJS.Timeout | null;
+  meterInterval: NodeJS.Timeout | null;
   currentBeat: number;
   transportPlaying: boolean;
   beatListenersActive: boolean;
   firedClips: Set<string>;      // "trackIndex:clipIndex"
   mutedTracks: Set<number>;      // Track indices that are muted
+  returnTracksMuted: Set<number>; // Return track indices that are muted
 }
 
 const mockState: MockState = {
   beatInterval: null,
+  meterInterval: null,
   currentBeat: 0,
   transportPlaying: false,
   beatListenersActive: false,
   firedClips: new Set(),
   mutedTracks: new Set(),
+  returnTracksMuted: new Set(),
 };
 
 // ============================================================================
@@ -136,6 +140,35 @@ function stopBeatListener() {
 }
 
 /**
+ * Start mock meter data generation (~20 Hz per slot)
+ */
+function startMeterGeneration() {
+  if (mockState.meterInterval) return;
+
+  mockState.meterInterval = setInterval(() => {
+    if (!mockState.transportPlaying) return;
+
+    for (let i = 0; i < 7; i++) {
+      const level = Math.random() * 0.6 + 0.1;  // Range 0.1–0.7
+      sendToServer(`/meter/slot/${i}`, level);
+    }
+  }, 50);  // ~20 Hz
+
+  log('MOCK', colors.magenta, 'Meter generation started');
+}
+
+/**
+ * Stop mock meter data generation
+ */
+function stopMeterGeneration() {
+  if (mockState.meterInterval) {
+    clearInterval(mockState.meterInterval);
+    mockState.meterInterval = null;
+  }
+  log('MOCK', colors.magenta, 'Meter generation stopped');
+}
+
+/**
  * Start transport (begin sending beats)
  */
 function startTransport() {
@@ -143,6 +176,7 @@ function startTransport() {
     mockState.transportPlaying = true;
     mockState.currentBeat = 0;
     log('MOCK', colors.blue, 'Transport started');
+    startMeterGeneration();
   }
 }
 
@@ -153,6 +187,7 @@ function stopTransport() {
   if (mockState.transportPlaying) {
     mockState.transportPlaying = false;
     log('MOCK', colors.blue, 'Transport stopped');
+    stopMeterGeneration();
   }
 }
 
@@ -215,7 +250,7 @@ function handleMessage(address: string, args: any[]) {
 
     case '/live/song/get/num_tracks': {
       log('RECV', colors.cyan, '← /live/song/get/num_tracks');
-      sendToServer('/live/song/get/num_tracks', 32);
+      sendToServer('/live/song/get/num_tracks', 42);  // 3 attempts * 7 layers * 2 options
       break;
     }
 
@@ -257,6 +292,29 @@ function handleMessage(address: string, args: any[]) {
       log('RECV', colors.cyan, '← /live/track/get/mute', `track=${trackIndex}`);
       const mute = mockState.mutedTracks.has(trackIndex) ? 1 : 0;
       sendToServer('/live/track/get/mute', trackIndex, mute);
+      break;
+    }
+
+    case '/live/return/set/mute': {
+      const [returnIndex, mute] = args;
+      const muteState = mute === 1 ? 'muted' : 'unmuted';
+      log('RECV', colors.cyan, '← /live/return/set/mute', `return=${returnIndex} ${muteState}`);
+
+      if (mute === 1) {
+        mockState.returnTracksMuted.add(returnIndex);
+      } else {
+        mockState.returnTracksMuted.delete(returnIndex);
+      }
+
+      log('MOCK', colors.yellow, `  Return track ${returnIndex} ${muteState}`);
+      break;
+    }
+
+    case '/live/device/set/parameter/value': {
+      const [trackIndex, deviceIndex, paramIndex, value] = args;
+      log('RECV', colors.cyan, '← /live/device/set/parameter/value',
+        `track=${trackIndex} device=${deviceIndex} param=${paramIndex} value=${value}`);
+      log('MOCK', colors.yellow, `  Param set: track ${trackIndex}, device ${deviceIndex}, param ${paramIndex} = ${value}`);
       break;
     }
 
@@ -321,6 +379,7 @@ function stop() {
   log('INFO', colors.yellow, 'Shutting down...');
 
   stopBeatListener();
+  stopMeterGeneration();
 
   if (receiveSocket) {
     receiveSocket.close();

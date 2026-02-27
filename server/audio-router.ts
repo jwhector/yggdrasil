@@ -1,5 +1,5 @@
 /**
- * Audio Router - Maps Conductor Events to AbletonOSC Messages
+ * Audio Router — Maps Conductor AUDIO_CUE Events to AbletonOSC Messages
  *
  * Translates AUDIO_CUE events from the conductor into OSC messages for Ableton Live
  * using the AbletonOSC plugin (ideoforms).
@@ -8,271 +8,316 @@
  * The timing engine handles scheduling but does NOT send audio OSC messages.
  * The audio router handles ALL outbound audio OSC messages.
  *
- * Track Layout (shared by both modes):
- * - optionsPerRow * rowCount tracks total (optionsPerRow per row)
- * - Track index = rowIndex * optionsPerRow + optionIndex
- * - Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), etc.
- * - Audition via mute/unmute (smooth transitions, no stop/start glitches)
- * - Layering: each row has its own tracks, committed clips keep playing
+ * Track Layout (arrangement mode — all clips pre-laid out, mute/unmute only):
+ *   trackIndex = attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset
+ *   - optionOffset: 0 for Option A, 1 for Option B
+ *   - With maxLayersPerAttempt=7: 42 tracks total (0–41)
+ *   - Example: Attempt 0, Layer 2, Option B = 0*14 + 2*2 + 1 = track 5
  *
- * Playback Modes (mutually exclusive, set via ShowConfig.playbackMode):
- * - Session View ('session', default): Fires clips at slot 0 (scene 0) per row.
- *   Tracks which clips have been fired via firedTracks set.
- *   Ableton ignores arrangement view when session clips are fired.
- * - Arrangement View ('arrangement'): Uses global transport (start/stop).
- *   No clips are ever fired. Tracks whether transport has been started.
+ * Collapse gesture uses a master return track with effects (distortion, filter sweep,
+ * reverb tail). All song-building tracks route through this return.
+ *
+ * Finale fragments reference the same Ableton tracks used during song-building.
+ * Stewardship parameters map to Ableton device parameters via SafeParameter.abletonMapping.
+ * Smoothing is handled by the Ableton device configuration, not the server.
  */
 
 import type { OSCBridge } from './osc';
-import type { ShowState, ConductorEvent, ShowPhase, PlaybackMode } from '../conductor/types';
+import type {
+  ShowState,
+  ConductorEvent,
+  AudioCue,
+} from '../conductor/types';
+
+// ============================================================================
+// Layout Configuration
+// ============================================================================
+
+export interface AbletonLayoutConfig {
+  maxLayersPerAttempt: number;      // Default: 7
+  attemptCount: number;              // Default: 3
+  collapseReturnTrackIndex: number;  // Return track index for collapse effects
+  finaleSlotCount: number;           // Default: 7
+}
+
+const DEFAULT_LAYOUT: AbletonLayoutConfig = {
+  maxLayersPerAttempt: 7,
+  attemptCount: 3,
+  collapseReturnTrackIndex: 0,
+  finaleSlotCount: 7,
+};
+
+// ============================================================================
+// Track Index Computation
+// ============================================================================
 
 /**
- * Audio router interface
+ * Compute Ableton track index from attempt, layer, and option.
+ *
+ * Formula: attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset
  */
+export function computeTrackIndex(
+  attemptIndex: number,
+  layerIndex: number,
+  option: 'A' | 'B',
+  maxLayersPerAttempt: number,
+): number {
+  const optionOffset = option === 'A' ? 0 : 1;
+  return attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset;
+}
+
+// ============================================================================
+// Audio Router Interface
+// ============================================================================
+
 export interface AudioRouter {
-  /** Process state change events, routing audio cues to OSC */
+  /** Process conductor events, routing audio cues to OSC */
   handleStateChange(state: ShowState, events: ConductorEvent[]): void;
-  /** Dispose of resources */
+  /** Clean up resources */
   dispose(): void;
 }
 
-/**
- * Internal state tracking for the audio router
- */
+// ============================================================================
+// Internal State
+// ============================================================================
+
 interface AudioRouterState {
-  lastKnownPhase: ShowPhase | null;
-  /** Set of track indices with clips currently fired — session mode only */
-  firedTracks: Set<number>;
-  /** Set of track indices currently unmuted (audible) */
+  /** Track indices currently unmuted (audible) */
   unmutedTracks: Set<number>;
-  /** Whether the global transport has been started — arrangement mode only */
+  /** Whether the global transport has been started */
   transportStarted: boolean;
+  /** Pending collapse cleanup timers, keyed by attemptIndex */
+  collapseTimers: Map<number, NodeJS.Timeout>;
+  /** Maps finale slotIndex → trackIndex for deactivation lookup */
+  activatedSlotTracks: Map<number, number>;
 }
+
+// ============================================================================
+// Factory
+// ============================================================================
 
 /**
- * Calculate Ableton track index from row and option indices.
- * Layout: optionsPerRow * rowCount tracks, optionsPerRow per row, grouped sequentially.
- * Row 0: tracks 0-(optionsPerRow-1), Row 1: tracks optionsPerRow-(optionsPerRow*2-1), etc.
+ * Create an audio router that translates conductor events to AbletonOSC messages.
  */
-function trackIndex(optionsPerRow: number, rowIndex: number, optionIndex: number): number {
-  return rowIndex * optionsPerRow + optionIndex;
-}
+export function createAudioRouter(
+  oscBridge: OSCBridge,
+  config?: Partial<AbletonLayoutConfig>,
+): AudioRouter {
+  const layout: AbletonLayoutConfig = { ...DEFAULT_LAYOUT, ...config };
 
-function stopAllTracks(oscBridge: OSCBridge): void {
-  function onNumTracks(numTracks: number): void {
-    for (let i = 0; i < numTracks; i++) {
-      oscBridge.send('/live/track/set/mute', i, 1);
-    }
-  }
-  oscBridge.once('/live/song/get/num_tracks', onNumTracks);
-  oscBridge.send('/live/song/get/num_tracks');
-}
-
-/**
- * Create an audio router that translates conductor events to AbletonOSC messages
- *
- * @param oscBridge - OSC bridge for sending messages to Ableton
- * @param playbackMode - 'session' for clip-based (default) or 'arrangement' for transport-based
- * @returns AudioRouter instance
- */
-export function createAudioRouter(oscBridge: OSCBridge, playbackMode: PlaybackMode = 'session'): AudioRouter {
-  // Internal state tracking
   const routerState: AudioRouterState = {
-    lastKnownPhase: null,
-    firedTracks: new Set<number>(),
-    unmutedTracks: new Set<number>(),
+    unmutedTracks: new Set(),
     transportStarted: false,
+    collapseTimers: new Map(),
+    activatedSlotTracks: new Map(),
   };
 
-  /**
-   * Mute all currently-unmuted tracks for a given row
-   */
-  function muteRowTracks(state: ShowState, rowIndex: number): void {
-    for (let i = 0; i < state.config.optionsPerRow; i++) {
-      const trk = trackIndex(state.config.optionsPerRow, rowIndex, i);
-      if (routerState.unmutedTracks.has(trk)) {
-        oscBridge.send('/live/track/set/mute', trk, 1);
-        routerState.unmutedTracks.delete(trk);
-      }
+  // --------------------------------------------------------------------------
+  // Helpers
+  // --------------------------------------------------------------------------
+
+  function ensureTransportStarted(): void {
+    if (!routerState.transportStarted) {
+      oscBridge.send('/live/song/start_playing');
+      routerState.transportStarted = true;
     }
   }
 
-  /**
-   * Handle state changes - called after every command is processed
-   */
+  function muteTrack(trackIndex: number): void {
+    if (routerState.unmutedTracks.has(trackIndex)) {
+      oscBridge.send('/live/track/set/mute', trackIndex, 1);
+      routerState.unmutedTracks.delete(trackIndex);
+    }
+  }
+
+  function unmuteTrack(trackIndex: number): void {
+    if (!routerState.unmutedTracks.has(trackIndex)) {
+      oscBridge.send('/live/track/set/mute', trackIndex, 0);
+      routerState.unmutedTracks.add(trackIndex);
+    }
+  }
+
+  function muteAllTracks(): void {
+    const totalTracks = layout.attemptCount * layout.maxLayersPerAttempt * 2;
+    for (let i = 0; i < totalTracks; i++) {
+      oscBridge.send('/live/track/set/mute', i, 1);
+    }
+    routerState.unmutedTracks.clear();
+    routerState.activatedSlotTracks.clear();
+  }
+
+  function clearCollapseTimers(): void {
+    for (const timer of routerState.collapseTimers.values()) {
+      clearTimeout(timer);
+    }
+    routerState.collapseTimers.clear();
+  }
+
+  // --------------------------------------------------------------------------
+  // AudioCue Handlers
+  // --------------------------------------------------------------------------
+
+  function handleAuditionStart(cue: Extract<AudioCue, { type: 'audition_start' }>): void {
+    ensureTransportStarted();
+
+    // Mute the other option for the same layer (in case it was previously unmuted)
+    const otherOption: 'A' | 'B' = cue.option === 'A' ? 'B' : 'A';
+    const otherTrack = computeTrackIndex(cue.attemptIndex, cue.layerIndex, otherOption, layout.maxLayersPerAttempt);
+    muteTrack(otherTrack);
+
+    // Unmute this option
+    const track = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.option, layout.maxLayersPerAttempt);
+    unmuteTrack(track);
+  }
+
+  function handleAuditionStop(cue: Extract<AudioCue, { type: 'audition_stop' }>): void {
+    const track = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.option, layout.maxLayersPerAttempt);
+    muteTrack(track);
+  }
+
+  function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
+    const winnerTrack = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.winner, layout.maxLayersPerAttempt);
+    const loser: 'A' | 'B' = cue.winner === 'A' ? 'B' : 'A';
+    const loserTrack = computeTrackIndex(cue.attemptIndex, cue.layerIndex, loser, layout.maxLayersPerAttempt);
+
+    unmuteTrack(winnerTrack);
+    muteTrack(loserTrack);
+  }
+
+  function handleCollapseGesture(
+    cue: Extract<AudioCue, { type: 'collapse_gesture' }>,
+    state: ShowState,
+  ): void {
+    // Enable return track effects (unmute return)
+    oscBridge.send('/live/return/set/mute', layout.collapseReturnTrackIndex, 0);
+
+    // Schedule cleanup: mute all attempt tracks + re-mute return after animation
+    const collapseMs = state.config.timing.collapseAnimationMs;
+    const timer = setTimeout(() => {
+      const baseTrack = cue.attemptIndex * (layout.maxLayersPerAttempt * 2);
+      const trackCount = layout.maxLayersPerAttempt * 2;
+      for (let i = 0; i < trackCount; i++) {
+        muteTrack(baseTrack + i);
+      }
+      // Re-mute return track effects
+      oscBridge.send('/live/return/set/mute', layout.collapseReturnTrackIndex, 1);
+      routerState.collapseTimers.delete(cue.attemptIndex);
+    }, collapseMs);
+
+    routerState.collapseTimers.set(cue.attemptIndex, timer);
+  }
+
+  function handleSlotActivate(cue: Extract<AudioCue, { type: 'slot_activate' }>): void {
+    ensureTransportStarted();
+    const trackIndex = cue.fragment.audioRef.trackIndex;
+    unmuteTrack(trackIndex);
+    routerState.activatedSlotTracks.set(cue.slotIndex, trackIndex);
+  }
+
+  function handleSlotDeactivate(cue: Extract<AudioCue, { type: 'slot_deactivate' }>): void {
+    const trackIndex = routerState.activatedSlotTracks.get(cue.slotIndex);
+    if (trackIndex !== undefined) {
+      muteTrack(trackIndex);
+      routerState.activatedSlotTracks.delete(cue.slotIndex);
+    }
+  }
+
+  function handleStewardParam(
+    cue: Extract<AudioCue, { type: 'steward_param' }>,
+    state: ShowState,
+  ): void {
+    const slot = state.finaleState?.activeSlots[cue.slotIndex];
+    if (!slot) return;
+
+    const mapping = slot.fragment.safeParameter.abletonMapping;
+    oscBridge.send(
+      '/live/device/set/parameter/value',
+      mapping.trackIndex,
+      mapping.deviceIndex,
+      mapping.paramIndex,
+      cue.value,
+    );
+  }
+
+  function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
+    if (cue.action === 'play') {
+      oscBridge.send('/live/song/start_playing');
+      routerState.transportStarted = true;
+    } else {
+      oscBridge.send('/live/song/stop_playing');
+      routerState.transportStarted = false;
+    }
+  }
+
+  function handlePanic(): void {
+    muteAllTracks();
+  }
+
+  // --------------------------------------------------------------------------
+  // Main Event Loop
+  // --------------------------------------------------------------------------
+
   function handleStateChange(state: ShowState, events: ConductorEvent[]): void {
     for (const event of events) {
-      // Handle audio cues
       if (event.type === 'AUDIO_CUE') {
         const cue = event.cue;
-
         switch (cue.type) {
-          case 'play_option': {
-            if (cue.rowIndex === undefined || !cue.optionId) break;
-
-            const row = state.rows[cue.rowIndex];
-            const optionIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-            const newTrack = trackIndex(state.config.optionsPerRow, cue.rowIndex, optionIdx);
-
-            if (playbackMode === 'session') {
-              // Session View: fire clips on first audition for this row, then mute/unmute
-              const rowBaseTrk = cue.rowIndex * state.config.optionsPerRow;
-              const rowClipsFired = routerState.firedTracks.has(rowBaseTrk);
-
-              if (!rowClipsFired) {
-                // Unmute the active option's track
-                oscBridge.send('/live/track/set/mute', newTrack, 0);
-                routerState.unmutedTracks.add(newTrack);
-                // First audition for this row: fire all optionsPerRow clips
-                for (let i = 0; i < state.config.optionsPerRow; i++) {
-                  const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
-                  oscBridge.send('/live/clip/fire', trk, 0);
-                  routerState.firedTracks.add(trk);
-                }
-              } else {
-                // Mute previously unmuted tracks for this row, then unmute new
-                muteRowTracks(state, cue.rowIndex);
-                oscBridge.send('/live/track/set/mute', newTrack, 0);
-                routerState.unmutedTracks.add(newTrack);
-              }
-            } else {
-              // Arrangement View: ensure transport is playing, then mute/unmute
-              if (!routerState.transportStarted) {
-                routerState.transportStarted = true;
-                oscBridge.send('/live/song/start_playing');
-              }
-              // Mute previously unmuted tracks for this row, then unmute new
-              muteRowTracks(state, cue.rowIndex);
-              oscBridge.send('/live/track/set/mute', newTrack, 0);
-              routerState.unmutedTracks.add(newTrack);
-            }
-
+          case 'audition_start':
+            handleAuditionStart(cue);
             break;
-          }
-
-          case 'stop_option': {
-            if (cue.rowIndex === undefined || !cue.optionId) break;
-
-            const row = state.rows[cue.rowIndex];
-            const optionIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-            const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, optionIdx);
-
-            // Mute the track
-            oscBridge.send('/live/track/set/mute', trk, 1);
-            routerState.unmutedTracks.delete(trk);
+          case 'audition_stop':
+            handleAuditionStop(cue);
             break;
-          }
-
-          case 'commit_layer': {
-            if (cue.rowIndex === undefined || !cue.optionId) break;
-
-            const row = state.rows[cue.rowIndex];
-            const winnerIdx = row?.options.findIndex(o => o.id === cue.optionId) ?? 0;
-
-            // Ensure winner is unmuted, all others for this row are muted
-            for (let i = 0; i < state.config.optionsPerRow; i++) {
-              const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
-              if (i === winnerIdx) {
-                oscBridge.send('/live/track/set/mute', trk, 0); // Unmute winner
-                routerState.unmutedTracks.add(trk);
-              } else {
-                oscBridge.send('/live/track/set/mute', trk, 1); // Mute losers
-                routerState.unmutedTracks.delete(trk);
-              }
-            }
+          case 'lock_in':
+            handleLockIn(cue);
             break;
-          }
-
-          case 'uncommit_layer': {
-            if (cue.rowIndex === undefined) break;
-
-            // Mute all option tracks for the row
-            for (let i = 0; i < state.config.optionsPerRow; i++) {
-              const trk = trackIndex(state.config.optionsPerRow, cue.rowIndex, i);
-              oscBridge.send('/live/track/set/mute', trk, 1);
-              routerState.unmutedTracks.delete(trk);
-
-              if (playbackMode === 'session') {
-                // Session: also stop clips and clear fired state
-                oscBridge.send('/live/clip/stop', trk, 0);
-                routerState.firedTracks.delete(trk);
-              }
-            }
+          case 'collapse_gesture':
+            handleCollapseGesture(cue, state);
             break;
-          }
-
-          case 'play_timeline': {
-            if (!cue.path || cue.path.length === 0) break;
-
-            // Mute everything first
-            for (const trk of routerState.unmutedTracks) {
-              oscBridge.send('/live/track/set/mute', trk, 1);
-            }
-            routerState.unmutedTracks.clear();
-
-            // Unmute tracks for each option in the path
-            for (let rowIdx = 0; rowIdx < cue.path.length; rowIdx++) {
-              const row = state.rows[rowIdx];
-              if (!row) continue;
-              const optionIdx = row.options.findIndex(o => o.id === cue.path![rowIdx]);
-              if (optionIdx < 0) continue;
-              const trk = trackIndex(state.config.optionsPerRow, rowIdx, optionIdx);
-
-              if (playbackMode === 'session') {
-                // Session: ensure clip is fired
-                if (!routerState.firedTracks.has(trk)) {
-                  oscBridge.send('/live/clip/fire', trk, 0);
-                  routerState.firedTracks.add(trk);
-                }
-              }
-              // Arrangement: transport should already be running; just unmute
-
-              // Unmute the track
-              oscBridge.send('/live/track/set/mute', trk, 0);
-              routerState.unmutedTracks.add(trk);
-            }
+          case 'slot_activate':
+            handleSlotActivate(cue);
             break;
-          }
+          case 'slot_deactivate':
+            handleSlotDeactivate(cue);
+            break;
+          case 'steward_param':
+            handleStewardParam(cue, state);
+            break;
+          case 'transport':
+            handleTransport(cue);
+            break;
+          case 'panic':
+            handlePanic();
+            break;
         }
-      }
-
-      if (event.type === 'AUDITION_OPTION_CHANGED' || event.type === 'ROW_PHASE_CHANGED') {
-        oscBridge.send('/live/song/set/current_song_time', 0);
       }
 
       if (event.type === 'SHOW_RESET') {
-        routerState.firedTracks.clear();
-        routerState.unmutedTracks.clear();
-        routerState.transportStarted = false;
-        stopAllTracks(oscBridge);
+        muteAllTracks();
         oscBridge.send('/live/song/stop_playing');
-        oscBridge.send('/live/song/set/current_song_time', 0);
+        routerState.transportStarted = false;
+        clearCollapseTimers();
       }
 
-      // Handle pause/resume
-      if (event.type === 'SHOW_PHASE_CHANGED') {
-        const phaseEvent = event;
+      if (event.type === 'PAUSED') {
+        oscBridge.send('/live/song/stop_playing');
+      }
 
-        if (phaseEvent.phase === 'paused') {
-          oscBridge.send('/live/song/stop_playing');
-        } else if (routerState.lastKnownPhase === 'paused') {
-          // Resuming from pause (previous phase was paused, current phase is not)
-          oscBridge.send('/live/song/continue_playing');
-        }
-
-        routerState.lastKnownPhase = phaseEvent.phase;
+      if (event.type === 'RESUMED') {
+        oscBridge.send('/live/song/continue_playing');
       }
     }
   }
 
-  /**
-   * Clean up resources
-   */
+  // --------------------------------------------------------------------------
+  // Lifecycle
+  // --------------------------------------------------------------------------
+
   function dispose(): void {
-    routerState.lastKnownPhase = null;
-    routerState.firedTracks.clear();
     routerState.unmutedTracks.clear();
+    routerState.activatedSlotTracks.clear();
     routerState.transportStarted = false;
+    clearCollapseTimers();
   }
 
   return {

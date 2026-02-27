@@ -139,28 +139,31 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 ## Phase 4: OSC Bridge & Audio Router
 **Goal:** Update Ableton integration for new track layout and commands.
 
-- [ ] **4a.** Update `server/audio-router.ts`:
-  - New track index formula: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`
-  - Map AUDIO_CUE events to OSC messages:
-    - Audition: unmute option track, mute other
-    - Lock-in: keep chosen unmuted, mute unchosen
-    - Collapse: enable return track effects, then mute all attempt tracks
-    - Finale slot activate/deactivate: mute/unmute fragment tracks
-    - Stewardship parameter: `/live/device/set/parameter/value`
-- [ ] **4b.** Create `server/metering.ts`:
-  - Listen for `/meter/slot/<N>` OSC messages
-  - Aggregate per-slot energy levels
-  - Broadcast to projector via dedicated socket event at ~10 Hz
-- [ ] **4c.** Update `server/osc.ts` if needed (should mostly be reusable).
-- [ ] **4d.** Update `server/timing.ts`:
-  - Quantized timing for audition, voting window, resolve animation, collapse animation
-  - Beat subscription for musical timing
-  - Version-check safety (same pattern as before)
-- [ ] **4e.** Create/update `config/ableton-layout.json` with track mapping config.
-- [ ] **4f.** Test with `osc-mock-ableton.ts` (update mock for new messages).
-- [ ] **4g.** Update CHANGELOG.md.
+- [x] **4a.** Rewrite `server/audio-router.ts`:
+  - Full rewrite. New track index formula: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`
+  - Maps all 9 `AudioCue` types to OSC: audition_start/stop, lock_in, collapse_gesture (return track enable + delayed mute), slot_activate/deactivate (internal slot→track mapping), steward_param (`/live/device/set/parameter/value`), transport, panic
+  - Arrangement mode only (no session/clip-firing mode). Idempotent mute/unmute helpers.
+  - Handles SHOW_RESET, PAUSED, RESUMED events
+  - Exported `computeTrackIndex()` and `AbletonLayoutConfig` type
+- [x] **4b.** Wire `server/metering.ts` to OSC:
+  - Stub was already complete from Phase 3
+  - Wired in `server/index.ts`: registers `/meter/slot/<N>` OSC handlers for 7 slots → `meteringService.updateSlotLevel()`
+- [x] **4c.** `server/osc.ts` — no changes needed. Clean I/O layer, fully reusable.
+- [x] **4d.** Rewrite `server/timing.ts`:
+  - Full rewrite. Handles `LAYER_PHASE_CHANGED` events: `auditioning` → timer → `OPEN_VOTING`, `voting` → timer → `CLOSE_VOTING`
+  - Finale rotation: OSC beat tracking fires `PERFORM_ROTATION_TICK` every `rotationBars * 4` beats. Fallback: JS interval.
+  - Added `PERFORM_ROTATION_TICK` command to `conductor/types.ts` and handler in `conductor/conductor.ts`
+  - Kept: version-check safety, hybrid OSC/JS-timer approach, factory pattern, lifecycle
+  - Removed: Row, RowPhase, old phases (revealing, coup_window), old TimingConfig fields
+- [x] **4e.** Created `config/ableton-layout.json` with track mapping defaults (maxLayersPerAttempt: 7, attemptCount: 3, collapseReturnTrackIndex: 0, finaleSlotCount: 7).
+- [x] **4f.** Updated `server/tools/osc-mock-ableton.ts`:
+  - Added handlers for `/live/return/set/mute` and `/live/device/set/parameter/value`
+  - Added mock meter data generation (~20 Hz per slot when transport playing)
+  - Updated `num_tracks` response to 42 (3 × 7 × 2)
+- [x] **4g.** Updated CHANGELOG.md.
+  - *198 total tests pass across 9 suites. `tsc --noEmit` clean for server/ and conductor/ files. Old client code (app/, components/) has pre-existing type errors — Phase 5+ targets.*
 
-**Completion check:** Audio router maps all new cues correctly. Metering pipeline works. Mock Ableton responds to new messages.
+**Completion check:** Audio router maps all new cues correctly. Metering pipeline wired. Timing engine handles new phases and rotation. Mock Ableton responds to new messages.
 
 ---
 

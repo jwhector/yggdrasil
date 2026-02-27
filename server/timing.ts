@@ -1,14 +1,15 @@
 /**
- * Timing Engine - Hybrid Timing with AbletonOSC + Server Timers
+ * Timing Engine — Hybrid Timing with AbletonOSC + Server Timers
  *
  * Manages automatic phase advancement with a hybrid approach:
- * - AbletonOSC controls musical timing via beat events (audition loops)
- * - Server JS timers control game logic timing (voting, coup windows)
+ * - Server JS timers control game logic timing (audition duration, voting window)
+ * - AbletonOSC beat events drive finale rotation ticks
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
- * - For audition: Subscribes to beat events, counts beats for master loop completion
- * - For voting/revealing/coup_window: Uses JS timers
+ * - For auditioning: Schedules auditionDurationMs timer → sends OPEN_VOTING
+ * - For voting: Schedules votingWindowMs timer → sends CLOSE_VOTING
+ * - For finale rotation: Counts beats → sends PERFORM_ROTATION_TICK
  * - Manual advances always take precedence (version check)
  *
  * Fallback Mode:
@@ -20,11 +21,13 @@ import type {
   ShowState,
   ConductorCommand,
   ConductorEvent,
-  TimingConfig,
-  Row,
-  RowPhase,
+  LayerPhase,
 } from '../conductor/types';
 import type { OSCBridge } from './osc';
+
+// ============================================================================
+// Interfaces
+// ============================================================================
 
 /**
  * Timing engine configuration
@@ -34,6 +37,8 @@ export interface TimingEngineConfig {
   enabled: boolean;
   /** OSC bridge for Ableton communication (null = fallback to JS timers) */
   oscBridge: OSCBridge | null;
+  /** BPM for fallback rotation timing (default: 120) */
+  fallbackBpm: number;
 }
 
 /**
@@ -66,47 +71,50 @@ interface TimerState {
 }
 
 /**
- * Beat tracking state (for Ableton mode audition timing)
+ * Rotation tracking state (for finale beat-based rotation)
  */
-interface BeatTrackingState {
-  /** The beat number when the current audition option started */
-  auditionOptionStartBeat: number | null;
-  /** Current row being auditioned */
-  rowIndex: number;
-  /** Raw audition index (0-based, maps to option via % optionsPerRow) */
-  rawAuditionIndex: number;
+interface RotationTrackingState {
+  lastRotationBeat: number;
+  rotationBeats: number;       // rotationBars * 4 (beats per rotation cycle)
 }
 
+const BEATS_PER_BAR = 4;
+
+// ============================================================================
+// Factory
+// ============================================================================
+
 /**
- * Create a timing engine instance
+ * Create a timing engine instance.
  *
  * @param sendCommand - Function to send commands (will be processed and broadcast)
  * @param getState - Function to get current show state
  * @param config - Timing engine configuration
- * @returns TimingEngine instance
  */
 export function createTimingEngine(
   sendCommand: (command: ConductorCommand) => void,
   getState: () => ShowState,
-  config?: Partial<TimingEngineConfig>
+  config?: Partial<TimingEngineConfig>,
 ): TimingEngine {
   const engineConfig: TimingEngineConfig = {
     enabled: true,
     oscBridge: null,
+    fallbackBpm: 120,
     ...config,
   };
 
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let beatTrackingState: BeatTrackingState | null = null;
+  let rotationState: RotationTrackingState | null = null;
+  let fallbackRotationInterval: NodeJS.Timeout | null = null;
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   // Timer Management
-  // ============================================================================
+  // --------------------------------------------------------------------------
 
   /**
-   * Cancel current timer if one exists
+   * Cancel current timer if one exists.
    */
   function cancelCurrentTimer(): void {
     if (currentTimer) {
@@ -117,13 +125,15 @@ export function createTimingEngine(
   }
 
   /**
-   * Schedule a timer to fire after the given duration
+   * Schedule a timer to fire after the given duration.
+   * Includes version-check safety: if state has changed by the time the timer
+   * fires, the callback is skipped.
    */
   function scheduleTimer(
     durationMs: number,
     scheduledVersion: number,
     phase: string,
-    callback: () => void
+    callback: () => void,
   ): void {
     cancelCurrentTimer();
 
@@ -153,130 +163,112 @@ export function createTimingEngine(
     console.log(`[Timing] Scheduled timer for ${phase}: ${durationMs}ms`);
   }
 
+  // --------------------------------------------------------------------------
+  // Layer Phase Handlers
+  // --------------------------------------------------------------------------
+
   /**
-   * Schedule automatic advance via ADVANCE_PHASE command
+   * Handle layer entering 'auditioning' phase.
+   * Schedules auditionDurationMs timer → sends OPEN_VOTING.
    */
-  function scheduleAdvance(durationMs: number, scheduledVersion: number, phase: string): void {
-    scheduleTimer(durationMs, scheduledVersion, phase, () => {
-      sendCommand({ type: 'ADVANCE_PHASE' });
+  function handleAuditioningPhase(state: ShowState): void {
+    const durationMs = state.config.timing.auditionDurationMs;
+    console.log(`[Timing] Auditioning: scheduling ${durationMs}ms timer → OPEN_VOTING`);
+
+    scheduleTimer(durationMs, state.version, 'auditioning', () => {
+      sendCommand({ type: 'OPEN_VOTING' });
     });
   }
 
-  // ============================================================================
-  // Beat Event Handling (AbletonOSC)
-  // ============================================================================
-
   /**
-   * Handle beat event from AbletonOSC
-   */
-  function handleBeatEvent(beatNumber: number): void {
-    if (!running || !beatTrackingState) return;
-
-    const state = getState();
-    if (state.phase !== 'running') return;
-
-    const currentRow = state.rows[state.currentRowIndex];
-    if (currentRow.phase !== 'voting' || currentRow.auditionComplete) return;
-
-    // If we haven't recorded a start beat yet, this is it
-    if (beatTrackingState.auditionOptionStartBeat === null) {
-      beatTrackingState.auditionOptionStartBeat = beatNumber;
-      console.log(`[Timing] Beat ${beatNumber}: audition option start recorded`);
-      return;
-    }
-
-    const masterLoopBeats = state.config.timing.masterLoopBeats ?? 32;
-    // const beatsElapsed = beatNumber - beatTrackingState.auditionOptionStartBeat;
-    const beatsElapsed = beatNumber % masterLoopBeats;
-
-    // if (beatsElapsed >= masterLoopBeats) {
-    if (beatsElapsed === 0 && beatNumber !== 0) {
-      console.log(`[Timing] Beat ${beatNumber}: master loop complete (${beatsElapsed} beats >= ${masterLoopBeats}). Advancing.`);
-      beatTrackingState = null; // Clear; will be recreated on next audition phase
-      sendCommand({ type: 'ADVANCE_PHASE' });
-    }
-  }
-
-  // ============================================================================
-  // Audition Phase (Beat-Based or Fallback)
-  // ============================================================================
-
-  /**
-   * Handle entering audition phase
-   */
-  function handleAuditionPhase(state: ShowState, row: Row): void {
-    const rawAuditionIndex = row.currentAuditionIndex ?? 0;
-    const optionIndex = rawAuditionIndex % state.config.optionsPerRow;  // Always 0-(optionsPerRow-1)
-    const timing = state.config.timing;
-    const loopsPerRow = timing.auditionLoopsPerRow ?? 1;
-    const currentLoop = Math.floor(rawAuditionIndex / state.config.optionsPerRow) + 1;
-
-    if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
-      // Ableton mode: Track beats, advance on master loop boundary
-      console.log(`[Timing] Audition (AbletonOSC): row ${row.index}, option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
-
-      beatTrackingState = {
-        auditionOptionStartBeat: null,  // Will be set on next beat event
-        rowIndex: row.index,
-        rawAuditionIndex,
-      };
-
-      // Beat events are handled by handleBeatEvent() via the /live/song/get/beat listener
-    } else {
-      // Fallback mode: Use JS timer
-      console.log(`[Timing] Audition (fallback): option ${optionIndex} (loop ${currentLoop}/${loopsPerRow})`);
-
-      beatTrackingState = {
-        auditionOptionStartBeat: null,
-        rowIndex: row.index,
-        rawAuditionIndex,
-      };
-
-      // Calculate total audition time for this option
-      // Each audition step = one option * loops per option
-      const totalMs = timing.auditionPerOptionMs * timing.auditionLoopsPerOption;
-
-      scheduleAdvance(totalMs, state.version, `auditioning option ${optionIndex} (loop ${currentLoop})`);
-    }
-  }
-
-  // ============================================================================
-  // Other Phases (Server-Driven)
-  // ============================================================================
-
-  /**
-   * Handle entering voting phase
+   * Handle layer entering 'voting' phase.
+   * Schedules votingWindowMs timer → sends CLOSE_VOTING.
    */
   function handleVotingPhase(state: ShowState): void {
-    const timing = state.config.timing;
-    console.log(`[Timing] Voting phase: scheduling ${timing.votingWindowMs}ms timer`);
-    scheduleAdvance(timing.votingWindowMs, state.version, 'voting');
+    const durationMs = state.config.timing.votingWindowMs;
+    console.log(`[Timing] Voting: scheduling ${durationMs}ms timer → CLOSE_VOTING`);
+
+    scheduleTimer(durationMs, state.version, 'voting', () => {
+      sendCommand({ type: 'CLOSE_VOTING' });
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Rotation Beat Tracking (Finale)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Start tracking beats for finale rotation.
+   */
+  function startRotationTracking(state: ShowState): void {
+    stopRotationTracking();
+
+    const rotationBars = state.config.finale.rotationBars;
+    const rotationBeats = rotationBars * BEATS_PER_BAR;
+
+    if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
+      // OSC mode: use beat events
+      rotationState = {
+        lastRotationBeat: 0,
+        rotationBeats,
+      };
+      console.log(`[Timing] Rotation tracking started (OSC, every ${rotationBars} bars / ${rotationBeats} beats)`);
+    } else {
+      // Fallback: use JS interval
+      const msPerBeat = 60000 / engineConfig.fallbackBpm;
+      const intervalMs = rotationBeats * msPerBeat;
+
+      fallbackRotationInterval = setInterval(() => {
+        if (!running) return;
+        const currentState = getState();
+        if (currentState.phase !== 'finale_rotating') {
+          stopRotationTracking();
+          return;
+        }
+        if (!currentState.finaleState?.rotationActive) return;
+
+        sendCommand({ type: 'PERFORM_ROTATION_TICK', beat: 0 });
+      }, intervalMs);
+
+      console.log(`[Timing] Rotation tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
+    }
   }
 
   /**
-   * Handle entering revealing phase
+   * Stop rotation tracking.
    */
-  function handleRevealingPhase(state: ShowState): void {
-    const timing = state.config.timing;
-    console.log(`[Timing] Revealing phase: scheduling ${timing.revealDurationMs}ms timer`);
-    scheduleAdvance(timing.revealDurationMs, state.version, 'revealing');
+  function stopRotationTracking(): void {
+    rotationState = null;
+    if (fallbackRotationInterval) {
+      clearInterval(fallbackRotationInterval);
+      fallbackRotationInterval = null;
+    }
   }
 
   /**
-   * Handle entering coup_window phase
+   * Handle beat event from AbletonOSC for rotation timing.
    */
-  function handleCoupWindowPhase(state: ShowState): void {
-    const timing = state.config.timing;
-    console.log(`[Timing] Coup window phase: scheduling ${timing.coupWindowMs}ms timer`);
-    scheduleAdvance(timing.coupWindowMs, state.version, 'coup_window');
+  function handleBeatEvent(beatNumber: number): void {
+    if (!running || !rotationState) return;
+
+    const state = getState();
+    if (state.phase !== 'finale_rotating') return;
+    if (!state.finaleState?.rotationActive) return;
+
+    const beatsSinceLastRotation = beatNumber - rotationState.lastRotationBeat;
+
+    if (beatsSinceLastRotation >= rotationState.rotationBeats) {
+      rotationState.lastRotationBeat = beatNumber;
+      sendCommand({ type: 'PERFORM_ROTATION_TICK', beat: beatNumber });
+    }
   }
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   // OSC Message Handling
-  // ============================================================================
+  // --------------------------------------------------------------------------
 
   /**
-   * Handle incoming OSC messages from AbletonOSC
+   * Handle incoming OSC messages from AbletonOSC.
    */
   function onOSCMessage(address: string, args: any[]): void {
     if (!running) return;
@@ -287,90 +279,78 @@ export function createTimingEngine(
         handleBeatEvent(beatNumber);
         break;
       }
-
       default:
-        // Ignore unknown messages
         break;
     }
   }
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   // State Change Handling
-  // ============================================================================
+  // --------------------------------------------------------------------------
 
   /**
-   * Handle state changes - called after every command is processed
+   * Handle state changes — called after every command is processed.
    */
   function onStateChanged(state: ShowState, events: ConductorEvent[]): void {
     if (!running || !engineConfig.enabled) return;
 
-    // Check for relevant events
-    const rowPhaseEvent = events.find(e => e.type === 'ROW_PHASE_CHANGED') as
-      | { type: 'ROW_PHASE_CHANGED'; row: number; phase: RowPhase }
-      | undefined;
-
-    const showPhaseEvent = events.find(e => e.type === 'SHOW_PHASE_CHANGED') as
-      | { type: 'SHOW_PHASE_CHANGED'; phase: string }
-      | undefined;
-
-    // Cancel timers on phase change
-    if (rowPhaseEvent || showPhaseEvent) {
-      cancelCurrentTimer();
-      beatTrackingState = null;
-    }
-
     // Don't schedule if paused
-    if (state.phase === 'paused') {
-      console.log('[Timing] Show paused - not scheduling timer');
+    if (state.paused) {
+      cancelCurrentTimer();
       return;
     }
 
-    // Don't schedule if not running
-    if (state.phase !== 'running') {
-      return;
-    }
+    // Check for layer phase changes (song-building)
+    const layerPhaseEvent = events.find(e => e.type === 'LAYER_PHASE_CHANGED') as
+      | { type: 'LAYER_PHASE_CHANGED'; attemptIndex: number; layerIndex: number; phase: LayerPhase }
+      | undefined;
 
-    const currentRow = state.rows[state.currentRowIndex];
+    if (layerPhaseEvent) {
+      cancelCurrentTimer();
 
-    // Schedule based on current row phase
-    switch (currentRow.phase) {
-      case 'voting':
-        // If still auditioning, handle audition; otherwise handle voting window
-        if (!currentRow.auditionComplete) {
-          handleAuditionPhase(state, currentRow);
-        } else {
+      switch (layerPhaseEvent.phase) {
+        case 'auditioning':
+          handleAuditioningPhase(state);
+          break;
+        case 'voting':
           handleVotingPhase(state);
-        }
-        break;
+          break;
+        case 'locked_in':
+          // No auto-advance — controller decides when to start next audition
+          console.log('[Timing] Layer locked in — waiting for manual advance');
+          break;
+        case 'collapsed':
+          // Conductor handles state transition synchronously
+          // Audio router handles collapse effect timing
+          console.log('[Timing] Attempt collapsed — no timer needed');
+          break;
+        default:
+          break;
+      }
+    }
 
-      case 'revealing':
-        handleRevealingPhase(state);
-        break;
+    // Check for show phase changes
+    const showPhaseEvent = events.find(e => e.type === 'SHOW_PHASE_CHANGED') as
+      | { type: 'SHOW_PHASE_CHANGED'; phase: string; attemptIndex?: number }
+      | undefined;
 
-      case 'coup_window':
-        handleCoupWindowPhase(state);
-        break;
+    if (showPhaseEvent) {
+      cancelCurrentTimer();
 
-      case 'committed':
-        // Manual control - no timer
-        console.log('[Timing] Row committed - waiting for manual advance');
-        break;
-
-      case 'pending':
-        // No timer for pending rows
-        break;
-
-      default:
-        console.warn(`[Timing] Unknown row phase: ${currentRow.phase}`);
+      if (showPhaseEvent.phase === 'finale_rotating') {
+        startRotationTracking(state);
+      } else {
+        stopRotationTracking();
+      }
     }
   }
 
-  // ============================================================================
+  // --------------------------------------------------------------------------
   // Lifecycle
-  // ============================================================================
+  // --------------------------------------------------------------------------
 
   /**
-   * Start the timing engine
+   * Start the timing engine.
    */
   function start(): void {
     if (running) {
@@ -387,38 +367,46 @@ export function createTimingEngine(
 
     // Wire up OSC message handling if bridge is available
     if (engineConfig.oscBridge) {
-      // Subscribe to beat events from AbletonOSC
-      engineConfig.oscBridge.on('/live/song/get/beat', (...args) => {
+      engineConfig.oscBridge.on('/live/song/get/beat', (...args: any[]) => {
         onOSCMessage('/live/song/get/beat', args);
       });
 
-      // Send subscription request to AbletonOSC
+      // Subscribe to beat events from AbletonOSC
       engineConfig.oscBridge.send('/live/song/start_listen/beat');
     }
 
     console.log('[Timing] Engine started');
-    console.log(`[Timing] Mode: ${engineConfig.oscBridge ? 'AbletonOSC (beat-based)' : 'Fallback (JS timers)'}`);
+    console.log(`[Timing] Mode: ${engineConfig.oscBridge ? 'AbletonOSC (beat-based rotation)' : 'Fallback (JS timers)'}`);
 
     // Initialize based on current state
     const state = getState();
-    if (state.phase === 'running') {
-      const currentRow = state.rows[state.currentRowIndex];
-      // Synthesize a phase changed event to trigger scheduling
-      onStateChanged(state, [
-        { type: 'ROW_PHASE_CHANGED', row: state.currentRowIndex, phase: currentRow.phase },
-      ]);
+    if (state.phase === 'attempt_build') {
+      const attempt = state.attempts[state.currentAttemptIndex];
+      if (attempt && attempt.status === 'in_progress') {
+        // Synthesize event to trigger scheduling for current layer
+        onStateChanged(state, [
+          {
+            type: 'LAYER_PHASE_CHANGED',
+            attemptIndex: state.currentAttemptIndex,
+            layerIndex: attempt.currentLayerIndex,
+            phase: attempt.currentLayerPhase,
+          },
+        ]);
+      }
+    } else if (state.phase === 'finale_rotating') {
+      startRotationTracking(state);
     }
   }
 
   /**
-   * Stop the timing engine
+   * Stop the timing engine.
    */
   function stop(): void {
     if (!running) return;
 
     running = false;
     cancelCurrentTimer();
-    beatTrackingState = null;
+    stopRotationTracking();
 
     // Unsubscribe from beat events
     if (engineConfig.oscBridge) {
@@ -429,7 +417,7 @@ export function createTimingEngine(
   }
 
   /**
-   * Clean up resources
+   * Clean up resources.
    */
   function dispose(): void {
     stop();
@@ -437,7 +425,7 @@ export function createTimingEngine(
   }
 
   /**
-   * Check if engine is running
+   * Check if engine is running.
    */
   function isRunning(): boolean {
     return running;
