@@ -1,13 +1,17 @@
 /**
  * State Serialization Utilities
  *
- * Handles proper serialization/deserialization of ShowState for Socket.IO.
+ * Handles proper serialization/deserialization of ShowState for Socket.IO
+ * and backup/persistence.
  *
- * Problem: Map and Set objects don't survive JSON serialization:
- *   - Map becomes {} (empty object) or loses its methods
- *   - Set becomes {} (empty object)
+ * Problem: Map objects don't survive JSON serialization (become {}).
+ * Solution: Convert Maps to [key, value][] arrays before sending,
+ *           reconstruct after receiving.
  *
- * Solution: Convert to arrays before sending, reconstruct after receiving.
+ * Maps in ShowState:
+ *   - ShowState.users: Map<UserId, User>
+ *   - FinaleState.chapterAssignments: Map<UserId, Chapter>
+ *   - FinaleState.trianglePositions: Map<UserId, TrianglePosition>
  *
  * Usage:
  *   Server: socket.emit('state_sync', serializeState(state))
@@ -18,115 +22,119 @@ import type {
   ShowState,
   UserId,
   User,
-  PersonalTree,
-  Faction,
-  FactionId,
+  Chapter,
+  TrianglePosition,
+  FinaleState,
 } from '@/conductor/types';
 
-/**
- * Serialized format for transmission (all Maps/Sets become arrays)
- */
+// ============================================================================
+// Serialized Types
+// ============================================================================
+
+export interface SerializedFinaleState {
+  chapterAssignments: [UserId, Chapter][];
+  queue: FinaleState['queue'];
+  activeSlots: FinaleState['activeSlots'];
+  trianglePositions: [UserId, TrianglePosition][];
+  centroid: TrianglePosition;
+  rotationActive: boolean;
+  rotationRate: 1 | 2;
+  frozen: boolean;
+  stewardshipLog: FinaleState['stewardshipLog'];
+  triangleActive: boolean;
+}
+
 export interface SerializedShowState {
-  id: string;
+  id: ShowState['id'];
+  phase: ShowState['phase'];
+  currentAttemptIndex: number;
+  attempts: ShowState['attempts'];
+  users: [UserId, User][];
+  finaleState: SerializedFinaleState | null;
+  config: ShowState['config'];
   version: number;
   lastUpdated: number;
-  phase: ShowState['phase'];
-  currentRowIndex: number;
-  rows: ShowState['rows'];
-  factions: SerializedFaction[];
-  users: [UserId, User][];
-  votes: ShowState['votes'];
-  personalTrees: [UserId, PersonalTree][];
-  paths: ShowState['paths'];
-  config: ShowState['config'];
-  pausedPhase: ShowState['pausedPhase'];
+  paused: boolean;
 }
 
-export interface SerializedFaction {
-  id: FactionId;
-  name: string;
-  color: string;
-  coupUsed: boolean;
-  coupMultiplier: number;
-  currentRowCoupVotes: UserId[];
+// ============================================================================
+// Finale State Serialize / Deserialize
+// ============================================================================
+
+export function serializeFinaleState(finaleState: FinaleState): SerializedFinaleState {
+  return {
+    chapterAssignments: Array.from(finaleState.chapterAssignments.entries()),
+    queue: finaleState.queue,
+    activeSlots: finaleState.activeSlots,
+    trianglePositions: Array.from(finaleState.trianglePositions.entries()),
+    centroid: finaleState.centroid,
+    rotationActive: finaleState.rotationActive,
+    rotationRate: finaleState.rotationRate,
+    frozen: finaleState.frozen,
+    stewardshipLog: finaleState.stewardshipLog,
+    triangleActive: finaleState.triangleActive,
+  };
 }
+
+export function deserializeFinaleState(data: SerializedFinaleState): FinaleState {
+  return {
+    chapterAssignments: new Map(data.chapterAssignments),
+    queue: data.queue,
+    activeSlots: data.activeSlots,
+    trianglePositions: new Map(data.trianglePositions),
+    centroid: data.centroid,
+    rotationActive: data.rotationActive,
+    rotationRate: data.rotationRate,
+    frozen: data.frozen,
+    stewardshipLog: data.stewardshipLog,
+    triangleActive: data.triangleActive,
+  };
+}
+
+// ============================================================================
+// Show State Serialize / Deserialize
+// ============================================================================
 
 /**
- * Serialize ShowState for transmission over Socket.IO
- * Converts Maps to arrays of [key, value] pairs
- * Converts Sets to arrays
+ * Serialize ShowState for transmission over Socket.IO or storage.
+ * Converts all Maps to [key, value][] arrays.
  */
 export function serializeState(state: ShowState): SerializedShowState {
   return {
     id: state.id,
+    phase: state.phase,
+    currentAttemptIndex: state.currentAttemptIndex,
+    attempts: state.attempts,
+    users: Array.from(state.users.entries()),
+    finaleState: state.finaleState ? serializeFinaleState(state.finaleState) : null,
+    config: state.config,
     version: state.version,
     lastUpdated: state.lastUpdated,
-    phase: state.phase,
-    currentRowIndex: state.currentRowIndex,
-    rows: state.rows,
-    factions: state.factions.map(serializeFaction),
-    users: Array.from(state.users.entries()),
-    votes: state.votes,
-    personalTrees: Array.from(state.personalTrees.entries()),
-    paths: state.paths,
-    config: state.config,
-    pausedPhase: state.pausedPhase,
+    paused: state.paused,
   };
 }
 
 /**
- * Serialize a single faction
- */
-function serializeFaction(faction: Faction): SerializedFaction {
-  return {
-    id: faction.id,
-    name: faction.name,
-    color: faction.color,
-    coupUsed: faction.coupUsed,
-    coupMultiplier: faction.coupMultiplier,
-    currentRowCoupVotes: Array.from(faction.currentRowCoupVotes),
-  };
-}
-
-/**
- * Deserialize ShowState after receiving from Socket.IO
- * Reconstructs Maps from arrays of [key, value] pairs
- * Reconstructs Sets from arrays
+ * Deserialize ShowState after receiving from Socket.IO or loading from storage.
+ * Reconstructs all Maps from [key, value][] arrays.
  */
 export function deserializeState(data: SerializedShowState): ShowState {
   return {
     id: data.id,
+    phase: data.phase,
+    currentAttemptIndex: data.currentAttemptIndex,
+    attempts: data.attempts,
+    users: new Map(data.users),
+    finaleState: data.finaleState ? deserializeFinaleState(data.finaleState) : null,
+    config: data.config,
     version: data.version,
     lastUpdated: data.lastUpdated,
-    phase: data.phase,
-    currentRowIndex: data.currentRowIndex,
-    rows: data.rows,
-    factions: data.factions.map(deserializeFaction) as [Faction, Faction, Faction, Faction],
-    users: new Map(data.users),
-    votes: data.votes,
-    personalTrees: new Map(data.personalTrees),
-    paths: data.paths,
-    config: data.config,
-    pausedPhase: data.pausedPhase,
+    paused: data.paused,
   };
 }
 
 /**
- * Deserialize a single faction
- */
-function deserializeFaction(faction: SerializedFaction): Faction {
-  return {
-    id: faction.id,
-    name: faction.name,
-    color: faction.color,
-    coupUsed: faction.coupUsed,
-    coupMultiplier: faction.coupMultiplier,
-    currentRowCoupVotes: new Set(faction.currentRowCoupVotes),
-  };
-}
-
-/**
- * Type guard to check if data is serialized state format
+ * Type guard: check if data looks like a serialized ShowState
  */
 export function isSerializedState(data: unknown): data is SerializedShowState {
   if (!data || typeof data !== 'object') return false;
@@ -135,6 +143,6 @@ export function isSerializedState(data: unknown): data is SerializedShowState {
     typeof obj.id === 'string' &&
     typeof obj.version === 'number' &&
     Array.isArray(obj.users) &&
-    Array.isArray(obj.factions)
+    Array.isArray(obj.attempts)
   );
 }

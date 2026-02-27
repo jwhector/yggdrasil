@@ -28,8 +28,20 @@ import type {
   UserId,
   SeatId,
   User,
+  TrianglePosition,
 } from './types';
 import { calculateConsensus, resolveVote } from './consensus';
+import {
+  assignChapters,
+  initializeFinaleState,
+  getAvailableFragments,
+  selectFragment,
+  computeCentroid,
+  performRotationTick,
+  updateStewardParam,
+  startStewardship,
+  endStewardship,
+} from './finale';
 
 // ============================================================================
 // State Initialization
@@ -117,20 +129,31 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       // This could toggle all thresholds to null or restore them. For now, no-op.
       return [];
 
-    // Finale (Phase 2 — not implemented yet)
+    // Finale
     case 'SETUP_FINALE':
+      return handleSetupFinale(state);
     case 'SELECT_FRAGMENT':
+      return handleSelectFragment(state, command.userId, command.fragmentId);
     case 'UPDATE_TRIANGLE':
+      return handleUpdateTriangle(state, command.userId, command.position);
     case 'UPDATE_STEWARD_PARAM':
+      return handleUpdateStewardParam(state, command.userId, command.value);
     case 'START_ROTATION':
+      return handleStartRotation(state);
     case 'STOP_ROTATION':
+      return handleStopRotation(state);
     case 'FREEZE_ROTATION':
+      return handleFreezeRotation(state);
     case 'SET_ROTATION_RATE':
+      return handleSetRotationRate(state, command.rate);
     case 'FORCE_ASSIGN_STEWARD':
+      return handleForceAssignSteward(state, command.userId, command.slotIndex);
     case 'FORCE_INSERT_FRAGMENT':
+      return handleForceInsertFragment(state, command.fragmentId, command.slotIndex);
     case 'CLEAR_QUEUE':
+      return handleClearQueue(state);
     case 'TOGGLE_TRIANGLE':
-      return [{ type: 'ERROR', message: `Finale command '${command.type}' not yet implemented (Phase 2)` }];
+      return handleToggleTriangle(state, command.active);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -797,6 +820,242 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
 function handleImportState(state: ShowState, importedState: ShowState): ConductorEvent[] {
   Object.assign(state, importedState);
   return [{ type: 'SHOW_PHASE_CHANGED', phase: state.phase }];
+}
+
+// ============================================================================
+// Finale Handlers
+// ============================================================================
+
+function handleSetupFinale(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_setup') {
+    return [{ type: 'ERROR', message: 'Can only setup finale during finale_setup phase' }];
+  }
+
+  // Assign chapters
+  const assignments = assignChapters(state.users);
+
+  // Update user objects
+  assignments.forEach((chapter, userId) => {
+    const user = state.users.get(userId);
+    if (user) user.finaleChapter = chapter;
+  });
+
+  // Initialize finale state
+  state.finaleState = initializeFinaleState(state.config.finale, assignments);
+
+  // Generate available fragments for the event
+  const allFragments = getAvailableFragments(state);
+  const selectableFragments = allFragments
+    .filter(f => f.selectable)
+    .map(f => f.fragment);
+
+  return [{
+    type: 'FINALE_SETUP_COMPLETE',
+    chapterAssignments: assignments,
+    availableFragments: selectableFragments,
+  }];
+}
+
+function handleSelectFragment(state: ShowState, userId: UserId, fragmentId: string): ConductorEvent[] {
+  if (state.phase !== 'finale_setup' && state.phase !== 'finale_rotating') {
+    return [{ type: 'ERROR', message: 'Can only select fragments during finale_setup or finale_rotating' }];
+  }
+
+  const result = selectFragment(userId, fragmentId, state);
+  if (result.error) {
+    return [{ type: 'ERROR', message: result.error }];
+  }
+
+  return result.events;
+}
+
+function handleUpdateTriangle(state: ShowState, userId: UserId, position: TrianglePosition): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  if (!finaleState.triangleActive) {
+    return []; // Silently ignore when triangle is disabled
+  }
+
+  finaleState.trianglePositions.set(userId, position);
+  finaleState.centroid = computeCentroid(finaleState.trianglePositions);
+
+  return [{ type: 'CENTROID_UPDATED', centroid: finaleState.centroid }];
+}
+
+function handleUpdateStewardParam(state: ShowState, userId: UserId, value: number): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  const result = updateStewardParam(userId, value, finaleState);
+  if (!result) {
+    return [{ type: 'ERROR', message: `User is not an active steward: ${userId}` }];
+  }
+
+  return [{
+    type: 'AUDIO_CUE',
+    cue: {
+      type: 'steward_param',
+      slotIndex: result.slotIndex,
+      value: result.clampedValue,
+    },
+  }];
+}
+
+function handleStartRotation(state: ShowState): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  if (state.phase !== 'finale_rotating') {
+    return [{ type: 'ERROR', message: 'Can only start rotation during finale_rotating' }];
+  }
+
+  finaleState.rotationActive = true;
+
+  // Do an initial fill of empty slots
+  return performRotationTick(state, 0);
+}
+
+function handleStopRotation(state: ShowState): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  finaleState.rotationActive = false;
+  return [{ type: 'STATE_UPDATED', version: state.version }];
+}
+
+function handleFreezeRotation(state: ShowState): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  finaleState.rotationActive = false;
+  finaleState.frozen = true;
+
+  // Transition to finale_frozen
+  state.phase = 'finale_frozen';
+
+  return [{ type: 'SHOW_PHASE_CHANGED', phase: 'finale_frozen' }];
+}
+
+function handleSetRotationRate(state: ShowState, rate: 1 | 2): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  finaleState.rotationRate = rate;
+  return [{ type: 'STATE_UPDATED', version: state.version }];
+}
+
+function handleForceAssignSteward(state: ShowState, userId: UserId, slotIndex: number): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  const slot = finaleState.activeSlots[slotIndex];
+  if (!slot) {
+    return [{ type: 'ERROR', message: `Slot ${slotIndex} is empty` }];
+  }
+
+  const user = state.users.get(userId);
+  if (!user) {
+    return [{ type: 'ERROR', message: `User not found: ${userId}` }];
+  }
+
+  const events: ConductorEvent[] = [];
+
+  // End current stewardship
+  const previousSteward = slot.stewardUserId;
+  endStewardship(finaleState, slotIndex, Date.now());
+  events.push({ type: 'STEWARDSHIP_ENDED', userId: previousSteward, slotIndex });
+
+  // Assign new steward
+  slot.stewardUserId = userId;
+  startStewardship(finaleState, slotIndex, slot.fragment, userId, Date.now());
+  events.push({ type: 'STEWARDSHIP_STARTED', userId, slotIndex });
+
+  return events;
+}
+
+function handleForceInsertFragment(state: ShowState, fragmentId: string, slotIndex: number): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  // Find fragment
+  const allFragments = getAvailableFragments(state);
+  const fragmentAvail = allFragments.find(f => f.fragment.id === fragmentId);
+  if (!fragmentAvail) {
+    return [{ type: 'ERROR', message: `Fragment not found: ${fragmentId}` }];
+  }
+
+  const events: ConductorEvent[] = [];
+
+  // Deactivate existing slot if occupied
+  const existingSlot = finaleState.activeSlots[slotIndex];
+  if (existingSlot) {
+    endStewardship(finaleState, slotIndex, Date.now());
+    events.push({ type: 'STEWARDSHIP_ENDED', userId: existingSlot.stewardUserId, slotIndex });
+    events.push({ type: 'SLOT_DEACTIVATED', slotIndex });
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'slot_deactivate', slotIndex } });
+  }
+
+  // Activate fragment in slot (no steward for forced inserts)
+  const newSlot = {
+    slotIndex,
+    fragment: fragmentAvail.fragment,
+    stewardUserId: '' as UserId,
+    parameterValue: fragmentAvail.fragment.safeParameter.defaultValue,
+    activatedAtBeat: 0,
+    energyLevel: 0,
+  };
+
+  finaleState.activeSlots[slotIndex] = newSlot;
+
+  events.push({
+    type: 'SLOT_ACTIVATED',
+    slotIndex,
+    fragment: fragmentAvail.fragment,
+    stewardUserId: '' as UserId,
+  });
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: { type: 'slot_activate', slotIndex, fragment: fragmentAvail.fragment },
+  });
+
+  return events;
+}
+
+function handleClearQueue(state: ShowState): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  finaleState.queue = [];
+  return [{ type: 'STATE_UPDATED', version: state.version }];
+}
+
+function handleToggleTriangle(state: ShowState, active: boolean): ConductorEvent[] {
+  const finaleState = state.finaleState;
+  if (!finaleState) {
+    return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  }
+
+  finaleState.triangleActive = active;
+  return [{ type: 'STATE_UPDATED', version: state.version }];
 }
 
 // ============================================================================

@@ -206,6 +206,7 @@ export interface FinaleState {
   rotationRate: 1 | 2;                  // Slots per 8-bar cycle
   frozen: boolean;
   stewardshipLog: StewardshipEntry[];
+  triangleActive: boolean;
 }
 
 export interface ActiveSlot {

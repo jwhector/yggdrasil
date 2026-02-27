@@ -4,96 +4,29 @@
  * Handles all database operations for Yggdrasil.
  * Uses better-sqlite3 with WAL mode for crash resilience.
  *
- * State is persisted as JSON with custom serialization for Maps and Sets.
+ * State is persisted as JSON with custom serialization for Maps.
  * Every state change is immediately written to disk (not periodic).
  */
 
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import type {
-  ShowState,
-  ShowId,
-  UserId,
-  User,
-  Vote,
-  PersonalTree,
-  FactionId,
-  SeatId,
-} from '@/conductor/types';
-
-/**
- * Serializable version of ShowState for JSON storage.
- * Converts Maps and Sets to arrays for JSON compatibility.
- */
-interface SerializedShowState {
-  id: ShowId;
-  version: number;
-  lastUpdated: number;
-  phase: string;
-  currentRowIndex: number;
-  rows: any[];
-  factions: any[];
-  users: Array<[UserId, User]>;
-  votes: Vote[];
-  personalTrees: Array<[UserId, PersonalTree]>;
-  paths: {
-    factionPath: string[];
-    popularPath: string[];
-  };
-  config: any;
-  pausedPhase: string | null;
-}
-
-/**
- * Converts ShowState to JSON-serializable format
- */
-function serializeState(state: ShowState): SerializedShowState {
-  // Convert faction Sets to arrays
-  const serializedFactions = state.factions.map(faction => ({
-    ...faction,
-    currentRowCoupVotes: Array.from(faction.currentRowCoupVotes),
-  }));
-
-  return {
-    ...state,
-    factions: serializedFactions,
-    users: Array.from(state.users.entries()),
-    personalTrees: Array.from(state.personalTrees.entries()),
-  };
-}
-
-/**
- * Converts serialized format back to ShowState
- */
-function deserializeState(data: SerializedShowState): ShowState {
-  // Convert faction arrays back to Sets
-  const factions = data.factions.map(faction => ({
-    ...faction,
-    currentRowCoupVotes: new Set(faction.currentRowCoupVotes),
-  })) as [any, any, any, any];
-
-  return {
-    ...data,
-    factions,
-    users: new Map(data.users),
-    personalTrees: new Map(data.personalTrees),
-  } as ShowState;
-}
+import type { ShowState, ShowId, UserId, User, LayerVote, SeatId, Chapter } from '@/conductor/types';
+import { serializeState, deserializeState } from '../lib/serialization';
 
 export interface PersistenceLayer {
   saveState(state: ShowState): void;
   loadState(showId: ShowId): ShowState | null;
   getLatestShow(): ShowState | null;
-  saveVote(vote: Vote, showId: ShowId): void;
+  saveLayerVote(vote: LayerVote, showId: ShowId): void;
   saveUser(user: User, showId: ShowId): void;
-  saveFigTreeResponse(userId: UserId, text: string, showId: ShowId): void;
+  saveFragmentSelection(userId: UserId, fragmentId: string, showId: ShowId): void;
   getUsersByShow(showId: ShowId): User[];
   close(): void;
 }
 
 /**
- * Initialize the database and return persistence layer functions
+ * Initialize the database and return persistence layer functions.
  */
 export function createPersistence(dbPath: string): PersistenceLayer {
   const db = new Database(dbPath);
@@ -105,8 +38,6 @@ export function createPersistence(dbPath: string): PersistenceLayer {
   // Read and execute schema
   const schemaPath = join(__dirname, '../db/schema.sql');
   const schema = readFileSync(schemaPath, 'utf-8');
-
-  // Execute entire schema at once (SQLite handles multiple statements)
   db.exec(schema);
 
   // Prepare statements for better performance
@@ -129,39 +60,38 @@ export function createPersistence(dbPath: string): PersistenceLayer {
     `),
 
     insertUser: db.prepare(`
-      INSERT INTO users (id, show_id, seat_id, faction, created_at)
+      INSERT INTO users (id, show_id, seat_id, finale_chapter, created_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET
         seat_id = excluded.seat_id,
-        faction = excluded.faction
+        finale_chapter = excluded.finale_chapter
     `),
 
     getUsersByShow: db.prepare(`
-      SELECT id, seat_id, faction FROM users WHERE show_id = ?
+      SELECT id, seat_id, finale_chapter FROM users WHERE show_id = ?
     `),
 
     insertVote: db.prepare(`
-      INSERT INTO votes (show_id, user_id, row_index, attempt, faction_vote, personal_vote, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO votes (show_id, user_id, attempt_index, layer_index, choice, created_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    insertFigTreeResponse: db.prepare(`
-      INSERT INTO fig_tree_responses (user_id, show_id, text, created_at)
+    insertFragmentSelection: db.prepare(`
+      INSERT INTO fragment_selections (user_id, show_id, fragment_id, created_at)
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET
-        text = excluded.text
+        fragment_id = excluded.fragment_id
     `),
   };
 
   return {
     /**
-     * Save complete show state atomically
+     * Save complete show state atomically.
      */
     saveState(state: ShowState): void {
       const serialized = serializeState(state);
       const json = JSON.stringify(serialized);
 
-      // Use transaction for atomicity
       const transaction = db.transaction(() => {
         stmts.insertShow.run(state.id, json, state.version);
       });
@@ -170,85 +100,81 @@ export function createPersistence(dbPath: string): PersistenceLayer {
     },
 
     /**
-     * Load show state by ID
+     * Load show state by ID.
      */
     loadState(showId: ShowId): ShowState | null {
       const row = stmts.getShow.get(showId) as { state: string } | undefined;
 
       if (!row) return null;
 
-      const serialized = JSON.parse(row.state) as SerializedShowState;
-      return deserializeState(serialized);
+      return deserializeState(JSON.parse(row.state));
     },
 
     /**
-     * Get the most recently updated show
+     * Get the most recently updated show.
      */
     getLatestShow(): ShowState | null {
       const row = stmts.getLatestShow.get() as { state: string } | undefined;
 
       if (!row) return null;
 
-      const serialized = JSON.parse(row.state) as SerializedShowState;
-      return deserializeState(serialized);
+      return deserializeState(JSON.parse(row.state));
     },
 
     /**
-     * Save a vote
+     * Save a layer vote for analysis / recovery.
      */
-    saveVote(vote: Vote, showId: ShowId): void {
+    saveLayerVote(vote: LayerVote, showId: ShowId): void {
       stmts.insertVote.run(
         showId,
         vote.userId,
-        vote.rowIndex,
-        vote.attempt,
-        vote.factionVote,
-        vote.personalVote
+        vote.attemptIndex,
+        vote.layerIndex,
+        vote.choice
       );
     },
 
     /**
-     * Save or update a user
+     * Save or update a user record.
      */
     saveUser(user: User, showId: ShowId): void {
       stmts.insertUser.run(
         user.id,
         showId,
         user.seatId,
-        user.faction
+        user.finaleChapter
       );
     },
 
     /**
-     * Save fig tree response
+     * Save a fragment selection (upsert — one per user).
      */
-    saveFigTreeResponse(userId: UserId, text: string, showId: ShowId): void {
-      stmts.insertFigTreeResponse.run(userId, showId, text);
+    saveFragmentSelection(userId: UserId, fragmentId: string, showId: ShowId): void {
+      stmts.insertFragmentSelection.run(userId, showId, fragmentId);
     },
 
     /**
-     * Get all users for a show (useful for debugging/recovery)
+     * Get all users for a show (useful for debugging / recovery).
+     * Note: Returns partial User objects — full state comes from ShowState.users.
      */
     getUsersByShow(showId: ShowId): User[] {
       const rows = stmts.getUsersByShow.all(showId) as Array<{
         id: UserId;
         seat_id: SeatId | null;
-        faction: FactionId | null;
+        finale_chapter: Chapter | null;
       }>;
 
-      // Note: This returns partial User objects (missing connected, joinedAt)
-      // In practice, full user state comes from ShowState.users
       return rows.map(row => ({
         id: row.id,
         seatId: row.seat_id,
-        faction: row.faction,
-        connected: false,  // Unknown from DB
-        joinedAt: 0,       // Unknown from DB
+        finaleChapter: row.finale_chapter,
+        connected: false,   // Unknown from DB alone
+        joinedAt: 0,        // Unknown from DB alone
       }));
     },
 
     /**
-     * Close database connection
+     * Close database connection.
      */
     close(): void {
       db.close();

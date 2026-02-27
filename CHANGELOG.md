@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## 2026-02-27 — Phase 3: Server Layer — Socket.IO & Persistence
+
+**Context:** Migration Phase 3 — rewire the server to use the new Conductor. Update persistence, socket events, state sync, and backup. Add metering stub.
+
+**New files:**
+- `server/metering.ts` — `createMeteringService(io)`: aggregates slot energy levels and broadcasts `meter` event to projector at ~10 Hz. OSC wiring happens in Phase 4.
+
+**Rewritten:**
+- `lib/serialization.ts` — Complete rewrite for new ShowState. Serializes `users`, `chapterAssignments`, `trianglePositions` Maps as `[key, value][]`. Old faction/personalTree/rows shapes gone.
+- `server/persistence.ts` — New schema types throughout. `saveLayerVote(LayerVote)` replaces `saveVote(Vote)`. `saveFragmentSelection` replaces `saveFigTreeResponse`. `saveUser` persists `finaleChapter` not `faction`. All serialization via `lib/serialization.ts`.
+- `server/socket.ts` — Removed: `coup_vote`, `fig_tree_response`, faction rooms, old dual-vote `vote` payload. Added: binary `vote`, `select_fragment`, high-frequency `triangle_update` (throttled centroid → projector at ~4 Hz, no state_sync), `steward_param`. `reconnect_user` → `reconnect`. `filterStateForClient` rewritten for all three client modes. `FACTION_ASSIGNED` event handling removed; `FORCE_RECONNECT` forwarding added.
+- `server/backup.ts` — Uses `serializeState`/`deserializeState` from `lib/serialization.ts`. Old faction/Set serialization removed.
+- `server/index.ts` — Creates and disposes metering service. Phase backup triggers updated (`opener`/`finale_rotating`). Periodic backup phase check updated to active show phases. Log says `Attempt:` not `Row:`. `playbackMode` arg removed from `createAudioRouter`.
+- `server/__tests__/persistence.test.ts` — Full rewrite for new types. Tests save/load, Map round-trips (users, finaleState), layer votes, fragment selections, upsert, transaction atomicity.
+- `server/__tests__/backup.test.ts` — Full rewrite for new types. Tests Map round-trips (users, finaleState), list, prune, createAndPruneBackup. Uses relative imports.
+
+**Key behaviors:**
+- Triangle updates skip state_sync and persistence — centroid broadcast throttled at ~4 Hz to projector only
+- Steward param updates use full pipeline (state_sync + persistence + audio hooks → OSC)
+- Server recovers from restart via `getLatestShow()` from SQLite
+
+---
+
+## 2026-02-26 — Phase 2: Conductor — Finale Logic
+**Context:** Migration Phase 2 — implement the finale state machine: chapter assignment, fragment selection, queue scheduling, rotation, stewardship, triangle aggregation.
+
+**New files:**
+- `conductor/finale.ts` — All finale pure logic: `assignChapters()`, `selectFragment()`, `computeCentroid()`, `scheduleRotation()`, `performRotationTick()`, `startStewardship()`, `endStewardship()`, `updateStewardParam()`, `initializeFinaleState()`, `getAvailableFragments()`
+- `conductor/__tests__/finale.test.ts` — 44 tests covering chapter assignment, centroid math, fragment selection validation, queue scheduling, rotation ticks, stewardship lifecycle, parameter clamping, all conductor command wiring, and full show flow
+
+**Modified:**
+- `conductor/types.ts` — Added `triangleActive: boolean` to `FinaleState`
+- `conductor/conductor.ts` — Replaced Phase 2 stubs with full handlers for all 12 finale commands: SETUP_FINALE, SELECT_FRAGMENT, UPDATE_TRIANGLE, UPDATE_STEWARD_PARAM, START_ROTATION, STOP_ROTATION, FREEZE_ROTATION, SET_ROTATION_RATE, FORCE_ASSIGN_STEWARD, FORCE_INSERT_FRAGMENT, CLEAR_QUEUE, TOGGLE_TRIANGLE
+- `conductor/index.ts` — Added finale function exports
+
+**Key behaviors implemented:**
+- Chapter assignment: random even split (±1) via Fisher-Yates shuffle + round-robin
+- Fragment selection: validates user's chapter assignment, fragment selectability, no duplicate picks
+- Queue scheduling: fairness-first (haven't stewarded +1000), then centroid chapter weighting (0–1), then diversity nudge (+0.5 for underrepresented chapters)
+- Rotation: fills empty slots first, then rotates out oldest; emits SLOT_ACTIVATED/DEACTIVATED + AUDIO_CUE events
+- Stewardship lifecycle: start on slot activation, end on rotation out, logged in stewardshipLog
+- Parameter clamping: values clamped to fragment's safeParameter.min/max
+- Triangle: position storage, centroid computation (average), toggle on/off
+- FREEZE_ROTATION transitions to finale_frozen phase
+- Full show flow test: lobby → 3 attempts (with collapse) → finale_setup → rotation → freeze → ended
+- 109 total tests pass across 4 suites, `tsc --noEmit` clean
+
+---
+
 ## 2026-02-26 — Phase 1: Conductor core — show phases & song-building
 **Context:** Migration Phase 1 — rewrite the Conductor state machine for new show flow, song-building, and consensus/collapse mechanics.
 

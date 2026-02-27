@@ -1,351 +1,284 @@
 /**
- * Backup System Tests
+ * Backup System Tests (NEW SYSTEM)
  *
  * Tests cover:
  * - Creating backups
- * - Loading backups
+ * - Loading backups with Map deserialization
  * - Listing backups
  * - Pruning old backups
- * - Map/Set deserialization
+ * - createAndPruneBackup convenience function
  */
 
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { existsSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { createBackup, loadBackup, listBackups, pruneBackups, createAndPruneBackup } from '../backup';
-import { createInitialState } from '@/conductor/conductor';
-import type { ShowState, FactionConfig } from '@/conductor/types';
+import { createInitialState } from '../../conductor/conductor';
+import type { ShowConfig } from '../../conductor/types';
 
-// Helper to create test config
-function createTestConfig() {
-  const factions: FactionConfig[] = [
-    { id: 0, name: 'Faction 0', color: '#ff0000' },
-    { id: 1, name: 'Faction 1', color: '#00ff00' },
-    { id: 2, name: 'Faction 2', color: '#0000ff' },
-    { id: 3, name: 'Faction 3', color: '#ffff00' },
-  ];
+// ============================================================================
+// Test Config Helper
+// ============================================================================
 
+function createTestConfig(): ShowConfig {
   return {
-    rowCount: 2,
-    factions,
-    timing: {
-      auditionLoopsPerOption: 2,
-      auditionPerOptionMs: 4000,
-      votingWindowMs: 30000,
-      revealDurationMs: 10000,
-      coupWindowMs: 15000,
-    },
-    coup: {
-      threshold: 0.5,
-      multiplierBonus: 0.5,
-    },
-    lobby: {
-      projectorContent: 'Welcome',
-      audiencePrompt: 'What lives on your fig tree?',
-    },
-    rows: [
+    maxLayersPerAttempt: 7,
+    attempts: [
       {
-        index: 0,
-        label: 'Row 0',
-        type: 'layer' as const,
-        options: [
-          { id: 'r0-opt0', index: 0, audioRef: 'audio-0-0' },
-          { id: 'r0-opt1', index: 1, audioRef: 'audio-0-1' },
-          { id: 'r0-opt2', index: 2, audioRef: 'audio-0-2' },
-          { id: 'r0-opt3', index: 3, audioRef: 'audio-0-3' },
+        chapter: 'ambition',
+        title: 'Ambition',
+        layers: [
+          { index: 0, type: 'foundation', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
         ],
       },
       {
-        index: 1,
-        label: 'Row 1',
-        type: 'effect' as const,
-        options: [
-          { id: 'r1-opt0', index: 0, audioRef: 'audio-1-0' },
-          { id: 'r1-opt1', index: 1, audioRef: 'audio-1-1' },
-          { id: 'r1-opt2', index: 2, audioRef: 'audio-1-2' },
-          { id: 'r1-opt3', index: 3, audioRef: 'audio-1-3' },
+        chapter: 'love',
+        title: 'Love',
+        layers: [
+          { index: 0, type: 'pulse', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+        ],
+      },
+      {
+        chapter: 'avoidance',
+        title: 'Avoidance',
+        layers: [
+          { index: 0, type: 'color', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
         ],
       },
     ],
-    topology: {
-      type: 'none' as const,
+    finale: {
+      slotCount: 7,
+      rotationBars: 8,
+      defaultRotationRate: 2,
+      triangleDriftTimeoutMs: 10000,
+      triangleDriftSpeedMs: 3000,
+      fragments: [],
     },
+    timing: {
+      auditionDurationMs: 4000,
+      votingWindowMs: 30000,
+      resolveAnimationMs: 5000,
+      collapseAnimationMs: 3000,
+      autoAdvanceToStoryMs: 2000,
+    },
+    lobby: { waitingMessage: 'Welcome' },
+    seatIds: ['seat-1'],
   };
 }
 
-describe('Backup System', () => {
-  const testBackupDir = join(__dirname, 'test-backups');
+// ============================================================================
+// Test Setup
+// ============================================================================
 
-  beforeEach(() => {
-    // Clean up test directory
-    if (existsSync(testBackupDir)) {
-      rmSync(testBackupDir, { recursive: true, force: true });
+const TEST_BACKUP_DIR = join(__dirname, 'test-backups');
+
+beforeEach(() => {
+  if (existsSync(TEST_BACKUP_DIR)) rmSync(TEST_BACKUP_DIR, { recursive: true, force: true });
+  mkdirSync(TEST_BACKUP_DIR, { recursive: true });
+});
+
+afterEach(() => {
+  if (existsSync(TEST_BACKUP_DIR)) rmSync(TEST_BACKUP_DIR, { recursive: true, force: true });
+});
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe('createBackup', () => {
+  test('creates a backup file', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    const filepath = createBackup(state, TEST_BACKUP_DIR);
+
+    expect(existsSync(filepath)).toBe(true);
+    expect(filepath).toContain('yggdrasil-backup-');
+    expect(filepath).toContain('show-1');
+    expect(filepath).toMatch(/\.json$/);
+  });
+
+  test('creates directory if it does not exist', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    const nested = join(TEST_BACKUP_DIR, 'nested', 'path');
+
+    const filepath = createBackup(state, nested);
+
+    expect(existsSync(filepath)).toBe(true);
+    expect(existsSync(nested)).toBe(true);
+  });
+
+  test('includes version in filename', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    state.version = 42;
+
+    const filepath = createBackup(state, TEST_BACKUP_DIR);
+
+    expect(filepath).toContain('-v42.json');
+  });
+});
+
+describe('loadBackup', () => {
+  test('loads backup and restores state correctly', () => {
+    const original = createInitialState(createTestConfig(), 'show-1');
+    const filepath = createBackup(original, TEST_BACKUP_DIR);
+
+    const loaded = loadBackup(filepath);
+
+    expect(loaded.id).toBe(original.id);
+    expect(loaded.version).toBe(original.version);
+    expect(loaded.phase).toBe(original.phase);
+  });
+
+  test('preserves Map<UserId, User>', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    state.users.set('user-1', { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null });
+    state.users.set('user-2', { id: 'user-2', seatId: 'A2', connected: false, joinedAt: 2000, finaleChapter: 'love' });
+
+    const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
+
+    expect(loaded.users).toBeInstanceOf(Map);
+    expect(loaded.users.size).toBe(2);
+    expect(loaded.users.get('user-1')?.seatId).toBe('A1');
+    expect(loaded.users.get('user-2')?.finaleChapter).toBe('love');
+  });
+
+  test('preserves null finaleState', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
+
+    expect(loaded.finaleState).toBeNull();
+  });
+
+  test('preserves finaleState Maps', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    state.finaleState = {
+      chapterAssignments: new Map([['u1', 'ambition'], ['u2', 'love']]),
+      queue: [],
+      activeSlots: new Array(7).fill(null),
+      trianglePositions: new Map([['u1', { wAmbition: 0.6, wLove: 0.2, wAvoidance: 0.2 }]]),
+      centroid: { wAmbition: 0.6, wLove: 0.2, wAvoidance: 0.2 },
+      rotationActive: false,
+      rotationRate: 2,
+      frozen: false,
+      stewardshipLog: [],
+      triangleActive: true,
+    };
+
+    const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
+
+    expect(loaded.finaleState!.chapterAssignments).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.chapterAssignments.get('u1')).toBe('ambition');
+    expect(loaded.finaleState!.trianglePositions).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.trianglePositions.get('u1')?.wAmbition).toBe(0.6);
+  });
+
+  test('throws for non-existent file', () => {
+    expect(() => loadBackup(join(TEST_BACKUP_DIR, 'non-existent.json'))).toThrow();
+  });
+});
+
+describe('listBackups', () => {
+  test('returns empty array for empty directory', () => {
+    expect(listBackups(TEST_BACKUP_DIR)).toEqual([]);
+  });
+
+  test('returns empty array for non-existent directory', () => {
+    expect(listBackups(join(TEST_BACKUP_DIR, 'no-such-dir'))).toEqual([]);
+  });
+
+  test('lists all backup files', () => {
+    const config = createTestConfig();
+    createBackup(createInitialState(config, 'show-1'), TEST_BACKUP_DIR);
+    createBackup(createInitialState(config, 'show-2'), TEST_BACKUP_DIR);
+
+    expect(listBackups(TEST_BACKUP_DIR).length).toBe(2);
+  });
+
+  test('includes metadata in each entry', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    state.version = 5;
+    state.phase = 'attempt_build';
+
+    createBackup(state, TEST_BACKUP_DIR);
+
+    const backups = listBackups(TEST_BACKUP_DIR);
+    expect(backups[0].showId).toBe('show-1');
+    expect(backups[0].version).toBe(5);
+    expect(backups[0].phase).toBe('attempt_build');
+    expect(backups[0].filename).toContain('yggdrasil-backup-');
+    expect(typeof backups[0].timestamp).toBe('number');
+  });
+
+  test('ignores non-backup files', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    createBackup(state, TEST_BACKUP_DIR);
+
+    const fs = require('fs');
+    fs.writeFileSync(join(TEST_BACKUP_DIR, 'other-file.json'), '{}');
+    fs.writeFileSync(join(TEST_BACKUP_DIR, 'readme.txt'), 'notes');
+
+    expect(listBackups(TEST_BACKUP_DIR).length).toBe(1);
+  });
+});
+
+describe('pruneBackups', () => {
+  test('keeps all backups when count is at or below limit', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    createBackup(state, TEST_BACKUP_DIR);
+    state.version = 2;
+    createBackup(state, TEST_BACKUP_DIR);
+
+    expect(pruneBackups(TEST_BACKUP_DIR, 5)).toBe(0);
+    expect(listBackups(TEST_BACKUP_DIR).length).toBe(2);
+  });
+
+  test('deletes oldest backups when over limit', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+
+    for (let i = 0; i < 5; i++) {
+      state.version = i;
+      createBackup(state, TEST_BACKUP_DIR);
     }
-    mkdirSync(testBackupDir, { recursive: true });
+
+    expect(pruneBackups(TEST_BACKUP_DIR, 3)).toBe(2);
+    expect(listBackups(TEST_BACKUP_DIR).length).toBe(3);
   });
 
-  afterEach(() => {
-    // Clean up test directory
-    if (existsSync(testBackupDir)) {
-      rmSync(testBackupDir, { recursive: true, force: true });
+  test('returns 0 for empty directory', () => {
+    expect(pruneBackups(TEST_BACKUP_DIR, 5)).toBe(0);
+  });
+
+  test('returns 0 for non-existent directory', () => {
+    expect(pruneBackups(join(TEST_BACKUP_DIR, 'no-such-dir'), 5)).toBe(0);
+  });
+});
+
+describe('createAndPruneBackup', () => {
+  test('enforces max backup count', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+
+    for (let i = 0; i < 5; i++) {
+      state.version = i;
+      createAndPruneBackup(state, TEST_BACKUP_DIR, 3);
     }
+
+    expect(listBackups(TEST_BACKUP_DIR).length).toBe(3);
   });
 
-  describe('createBackup', () => {
-    test('creates a backup file', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
+  test('defaults to 10 backups', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
 
-      const filepath = createBackup(state, testBackupDir);
+    for (let i = 0; i < 15; i++) {
+      state.version = i;
+      createAndPruneBackup(state, TEST_BACKUP_DIR);
+    }
 
-      expect(existsSync(filepath)).toBe(true);
-      expect(filepath).toContain('yggdrasil-backup-');
-      expect(filepath).toContain('test-show-1');
-      expect(filepath).toMatch(/\.json$/);
-    });
-
-    test('creates directory if it does not exist', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      const nonExistentDir = join(testBackupDir, 'nested', 'path');
-
-      const filepath = createBackup(state, nonExistentDir);
-
-      expect(existsSync(filepath)).toBe(true);
-      expect(existsSync(nonExistentDir)).toBe(true);
-    });
-
-    test('includes version in filename', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      state.version = 42;
-
-      const filepath = createBackup(state, testBackupDir);
-
-      expect(filepath).toContain('-v42.json');
-    });
+    expect(listBackups(TEST_BACKUP_DIR).length).toBe(10);
   });
 
-  describe('loadBackup', () => {
-    test('loads backup correctly', () => {
-      const config = createTestConfig();
-      const originalState = createInitialState(config, 'test-show-1');
+  test('returns path to the created file', () => {
+    const state = createInitialState(createTestConfig(), 'show-1');
+    const filepath = createAndPruneBackup(state, TEST_BACKUP_DIR, 5);
 
-      const filepath = createBackup(originalState, testBackupDir);
-      const loadedState = loadBackup(filepath);
-
-      expect(loadedState.id).toBe(originalState.id);
-      expect(loadedState.version).toBe(originalState.version);
-      expect(loadedState.phase).toBe(originalState.phase);
-    });
-
-    test('preserves Map structures', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      // Add users
-      state.users.set('user-1', {
-        id: 'user-1',
-        seatId: 'A1',
-        faction: 0,
-        connected: true,
-        joinedAt: Date.now(),
-      });
-
-      // Add personal trees
-      state.personalTrees.set('user-1', {
-        userId: 'user-1',
-        path: ['r0-opt0', 'r1-opt1'],
-        figTreeResponse: 'Test response',
-      });
-
-      const filepath = createBackup(state, testBackupDir);
-      const loaded = loadBackup(filepath);
-
-      expect(loaded.users).toBeInstanceOf(Map);
-      expect(loaded.users.size).toBe(1);
-      expect(loaded.users.get('user-1')?.seatId).toBe('A1');
-
-      expect(loaded.personalTrees).toBeInstanceOf(Map);
-      expect(loaded.personalTrees.size).toBe(1);
-      expect(loaded.personalTrees.get('user-1')?.path).toEqual(['r0-opt0', 'r1-opt1']);
-    });
-
-    test('preserves Set structures in factions', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      // Add coup votes
-      state.factions[0].currentRowCoupVotes.add('user-1');
-      state.factions[0].currentRowCoupVotes.add('user-2');
-
-      const filepath = createBackup(state, testBackupDir);
-      const loaded = loadBackup(filepath);
-
-      expect(loaded.factions[0].currentRowCoupVotes).toBeInstanceOf(Set);
-      expect(loaded.factions[0].currentRowCoupVotes.size).toBe(2);
-      expect(loaded.factions[0].currentRowCoupVotes.has('user-1')).toBe(true);
-    });
-
-    test('throws error for non-existent file', () => {
-      expect(() => {
-        loadBackup(join(testBackupDir, 'non-existent.json'));
-      }).toThrow();
-    });
-  });
-
-  describe('listBackups', () => {
-    test('returns empty array for empty directory', () => {
-      const backups = listBackups(testBackupDir);
-      expect(backups).toEqual([]);
-    });
-
-    test('returns empty array for non-existent directory', () => {
-      const backups = listBackups(join(testBackupDir, 'non-existent'));
-      expect(backups).toEqual([]);
-    });
-
-    test('lists all backups', () => {
-      const config = createTestConfig();
-      const state1 = createInitialState(config, 'show-1');
-      const state2 = createInitialState(config, 'show-2');
-
-      createBackup(state1, testBackupDir);
-      createBackup(state2, testBackupDir);
-
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(2);
-    });
-
-    test('sorts backups by timestamp descending', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      // Create backups with slight delay
-      const path1 = createBackup(state, testBackupDir);
-      // Small delay to ensure different timestamps
-      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-      // We can't easily test timing in synchronous tests, but we can verify structure
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(1);
-      expect(backups[0].showId).toBe('show-1');
-    });
-
-    test('includes metadata in backup info', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-      state.version = 5;
-      state.phase = 'running';
-
-      createBackup(state, testBackupDir);
-
-      const backups = listBackups(testBackupDir);
-      expect(backups[0].showId).toBe('show-1');
-      expect(backups[0].version).toBe(5);
-      expect(backups[0].phase).toBe('running');
-      expect(backups[0].filename).toContain('yggdrasil-backup-');
-      expect(backups[0].filepath).toContain(testBackupDir);
-      expect(typeof backups[0].timestamp).toBe('number');
-    });
-
-    test('ignores non-backup files', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      createBackup(state, testBackupDir);
-
-      // Create a non-backup file
-      const fs = require('fs');
-      fs.writeFileSync(join(testBackupDir, 'other-file.json'), '{}');
-      fs.writeFileSync(join(testBackupDir, 'readme.txt'), 'test');
-
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(1);
-    });
-  });
-
-  describe('pruneBackups', () => {
-    test('keeps all backups if count is below threshold', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      createBackup(state, testBackupDir);
-      state.version = 2; // Change version to get different filename
-      createBackup(state, testBackupDir);
-
-      const deleted = pruneBackups(testBackupDir, 5);
-      expect(deleted).toBe(0);
-
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(2);
-    });
-
-    test('deletes oldest backups when over limit', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      // Create 5 backups
-      for (let i = 0; i < 5; i++) {
-        state.version = i;
-        createBackup(state, testBackupDir);
-      }
-
-      const deleted = pruneBackups(testBackupDir, 3);
-      expect(deleted).toBe(2);
-
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(3);
-    });
-
-    test('returns 0 for empty directory', () => {
-      const deleted = pruneBackups(testBackupDir, 5);
-      expect(deleted).toBe(0);
-    });
-
-    test('returns 0 for non-existent directory', () => {
-      const deleted = pruneBackups(join(testBackupDir, 'non-existent'), 5);
-      expect(deleted).toBe(0);
-    });
-  });
-
-  describe('createAndPruneBackup', () => {
-    test('creates backup and prunes old ones', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      // Create several backups
-      for (let i = 0; i < 5; i++) {
-        state.version = i;
-        createAndPruneBackup(state, testBackupDir, 3);
-      }
-
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(3);
-    });
-
-    test('uses default max of 10 backups', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      // Create 15 backups
-      for (let i = 0; i < 15; i++) {
-        state.version = i;
-        createAndPruneBackup(state, testBackupDir);
-      }
-
-      const backups = listBackups(testBackupDir);
-      expect(backups.length).toBe(10);
-    });
-
-    test('returns path to created backup', () => {
-      const config = createTestConfig();
-      const state = createInitialState(config, 'show-1');
-
-      const filepath = createAndPruneBackup(state, testBackupDir, 5);
-
-      expect(existsSync(filepath)).toBe(true);
-      expect(filepath).toContain('yggdrasil-backup-');
-    });
+    expect(existsSync(filepath)).toBe(true);
   });
 });

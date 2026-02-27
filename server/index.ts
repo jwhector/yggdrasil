@@ -31,6 +31,7 @@ import { createAndPruneBackup } from './backup';
 import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
 import { createAudioRouter, type AudioRouter } from './audio-router';
+import { createMeteringService } from './metering';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || 'localhost';
@@ -95,7 +96,7 @@ async function main() {
 
   if (existingShow) {
     console.log(`[Server] Loaded existing show: ${existingShow.id} (version ${existingShow.version})`);
-    console.log(`[Server] Show phase: ${existingShow.phase}, Row: ${existingShow.currentRowIndex}`);
+    console.log(`[Server] Show phase: ${existingShow.phase}, Attempt: ${existingShow.currentAttemptIndex}`);
     currentState = existingShow;
   } else {
     console.log('[Server] No existing show found, creating new show from config...');
@@ -129,8 +130,8 @@ async function main() {
     if (events.some(e => e.type === 'SHOW_PHASE_CHANGED')) {
       const phaseEvent = events.find(e => e.type === 'SHOW_PHASE_CHANGED') as any;
 
-      // Backup when transitioning to running or finale
-      if (phaseEvent.phase === 'running' || phaseEvent.phase === 'finale') {
+      // Backup when the show starts and when the finale begins
+      if (phaseEvent.phase === 'opener' || phaseEvent.phase === 'finale_rotating') {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, 10);
           console.log(`[Backup] Created backup: ${backupPath}`);
@@ -219,10 +220,13 @@ async function main() {
   }
 
   // Create and register audio router
-  const audioRouter = createAudioRouter(oscBridge, currentState?.config?.playbackMode ?? 'session');
+  const audioRouter = createAudioRouter(oscBridge);
   stateChangeHooks.push((state, events) => {
     audioRouter.handleStateChange(state, events);
   });
+
+  // Create metering service (wires OSC → projector in Phase 4)
+  const meteringService = createMeteringService(io);
 
   // Start OSC bridge and timing engine
   try {
@@ -247,8 +251,9 @@ async function main() {
     periodicBackupInterval = setInterval(() => {
       const state = getState();
 
-      // Only backup during running phase to avoid cluttering with lobby backups
-      if (state.phase === 'running') {
+      // Only backup during active show phases to avoid cluttering with lobby backups
+      const activePhases = ['attempt_story', 'attempt_build', 'finale_setup', 'finale_rotating', 'finale_frozen'];
+      if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);
           console.log(`[Backup] Periodic backup created: ${backupPath}`);
@@ -269,9 +274,10 @@ async function main() {
       console.log('[Server] Timing engine stopped');
     }
 
-    // Stop audio router
+    // Stop audio router and metering
     audioRouter.dispose();
-    console.log('[Server] Audio router stopped');
+    meteringService.dispose();
+    console.log('[Server] Audio router and metering stopped');
 
     // Stop OSC bridge
     oscBridge.stop();

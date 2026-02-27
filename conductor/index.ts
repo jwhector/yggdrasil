@@ -20,3 +20,17 @@ export { calculateConsensus, resolveVote } from './consensus';
 // Export fragment functions
 export { generateFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
+
+// Export finale functions
+export {
+  assignChapters,
+  initializeFinaleState,
+  getAvailableFragments,
+  selectFragment,
+  computeCentroid,
+  scheduleRotation,
+  performRotationTick,
+  startStewardship,
+  endStewardship,
+  updateStewardParam,
+} from './finale';

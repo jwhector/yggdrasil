@@ -1,457 +1,359 @@
 /**
- * Persistence Layer Tests
+ * Persistence Layer Tests (NEW SYSTEM)
  *
  * Tests cover:
- * - Database initialization
- * - State save/load with Map/Set serialization
- * - Vote, user, and fig tree response persistence
+ * - Database initialization and WAL mode
+ * - State save/load with Map serialization (users, finaleState)
+ * - Layer vote, user, and fragment selection persistence
  * - Transaction atomicity
+ * - getLatestShow recovery flow
  */
 
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createPersistence } from '../persistence';
-import { createInitialState } from '@/conductor/conductor';
-import type { ShowState, User, Vote, FactionConfig } from '@/conductor/types';
-import { ShowConfig } from '../../conductor';
+import { createInitialState } from '../../conductor/conductor';
+import type { ShowConfig, LayerVote, User } from '../../conductor/types';
 
-// Helper to create test config
+// ============================================================================
+// Test Config Helper
+// ============================================================================
+
 function createTestConfig(): ShowConfig {
-  const factions: FactionConfig[] = [
-    { id: 0, name: 'Faction 0', color: '#ff0000' },
-    { id: 1, name: 'Faction 1', color: '#00ff00' },
-    { id: 2, name: 'Faction 2', color: '#0000ff' },
-    { id: 3, name: 'Faction 3', color: '#ffff00' },
-  ];
-
   return {
-    rowCount: 2,
-    optionsPerRow: 4,
-    factions,
-    timing: {
-      auditionLoopsPerOption: 2,
-      auditionLoopsPerRow: 1,
-      auditionPerOptionMs: 4000,
-      votingWindowMs: 30000,
-      revealDurationMs: 10000,
-      coupWindowMs: 15000,
-      masterLoopBeats: 4,
-    },
-    coup: {
-      threshold: 0.5,
-      multiplierBonus: 0.5,
-    },
-    lobby: {
-      projectorContent: 'Welcome',
-      audiencePrompt: 'What lives on your fig tree?',
-    },
-    rows: [
+    maxLayersPerAttempt: 7,
+    attempts: [
       {
-        index: 0,
-        label: 'Row 0',
-        type: 'layer' as const,
-        options: [
-          { id: 'r0-opt0', index: 0, audioRef: 'audio-0-0' },
-          { id: 'r0-opt1', index: 1, audioRef: 'audio-0-1' },
-          { id: 'r0-opt2', index: 2, audioRef: 'audio-0-2' },
-          { id: 'r0-opt3', index: 3, audioRef: 'audio-0-3' },
+        chapter: 'ambition',
+        title: 'Ambition',
+        layers: [
+          { index: 0, type: 'foundation', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 1, type: 'pulse', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
         ],
       },
       {
-        index: 1,
-        label: 'Row 1',
-        type: 'effect' as const,
-        options: [
-          { id: 'r1-opt0', index: 0, audioRef: 'audio-1-0' },
-          { id: 'r1-opt1', index: 1, audioRef: 'audio-1-1' },
-          { id: 'r1-opt2', index: 2, audioRef: 'audio-1-2' },
-          { id: 'r1-opt3', index: 3, audioRef: 'audio-1-3' },
+        chapter: 'love',
+        title: 'Love',
+        layers: [
+          { index: 0, type: 'color', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+        ],
+      },
+      {
+        chapter: 'avoidance',
+        title: 'Avoidance',
+        layers: [
+          { index: 0, type: 'space', optionA: { trackIndex: 6 }, optionB: { trackIndex: 7 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
         ],
       },
     ],
-    topology: {
-      type: 'none' as const,
+    finale: {
+      slotCount: 7,
+      rotationBars: 8,
+      defaultRotationRate: 2,
+      triangleDriftTimeoutMs: 10000,
+      triangleDriftSpeedMs: 3000,
+      fragments: [],
     },
+    timing: {
+      auditionDurationMs: 4000,
+      votingWindowMs: 30000,
+      resolveAnimationMs: 5000,
+      collapseAnimationMs: 3000,
+      autoAdvanceToStoryMs: 2000,
+    },
+    lobby: { waitingMessage: 'Welcome' },
+    seatIds: ['seat-1', 'seat-2'],
   };
 }
 
-describe('Persistence Layer', () => {
-  const testDbPath = join(__dirname, 'test-persistence.db');
-  const testDbWalPath = `${testDbPath}-wal`;
-  const testDbShmPath = `${testDbPath}-shm`;
+// ============================================================================
+// Test Setup
+// ============================================================================
 
-  // Clean up before each test
-  beforeEach(() => {
-    [testDbPath, testDbWalPath, testDbShmPath].forEach(path => {
-      if (existsSync(path)) {
-        unlinkSync(path);
-      }
-    });
+const TEST_DB_PATH = join(__dirname, 'test-persistence.db');
+const TEST_DB_WAL = `${TEST_DB_PATH}-wal`;
+const TEST_DB_SHM = `${TEST_DB_PATH}-shm`;
+
+function cleanup() {
+  for (const p of [TEST_DB_PATH, TEST_DB_WAL, TEST_DB_SHM]) {
+    if (existsSync(p)) {
+      try { unlinkSync(p); } catch { /* ignore */ }
+    }
+  }
+}
+
+beforeEach(cleanup);
+afterEach(cleanup);
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe('Database initialization', () => {
+  test('creates database file', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    expect(existsSync(TEST_DB_PATH)).toBe(true);
+    db.close();
   });
 
-  // Clean up after each test
-  afterEach(() => {
-    [testDbPath, testDbWalPath, testDbShmPath].forEach(path => {
-      if (existsSync(path)) {
-        try {
-          unlinkSync(path);
-        } catch (err) {
-          // Ignore cleanup errors
-        }
-      }
-    });
+  test('enables WAL mode (creates .wal file on first write)', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-wal');
+    db.saveState(state);
+    expect(existsSync(TEST_DB_WAL)).toBe(true);
+    db.close();
+  });
+});
+
+describe('State persistence', () => {
+  test('saves and loads state correctly', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+
+    db.saveState(state);
+    const loaded = db.loadState('show-1');
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.id).toBe('show-1');
+    expect(loaded!.version).toBe(state.version);
+    expect(loaded!.phase).toBe('lobby');
+
+    db.close();
   });
 
-  describe('Database initialization', () => {
-    test('creates database file', () => {
-      const db = createPersistence(testDbPath);
-      expect(existsSync(testDbPath)).toBe(true);
-      db.close();
-    });
-
-    test('enables WAL mode', () => {
-      const db = createPersistence(testDbPath);
-      // WAL mode creates .wal and .shm files on first write
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state);
-      expect(existsSync(testDbWalPath)).toBe(true);
-      db.close();
-    });
-
-    test('creates all required tables', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      // Should not throw when using all tables
-      db.saveState(state);
-      db.saveUser({ id: 'user-1', seatId: 'A1', faction: 0, connected: true, joinedAt: Date.now() }, 'test-show-1');
-      db.saveVote({ userId: 'user-1', rowIndex: 0, factionVote: 'r0-opt0', personalVote: 'r0-opt1', timestamp: Date.now(), attempt: 1 }, 'test-show-1');
-      db.saveFigTreeResponse('user-1', 'My response', 'test-show-1');
-
-      db.close();
-    });
+  test('returns null for non-existent show', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    expect(db.loadState('no-such-show')).toBeNull();
+    db.close();
   });
 
-  describe('State persistence', () => {
-    test('saves and loads state correctly', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
+  test('preserves Map<UserId, User>', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
 
-      db.saveState(state);
-      const loaded = db.loadState('test-show-1');
+    state.users.set('user-1', { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null });
+    state.users.set('user-2', { id: 'user-2', seatId: 'A2', connected: false, joinedAt: 2000, finaleChapter: 'love' });
 
-      expect(loaded).not.toBeNull();
-      expect(loaded!.id).toBe('test-show-1');
-      expect(loaded!.version).toBe(state.version);
-      expect(loaded!.phase).toBe(state.phase);
+    db.saveState(state);
+    const loaded = db.loadState('show-1');
 
-      db.close();
-    });
+    expect(loaded!.users).toBeInstanceOf(Map);
+    expect(loaded!.users.size).toBe(2);
+    expect(loaded!.users.get('user-1')?.seatId).toBe('A1');
+    expect(loaded!.users.get('user-2')?.finaleChapter).toBe('love');
 
-    test('returns null for non-existent show', () => {
-      const db = createPersistence(testDbPath);
-      const loaded = db.loadState('non-existent');
-      expect(loaded).toBeNull();
-      db.close();
-    });
-
-    test('preserves Map<UserId, User> structure', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      // Add users
-      state.users.set('user-1', {
-        id: 'user-1',
-        seatId: 'A1',
-        faction: 0,
-        connected: true,
-        joinedAt: Date.now(),
-      });
-      state.users.set('user-2', {
-        id: 'user-2',
-        seatId: 'A2',
-        faction: 1,
-        connected: false,
-        joinedAt: Date.now(),
-      });
-
-      db.saveState(state);
-      const loaded = db.loadState('test-show-1');
-
-      expect(loaded!.users).toBeInstanceOf(Map);
-      expect(loaded!.users.size).toBe(2);
-      expect(loaded!.users.get('user-1')?.seatId).toBe('A1');
-      expect(loaded!.users.get('user-2')?.faction).toBe(1);
-
-      db.close();
-    });
-
-    test('preserves Map<UserId, PersonalTree> structure', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      // Add personal trees
-      state.personalTrees.set('user-1', {
-        userId: 'user-1',
-        path: ['r0-opt0', 'r1-opt2'],
-        figTreeResponse: 'My story',
-      });
-
-      db.saveState(state);
-      const loaded = db.loadState('test-show-1');
-
-      expect(loaded!.personalTrees).toBeInstanceOf(Map);
-      expect(loaded!.personalTrees.size).toBe(1);
-      expect(loaded!.personalTrees.get('user-1')?.path).toEqual(['r0-opt0', 'r1-opt2']);
-      expect(loaded!.personalTrees.get('user-1')?.figTreeResponse).toBe('My story');
-
-      db.close();
-    });
-
-    test('preserves Set<UserId> in faction coup votes', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      // Add coup votes
-      state.factions[0].currentRowCoupVotes.add('user-1');
-      state.factions[0].currentRowCoupVotes.add('user-2');
-      state.factions[1].currentRowCoupVotes.add('user-3');
-
-      db.saveState(state);
-      const loaded = db.loadState('test-show-1');
-
-      expect(loaded!.factions[0].currentRowCoupVotes).toBeInstanceOf(Set);
-      expect(loaded!.factions[0].currentRowCoupVotes.size).toBe(2);
-      expect(loaded!.factions[0].currentRowCoupVotes.has('user-1')).toBe(true);
-      expect(loaded!.factions[0].currentRowCoupVotes.has('user-2')).toBe(true);
-      expect(loaded!.factions[1].currentRowCoupVotes.has('user-3')).toBe(true);
-
-      db.close();
-    });
-
-    test('updates existing state on save', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-
-      db.saveState(state);
-
-      // Modify and save again
-      state.version = 2;
-      state.phase = 'running';
-      db.saveState(state);
-
-      const loaded = db.loadState('test-show-1');
-      expect(loaded!.version).toBe(2);
-      expect(loaded!.phase).toBe('running');
-
-      db.close();
-    });
-
-    test('getLatestShow returns a show when shows exist', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-
-      const state1 = createInitialState(config, 'show-1');
-      const state2 = createInitialState(config, 'show-2');
-
-      db.saveState(state1);
-      db.saveState(state2);
-
-      const latest = db.getLatestShow();
-      expect(latest).not.toBeNull();
-      expect(['show-1', 'show-2']).toContain(latest!.id);
-
-      db.close();
-    });
-
-    test('getLatestShow returns null when no shows exist', () => {
-      const db = createPersistence(testDbPath);
-      const latest = db.getLatestShow();
-      expect(latest).toBeNull();
-      db.close();
-    });
+    db.close();
   });
 
-  describe('Vote persistence', () => {
-    test('saves vote correctly', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state); // Create show first for foreign key
-      db.saveUser({ id: 'user-1', seatId: 'A1', faction: 0, connected: true, joinedAt: Date.now() }, 'test-show-1');
+  test('preserves null finaleState', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
 
-      const vote: Vote = {
-        userId: 'user-1',
-        rowIndex: 0,
-        factionVote: 'r0-opt0',
-        personalVote: 'r0-opt1',
-        timestamp: Date.now(),
-        attempt: 1,
-      };
+    db.saveState(state);
+    const loaded = db.loadState('show-1');
 
-      db.saveVote(vote, 'test-show-1');
-      db.close();
-    });
+    expect(loaded!.finaleState).toBeNull();
 
-    test('allows multiple votes from same user', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state); // Create show first for foreign key
-      db.saveUser({ id: 'user-1', seatId: 'A1', faction: 0, connected: true, joinedAt: Date.now() }, 'test-show-1');
-
-      const vote1: Vote = {
-        userId: 'user-1',
-        rowIndex: 0,
-        factionVote: 'r0-opt0',
-        personalVote: 'r0-opt1',
-        timestamp: Date.now(),
-        attempt: 1,
-      };
-
-      const vote2: Vote = {
-        userId: 'user-1',
-        rowIndex: 0,
-        factionVote: 'r0-opt2',
-        personalVote: 'r0-opt3',
-        timestamp: Date.now(),
-        attempt: 2,
-      };
-
-      db.saveVote(vote1, 'test-show-1');
-      db.saveVote(vote2, 'test-show-1');
-      db.close();
-    });
+    db.close();
   });
 
-  describe('User persistence', () => {
-    test('saves user correctly', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state); // Create show first for foreign key
+  test('preserves finaleState Maps (chapterAssignments, trianglePositions)', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
 
-      const user: User = {
-        id: 'user-1',
-        seatId: 'A1',
-        faction: 0,
-        connected: true,
-        joinedAt: Date.now(),
-      };
+    // Manually attach a minimal finaleState for persistence testing
+    state.finaleState = {
+      chapterAssignments: new Map([['user-1', 'ambition'], ['user-2', 'love']]),
+      queue: [],
+      activeSlots: new Array(7).fill(null),
+      trianglePositions: new Map([['user-1', { wAmbition: 0.5, wLove: 0.3, wAvoidance: 0.2 }]]),
+      centroid: { wAmbition: 0.5, wLove: 0.3, wAvoidance: 0.2 },
+      rotationActive: false,
+      rotationRate: 2,
+      frozen: false,
+      stewardshipLog: [],
+      triangleActive: true,
+    };
 
-      db.saveUser(user, 'test-show-1');
-      db.close();
-    });
+    db.saveState(state);
+    const loaded = db.loadState('show-1');
 
-    test('updates user on conflict', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state); // Create show first for foreign key
+    expect(loaded!.finaleState).not.toBeNull();
+    expect(loaded!.finaleState!.chapterAssignments).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.chapterAssignments.get('user-1')).toBe('ambition');
+    expect(loaded!.finaleState!.chapterAssignments.get('user-2')).toBe('love');
+    expect(loaded!.finaleState!.trianglePositions).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.trianglePositions.get('user-1')?.wAmbition).toBe(0.5);
 
-      const user: User = {
-        id: 'user-1',
-        seatId: 'A1',
-        faction: 0,
-        connected: true,
-        joinedAt: Date.now(),
-      };
-
-      db.saveUser(user, 'test-show-1');
-
-      // Update user
-      user.faction = 1;
-      user.seatId = 'B2';
-      db.saveUser(user, 'test-show-1');
-
-      const users = db.getUsersByShow('test-show-1');
-      expect(users.length).toBe(1);
-      expect(users[0].faction).toBe(1);
-      expect(users[0].seatId).toBe('B2');
-
-      db.close();
-    });
-
-    test('getUsersByShow returns all users for a show', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state1 = createInitialState(config, 'show-1');
-      const state2 = createInitialState(config, 'show-2');
-      db.saveState(state1); // Create shows first for foreign key
-      db.saveState(state2);
-
-      db.saveUser({ id: 'user-1', seatId: 'A1', faction: 0, connected: true, joinedAt: Date.now() }, 'show-1');
-      db.saveUser({ id: 'user-2', seatId: 'A2', faction: 1, connected: true, joinedAt: Date.now() }, 'show-1');
-      db.saveUser({ id: 'user-3', seatId: 'B1', faction: 2, connected: true, joinedAt: Date.now() }, 'show-2');
-
-      const show1Users = db.getUsersByShow('show-1');
-      expect(show1Users.length).toBe(2);
-
-      const show2Users = db.getUsersByShow('show-2');
-      expect(show2Users.length).toBe(1);
-
-      db.close();
-    });
+    db.close();
   });
 
-  describe('Fig tree responses', () => {
-    test('saves fig tree response', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state); // Create show first for foreign key
-      db.saveUser({ id: 'user-1', seatId: 'A1', faction: 0, connected: true, joinedAt: Date.now() }, 'test-show-1');
+  test('updates existing state on re-save', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
 
-      db.saveFigTreeResponse('user-1', 'My response to the prompt', 'test-show-1');
-      db.close();
-    });
+    db.saveState(state);
+    state.version = 5;
+    state.phase = 'attempt_build';
+    db.saveState(state);
 
-    test('updates response on conflict', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
-      db.saveState(state); // Create show first for foreign key
-      db.saveUser({ id: 'user-1', seatId: 'A1', faction: 0, connected: true, joinedAt: Date.now() }, 'test-show-1');
+    const loaded = db.loadState('show-1');
+    expect(loaded!.version).toBe(5);
+    expect(loaded!.phase).toBe('attempt_build');
 
-      db.saveFigTreeResponse('user-1', 'First response', 'test-show-1');
-      db.saveFigTreeResponse('user-1', 'Updated response', 'test-show-1');
-
-      db.close();
-    });
+    db.close();
   });
 
-  describe('Transaction atomicity', () => {
-    test('state save is atomic', () => {
-      const db = createPersistence(testDbPath);
-      const config = createTestConfig();
-      const state = createInitialState(config, 'test-show-1');
+  test('getLatestShow returns most recently updated show', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const config = createTestConfig();
 
-      // Save state multiple times rapidly
-      for (let i = 0; i < 10; i++) {
-        state.version = i;
-        db.saveState(state);
-      }
+    db.saveState(createInitialState(config, 'show-1'));
+    db.saveState(createInitialState(config, 'show-2'));
 
-      const loaded = db.loadState('test-show-1');
-      expect(loaded!.version).toBe(9);
+    const latest = db.getLatestShow();
+    expect(latest).not.toBeNull();
+    expect(['show-1', 'show-2']).toContain(latest!.id);
 
-      db.close();
-    });
+    db.close();
   });
 
-  describe('Close', () => {
-    test('closes database connection', () => {
-      const db = createPersistence(testDbPath);
-      db.close();
-      // No error should occur
-    });
+  test('getLatestShow returns null when no shows exist', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    expect(db.getLatestShow()).toBeNull();
+    db.close();
+  });
+});
+
+describe('Layer vote persistence', () => {
+  test('saves a layer vote', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null }, 'show-1');
+
+    const vote: LayerVote = {
+      userId: 'user-1',
+      attemptIndex: 0,
+      layerIndex: 0,
+      choice: 'A',
+      timestamp: Date.now(),
+    };
+
+    expect(() => db.saveLayerVote(vote, 'show-1')).not.toThrow();
+
+    db.close();
+  });
+
+  test('allows multiple votes from same user across layers', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null }, 'show-1');
+
+    db.saveLayerVote({ userId: 'user-1', attemptIndex: 0, layerIndex: 0, choice: 'A', timestamp: Date.now() }, 'show-1');
+    db.saveLayerVote({ userId: 'user-1', attemptIndex: 0, layerIndex: 1, choice: 'B', timestamp: Date.now() }, 'show-1');
+
+    db.close(); // No error = pass
+  });
+});
+
+describe('User persistence', () => {
+  test('saves a user', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    const user: User = { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null };
+    expect(() => db.saveUser(user, 'show-1')).not.toThrow();
+
+    db.close();
+  });
+
+  test('updates user on conflict (upsert)', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    const user: User = { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null };
+    db.saveUser(user, 'show-1');
+
+    // Update seat and finaleChapter
+    user.seatId = 'B2';
+    user.finaleChapter = 'ambition';
+    db.saveUser(user, 'show-1');
+
+    const users = db.getUsersByShow('show-1');
+    expect(users.length).toBe(1);
+    expect(users[0].seatId).toBe('B2');
+    expect(users[0].finaleChapter).toBe('ambition');
+
+    db.close();
+  });
+
+  test('getUsersByShow returns users scoped to a show', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const config = createTestConfig();
+    db.saveState(createInitialState(config, 'show-1'));
+    db.saveState(createInitialState(config, 'show-2'));
+
+    db.saveUser({ id: 'u1', seatId: 'A1', connected: true, joinedAt: 0, finaleChapter: null }, 'show-1');
+    db.saveUser({ id: 'u2', seatId: 'A2', connected: true, joinedAt: 0, finaleChapter: null }, 'show-1');
+    db.saveUser({ id: 'u3', seatId: 'B1', connected: true, joinedAt: 0, finaleChapter: null }, 'show-2');
+
+    expect(db.getUsersByShow('show-1').length).toBe(2);
+    expect(db.getUsersByShow('show-2').length).toBe(1);
+
+    db.close();
+  });
+});
+
+describe('Fragment selection persistence', () => {
+  test('saves a fragment selection', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 0, finaleChapter: 'ambition' }, 'show-1');
+
+    expect(() => db.saveFragmentSelection('user-1', 'frag-ambition-0-A', 'show-1')).not.toThrow();
+
+    db.close();
+  });
+
+  test('updates selection on conflict (one per user)', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 0, finaleChapter: 'ambition' }, 'show-1');
+
+    db.saveFragmentSelection('user-1', 'frag-ambition-0-A', 'show-1');
+    expect(() => db.saveFragmentSelection('user-1', 'frag-ambition-1-B', 'show-1')).not.toThrow();
+
+    db.close();
+  });
+});
+
+describe('Transaction atomicity', () => {
+  test('rapid saves preserve latest version', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+
+    for (let i = 0; i < 10; i++) {
+      state.version = i;
+      db.saveState(state);
+    }
+
+    const loaded = db.loadState('show-1');
+    expect(loaded!.version).toBe(9);
+
+    db.close();
+  });
+});
+
+describe('Close', () => {
+  test('closes database connection without error', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    expect(() => db.close()).not.toThrow();
   });
 });
