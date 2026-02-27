@@ -12,8 +12,8 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 
 **Prerequisites:** ARCHITECTURE.md, DECISIONS.md, and CLAUDE.md are in the repo.
 
-- [ ] **0a.** Read the current `conductor/types.ts` (or equivalent). Identify every type that references old concepts (factions, coherence, coups, personal trees, fig tree, 4-option voting). Note them but don't delete yet.
-- [ ] **0b.** Create new `conductor/types.ts` with all types from ARCHITECTURE.md § Data Models:
+- [x] **0a.** Read the current `conductor/types.ts` (or equivalent). Identify every type that references old concepts (factions, coherence, coups, personal trees, fig tree, 4-option voting). Note them but don't delete yet.
+- [x] **0b.** Create new `conductor/types.ts` with all types from ARCHITECTURE.md § Data Models:
   - `User`, `UserId`, `SeatId`
   - `Chapter`, `LayerType`, `LayerPhase`, `LayerConfig`, `LayerResult`, `LayerVote`
   - `AttemptState`, `AttemptConfig`, `AttemptResult`
@@ -23,10 +23,11 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
   - `ConductorCommand` (full union from ARCHITECTURE.md)
   - `ConductorEvent` (full union from ARCHITECTURE.md)
   - `VoteResult`, `AudioCue`, `AudioReference`, `AbletonParamRef`
-- [ ] **0c.** Update `db/schema.sql` with new schema from ARCHITECTURE.md § Persistence Layer.
-- [ ] **0d.** Delete old type definitions that have no equivalent in the new system.
-- [ ] **0e.** Verify: `npx tsc --noEmit` on just the types file should pass (no imports from other files yet — types should be self-contained).
-- [ ] **0f.** Update CHANGELOG.md.
+- [x] **0c.** Update `db/schema.sql` with new schema from ARCHITECTURE.md § Persistence Layer.
+- [x] **0d.** Delete old type definitions that have no equivalent in the new system.
+  - *Note: Old types were replaced in-place (full rewrite of types.ts). Old conductor files (coherence.ts, coup.ts, ties.ts, assignment.ts) still exist — will be removed in Phase 1.*
+- [x] **0e.** Verify: `npx tsc --noEmit` on just the types file should pass (no imports from other files yet — types should be self-contained).
+- [x] **0f.** Update CHANGELOG.md.
 
 **Completion check:** New types file compiles. Old faction/coup/coherence types are gone. Schema matches ARCHITECTURE.md.
 
@@ -35,36 +36,42 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 ## Phase 1: Conductor Core — Show Phases & Song-Building
 **Goal:** Rewrite the Conductor state machine for the new show flow and song-building mechanics. No finale yet.
 
-- [ ] **1a.** Gut the old `conductor/conductor.ts`. Keep the structural pattern (class or module that receives commands, validates, mutates state, returns events) but remove ALL old game logic.
-- [ ] **1b.** Implement show phase transitions per ARCHITECTURE.md § Show Phase State Machine:
+- [x] **1a.** Gut the old `conductor/conductor.ts`. Keep the structural pattern (class or module that receives commands, validates, mutates state, returns events) but remove ALL old game logic.
+  - *Full rewrite from scratch. Also deleted coherence.ts, coup.ts, ties.ts, assignment.ts and their tests.*
+- [x] **1b.** Implement show phase transitions per ARCHITECTURE.md § Show Phase State Machine:
   - `lobby → opener → attempt_story → attempt_build → ... → finale_setup → finale_rotating → finale_frozen → ended`
   - `ADVANCE_PHASE` command walks through the sequence
   - `JUMP_TO_PHASE` for controller override
   - `PAUSE` / `RESUME`
   - Track `currentAttemptIndex` (0, 1, 2)
-- [ ] **1c.** Create `conductor/consensus.ts`:
+- [x] **1c.** Create `conductor/consensus.ts`:
   - `calculateConsensus(votes)` → `{ consensus, winner, votesA, votesB, totalVotes }`
-  - Doubt threshold check: `consensus >= threshold` → pass, else collapse
-- [ ] **1d.** Implement song-building layer flow in conductor:
+  - `resolveVote(votes, threshold)` → full VoteResult with threshold check
+- [x] **1d.** Implement song-building layer flow in conductor:
   - Layer phase transitions: `locked → auditioning → voting → resolving → locked_in` (or `→ collapsed`)
   - `SUBMIT_VOTE` command (binary A/B)
   - `OPEN_VOTING` / `CLOSE_VOTING`
   - Vote result calculation with doubt check
   - Collapse handling: mark attempt as collapsed, record `collapsedAtLayer`
-  - Auto-advance to next `attempt_story` on collapse (except attempt 2 → manual)
+  - Auto-advance to next `attempt_story` on collapse (except attempt 2 → manual per R15)
   - `FORCE_OPTION`, `FORCE_CONTINUE`, `FORCE_COLLAPSE`, `RERUN_VOTE`, `EXTEND_VOTE_TIMER`
-- [ ] **1e.** Create `conductor/fragments.ts`:
-  - `generateFragments(attemptResults)` → produces fragment list with correct availability (locked-in winners = selectable, losing options + unreached = locked/grayed)
-- [ ] **1f.** Write tests in `conductor/__tests__/`:
-  - Show phase transitions (happy path)
+- [x] **1e.** Create `conductor/fragments.ts`:
+  - `generateFragments(attempts, configs)` → produces fragment list with correct availability
+  - `extractAttemptResult(attempt)` → extracts AttemptResult from AttemptState
+- [x] **1f.** Write tests in `conductor/__tests__/`:
+  - 65 tests total across 3 test files (conductor, consensus, fragments)
+  - Show phase transitions (happy path + error cases)
   - Song-building: vote → lock-in → next layer
   - Doubt threshold: consensus above threshold → continue
   - Doubt threshold: consensus below threshold → collapse
   - Collapse sets correct `collapsedAtLayer` and `status`
   - Fragment generation: correct selectable vs locked fragments
-  - Force commands work (force option, force collapse, force continue)
+  - Force commands work (force option, force collapse, rerun vote, set threshold)
   - Auto-advance after collapse (attempts 0, 1) vs manual (attempt 2)
-- [ ] **1g.** Update CHANGELOG.md.
+  - User connection/disconnection/reconnection
+  - Recovery (reset to lobby, force reconnect)
+  - Audio commands (transport, panic)
+- [x] **1g.** Update CHANGELOG.md.
 
 **Completion check:** All conductor tests pass. `npx tsc --noEmit` passes. No references to factions/coups/coherence in conductor/.
 

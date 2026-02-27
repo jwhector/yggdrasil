@@ -1,10 +1,12 @@
 /**
- * Solo Show — Core Type Definitions
- * 
+ * Solo Show — Core Type Definitions (NEW SYSTEM)
+ *
  * This file defines the shared language for the entire system.
  * Changes here affect conductor, server, and client packages.
- * 
+ *
  * See ARCHITECTURE.md for detailed documentation of each type.
+ *
+ * Self-contained: no imports from other project files.
  */
 
 // ============================================================================
@@ -12,31 +14,229 @@
 // ============================================================================
 
 export type UserId = string;
-export type OptionId = string;
-export type ShowId = string;
 export type SeatId = string;
-export type FactionId = 0 | 1 | 2 | 3;
+export type ShowId = string;
 export type Timestamp = number;
-export type PlaybackMode = 'session' | 'arrangement';
 
 // ============================================================================
-// Seat Topology
+// Chapter & Layer Identity
+// ============================================================================
+
+/** The three story chapters, each corresponding to one song-building attempt. */
+export type Chapter = 'ambition' | 'love' | 'avoidance';
+
+/**
+ * Layer types represent the musical role of each layer in a song.
+ * Core types are defined; custom strings are allowed for extensibility.
+ */
+export type LayerType =
+  | 'foundation'   // The bed / the ground
+  | 'pulse'        // Heartbeat / drive
+  | 'color'        // Warmth / sharpness
+  | 'space'        // Intimate / distant
+  | 'voice'        // Clear / masked
+  | string;        // Extensible for custom types
+
+// ============================================================================
+// Layer Phases & Config
 // ============================================================================
 
 /**
- * Defines which seats are adjacent to each other.
- * Used for faction assignment optimization.
+ * Phase of a single layer within an attempt_build phase.
+ *
+ * locked → auditioning → voting → resolving → locked_in
+ *                                     │
+ *                                     ▼ (if consensus < doubt threshold)
+ *                                 collapsed (attempt ends)
  */
-export interface AdjacencyGraph {
-  getNeighbors(seatId: SeatId): SeatId[];
+export type LayerPhase =
+  | 'locked'        // Not yet reached; displayed as unexplored square
+  | 'auditioning'   // Playing A and B previews
+  | 'voting'        // Vote window open, audience selecting A or B
+  | 'resolving'     // Vote closed, calculating result, displaying outcome
+  | 'locked_in'     // Option chosen, layer committed to song stack
+  | 'collapsed';    // Attempt failed at this layer (doubt exceeded consensus)
+
+/** Configuration for a single layer within an attempt. */
+export interface LayerConfig {
+  index: number;                        // 0-indexed position in the attempt
+  type: LayerType;
+  optionA: AudioReference;              // Ableton clip reference
+  optionB: AudioReference;              // Ableton clip reference
+  labelA: string;                       // Short emotional tagline for A
+  labelB: string;                       // Short emotional tagline for B
+  doubtThreshold: number | null;        // null = no threshold (simple majority wins)
+  // TODO: See DECISIONS.md O2 — exact threshold schedule TBD
 }
 
-export type TopologyType = 'theater_rows' | 'tables' | 'grid' | 'none';
+/** Result of a resolved layer. */
+export interface LayerResult {
+  layerIndex: number;
+  type: LayerType;
+  status: 'locked_in' | 'unreached';    // unreached = never got to vote on this layer
+  chosenOption: 'A' | 'B' | null;       // null if unreached
+  consensus: number | null;             // null if unreached
+}
 
-export interface SeatTopologyConfig {
-  type: TopologyType;
-  // Additional config per type (e.g., rows/cols for grid, table assignments for tables)
-  data?: Record<string, unknown>;
+/** A single audience member's vote on a layer. */
+export interface LayerVote {
+  userId: UserId;
+  attemptIndex: number;
+  layerIndex: number;
+  choice: 'A' | 'B';
+  timestamp: Timestamp;
+}
+
+// ============================================================================
+// Vote Result
+// ============================================================================
+
+export interface VoteResult {
+  winner: 'A' | 'B';
+  consensus: number;                    // 0.0 to 1.0
+  votesA: number;
+  votesB: number;
+  totalVotes: number;
+  thresholdMet: boolean;                // True if consensus >= doubt threshold (or no threshold)
+  doubtThreshold: number | null;
+}
+
+// ============================================================================
+// Attempt
+// ============================================================================
+
+/** Runtime state of a single song-building attempt. */
+export interface AttemptState {
+  index: number;                        // 0, 1, 2
+  chapter: Chapter;
+  layerPlan: LayerConfig[];
+  currentLayerIndex: number;
+  currentLayerPhase: LayerPhase;
+  layerResults: LayerResult[];          // Populated as layers resolve
+  votes: LayerVote[];                   // All votes for this attempt
+  status: 'pending' | 'in_progress' | 'completed' | 'collapsed';
+  collapsedAtLayer: number | null;
+}
+
+/** Static configuration for a single attempt. */
+export interface AttemptConfig {
+  chapter: Chapter;
+  title: string;                        // Display name (e.g., "Ambition")
+  layers: LayerConfig[];                // 5–7 layers per attempt
+  // TODO: See DECISIONS.md O1 — exact layer count TBD
+}
+
+/** Recorded result of a completed/collapsed attempt, used for fragment generation. */
+export interface AttemptResult {
+  attemptIndex: number;
+  chapter: Chapter;
+  layers: LayerResult[];
+  completed: boolean;                   // True if all layers were reached and passed
+  collapsedAtLayer: number | null;
+}
+
+// ============================================================================
+// Fragment & Safe Parameter
+// ============================================================================
+
+/** A fragment is a selectable musical element for the finale, derived from attempt results. */
+export interface Fragment {
+  id: string;                           // Unique identifier
+  attemptIndex: number;
+  layerIndex: number;
+  option: 'A' | 'B';
+  chapter: Chapter;
+  layerType: LayerType;
+  displayName: string;                  // Human-readable name for UI
+  // TODO: See DECISIONS.md O5 — display name generation strategy TBD
+  audioRef: AudioReference;
+  safeParameter: SafeParameter;
+}
+
+/** The parameter that stewards control when their fragment is active. */
+export interface SafeParameter {
+  name: string;                         // Internal parameter name
+  displayLabel: string;                 // What the user sees (e.g., "Intensity")
+  abletonMapping: AbletonParamRef;      // Track index + device index + param index
+  min: number;                          // Clamped minimum (0.0–1.0)
+  max: number;                          // Clamped maximum (0.0–1.0)
+  defaultValue: number;                 // Neutral position
+  smoothingMs: number;                  // Parameter change smoothing (prevent zipper noise)
+}
+
+/** A user's fragment selection for the finale queue. */
+export interface FragmentSelection {
+  userId: UserId;
+  attemptIndex: number;
+  layerIndex: number;
+  option: 'A' | 'B';
+  chapter: Chapter;
+}
+
+// ============================================================================
+// Audio References (placeholders — to be fleshed out with Ableton layout)
+// ============================================================================
+
+// TODO: See DECISIONS.md O8 — Ableton session template TBD
+/** Reference to an audio clip/track in Ableton. Placeholder shape. */
+export interface AudioReference {
+  trackIndex: number;                   // Computed from track layout formula
+  clipSlot?: number;
+  label?: string;                       // Human-readable reference
+}
+
+/** Reference to an Ableton device parameter. Placeholder shape. */
+export interface AbletonParamRef {
+  trackIndex: number;
+  deviceIndex: number;
+  paramIndex: number;
+}
+
+// ============================================================================
+// Finale State
+// ============================================================================
+
+export interface FinaleState {
+  chapterAssignments: Map<UserId, Chapter>;
+  queue: QueueEntry[];
+  activeSlots: (ActiveSlot | null)[];   // Length 7; null = empty slot
+  trianglePositions: Map<UserId, TrianglePosition>;
+  centroid: TrianglePosition;           // Computed weighted average
+  rotationActive: boolean;
+  rotationRate: 1 | 2;                  // Slots per 8-bar cycle
+  frozen: boolean;
+  stewardshipLog: StewardshipEntry[];
+}
+
+export interface ActiveSlot {
+  slotIndex: number;                    // 0–6
+  fragment: Fragment;
+  stewardUserId: UserId;
+  parameterValue: number;              // Current safe parameter value
+  activatedAtBeat: number;
+  energyLevel: number;                 // From audio metering (0.0–1.0)
+}
+
+export interface QueueEntry {
+  userId: UserId;
+  fragment: Fragment;
+  chapter: Chapter;
+  enqueuedAt: Timestamp;
+  hasBeenSteward: boolean;             // Tracks whether this user has had a turn
+}
+
+export interface TrianglePosition {
+  wAmbition: number;                   // 0.0–1.0, all three sum to 1.0
+  wLove: number;
+  wAvoidance: number;
+}
+
+export interface StewardshipEntry {
+  userId: UserId;
+  slotIndex: number;
+  fragment: Fragment;
+  startBeat: number;
+  endBeat: number | null;              // null if still active
 }
 
 // ============================================================================
@@ -45,168 +245,30 @@ export interface SeatTopologyConfig {
 
 export interface User {
   id: UserId;
-  seatId: SeatId | null;        // From QR code, null if unknown
-  faction: FactionId | null;    // null until assignment phase completes
+  seatId: SeatId | null;               // From QR code scan; null if joined without QR
   connected: boolean;
   joinedAt: Timestamp;
+  finaleChapter: Chapter | null;        // Assigned at finale_setup; null before then
 }
 
 // ============================================================================
-// Faction
-// ============================================================================
-
-export interface Faction {
-  id: FactionId;
-  name: string;
-  color: string;
-  coupUsed: boolean;
-  coupMultiplier: number;
-  currentRowCoupVotes: Set<UserId>;
-}
-
-// ============================================================================
-// Row & Options
-// ============================================================================
-
-export type RowPhase =
-  | 'pending'
-  | 'voting'        // Now includes audition playback
-  | 'revealing'
-  | 'coup_window'
-  | 'committed';
-
-export type RowType = 'layer' | 'effect';
-
-/**
- * Options are musically ambiguous — they are NOT tied to specific factions.
- * The 4 factions and optionsPerRow options per row is thematic parallelism, not mechanical coupling.
- * A faction wins by having its members align on ANY option.
- */
-export interface Option {
-  id: OptionId;
-  index: number;  // 0-(optionsPerRow-1), position within row
-  audioRef: string;
-  harmonicGroup?: string;
-}
-
-export interface Row {
-  index: number;
-  label: string;
-  type: RowType;
-  options: Option[];
-  phase: RowPhase;
-  committedOption: OptionId | null;
-  attempts: number;
-  currentAuditionIndex: number | null;  // Used during 'voting' phase for audition playback
-  auditionComplete: boolean;             // Tracks if all options have been heard
-}
-
-// ============================================================================
-// Voting
-// ============================================================================
-
-export interface Vote {
-  userId: UserId;
-  rowIndex: number;
-  factionVote: OptionId;
-  personalVote: OptionId;
-  timestamp: Timestamp;
-  attempt: number;
-}
-
-// ============================================================================
-// Personal Tree (for Finale)
+// Show Phase State Machine
 // ============================================================================
 
 /**
- * Tracks each user's personal votes and their response to the lobby prompt.
- * Used during finale to play back "songs that could've been" with imagined alternate lives.
+ * Show phase progression:
+ * lobby → opener → attempt_story → attempt_build → ... (×3) →
+ * finale_setup → finale_rotating → finale_frozen → ended
  */
-export interface PersonalTree {
-  userId: UserId;
-  path: OptionId[];                     // One entry per row (personal votes)
-  figTreeResponse: string | null;       // Response to lobby prompt (e.g., "What lives on your fig tree?")
-}
-
-// ============================================================================
-// Show State
-// ============================================================================
-
 export type ShowPhase =
-  | 'lobby'           // Audience joining, factions not yet assigned, fig tree prompt
-  | 'assigning'       // Brief phase during faction assignment (reveal animation)
-  | 'running'         // Main show loop
-  | 'finale'          // Playing back personal timelines
-  | 'ended'
-  | 'paused';
-
-export interface TimingConfig {
-  auditionLoopsPerOption: number;     // How many times each option loops during audition (default: 2)
-  auditionLoopsPerRow: number;        // How many complete cycles through all optionsPerRow options (default: 1)
-  auditionPerOptionMs: number;        // ms per loop
-  votingWindowMs: number;
-  revealDurationMs: number;
-  coupWindowMs: number;
-  masterLoopBeats: number;            // Beats per master loop cycle (e.g., 32 for 8 bars in 4/4)
-}
-
-export interface CoupConfig {
-  threshold: number;
-  multiplierBonus: number;
-}
-
-export interface LobbyConfig {
-  projectorContent: string;             // Text displayed on projector during lobby
-  audiencePrompt: string;               // Prompt for audience input (e.g., "What lives on your fig tree?")
-}
-
-export interface ShowConfig {
-  rowCount: number;
-  optionsPerRow: number;
-  factions: FactionConfig[];
-  timing: TimingConfig;
-  coup: CoupConfig;
-  lobby: LobbyConfig;
-  rows: RowConfig[];
-  topology: SeatTopologyConfig;
-  playbackMode: PlaybackMode;
-}
-
-export interface FactionConfig {
-  id: FactionId;
-  name: string;
-  color: string;
-}
-
-export interface RowConfig {
-  index: number;
-  label: string;
-  type: RowType;
-  description?: string;
-  keyDecision?: boolean;
-  options: OptionConfig[];
-}
-
-export interface OptionConfig {
-  id: OptionId;
-  index: number;  // 0-(optionsPerRow-1), position within row
-  audioRef: string;
-  harmonicGroup?: string;
-}
-
-// ============================================================================
-// Dual Path Tracking
-// ============================================================================
-
-/**
- * The system tracks two parallel paths through the Song Tree:
- * - factionPath: Determined by coherence competition ("the song we built")
- * - popularPath: Determined by personal vote plurality ("the song we wanted")
- */
-export interface DualPaths {
-  factionPath: OptionId[];    // Committed options (coherence winners)
-  popularPath: OptionId[];    // Personal vote plurality winners
-}
+  | 'lobby'               // Audience joining, waiting
+  | 'opener'              // Performance opening (phones dark)
+  | 'attempt_story'       // Story segment before song-building (phones dark)
+  | 'attempt_build'       // Active song-building with audience voting
+  | 'finale_setup'        // Chapter assignment + fragment selection
+  | 'finale_rotating'     // Active slot rotation with stewardship
+  | 'finale_frozen'       // Rotation frozen, final mix locked
+  | 'ended';              // Show complete
 
 // ============================================================================
 // Show State
@@ -214,54 +276,161 @@ export interface DualPaths {
 
 export interface ShowState {
   id: ShowId;
-  version: number;            // Monotonic, increments on every state change
-  lastUpdated: Timestamp;     // Wall clock time of last change
   phase: ShowPhase;
-  currentRowIndex: number;
-  rows: Row[];
-  factions: [Faction, Faction, Faction, Faction];
+  currentAttemptIndex: number;          // 0, 1, 2
+  attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  votes: Vote[];
-  personalTrees: Map<UserId, PersonalTree>;
-  paths: DualPaths;           // Faction path and popular path
+  finaleState: FinaleState | null;      // Populated at finale_setup
   config: ShowConfig;
-  pausedPhase: ShowPhase | null;
+  version: number;                      // Increments on every state change
+  lastUpdated: Timestamp;               // Wall clock time
+  paused: boolean;
 }
+
+// ============================================================================
+// Show Config
+// ============================================================================
+
+export interface ShowConfig {
+  maxLayersPerAttempt: number;          // Used for track index calculation (default: 7)
+  attempts: AttemptConfig[];            // Length 3
+  finale: FinaleConfig;
+  timing: TimingConfig;
+  lobby: {
+    waitingMessage: string;             // Text displayed while waiting
+  };
+  seatIds: SeatId[];                    // Known seats for QR code generation
+}
+
+export interface FinaleConfig {
+  slotCount: number;                    // Default: 7
+  rotationBars: number;                 // Default: 8
+  defaultRotationRate: 1 | 2;           // Slots per cycle
+  triangleDriftTimeoutMs: number;       // How long before idle dots drift to center
+  triangleDriftSpeedMs: number;         // How fast drift occurs
+  fragments: Fragment[];                // Pre-configured fragment library
+}
+
+export interface TimingConfig {
+  auditionDurationMs: number;           // Per-option audition preview
+  votingWindowMs: number;               // How long voting stays open
+  resolveAnimationMs: number;           // Result display duration
+  collapseAnimationMs: number;          // Collapse gesture duration before auto-advance
+  autoAdvanceToStoryMs: number;         // Delay after collapse before transitioning
+  // TODO: See DECISIONS.md O4 — audition cadence details TBD
+}
+
+// ============================================================================
+// Audio Cues
+// ============================================================================
+
+export type AudioCue =
+  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' }
+  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
+  | { type: 'collapse_gesture'; attemptIndex: number }
+  | { type: 'slot_activate'; slotIndex: number; fragment: Fragment }
+  | { type: 'slot_deactivate'; slotIndex: number }
+  | { type: 'steward_param'; slotIndex: number; value: number }
+  | { type: 'transport'; action: 'play' | 'stop' }
+  | { type: 'panic' };                  // Hard mute all
 
 // ============================================================================
 // Conductor Commands (Input)
 // ============================================================================
 
 export type ConductorCommand =
-  // Phase control
+  // Show flow
   | { type: 'ADVANCE_PHASE' }
-  | { type: 'START_SHOW' }
-  | { type: 'ASSIGN_FACTIONS' }
-  | { type: 'FORCE_FINALE' }
-  
-  // User actions
-  | { type: 'SUBMIT_VOTE'; userId: UserId; factionVote: OptionId; personalVote: OptionId }
-  | { type: 'SUBMIT_COUP_VOTE'; userId: UserId }
-  | { type: 'SUBMIT_FIG_TREE_RESPONSE'; userId: UserId; text: string }
-  
-  // Connection management
-  | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId; existingFaction?: FactionId }
-  | { type: 'USER_DISCONNECT'; userId: UserId }
-  | { type: 'USER_RECONNECT'; userId: UserId; lastVersion: number }
-  
-  // Performer controls
+  | { type: 'JUMP_TO_PHASE'; phase: ShowPhase; attemptIndex?: number }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
-  | { type: 'SKIP_ROW' }
-  | { type: 'RESTART_ROW' }
-  | { type: 'TRIGGER_COUP'; factionId: FactionId }
-  | { type: 'SET_TIMING'; timing: Partial<TimingConfig> }
-  
-  // Emergency recovery (controller only)
-  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean }
+
+  // Song-building
+  | { type: 'START_AUDITION' }
+  | { type: 'OPEN_VOTING' }
+  | { type: 'CLOSE_VOTING' }
+  | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
+  | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
+  | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
+  | { type: 'RERUN_VOTE' }
+  | { type: 'FORCE_CONTINUE' }
+  | { type: 'FORCE_COLLAPSE' }
+
+  // Doubt
+  | { type: 'SET_THRESHOLD'; layerIndex: number; threshold: number | null }
+  | { type: 'TOGGLE_DOUBT'; active: boolean }
+
+  // Finale
+  | { type: 'SETUP_FINALE' }
+  | { type: 'SELECT_FRAGMENT'; userId: UserId; fragmentId: string }
+  | { type: 'UPDATE_TRIANGLE'; userId: UserId; position: TrianglePosition }
+  | { type: 'UPDATE_STEWARD_PARAM'; userId: UserId; value: number }
+  | { type: 'START_ROTATION' }
+  | { type: 'STOP_ROTATION' }
+  | { type: 'FREEZE_ROTATION' }
+  | { type: 'SET_ROTATION_RATE'; rate: 1 | 2 }
+  | { type: 'FORCE_ASSIGN_STEWARD'; userId: UserId; slotIndex: number }
+  | { type: 'FORCE_INSERT_FRAGMENT'; fragmentId: string; slotIndex: number }
+  | { type: 'CLEAR_QUEUE' }
+  | { type: 'TOGGLE_TRIANGLE'; active: boolean }
+
+  // Audio
+  | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
+  | { type: 'AUDIO_PANIC' }
+  | { type: 'TRIGGER_COLLAPSE_GESTURE' }
+
+  // Connection
+  | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
+  | { type: 'USER_DISCONNECT'; userId: UserId }
+
+  // Recovery
+  | { type: 'EXPORT_STATE' }
   | { type: 'IMPORT_STATE'; state: ShowState }
-  | { type: 'NEW_SHOW' }
-  | { type: 'FORCE_RECONNECT_ALL' };
+  | { type: 'FORCE_RECONNECT_ALL' }
+  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean };
+
+// ============================================================================
+// Conductor Events (Output)
+// ============================================================================
+
+export type ConductorEvent =
+  // Show flow
+  | { type: 'SHOW_PHASE_CHANGED'; phase: ShowPhase; attemptIndex?: number }
+  | { type: 'PAUSED' }
+  | { type: 'RESUMED' }
+
+  // Song-building
+  | { type: 'LAYER_PHASE_CHANGED'; attemptIndex: number; layerIndex: number; phase: LayerPhase }
+  | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
+  | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
+  | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
+  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; consensus: number; threshold: number }
+  | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
+
+  // Finale
+  | { type: 'FINALE_SETUP_COMPLETE'; chapterAssignments: Map<UserId, Chapter>; availableFragments: Fragment[] }
+  | { type: 'FRAGMENT_QUEUED'; userId: UserId; fragment: Fragment }
+  | { type: 'SLOT_ACTIVATED'; slotIndex: number; fragment: Fragment; stewardUserId: UserId }
+  | { type: 'SLOT_DEACTIVATED'; slotIndex: number }
+  | { type: 'STEWARDSHIP_STARTED'; userId: UserId; slotIndex: number }
+  | { type: 'STEWARDSHIP_ENDED'; userId: UserId; slotIndex: number }
+  | { type: 'CENTROID_UPDATED'; centroid: TrianglePosition }
+  | { type: 'ROTATION_TICK'; newSlots: ActiveSlot[]; removedSlots: number[] }
+
+  // Audio
+  | { type: 'AUDIO_CUE'; cue: AudioCue }
+  | { type: 'METER_UPDATE'; slots: { slotIndex: number; energy: number }[] }
+
+  // State
+  | { type: 'STATE_UPDATED'; version: number }
+
+  // Recovery
+  | { type: 'FORCE_RECONNECT'; reason: string }
+  | { type: 'SHOW_RESET'; preservedUsers: boolean }
+
+  // Errors
+  | { type: 'ERROR'; message: string; command?: ConductorCommand };
 
 // ============================================================================
 // Client Identity (stored in localStorage for reconnection)
@@ -272,173 +441,4 @@ export interface StoredClientIdentity {
   showId: ShowId;
   seatId: SeatId | null;
   lastVersion: number;
-}
-
-// ============================================================================
-// Conductor Events (Output)
-// ============================================================================
-
-export interface FactionResult {
-  factionId: FactionId;
-  rawCoherence: number;
-  weightedCoherence: number;
-  voteCount: number;
-  votedForOption: OptionId;             // Which option this faction's largest bloc voted for
-}
-
-export interface TieInfo {
-  occurred: boolean;
-  tiedFactionIds: FactionId[];          // Empty if no tie
-}
-
-export interface PopularVoteResult {
-  optionId: OptionId;                   // Option with most personal votes
-  voteCount: number;
-  divergedFromFaction: boolean;         // True if popular ≠ faction choice
-}
-
-export interface RevealPayload {
-  rowIndex: number;
-  factionResults: FactionResult[];
-  tie: TieInfo;
-  winningOptionId: OptionId;            // Resolved winner (random if tie)
-  winningFactionId: FactionId;          // Resolved winner (random if tie)
-  popularVote: PopularVoteResult;
-}
-
-export interface FinaleTimeline {
-  userId: UserId;
-  path: OptionId[];
-  figTreeResponse: string;
-  harmonicGroup: string;
-}
-
-export type AudioCueType =
-  | 'play_option'
-  | 'stop_option'
-  | 'commit_layer'
-  | 'uncommit_layer'
-  | 'play_timeline';
-
-export interface AudioCue {
-  type: AudioCueType;
-  rowIndex?: number;
-  optionId?: OptionId;
-  path?: OptionId[];
-  userId?: UserId;  // Present for individual timeline playback
-}
-
-export type ConductorEvent =
-  // Phase and game flow
-  | { type: 'ROW_PHASE_CHANGED'; row: number; phase: RowPhase }
-  | { type: 'AUDITION_OPTION_CHANGED'; row: number; optionIndex: number }
-  | { type: 'AUDITION_COMPLETE'; row: number }
-  | { type: 'VOTE_RECEIVED'; userId: UserId; row: number }
-  | { type: 'REVEAL'; payload: RevealPayload }
-  | { type: 'TIE_DETECTED'; row: number; tiedFactionIds: FactionId[] }
-  | { type: 'TIE_RESOLVED'; row: number; winningFactionId: FactionId }
-  | { type: 'PATHS_UPDATED'; paths: DualPaths }
-  | { type: 'COUP_METER_UPDATE'; factionId: FactionId; progress: number }
-  | { type: 'COUP_TRIGGERED'; factionId: FactionId; row: number }
-  | { type: 'ROW_COMMITTED'; row: number; optionId: OptionId; popularOptionId: OptionId }
-  | { type: 'SHOW_PHASE_CHANGED'; phase: ShowPhase }
-  
-  // Faction assignment
-  | { type: 'FACTIONS_ASSIGNED'; assignments: Map<UserId, FactionId> }
-  | { type: 'FACTION_ASSIGNED'; userId: UserId; faction: FactionId }
-  
-  // Finale
-  | { type: 'FINALE_POPULAR_SONG'; path: OptionId[] }
-  | { type: 'FINALE_TIMELINE'; timeline: FinaleTimeline }
-  
-  // Audio
-  | { type: 'AUDIO_CUE'; cue: AudioCue }
-  
-  // Connection management
-  | { type: 'USER_JOINED'; userId: UserId; faction: FactionId | null }
-  | { type: 'USER_LEFT'; userId: UserId }
-  | { type: 'USER_RECONNECTED'; userId: UserId; missedEvents: number }
-  
-  // State sync (sent to individual client on connect/reconnect)
-  | { type: 'STATE_SYNC'; state: ShowState; forUserId: UserId }
-  
-  // Recovery
-  | { type: 'FORCE_RECONNECT'; reason: string }  // Broadcast to all clients
-  | { type: 'SHOW_RESET'; preservedUsers: boolean }
-  
-  // Errors
-  | { type: 'ERROR'; message: string; command?: ConductorCommand };
-
-// ============================================================================
-// Audio Adapter Interface
-// ============================================================================
-
-export interface AudioAdapter {
-  initialize(config: ShowConfig): Promise<void>;
-  playOption(rowIndex: number, optionId: OptionId): Promise<void>;
-  stopOption(rowIndex: number, optionId: OptionId): Promise<void>;
-  commitLayer(rowIndex: number, optionId: OptionId): Promise<void>;
-  uncommitLayer(rowIndex: number): Promise<void>;
-  playPopularPath(path: OptionId[]): Promise<void>;       // "The song we wanted"
-  playPersonalTimeline(path: OptionId[]): Promise<void>;  // Individual finale timelines
-  dispose(): Promise<void>;
-}
-
-// ============================================================================
-// Client State (subset visible to each client type)
-// ============================================================================
-
-export interface AudienceClientState {
-  userId: UserId;
-  seatId: SeatId | null;
-  faction: FactionId | null;  // null until assignment phase
-  showPhase: ShowPhase;
-  figTreeResponseSubmitted: boolean;  // Whether user has responded to lobby prompt
-  currentRow: {
-    index: number;
-    phase: RowPhase;
-    options: Option[];
-    currentAuditionIndex: number | null;
-    auditionComplete: boolean;
-  } | null;
-  myVote: { factionVote: OptionId; personalVote: OptionId } | null;
-  coupMeter: number | null; // Only if in coup_window
-  canCoup: boolean;
-}
-
-export interface ProjectorClientState {
-  showPhase: ShowPhase;
-  currentRowIndex: number;
-  rows: Array<{
-    index: number;
-    label: string;
-    type: RowType;
-    options: Option[];
-    phase: RowPhase;
-    committedOption: OptionId | null;
-    currentAuditionIndex: number | null;
-    auditionComplete: boolean;
-    attempts: number;
-  }>;
-  paths: DualPaths;           // Faction path (solid) and popular path (ghost)
-  factions: Array<{ id: FactionId; name: string; color: string }>;
-  lastReveal: RevealPayload | null;
-  tiebreaker: {
-    active: boolean;
-    tiedFactionIds: FactionId[];
-  } | null;
-  currentFinaleTimeline: FinaleTimeline | null;
-  finalePhase: 'popular_song' | 'individual_timelines' | null;
-  
-}
-
-export interface ControllerClientState {
-  showPhase: ShowPhase;
-  currentRowIndex: number;
-  rows: Row[];
-  factions: Faction[];
-  paths: DualPaths;
-  userCount: number;
-  factionCounts: [number, number, number, number];
-  config: ShowConfig;
 }

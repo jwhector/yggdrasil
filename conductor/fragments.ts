@@ -1,0 +1,168 @@
+/**
+ * Fragments — Generate Finale Fragments from Attempt Results
+ *
+ * After each attempt (completed or collapsed), this module produces the fragment
+ * list with correct availability for the finale:
+ * - locked_in winners → selectable fragments
+ * - locked_in losers → visible but locked/grayed ("what could have been")
+ * - unreached layers → both options visible but locked/grayed
+ *
+ * Pure functions, no I/O.
+ */
+
+import type {
+  AttemptState,
+  AttemptConfig,
+  AttemptResult,
+  LayerResult,
+  Fragment,
+  AudioReference,
+  SafeParameter,
+  AbletonParamRef,
+  Chapter,
+  LayerType,
+} from './types';
+
+/** Describes a fragment's availability in the finale. */
+export interface FragmentAvailability {
+  fragment: Fragment;
+  selectable: boolean;  // true = winner from locked-in layer; false = loser or unreached
+}
+
+/**
+ * Extract an AttemptResult from a completed or collapsed AttemptState.
+ */
+export function extractAttemptResult(attempt: AttemptState): AttemptResult {
+  return {
+    attemptIndex: attempt.index,
+    chapter: attempt.chapter,
+    layers: attempt.layerResults,
+    completed: attempt.status === 'completed',
+    collapsedAtLayer: attempt.collapsedAtLayer,
+  };
+}
+
+/**
+ * Generate all fragments and their availability from attempt results.
+ *
+ * For each attempt that has been played (completed or collapsed):
+ * - locked_in layers: winner option → selectable, loser option → not selectable
+ * - unreached layers: both A and B → not selectable
+ */
+export function generateFragments(
+  attempts: AttemptState[],
+  attemptConfigs: AttemptConfig[],
+): FragmentAvailability[] {
+  const fragments: FragmentAvailability[] = [];
+
+  for (const attempt of attempts) {
+    if (attempt.status === 'pending') continue;
+
+    const config = attemptConfigs[attempt.index];
+    if (!config) continue;
+
+    for (const layerConfig of config.layers) {
+      const result = attempt.layerResults.find(r => r.layerIndex === layerConfig.index);
+
+      if (result && result.status === 'locked_in' && result.chosenOption !== null) {
+        // Winner fragment — selectable
+        fragments.push({
+          fragment: buildFragment(
+            attempt.index,
+            layerConfig.index,
+            result.chosenOption,
+            attempt.chapter,
+            layerConfig.type,
+            result.chosenOption === 'A' ? layerConfig.optionA : layerConfig.optionB,
+          ),
+          selectable: true,
+        });
+
+        // Loser fragment — visible but locked
+        const loser: 'A' | 'B' = result.chosenOption === 'A' ? 'B' : 'A';
+        fragments.push({
+          fragment: buildFragment(
+            attempt.index,
+            layerConfig.index,
+            loser,
+            attempt.chapter,
+            layerConfig.type,
+            loser === 'A' ? layerConfig.optionA : layerConfig.optionB,
+          ),
+          selectable: false,
+        });
+      } else {
+        // Unreached layer — both options visible but locked
+        fragments.push({
+          fragment: buildFragment(
+            attempt.index,
+            layerConfig.index,
+            'A',
+            attempt.chapter,
+            layerConfig.type,
+            layerConfig.optionA,
+          ),
+          selectable: false,
+        });
+
+        fragments.push({
+          fragment: buildFragment(
+            attempt.index,
+            layerConfig.index,
+            'B',
+            attempt.chapter,
+            layerConfig.type,
+            layerConfig.optionB,
+          ),
+          selectable: false,
+        });
+      }
+    }
+  }
+
+  return fragments;
+}
+
+/**
+ * Build a Fragment object. Display name and safe parameter use placeholders.
+ */
+function buildFragment(
+  attemptIndex: number,
+  layerIndex: number,
+  option: 'A' | 'B',
+  chapter: Chapter,
+  layerType: LayerType,
+  audioRef: AudioReference,
+): Fragment {
+  // TODO: See DECISIONS.md O5 — display name generation strategy TBD
+  const displayName = `${capitalize(chapter)}: ${capitalize(layerType)} ${option}`;
+
+  return {
+    id: `${attemptIndex}-${layerIndex}-${option}`,
+    attemptIndex,
+    layerIndex,
+    option,
+    chapter,
+    layerType,
+    displayName,
+    audioRef,
+    safeParameter: placeholderSafeParameter(attemptIndex, layerIndex),
+  };
+}
+
+/** Placeholder safe parameter until Ableton layout is finalized. */
+function placeholderSafeParameter(attemptIndex: number, layerIndex: number): SafeParameter {
+  return {
+    name: `param-${attemptIndex}-${layerIndex}`,
+    displayLabel: 'Intensity',
+    abletonMapping: { trackIndex: 0, deviceIndex: 0, paramIndex: 0 } as AbletonParamRef,
+    min: 0.0,
+    max: 1.0,
+    defaultValue: 0.5,
+    smoothingMs: 50,
+  };
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

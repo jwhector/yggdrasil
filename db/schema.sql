@@ -1,4 +1,4 @@
--- Yggdrasil Database Schema
+-- Yggdrasil Database Schema (NEW SYSTEM)
 -- SQLite with WAL mode for crash resilience
 
 PRAGMA journal_mode=WAL;
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   show_id TEXT NOT NULL,
   seat_id TEXT,
-  faction INTEGER,  -- NULL until assignment
+  finale_chapter TEXT,                  -- NULL until finale_setup; 'ambition' | 'love' | 'avoidance'
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
@@ -28,20 +28,19 @@ CREATE TABLE IF NOT EXISTS votes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  row_index INTEGER NOT NULL,
-  attempt INTEGER NOT NULL,
-  faction_vote TEXT NOT NULL,
-  personal_vote TEXT NOT NULL,
+  attempt_index INTEGER NOT NULL,
+  layer_index INTEGER NOT NULL,
+  choice TEXT NOT NULL CHECK(choice IN ('A', 'B')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Fig tree responses: lobby prompt answers for finale
-CREATE TABLE IF NOT EXISTS fig_tree_responses (
+-- Fragment selections: finale queue entries
+CREATE TABLE IF NOT EXISTS fragment_selections (
   user_id TEXT PRIMARY KEY,
   show_id TEXT NOT NULL,
-  text TEXT NOT NULL,
+  fragment_id TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
@@ -51,4 +50,4 @@ CREATE TABLE IF NOT EXISTS fig_tree_responses (
 CREATE INDEX IF NOT EXISTS idx_users_show ON users(show_id);
 CREATE INDEX IF NOT EXISTS idx_votes_show ON votes(show_id);
 CREATE INDEX IF NOT EXISTS idx_votes_user ON votes(user_id);
-CREATE INDEX IF NOT EXISTS idx_fig_tree_show ON fig_tree_responses(show_id);
+CREATE INDEX IF NOT EXISTS idx_fragment_selections_show ON fragment_selections(show_id);

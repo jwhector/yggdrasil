@@ -1,694 +1,742 @@
 /**
- * Conductor State Machine Tests
+ * Conductor State Machine Tests (NEW SYSTEM)
  *
- * Tests cover:
- * - Phase transitions
- * - Vote processing
- * - Reveal logic
- * - User connection management
- * - Controller commands
+ * Test names are specifications — complete sentences describing behavior.
  */
 
 import { describe, test, expect } from '@jest/globals';
 import { createInitialState, processCommand } from '../conductor';
-import type { ShowState, ShowConfig, FactionConfig } from '../types';
+import type { ShowState, ShowConfig, AttemptConfig, LayerConfig, ConductorEvent, AudioReference } from '../types';
 
-// Helper to create minimal show config
-function createTestConfig(): ShowConfig {
-  const factions: FactionConfig[] = [
-    { id: 0, name: 'Faction 0', color: '#ff0000' },
-    { id: 1, name: 'Faction 1', color: '#00ff00' },
-    { id: 2, name: 'Faction 2', color: '#0000ff' },
-    { id: 3, name: 'Faction 3', color: '#ffff00' },
-  ];
+// ============================================================================
+// Test Helpers
+// ============================================================================
 
+function makeAudioRef(index: number): AudioReference {
+  return { trackIndex: index };
+}
+
+function makeLayerConfig(index: number, threshold: number | null = null): LayerConfig {
   return {
-    rowCount: 3,
-    optionsPerRow: 4,
-    factions,
-    timing: {
-      auditionLoopsPerOption: 2,
-      auditionLoopsPerRow: 1,
-      auditionPerOptionMs: 4000,
-      votingWindowMs: 30000,
-      revealDurationMs: 10000,
-      coupWindowMs: 15000,
-      masterLoopBeats: 4,
-    },
-    coup: {
-      threshold: 0.5,
-      multiplierBonus: 0.5,
-    },
-    lobby: {
-      projectorContent: 'Welcome',
-      audiencePrompt: 'What lives on your fig tree?',
-    },
-    rows: [
-      {
-        index: 0,
-        label: 'Row 0',
-        type: 'layer',
-        options: [
-          { id: 'r0-opt0', index: 0, audioRef: 'audio-0-0' },
-          { id: 'r0-opt1', index: 1, audioRef: 'audio-0-1' },
-          { id: 'r0-opt2', index: 2, audioRef: 'audio-0-2' },
-          { id: 'r0-opt3', index: 3, audioRef: 'audio-0-3' },
-        ],
-      },
-      {
-        index: 1,
-        label: 'Row 1',
-        type: 'effect',
-        options: [
-          { id: 'r1-opt0', index: 0, audioRef: 'audio-1-0' },
-          { id: 'r1-opt1', index: 1, audioRef: 'audio-1-1' },
-          { id: 'r1-opt2', index: 2, audioRef: 'audio-1-2' },
-          { id: 'r1-opt3', index: 3, audioRef: 'audio-1-3' },
-        ],
-      },
-      {
-        index: 2,
-        label: 'Row 2',
-        type: 'layer',
-        options: [
-          { id: 'r2-opt0', index: 0, audioRef: 'audio-2-0' },
-          { id: 'r2-opt1', index: 1, audioRef: 'audio-2-1' },
-          { id: 'r2-opt2', index: 2, audioRef: 'audio-2-2' },
-          { id: 'r2-opt3', index: 3, audioRef: 'audio-2-3' },
-        ],
-      },
-    ],
-    topology: { type: 'none' },
-    playbackMode: 'session',
+    index,
+    type: index === 0 ? 'foundation' : index === 1 ? 'pulse' : 'color',
+    optionA: makeAudioRef(index * 2),
+    optionB: makeAudioRef(index * 2 + 1),
+    labelA: `Layer ${index} A`,
+    labelB: `Layer ${index} B`,
+    doubtThreshold: threshold,
   };
 }
 
-describe('createInitialState', () => {
-  test('creates state in lobby phase', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show-1');
+function makeAttemptConfig(
+  chapter: 'ambition' | 'love' | 'avoidance',
+  thresholds: (number | null)[] = [null, null, 0.65],
+): AttemptConfig {
+  return {
+    chapter,
+    title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
+    layers: thresholds.map((t, i) => makeLayerConfig(i, t)),
+  };
+}
 
-    expect(state.id).toBe('test-show-1');
+function createTestConfig(layerThresholds: (number | null)[] = [null, null, 0.65]): ShowConfig {
+  return {
+    maxLayersPerAttempt: 7,
+    attempts: [
+      makeAttemptConfig('ambition', layerThresholds),
+      makeAttemptConfig('love', layerThresholds),
+      makeAttemptConfig('avoidance', layerThresholds),
+    ],
+    finale: {
+      slotCount: 7,
+      rotationBars: 8,
+      defaultRotationRate: 2,
+      triangleDriftTimeoutMs: 10000,
+      triangleDriftSpeedMs: 3000,
+      fragments: [],
+    },
+    timing: {
+      auditionDurationMs: 4000,
+      votingWindowMs: 30000,
+      resolveAnimationMs: 5000,
+      collapseAnimationMs: 3000,
+      autoAdvanceToStoryMs: 2000,
+    },
+    lobby: { waitingMessage: 'Welcome' },
+    seatIds: ['seat-1', 'seat-2'],
+  };
+}
+
+function createTestState(config?: ShowConfig): ShowState {
+  return createInitialState(config || createTestConfig(), 'test-show');
+}
+
+/** Advance through phases to reach attempt_build for attempt 0. */
+function advanceToBuild(state: ShowState): void {
+  processCommand(state, { type: 'ADVANCE_PHASE' }); // lobby → opener
+  processCommand(state, { type: 'ADVANCE_PHASE' }); // opener → attempt_story
+  processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
+}
+
+/** Connect a user and return their userId. */
+function connectUser(state: ShowState, userId: string): void {
+  processCommand(state, { type: 'USER_CONNECT', userId });
+}
+
+/** Run through the full layer cycle: audition → vote → close (resolve). */
+function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | 'B' = 'A'): ConductorEvent[] {
+  processCommand(state, { type: 'START_AUDITION' });
+  processCommand(state, { type: 'OPEN_VOTING' });
+  for (const userId of voters) {
+    processCommand(state, { type: 'SUBMIT_VOTE', userId, choice });
+  }
+  return processCommand(state, { type: 'CLOSE_VOTING' });
+}
+
+function findEvent(events: ConductorEvent[], type: string): ConductorEvent | undefined {
+  return events.find(e => e.type === type);
+}
+
+// ============================================================================
+// Show Phase Transitions
+// ============================================================================
+
+describe('Show Phase Transitions', () => {
+  test('initial state starts in lobby phase with version 0', () => {
+    const state = createTestState();
     expect(state.phase).toBe('lobby');
     expect(state.version).toBe(0);
-    expect(state.currentRowIndex).toBe(0);
+    expect(state.currentAttemptIndex).toBe(0);
+    expect(state.attempts).toHaveLength(3);
+    expect(state.paused).toBe(false);
   });
 
-  test('creates correct number of rows', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show-1');
+  test('ADVANCE_PHASE transitions from lobby to opener', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
 
-    expect(state.rows.length).toBe(3);
-    expect(state.rows[0].label).toBe('Row 0');
-    expect(state.rows[1].label).toBe('Row 1');
-    expect(state.rows[2].label).toBe('Row 2');
+    expect(state.phase).toBe('opener');
+    expect(findEvent(events, 'SHOW_PHASE_CHANGED')).toBeDefined();
   });
 
-  test('creates all rows in pending phase', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show-1');
+  test('ADVANCE_PHASE walks through the full phase sequence', () => {
+    const state = createTestState();
+    const phases: string[] = [state.phase];
 
-    for (const row of state.rows) {
-      expect(row.phase).toBe('pending');
-      expect(row.committedOption).toBe(null);
-      expect(row.attempts).toBe(0);
+    // Walk through all phases
+    for (let i = 0; i < 11; i++) {
+      processCommand(state, { type: 'ADVANCE_PHASE' });
+      phases.push(state.phase);
     }
+
+    expect(phases).toEqual([
+      'lobby',
+      'opener',
+      'attempt_story', // attempt 0
+      'attempt_build', // attempt 0
+      'attempt_story', // attempt 1
+      'attempt_build', // attempt 1
+      'attempt_story', // attempt 2
+      'attempt_build', // attempt 2
+      'finale_setup',
+      'finale_rotating',
+      'finale_frozen',
+      'ended',
+    ]);
   });
 
-  test('initializes 4 factions with default values', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show-1');
+  test('ADVANCE_PHASE increments currentAttemptIndex correctly through attempts', () => {
+    const state = createTestState();
 
-    expect(state.factions.length).toBe(4);
-    for (const faction of state.factions) {
-      expect(faction.coupUsed).toBe(false);
-      expect(faction.coupMultiplier).toBe(1.0);
-      expect(faction.currentRowCoupVotes.size).toBe(0);
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // opener
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story 0
+    expect(state.currentAttemptIndex).toBe(0);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build 0
+    expect(state.currentAttemptIndex).toBe(0);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story 1
+    expect(state.currentAttemptIndex).toBe(1);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build 1
+    expect(state.currentAttemptIndex).toBe(1);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story 2
+    expect(state.currentAttemptIndex).toBe(2);
+  });
+
+  test('ADVANCE_PHASE returns error when already at ended', () => {
+    const state = createTestState();
+    // Walk to ended
+    for (let i = 0; i < 11; i++) {
+      processCommand(state, { type: 'ADVANCE_PHASE' });
     }
+    expect(state.phase).toBe('ended');
+
+    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
   });
 
-  test('initializes empty collections', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show-1');
+  test('ADVANCE_PHASE returns error when paused', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'PAUSE' });
 
-    expect(state.users.size).toBe(0);
-    expect(state.votes.length).toBe(0);
-    expect(state.personalTrees.size).toBe(0);
-    expect(state.paths.factionPath.length).toBe(0);
-    expect(state.paths.popularPath.length).toBe(0);
+    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('JUMP_TO_PHASE transitions directly to specified phase', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'attempt_build', attemptIndex: 1 });
+
+    expect(state.phase).toBe('attempt_build');
+    expect(state.currentAttemptIndex).toBe(1);
+  });
+
+  test('entering attempt_build activates the attempt as in_progress', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    expect(state.attempts[0].status).toBe('in_progress');
+    expect(state.attempts[0].currentLayerIndex).toBe(0);
+    expect(state.attempts[0].currentLayerPhase).toBe('locked');
+  });
+
+  test('version increments with every command processed', () => {
+    const state = createTestState();
+    expect(state.version).toBe(0);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' });
+    expect(state.version).toBe(1);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' });
+    expect(state.version).toBe(2);
   });
 });
 
-describe('User Connection', () => {
-  test('USER_CONNECT adds new user to state', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
+// ============================================================================
+// Pause / Resume
+// ============================================================================
 
-    const events = processCommand(state, {
-      type: 'USER_CONNECT',
-      userId: 'user1',
-      seatId: 'A1',
-    });
+describe('Pause and Resume', () => {
+  test('PAUSE sets paused to true and emits PAUSED event', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'PAUSE' });
 
-    expect(state.users.has('user1')).toBe(true);
-    expect(state.users.get('user1')?.seatId).toBe('A1');
-    expect(state.users.get('user1')?.faction).toBe(null);
-    expect(state.users.get('user1')?.connected).toBe(true);
-
-    expect(events).toContainEqual({
-      type: 'USER_JOINED',
-      userId: 'user1',
-      faction: null,
-    });
+    expect(state.paused).toBe(true);
+    expect(findEvent(events, 'PAUSED')).toBeDefined();
   });
 
-  test('USER_CONNECT initializes personal tree', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
+  test('RESUME clears paused and emits RESUMED event', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'PAUSE' });
+    const events = processCommand(state, { type: 'RESUME' });
 
-    processCommand(state, { type: 'USER_CONNECT', userId: 'user1' });
+    expect(state.paused).toBe(false);
+    expect(findEvent(events, 'RESUMED')).toBeDefined();
+  });
 
-    expect(state.personalTrees.has('user1')).toBe(true);
-    expect(state.personalTrees.get('user1')?.path).toEqual([]);
-    expect(state.personalTrees.get('user1')?.figTreeResponse).toBe(null);
+  test('PAUSE is idempotent when already paused', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'PAUSE' });
+    const events = processCommand(state, { type: 'PAUSE' });
+
+    expect(events).toHaveLength(0);
+  });
+
+  test('RESUME is idempotent when not paused', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'RESUME' });
+
+    expect(events).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Song-Building: Layer Flow
+// ============================================================================
+
+describe('Song-Building Layer Flow', () => {
+  test('START_AUDITION transitions current layer from locked to auditioning', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'START_AUDITION' });
+    const attempt = state.attempts[0];
+
+    expect(attempt.currentLayerPhase).toBe('auditioning');
+    expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
+    expect(findEvent(events, 'AUDIO_CUE')).toBeDefined();
+  });
+
+  test('START_AUDITION returns error when not in attempt_build', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'START_AUDITION' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('OPEN_VOTING transitions from auditioning to voting', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    const events = processCommand(state, { type: 'OPEN_VOTING' });
+    expect(state.attempts[0].currentLayerPhase).toBe('voting');
+    expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
+  });
+
+  test('OPEN_VOTING returns error when not in auditioning phase', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+    // Layer is in 'locked' — should fail
+    const events = processCommand(state, { type: 'OPEN_VOTING' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('SUBMIT_VOTE records a vote during voting phase', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+
+    const events = processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    expect(findEvent(events, 'VOTE_RECEIVED')).toBeDefined();
+    expect(state.attempts[0].votes).toHaveLength(1);
+    expect(state.attempts[0].votes[0].choice).toBe('A');
+  });
+
+  test('SUBMIT_VOTE replaces an existing vote from the same user for the same layer', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'B' });
+
+    expect(state.attempts[0].votes).toHaveLength(1);
+    expect(state.attempts[0].votes[0].choice).toBe('B');
+  });
+
+  test('SUBMIT_VOTE is silently ignored when not in voting phase', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    expect(events).toHaveLength(0);
+  });
+
+  test('CLOSE_VOTING resolves the layer and emits VOTE_RESULT', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    connectUser(state, 'user-2');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-2', choice: 'A' });
+
+    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    expect(findEvent(events, 'VOTE_RESULT')).toBeDefined();
+  });
+});
+
+// ============================================================================
+// Vote Resolution: Lock-in
+// ============================================================================
+
+describe('Vote Resolution and Lock-in', () => {
+  test('layer locks in when consensus meets or exceeds threshold', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    connectUser(state, 'user-2');
+    connectUser(state, 'user-3');
+    advanceToBuild(state);
+
+    // Layer 0 has no threshold (null), so any majority wins
+    const events = completeSingleLayer(state, ['user-1', 'user-2', 'user-3'], 'A');
+
+    expect(findEvent(events, 'LAYER_LOCKED_IN')).toBeDefined();
+    expect(state.attempts[0].layerResults[0].status).toBe('locked_in');
+    expect(state.attempts[0].layerResults[0].chosenOption).toBe('A');
+  });
+
+  test('layer advances to next layer after lock-in', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+
+    completeSingleLayer(state, ['user-1'], 'A');
+
+    expect(state.attempts[0].currentLayerIndex).toBe(1);
+    expect(state.attempts[0].currentLayerPhase).toBe('locked');
+  });
+
+  test('attempt is completed when all layers are locked in', () => {
+    // Config with 2 layers, both no threshold
+    const config = createTestConfig([null, null]);
+    const state = createTestState(config);
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+
+    completeSingleLayer(state, ['user-1'], 'A');
+    const events = completeSingleLayer(state, ['user-1'], 'B');
+
+    expect(state.attempts[0].status).toBe('completed');
+    expect(findEvent(events, 'ATTEMPT_COMPLETED')).toBeDefined();
+    expect(state.attempts[0].layerResults).toHaveLength(2);
+    expect(state.attempts[0].layerResults[0].chosenOption).toBe('A');
+    expect(state.attempts[0].layerResults[1].chosenOption).toBe('B');
+  });
+
+  test('lock-in emits AUDIO_CUE with correct attempt and layer info', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+
+    const events = completeSingleLayer(state, ['user-1'], 'A');
+    const audioCue = events.find(e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'lock_in');
+
+    expect(audioCue).toBeDefined();
+    expect((audioCue as any).cue.attemptIndex).toBe(0);
+    expect((audioCue as any).cue.layerIndex).toBe(0);
+    expect((audioCue as any).cue.winner).toBe('A');
+  });
+});
+
+// ============================================================================
+// Doubt Threshold and Collapse
+// ============================================================================
+
+describe('Doubt Threshold and Collapse', () => {
+  test('attempt collapses when consensus is below doubt threshold', () => {
+    // Layer 0 has 65% threshold
+    const config = createTestConfig([0.65]);
+    const state = createTestState(config);
+    // Need 4 voters to get 50% consensus (2:2 split)
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    connectUser(state, 'u3');
+    connectUser(state, 'u4');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u3', choice: 'B' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u4', choice: 'B' });
+
+    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.attempts[0].status).toBe('collapsed');
+    expect(state.attempts[0].collapsedAtLayer).toBe(0);
+    expect(findEvent(events, 'ATTEMPT_COLLAPSED')).toBeDefined();
+  });
+
+  test('collapse records the correct collapsedAtLayer', () => {
+    // 2 layers: layer 0 no threshold, layer 1 has 90% threshold
+    const config = createTestConfig([null, 0.9]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+
+    // Layer 0: all vote A, no threshold → passes
+    completeSingleLayer(state, ['u1', 'u2'], 'A');
+
+    // Layer 1: split vote 1:1 = 50%, threshold 90% → collapses
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.attempts[0].status).toBe('collapsed');
+    expect(state.attempts[0].collapsedAtLayer).toBe(1);
+    // Layer 0 should be in results as locked_in
+    expect(state.attempts[0].layerResults.find(r => r.layerIndex === 0)?.status).toBe('locked_in');
+  });
+
+  test('collapse emits AUDIO_CUE with collapse_gesture', () => {
+    const config = createTestConfig([0.9]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+
+    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    const collapseAudio = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'collapse_gesture'
+    );
+    expect(collapseAudio).toBeDefined();
+  });
+
+  test('collapse of attempt 0 auto-advances to attempt_story for attempt 1', () => {
+    const config = createTestConfig([0.9]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.phase).toBe('attempt_story');
+    expect(state.currentAttemptIndex).toBe(1);
+  });
+
+  test('collapse of attempt 1 auto-advances to attempt_story for attempt 2', () => {
+    const config = createTestConfig([0.9]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+
+    // Collapse attempt 0
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    // Now at attempt_story index 1
+
+    // Advance to attempt_build 1 and collapse
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build 1
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.phase).toBe('attempt_story');
+    expect(state.currentAttemptIndex).toBe(2);
+  });
+
+  test('collapse of attempt 2 (Song 3) does NOT auto-advance — manual transition required', () => {
+    const config = createTestConfig([0.9]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+
+    // Jump straight to attempt_build for attempt 2
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'attempt_build', attemptIndex: 2 });
+
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    // Should stay in attempt_build (not auto-advance to finale_setup)
+    expect(state.phase).toBe('attempt_build');
+    expect(state.currentAttemptIndex).toBe(2);
+    expect(state.attempts[2].status).toBe('collapsed');
+  });
+
+  test('unreached layers are marked in results after collapse', () => {
+    // 3 layers, collapse on layer 1
+    const config = createTestConfig([null, 0.9, 0.9]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+
+    // Layer 0: passes
+    completeSingleLayer(state, ['u1', 'u2'], 'A');
+
+    // Layer 1: collapses
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    const results = state.attempts[0].layerResults;
+    expect(results.find(r => r.layerIndex === 0)?.status).toBe('locked_in');
+    expect(results.find(r => r.layerIndex === 1)?.status).toBe('unreached');
+    expect(results.find(r => r.layerIndex === 2)?.status).toBe('unreached');
+  });
+});
+
+// ============================================================================
+// Force Commands
+// ============================================================================
+
+describe('Force Commands', () => {
+  test('FORCE_OPTION locks in the specified option regardless of votes', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+
+    // Don't vote, just force
+    const events = processCommand(state, { type: 'FORCE_OPTION', choice: 'B' });
+
+    expect(state.attempts[0].layerResults[0].chosenOption).toBe('B');
+    expect(state.attempts[0].layerResults[0].status).toBe('locked_in');
+    expect(findEvent(events, 'LAYER_LOCKED_IN')).toBeDefined();
+  });
+
+  test('FORCE_COLLAPSE collapses the current attempt immediately', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'FORCE_COLLAPSE' });
+
+    expect(state.attempts[0].status).toBe('collapsed');
+    expect(findEvent(events, 'ATTEMPT_COLLAPSED')).toBeDefined();
+  });
+
+  test('FORCE_CONTINUE returns error when not in resolving phase', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'FORCE_CONTINUE' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('RERUN_VOTE clears votes and returns to auditioning', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+
+    expect(state.attempts[0].votes).toHaveLength(1);
+
+    const events = processCommand(state, { type: 'RERUN_VOTE' });
+
+    expect(state.attempts[0].votes).toHaveLength(0);
+    expect(state.attempts[0].currentLayerPhase).toBe('auditioning');
+    expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
+  });
+
+  test('SET_THRESHOLD updates the doubt threshold for a specific layer', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'SET_THRESHOLD', layerIndex: 0, threshold: 0.8 });
+
+    expect(state.attempts[0].layerPlan[0].doubtThreshold).toBe(0.8);
+  });
+
+  test('SET_THRESHOLD can set threshold to null (disable doubt)', () => {
+    const config = createTestConfig([0.9]);
+    const state = createTestState(config);
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'SET_THRESHOLD', layerIndex: 0, threshold: null });
+
+    expect(state.attempts[0].layerPlan[0].doubtThreshold).toBeNull();
+  });
+});
+
+// ============================================================================
+// User Connection
+// ============================================================================
+
+describe('User Connection', () => {
+  test('USER_CONNECT creates a new user', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'USER_CONNECT', userId: 'user-1', seatId: 'seat-1' });
+
+    expect(state.users.has('user-1')).toBe(true);
+    const user = state.users.get('user-1')!;
+    expect(user.seatId).toBe('seat-1');
+    expect(user.connected).toBe(true);
+    expect(user.finaleChapter).toBeNull();
+  });
+
+  test('USER_CONNECT reconnects an existing user', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'USER_CONNECT', userId: 'user-1' });
+    processCommand(state, { type: 'USER_DISCONNECT', userId: 'user-1' });
+
+    expect(state.users.get('user-1')!.connected).toBe(false);
+
+    processCommand(state, { type: 'USER_CONNECT', userId: 'user-1' });
+    expect(state.users.get('user-1')!.connected).toBe(true);
+    // Should not create a duplicate
+    expect(state.users.size).toBe(1);
   });
 
   test('USER_DISCONNECT marks user as disconnected', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
+    const state = createTestState();
+    processCommand(state, { type: 'USER_CONNECT', userId: 'user-1' });
+    processCommand(state, { type: 'USER_DISCONNECT', userId: 'user-1' });
 
-    processCommand(state, { type: 'USER_CONNECT', userId: 'user1' });
-    const events = processCommand(state, { type: 'USER_DISCONNECT', userId: 'user1' });
-
-    expect(state.users.get('user1')?.connected).toBe(false);
-    expect(events).toContainEqual({ type: 'USER_LEFT', userId: 'user1' });
-  });
-
-  test('USER_RECONNECT marks user as connected', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'user1' });
-    processCommand(state, { type: 'USER_DISCONNECT', userId: 'user1' });
-
-    const events = processCommand(state, {
-      type: 'USER_RECONNECT',
-      userId: 'user1',
-      lastVersion: 0,
-    });
-
-    expect(state.users.get('user1')?.connected).toBe(true);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'USER_RECONNECTED',
-        userId: 'user1',
-      })
-    );
-  });
-
-  test('SUBMIT_FIG_TREE_RESPONSE stores text', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'user1' });
-    processCommand(state, {
-      type: 'SUBMIT_FIG_TREE_RESPONSE',
-      userId: 'user1',
-      text: 'My response',
-    });
-
-    expect(state.personalTrees.get('user1')?.figTreeResponse).toBe('My response');
+    expect(state.users.get('user-1')!.connected).toBe(false);
   });
 });
 
-describe('Faction Assignment', () => {
-  test('ASSIGN_FACTIONS assigns factions to users', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-
-    // Add users
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1', seatId: 'A1' });
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u2', seatId: 'A2' });
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u3', seatId: 'A3' });
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u4', seatId: 'A4' });
-
-    const events = processCommand(state, { type: 'ASSIGN_FACTIONS' });
-
-    // All users should have factions
-    expect(state.users.get('u1')?.faction).not.toBe(null);
-    expect(state.users.get('u2')?.faction).not.toBe(null);
-    expect(state.users.get('u3')?.faction).not.toBe(null);
-    expect(state.users.get('u4')?.faction).not.toBe(null);
-
-    expect(state.phase).toBe('assigning');
-
-    expect(events).toContainEqual({
-      type: 'SHOW_PHASE_CHANGED',
-      phase: 'assigning',
-    });
-  });
-
-  test('cannot assign factions outside lobby phase', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-
-    const events = processCommand(state, { type: 'ASSIGN_FACTIONS' });
-
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'ERROR',
-        message: 'Can only assign factions during lobby phase',
-      })
-    );
-  });
-});
-
-describe('Phase Transitions', () => {
-  test('START_SHOW moves from assigning to running', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'assigning';
-
-    const events = processCommand(state, { type: 'START_SHOW' });
-
-    expect(state.phase).toBe('running');
-    expect(state.rows[0].phase).toBe('voting');
-    expect(state.rows[0].currentAuditionIndex).toBe(0);
-
-    expect(events).toContainEqual({
-      type: 'SHOW_PHASE_CHANGED',
-      phase: 'running',
-    });
-    expect(events).toContainEqual({
-      type: 'ROW_PHASE_CHANGED',
-      row: 0,
-      phase: 'voting',
-    });
-  });
-
-  test('ADVANCE_PHASE during voting (auditioning) cycles through options', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-    state.rows[0].auditionComplete = false;
-    state.rows[0].currentAuditionIndex = 0;
-
-    // Advance through options
-    let events = processCommand(state, { type: 'ADVANCE_PHASE' });
-    expect(state.rows[0].currentAuditionIndex).toBe(1);
-    expect(state.rows[0].auditionComplete).toBe(false);
-
-    events = processCommand(state, { type: 'ADVANCE_PHASE' });
-    expect(state.rows[0].currentAuditionIndex).toBe(2);
-    expect(state.rows[0].auditionComplete).toBe(false);
-
-    events = processCommand(state, { type: 'ADVANCE_PHASE' });
-    expect(state.rows[0].currentAuditionIndex).toBe(3);
-    expect(state.rows[0].auditionComplete).toBe(false);
-
-    // Final advance should mark audition complete (stay in voting phase)
-    events = processCommand(state, { type: 'ADVANCE_PHASE' });
-    expect(state.rows[0].phase).toBe('voting');
-    expect(state.rows[0].auditionComplete).toBe(true);
-    expect(state.rows[0].currentAuditionIndex).toBe(null);
-  });
-
-  describe('Audition Loops Per Row', () => {
-    test('with auditionLoopsPerRow=1, marks audition complete after 4 advances', () => {
-      const config = createTestConfig();
-      config.timing.auditionLoopsPerRow = 1;  // Explicit default
-      const state = createInitialState(config, 'test-show');
-      state.phase = 'running';
-      state.rows[0].phase = 'voting';
-      state.rows[0].auditionComplete = false;
-      state.rows[0].currentAuditionIndex = 0;
-
-      // Advance through all 4 options
-      for (let i = 0; i < 3; i++) {
-        processCommand(state, { type: 'ADVANCE_PHASE' });
-        expect(state.rows[0].phase).toBe('voting');
-        expect(state.rows[0].auditionComplete).toBe(false);
-      }
-
-      processCommand(state, { type: 'ADVANCE_PHASE' });
-      expect(state.rows[0].phase).toBe('voting');
-      expect(state.rows[0].auditionComplete).toBe(true);
-    });
-
-    test('with auditionLoopsPerRow=2, marks audition complete after 8 advances', () => {
-      const config = createTestConfig();
-      config.timing.auditionLoopsPerRow = 2;
-      const state = createInitialState(config, 'test-show');
-      state.phase = 'running';
-      state.rows[0].phase = 'voting';
-      state.rows[0].auditionComplete = false;
-      state.rows[0].currentAuditionIndex = 0;
-
-      // Advance through 7 steps (still auditioning)
-      for (let i = 0; i < 7; i++) {
-        processCommand(state, { type: 'ADVANCE_PHASE' });
-        expect(state.rows[0].phase).toBe('voting');
-        expect(state.rows[0].auditionComplete).toBe(false);
-      }
-
-      // 8th advance marks audition complete
-      processCommand(state, { type: 'ADVANCE_PHASE' });
-      expect(state.rows[0].phase).toBe('voting');
-      expect(state.rows[0].auditionComplete).toBe(true);
-    });
-
-    test('AUDITION_OPTION_CHANGED always emits optionIndex 0-3', () => {
-      const config = createTestConfig();
-      config.timing.auditionLoopsPerRow = 2;
-      const state = createInitialState(config, 'test-show');
-      state.phase = 'running';
-      state.rows[0].phase = 'voting';
-      state.rows[0].auditionComplete = false;
-      state.rows[0].currentAuditionIndex = 0;
-
-      // Collect all option indices from events
-      const optionIndices: number[] = [];
-      for (let i = 0; i < 7; i++) {
-        const events = processCommand(state, { type: 'ADVANCE_PHASE' });
-        const optionEvent = events.find(e => e.type === 'AUDITION_OPTION_CHANGED');
-        if (optionEvent && optionEvent.type === 'AUDITION_OPTION_CHANGED') {
-          optionIndices.push(optionEvent.optionIndex);
-        }
-      }
-
-      // Should cycle 1,2,3,0,1,2,3 (7 advances from index 0)
-      expect(optionIndices).toEqual([1, 2, 3, 0, 1, 2, 3]);
-    });
-
-    test('defaults to 1 loop when auditionLoopsPerRow is not set', () => {
-      const config = createTestConfig();
-      delete (config.timing as any).auditionLoopsPerRow;  // Ensure not set
-      const state = createInitialState(config, 'test-show');
-      state.phase = 'running';
-      state.rows[0].phase = 'voting';
-      state.rows[0].auditionComplete = false;
-      state.rows[0].currentAuditionIndex = 0;
-
-      // Should transition after 4 advances (default behavior)
-      for (let i = 0; i < 3; i++) {
-        processCommand(state, { type: 'ADVANCE_PHASE' });
-      }
-      processCommand(state, { type: 'ADVANCE_PHASE' });
-      expect(state.rows[0].phase).toBe('voting');
-    });
-  });
-
-  test('ADVANCE_PHASE from voting to revealing', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-    state.rows[0].auditionComplete = true; // Audition must be complete to advance to revealing
-
-    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
-
-    expect(state.rows[0].phase).toBe('revealing');
-    expect(events).toContainEqual({
-      type: 'ROW_PHASE_CHANGED',
-      row: 0,
-      phase: 'revealing',
-    });
-  });
-
-  test('ADVANCE_PHASE from revealing to coup_window', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'revealing';
-    state.rows[0].committedOption = 'r0-opt0'; // Must be set during reveal
-
-    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
-
-    expect(state.rows[0].phase).toBe('coup_window');
-  });
-
-  test('ADVANCE_PHASE from coup_window to committed', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'coup_window';
-    state.rows[0].committedOption = 'r0-opt0';
-    state.paths.popularPath.push('r0-opt0');
-
-    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
-
-    expect(state.rows[0].phase).toBe('committed');
-    expect(events).toContainEqual({
-      type: 'ROW_COMMITTED',
-      row: 0,
-      optionId: 'r0-opt0',
-      popularOptionId: 'r0-opt0',
-    });
-  });
-
-  test('ADVANCE_PHASE from committed advances to next row', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.currentRowIndex = 0;
-    state.rows[0].phase = 'committed';
-
-    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
-
-    expect(state.currentRowIndex).toBe(1);
-    expect(state.rows[1].phase).toBe('voting');
-    expect(state.rows[1].currentAuditionIndex).toBe(0);
-  });
-
-  test('ADVANCE_PHASE after last row moves to finale', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.currentRowIndex = 2; // Last row
-    state.rows[2].phase = 'committed';
-
-    const events = processCommand(state, { type: 'ADVANCE_PHASE' });
-
-    expect(state.phase).toBe('finale');
-    expect(events).toContainEqual({
-      type: 'SHOW_PHASE_CHANGED',
-      phase: 'finale',
-    });
-  });
-});
-
-describe('Vote Processing', () => {
-  test('SUBMIT_VOTE stores vote for user', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    state.users.get('u1')!.faction = 0;
-
-    const events = processCommand(state, {
-      type: 'SUBMIT_VOTE',
-      userId: 'u1',
-      factionVote: 'r0-opt1',
-      personalVote: 'r0-opt2',
-    });
-
-    expect(state.votes.length).toBe(1);
-    expect(state.votes[0].userId).toBe('u1');
-    expect(state.votes[0].factionVote).toBe('r0-opt1');
-    expect(state.votes[0].personalVote).toBe('r0-opt2');
-
-    expect(events).toContainEqual({
-      type: 'VOTE_RECEIVED',
-      userId: 'u1',
-      row: 0,
-    });
-  });
-
-  test('SUBMIT_VOTE updates personal tree', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    state.users.get('u1')!.faction = 0;
-
-    processCommand(state, {
-      type: 'SUBMIT_VOTE',
-      userId: 'u1',
-      factionVote: 'r0-opt1',
-      personalVote: 'r0-opt2',
-    });
-
-    expect(state.personalTrees.get('u1')?.path[0]).toBe('r0-opt2');
-  });
-
-  test('SUBMIT_VOTE replaces previous vote from same user', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    state.users.get('u1')!.faction = 0;
-
-    // First vote
-    processCommand(state, {
-      type: 'SUBMIT_VOTE',
-      userId: 'u1',
-      factionVote: 'r0-opt1',
-      personalVote: 'r0-opt1',
-    });
-
-    // Second vote
-    processCommand(state, {
-      type: 'SUBMIT_VOTE',
-      userId: 'u1',
-      factionVote: 'r0-opt2',
-      personalVote: 'r0-opt2',
-    });
-
-    // Should only have one vote
-    expect(state.votes.length).toBe(1);
-    expect(state.votes[0].factionVote).toBe('r0-opt2');
-  });
-
-  test('SUBMIT_VOTE returns empty array during wrong phase', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'revealing'; // Wrong phase for voting
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    state.users.get('u1')!.faction = 0;
-
-    const events = processCommand(state, {
-      type: 'SUBMIT_VOTE',
-      userId: 'u1',
-      factionVote: 'r0-opt1',
-      personalVote: 'r0-opt2',
-    });
-
-    expect(events).toEqual([]);
-    expect(state.votes.length).toBe(0);
-  });
-});
-
-describe('Controller Commands', () => {
-  test('PAUSE pauses the show', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-
-    const events = processCommand(state, { type: 'PAUSE' });
-
-    expect(state.phase).toBe('paused');
-    expect(state.pausedPhase).toBe('running');
-    expect(events).toContainEqual({
-      type: 'SHOW_PHASE_CHANGED',
-      phase: 'paused',
-    });
-  });
-
-  test('RESUME resumes the show', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'paused';
-    state.pausedPhase = 'running';
-
-    const events = processCommand(state, { type: 'RESUME' });
-
-    expect(state.phase).toBe('running');
-    expect(state.pausedPhase).toBe(null);
-  });
-
-  test('SKIP_ROW marks row as committed with default option', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-
-    const events = processCommand(state, { type: 'SKIP_ROW' });
-
-    expect(state.rows[0].phase).toBe('committed');
-    expect(state.rows[0].committedOption).toBe('r0-opt0');
-    expect(state.paths.factionPath).toContain('r0-opt0');
-  });
-
-  test('RESTART_ROW resets row to auditioning', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-    state.rows[0].phase = 'voting';
-
-    const events = processCommand(state, { type: 'RESTART_ROW' });
-
-    expect(state.rows[0].phase).toBe('voting');
-    expect(state.rows[0].currentAuditionIndex).toBe(0);
-    expect(state.rows[0].attempts).toBe(1);
-  });
-
-  test('FORCE_FINALE moves directly to finale', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-
-    const events = processCommand(state, { type: 'FORCE_FINALE' });
-
-    expect(state.phase).toBe('finale');
-    expect(events).toContainEqual({
-      type: 'SHOW_PHASE_CHANGED',
-      phase: 'finale',
-    });
-  });
-
-  test('RESET_TO_LOBBY resets to lobby phase', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-    state.phase = 'running';
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    state.users.get('u1')!.faction = 0;
-
-    const events = processCommand(state, { type: 'RESET_TO_LOBBY', preserveUsers: true });
+// ============================================================================
+// Recovery
+// ============================================================================
+
+describe('Recovery', () => {
+  test('RESET_TO_LOBBY resets phase and attempts but preserves users when specified', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'RESET_TO_LOBBY', preserveUsers: true });
 
     expect(state.phase).toBe('lobby');
-    expect(state.users.has('u1')).toBe(true);
-    expect(state.users.get('u1')?.faction).toBe(null);
-    expect(state.votes.length).toBe(0);
+    expect(state.currentAttemptIndex).toBe(0);
+    expect(state.users.has('user-1')).toBe(true);
+    expect(state.attempts[0].status).toBe('pending');
+    expect(state.paused).toBe(false);
   });
 
-  test('RESET_TO_LOBBY can clear all users', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
-
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
+  test('RESET_TO_LOBBY clears users when preserveUsers is false', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
 
     processCommand(state, { type: 'RESET_TO_LOBBY', preserveUsers: false });
 
     expect(state.users.size).toBe(0);
-    expect(state.personalTrees.size).toBe(0);
+  });
+
+  test('FORCE_RECONNECT_ALL emits FORCE_RECONNECT event', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'FORCE_RECONNECT_ALL' });
+
+    expect(findEvent(events, 'FORCE_RECONNECT')).toBeDefined();
   });
 });
 
-describe('Version Tracking', () => {
-  test('version increments with every command', () => {
-    const config = createTestConfig();
-    const state = createInitialState(config, 'test-show');
+// ============================================================================
+// Audio Commands
+// ============================================================================
 
-    expect(state.version).toBe(0);
+describe('Audio Commands', () => {
+  test('AUDIO_TRANSPORT emits transport audio cue', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'AUDIO_TRANSPORT', action: 'play' });
 
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    expect(state.version).toBe(1);
+    const cue = events.find(e => e.type === 'AUDIO_CUE');
+    expect(cue).toBeDefined();
+    expect((cue as any).cue.type).toBe('transport');
+    expect((cue as any).cue.action).toBe('play');
+  });
 
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u2' });
-    expect(state.version).toBe(2);
+  test('AUDIO_PANIC emits panic audio cue', () => {
+    const state = createTestState();
+    const events = processCommand(state, { type: 'AUDIO_PANIC' });
 
-    processCommand(state, { type: 'PAUSE' });
-    expect(state.version).toBe(3);
+    const cue = events.find(e => e.type === 'AUDIO_CUE');
+    expect(cue).toBeDefined();
+    expect((cue as any).cue.type).toBe('panic');
   });
 });

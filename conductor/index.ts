@@ -13,7 +13,10 @@ export * from './types';
 
 // Export conductor functions
 export { createInitialState, processCommand } from './conductor';
-export { calculateCoherence, calculateWeightedCoherence, calculatePopularWinner, getFactionBlocOption } from './coherence';
-export { detectTie, resolveTie } from './ties';
-export { processCoupVote, triggerCoupManually, canFactionCoup, getCoupProgress, clearCoupVotesForNewRow, resetCoupMultipliers } from './coup';
-export { assignFactions, assignLatecomer, NullAdjacencyGraph, TheaterRowsAdjacencyGraph } from './assignment';
+
+// Export consensus functions
+export { calculateConsensus, resolveVote } from './consensus';
+
+// Export fragment functions
+export { generateFragments, extractAttemptResult } from './fragments';
+export type { FragmentAvailability } from './fragments';
