@@ -40,6 +40,13 @@ export function createPersistence(dbPath: string): PersistenceLayer {
   const schema = readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
 
+  // Migrations: add columns that may be missing from older DB files
+  // SQLite doesn't support ADD COLUMN IF NOT EXISTS, so check via PRAGMA first.
+  const userColumns = (db.pragma('table_info(users)') as { name: string }[]).map(c => c.name);
+  if (!userColumns.includes('finale_chapter')) {
+    db.exec(`ALTER TABLE users ADD COLUMN finale_chapter TEXT`);
+  }
+
   // Prepare statements for better performance
   const stmts = {
     insertShow: db.prepare(`

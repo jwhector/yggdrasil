@@ -26,6 +26,7 @@ import type {
   Fragment,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
+import { getAvailableFragments } from '../conductor/finale';
 import type { PersistenceLayer } from './persistence';
 import { serializeState } from '../lib/serialization';
 
@@ -574,6 +575,7 @@ export function filterStateForClient(
         let stewardSlotIndex: number | null = null;
         let stewardFragment: Fragment | null = null;
         let stewardParameterLabel: string | null = null;
+        let stewardParameterValue: number | null = null;
 
         for (let i = 0; i < fs.activeSlots.length; i++) {
           const slot = fs.activeSlots[i];
@@ -581,6 +583,7 @@ export function filterStateForClient(
             stewardSlotIndex = i;
             stewardFragment = slot.fragment;
             stewardParameterLabel = slot.fragment.safeParameter.displayLabel;
+            stewardParameterValue = slot.parameterValue;
             break;
           }
         }
@@ -589,15 +592,24 @@ export function filterStateForClient(
         const myQueueEntry = fs.queue.find(q => q.userId === userId);
         const myFragment: Fragment | null = myQueueEntry?.fragment ?? null;
 
+        // Fragments for this user's chapter (selectable = winner, false = loser/unreached)
+        const availableFragments = user.finaleChapter
+          ? getAvailableFragments(state)
+              .filter(fa => fa.fragment.chapter === user.finaleChapter)
+              .map(fa => ({ fragment: fa.fragment, selectable: fa.selectable }))
+          : [];
+
         myFinale = {
           myChapter: user.finaleChapter,
           isSteward: stewardSlotIndex !== null,
           stewardSlotIndex,
           stewardFragment,
           stewardParameterLabel,
+          stewardParameterValue,
           myTrianglePosition: fs.trianglePositions.get(userId) ?? null,
           myFragment,
           triangleActive: fs.triangleActive,
+          availableFragments,
         };
       }
 

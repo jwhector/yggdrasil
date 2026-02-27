@@ -1,5 +1,85 @@
 # CHANGELOG
 
+## 2026-02-27 — Phase 7: Controller UI
+
+**Context:** Migration Phase 7 — build the operator console at `/controller`. All conductor commands and server socket infrastructure were already in place. This phase adds a full performer-facing control surface: phase management, live vote metrics, doubt threshold adjustment, finale management, audio controls, and emergency recovery tools.
+
+**New files:**
+- `components/controller/MetricsPanel.tsx` — Persistent sticky status bar. Always visible. Shows: current phase (colored badge), user count, state version, WebSocket status, and phase-specific metrics (vote A/B counts + consensus % during attempt_build; queue, slots, stewardship progress during finale phases).
+- `components/controller/ShowControls.tsx` — Core phase management. Advance Phase, Pause/Resume toggle, Start Audition (when layer is locked), and Jump to Phase dropdown with attempt index selector for attempt_story/attempt_build phases.
+- `components/controller/VotingControls.tsx` — Song-building vote management. Only shown during attempt_build. Live vote bar (A vs B with percentages), Open/Close Vote, Force A/B (warning-styled), Extend Timer (+5s/+10s), Rerun Vote. Buttons auto-disable based on current layer phase.
+- `components/controller/DoubtControls.tsx` — Threshold management. Only shown during attempt_build. Threshold display (shows OFF when null), slider (50–100%, step 5), preset buttons (65%/75%/85%/90%), Doubt ON/OFF toggle (null = off, value = on). Force Continue (warning) and Force Collapse (danger). Local slider state syncs when layer changes.
+- `components/controller/FinaleControls.tsx` — Finale management. Only shown during finale phases. Rotation controls (Start/Stop/Freeze), rate selector (1×/2×), Triangle toggle, Clear Queue. Status panel: queue counts by chapter, stewardship progress bar, active slots list with chapter color, fragment name, and energy bar.
+- `components/controller/EmergencyControls.tsx` — Audio and recovery. Always visible, collapsible. Audio: Transport Play/Stop, Collapse Gesture, Audio Panic (hard mute, danger-styled). Recovery: Export State (downloads serialized JSON), Import State (file upload), Force Reconnect All, Reset to Lobby (keep/clear users) — all destructive actions require a confirmation step.
+- `app/controller/page.tsx` — Full rewrite. Passcode gate (checks `NEXT_PUBLIC_CONTROLLER_PASSCODE` env var; no gate if unset). Orchestrates all five components. Phase-conditional section rendering: VotingControls + DoubtControls only during attempt_build; FinaleControls only during finale phases.
+
+**Design decisions:**
+- Inline styles throughout (matches existing page convention). Dark theme (#0a0a0a bg) matching the show aesthetic.
+- Button sizing: min 48px height, large font for live performance use.
+- Color coding: primary (white), warning (amber, #fbbf24), danger (red, #f87171). Override buttons always amber/red.
+- Phase-specific sections collapse entirely when not in the relevant phase — no dead controls on screen.
+- FORCE_ASSIGN_STEWARD / FORCE_INSERT_FRAGMENT omitted: server currently overrides `userId` on any command with that field. TODO for server-side controller auth fix.
+- 198 tests passing, zero new type errors (`tsc --noEmit` clean for all new files).
+
+## 2026-02-27 — Phase 6: Client — Finale UI
+
+**Context:** Migration Phase 6 — build the audience phone UI and projector display for the finale. Conductor finale logic (fragment selection, triangle steering, stewardship, rotation) and server socket handlers (`select_fragment`, `triangle_update`, `steward_param`, `centroid`, `meter`) were already complete. This phase adds client-side types, components, and page wiring.
+
+**New files:**
+- `components/finale/FragmentSelector.tsx` — Audience fragment grid. Shows all fragments for the user's assigned chapter. Winners = selectable (full opacity, chapter color, tappable `<button>`). Losers + unreached = visible but grayed (25% opacity, `disabled`). Option A = solid fill, B = outlined — matching OptionCard pattern. Selected fragment gets white ring glow.
+- `components/finale/TriangleSteering.tsx` — SVG equilateral triangle. Corners labeled AMBITION (red), LOVE (amber), AVOIDANCE (blue) with accent dots. Audience mode: draggable white dot, uses `useTriangleInput` hook. Projector mode: centroid dot displayed from server broadcasts. Corner radial gradient fills. `touch-action: none` for mobile drag. TODO comments for auto-recenter drift and underrepresented chapter glow.
+- `components/finale/StewardSlider.tsx` — Custom vertical touch slider for steward mode. Pointer-driven (no `<input type="range">`). Chapter-colored fill + thumb, white ring glow. Label from `safeParameter.displayLabel`. Throttled `onChange` at ~50ms. Syncs initial position from server `stewardParameterValue` on reconnect. Shows fragment name + "YOU ARE STEERING".
+- `components/finale/SlotCard.tsx` — Single projector slot card. Empty = dark placeholder. Active = chapter color background, layer symbol, chapter icon, fragment name, steward badge. Energy glow: `boxShadow` spread/opacity driven by metering level (0–1).
+- `components/finale/SlotGrid.tsx` — Arranges 7 SlotCards in a flex row. Accepts `activeSlots` from state and `meterLevels: Map<slotIndex, energy>` from high-frequency `meter` socket events.
+- `hooks/useTriangle.ts` — Two hooks. `useTriangleInput`: pointer events on SVG ref → barycentric weights via area-ratio formula, clamped to triangle, throttled emit at ~250ms. `useTriangleCentroid`: listens to `centroid` socket events, interpolates via `requestAnimationFrame` for 60fps display. Pure math helpers `pointToBarycentric` / `barycentricToPoint` exported.
+
+**Updated:**
+- `conductor/types.ts` — Added `availableFragments` and `stewardParameterValue` to `AudienceFinaleView`. `availableFragments` is the per-chapter fragment list with `selectable` flags sent to audience clients. `stewardParameterValue` is the current slider position for reconnection recovery.
+- `server/socket.ts` — Imports `getAvailableFragments` from `conductor/finale`. Populates `availableFragments` (filtered to user's chapter) and `stewardParameterValue` (from active slot) in `filterStateForClient()` audience case.
+- `app/audience/page.tsx` — Finale phase routing: steward → `StewardSlider`; not-yet-selected + fragments available → `FragmentSelector`; queued + triangle active → `TriangleSteering`; otherwise minimal "LISTEN" / "FINALE IN PROGRESS" text. Fragment selection allowed during both `finale_setup` and `finale_rotating`.
+- `app/projector/page.tsx` — Finale phase: `SlotGrid` (activeSlots + meterLevels), `TriangleSteering` in display-only mode with interpolated centroid, `FinalePhaseIndicator`, `QueueStatus`. `meter` socket events wired via `useState` + `useEffect` (separate from state_sync). `useTriangleCentroid` hook for smooth centroid animation.
+
+**Key behaviors:**
+- Fragment selector shows all fragments for user's chapter (winners selectable, losers/unreached visible but locked). Single selection emits `select_fragment`.
+- Triangle steering throttled at ~250ms on audience; projector interpolates received centroid at 60fps.
+- Steward slider local state for responsiveness; server-authoritative value synced on reconnect via `stewardParameterValue`.
+- Projector metering: `meter` events (10 Hz) update slot energy levels independently of state_sync — no render overhead on state_sync for high-frequency data.
+- 198 tests passing, `tsc --noEmit` clean for all Phase 6 files.
+
+## 2026-02-27 — Phase 5: Client — Song-Building UI
+
+**Context:** Migration Phase 5 — build the audience phone UI and projector display for song-building. Server-side state filtering was already complete (filterStateForClient in socket.ts). This phase adds client state types, a visual identity module, song-building components, and rewrites both client pages.
+
+**New files:**
+- `lib/identity.ts` — Chapter + layer color/symbol/label mappings. Placeholder values; all marked `// TODO: See DECISIONS.md O3`. Exports `getLayerIdentity()` and `getChapterIdentity()` helpers with fallback for unknown types.
+- `components/song-building/OptionCard.tsx` — A/B option card. Option A = solid fill with layer color; Option B = outlined. States: default, selected (checkmark), winner (scale + badge), loser (dimmed), collapsed. Large tap target.
+- `components/song-building/LayerGrid.tsx` — Grid of all layers for the current attempt. Infers each layer's visual state from position vs `currentLayerIndex`. Resolved layers show winner/loser from `layerResults`. Active layer shows OptionCards. Future layers show locked placeholders.
+- `components/song-building/ConsensusBar.tsx` — Horizontal split bar showing live vote distribution (A left / B right). Updates reactively from `attempt.votes`. Winner side highlights after resolution.
+- `components/song-building/DoubtMeter.tsx` — Horizontal gauge with threshold line marker. Orange danger state when consensus < threshold. Hidden when `doubtThreshold === null`. Collapse state shows red.
+- `app/globals.css` — Tailwind CSS v4 directives + `@theme` block with chapter/layer color tokens (placeholders, marked TODO O3).
+- `postcss.config.js` — PostCSS config using `@tailwindcss/postcss`.
+
+**Rewritten:**
+- `hooks/useShowState.ts` — Full rewrite. Function overloads by mode: audience → `AudienceStateReturn`, projector → `ProjectorStateReturn`, controller → `ControllerStateReturn`. No client-side transforms — audience/projector receive pre-filtered JSON from server. Only controller deserializes Maps. Derives `isDark` (lobby/opener/attempt_story/ended) and `isVotingActive` (currentLayerPhase === 'voting').
+- `app/audience/page.tsx` — Full rewrite. Phase routing: lobby (waiting message), opener/attempt_story (dark listen screen), attempt_build (LayerGrid + vote emission via `emit('vote', { choice })`), finale phases (placeholder for Phase 6), ended. Wrapped in Suspense for `useSearchParams`. Connection indicator, pause overlay.
+- `app/projector/page.tsx` — Full rewrite. Phase routing: lobby (LobbyDisplay with user count), dark during story phases, attempt_build (chapter header with accent color, current layer card with A vs B options, stack history icons, ConsensusBar, DoubtMeter, collapse overlay placeholder), finale phases (placeholder for Phase 6). Live vote tallies computed from `attempt.votes` in useMemo.
+
+**Updated:**
+- `conductor/types.ts` — Added `AudienceClientState`, `AudienceAttemptView`, `AudienceFinaleView`, `ProjectorClientState`, `ProjectorFinaleView`. Match the exact shapes returned by `filterStateForClient()` in server/socket.ts.
+- `app/layout.tsx` — Added `import './globals.css'`.
+- `package.json` — Added `tailwindcss`, `postcss`, `autoprefixer`, `@tailwindcss/postcss` as devDependencies.
+
+**Key behaviors:**
+- Audience grid: layers unlock sequentially. Active layer shows A/B OptionCards. Future layers = generic locked squares. Resolved layers show winner (full opacity) vs loser (25% opacity) using layer color from identity.ts.
+- Projector vote tallies: derived in useMemo from `currentAttempt.votes` filtered by current layer index — gives live updating during voting phase.
+- Tailwind v4 + inline styles coexist: dynamic layer colors use inline `style` (runtime lookups); layout/spacing could use Tailwind classes but this phase primarily uses inline styles matching existing component patterns.
+- Pause overlay: shown on top of current phase UI, non-interactive.
+- Finale: placeholder in both pages; will be built in Phase 6.
+
+**Test results:** 198 tests pass across 9 suites. No new tests (UI components — testable via browser).
+
+---
+
 ## 2026-02-27 — Phase 4: OSC Bridge & Audio Router
 
 **Context:** Migration Phase 4 — rewrite the Ableton integration for the new track layout (3 attempts × 7 layers × 2 options = 42 tracks), new AudioCue types, and new timing phases.

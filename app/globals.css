@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+/*
+ * Visual Identity System — placeholder values
+ * TODO: See DECISIONS.md O3 — chapter + layer color/symbol assignments TBD
+ */
+@theme {
+  /* Chapter colors */
+  --color-chapter-ambition: #e63946;
+  --color-chapter-love: #f4a261;
+  --color-chapter-avoidance: #457b9d;
+
+  /* Layer colors */
+  --color-layer-foundation: #8b1a1a;
+  --color-layer-pulse: #f5c542;
+  --color-layer-color: #7b2d8b;
+  --color-layer-space: #2563eb;
+  --color-layer-voice: #e5e5e5;
+}
+
+body {
+  background-color: #000;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+}

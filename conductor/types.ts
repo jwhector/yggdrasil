@@ -446,3 +446,88 @@ export interface StoredClientIdentity {
   seatId: SeatId | null;
   lastVersion: number;
 }
+
+// ============================================================================
+// Client State Types (match filterStateForClient() output in server/socket.ts)
+// ============================================================================
+
+/**
+ * Current attempt view sent to audience clients.
+ * Personalized: includes myVote, limited to data needed for the current layer.
+ */
+export interface AudienceAttemptView {
+  index: number;
+  chapter: Chapter;
+  status: AttemptState['status'];
+  currentLayerIndex: number;
+  currentLayerPhase: LayerPhase;
+  layerCount: number;
+  currentLayerConfig: LayerConfig | null;
+  layerResults: LayerResult[];
+  myVote: 'A' | 'B' | null;
+}
+
+/**
+ * Finale view sent to audience clients.
+ * Personalized: their chapter, stewardship status, triangle position, queued fragment.
+ */
+export interface AudienceFinaleView {
+  myChapter: Chapter | null;
+  isSteward: boolean;
+  stewardSlotIndex: number | null;
+  stewardFragment: Fragment | null;
+  stewardParameterLabel: string | null;
+  stewardParameterValue: number | null;  // Current slider position (for reconnection recovery)
+  myTrianglePosition: TrianglePosition | null;
+  myFragment: Fragment | null;
+  triangleActive: boolean;
+  availableFragments: Array<{ fragment: Fragment; selectable: boolean }>;
+}
+
+/**
+ * State received by audience clients via state_sync (personalized per user).
+ * Must match the 'audience' case of filterStateForClient() in server/socket.ts.
+ */
+export interface AudienceClientState {
+  userId: UserId;
+  seatId: SeatId | null;
+  phase: ShowPhase;
+  paused: boolean;
+  version: number;
+  finaleChapter: Chapter | null;
+  currentAttemptIndex: number;
+  currentAttempt: AudienceAttemptView | null;
+  myFinale: AudienceFinaleView | null;
+  config: {
+    lobby: { waitingMessage: string };
+  };
+}
+
+/**
+ * Finale state sent to projector (public — no per-user data).
+ */
+export interface ProjectorFinaleView {
+  queue: QueueEntry[];
+  activeSlots: (ActiveSlot | null)[];
+  centroid: TrianglePosition;
+  rotationActive: boolean;
+  rotationRate: 1 | 2;
+  frozen: boolean;
+  triangleActive: boolean;
+  stewardshipLog: StewardshipEntry[];
+}
+
+/**
+ * State received by projector clients via state_sync (public, no per-user data).
+ * Must match the 'projector' case of filterStateForClient() in server/socket.ts.
+ */
+export interface ProjectorClientState {
+  phase: ShowPhase;
+  paused: boolean;
+  version: number;
+  currentAttemptIndex: number;
+  userCount: number;
+  attempts: AttemptState[];
+  finaleState: ProjectorFinaleView | null;
+  config: ShowConfig;
+}

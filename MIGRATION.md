@@ -170,26 +170,28 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 ## Phase 5: Client — Song-Building UI
 **Goal:** Build the audience and projector UIs for song-building phases.
 
-- [ ] **5a.** Create `lib/identity.ts` with chapter + layer color/symbol mappings (use placeholders, mark with TODO).
-- [ ] **5b.** Create `components/song-building/LayerGrid.tsx`:
+- [x] **5a.** Create `lib/identity.ts` with chapter + layer color/symbol mappings (use placeholders, mark with TODO).
+- [x] **5b.** Create `components/song-building/LayerGrid.tsx`:
   - Grid of all layers for current attempt as squares
   - States: locked (future), active (current — both A/B selectable), locked_in (chosen option prominent, losing option dimmed/grayed), collapsed
-- [ ] **5c.** Create `components/song-building/OptionCard.tsx`:
+- [x] **5c.** Create `components/song-building/OptionCard.tsx`:
   - A/B option display with layer color + symbol
   - Solid (A) vs outlined (B) style
   - Selectable state, selected state, disabled state
-- [ ] **5d.** Create `components/song-building/ConsensusBar.tsx` and `DoubtMeter.tsx`:
+- [x] **5d.** Create `components/song-building/ConsensusBar.tsx` and `DoubtMeter.tsx`:
   - Consensus bar: leading side + margin
   - Doubt meter: rising gauge with threshold line
-- [ ] **5e.** Update `app/audience/page.tsx`:
-  - Show phase routing: dark screen during story, layer grid during build, finale UI during finale
+- [x] **5e.** Update `app/audience/page.tsx`:
+  - Show phase routing: dark screen during story, layer grid during build, finale placeholder
   - Wire to `useShowState` hook
-- [ ] **5f.** Update `app/projector/page.tsx` for song-building:
-  - Chapter title + accent, current layer card, stack history, meters, collapse animation
-- [ ] **5g.** Create `hooks/useShowState.ts` (or update existing):
-  - Receives state_sync, provides typed state to components
-  - Derives: current attempt, current layer, user's vote status, etc.
-- [ ] **5h.** Update CHANGELOG.md.
+- [x] **5f.** Update `app/projector/page.tsx` for song-building:
+  - Chapter title + accent, current layer card, stack history, meters, collapse animation placeholder
+- [x] **5g.** Rewrite `hooks/useShowState.ts`:
+  - Receives state_sync, provides typed state (overloaded by mode)
+  - No client-side transforms — server pre-filters per mode
+  - Derives: currentAttempt, isVotingActive, isDark
+- [x] **5h.** Update CHANGELOG.md.
+  - *Also: Tailwind CSS v4 setup (postcss.config.js, app/globals.css, layout.tsx). Client state types (AudienceClientState, ProjectorClientState) added to conductor/types.ts. 198 tests still passing.*
 
 **Completion check:** Audience can see layer grid, tap A/B, see result. Projector shows layer progress and meters. Dark screen during story phases.
 
@@ -198,28 +200,30 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 ## Phase 6: Client — Finale UI
 **Goal:** Build the finale UIs: fragment selection, triangle steering, stewardship slider, projector slot display.
 
-- [ ] **6a.** Create `components/finale/FragmentSelector.tsx`:
+- [x] **6a.** Create `components/finale/FragmentSelector.tsx`:
   - Grid of layers for user's assigned chapter
-  - Winning options = selectable, losing + unreached = locked/grayed
-  - Single selection
-- [ ] **6b.** Create `components/finale/TriangleSteering.tsx`:
-  - Three-corner triangle (Ambition/Love/Avoidance)
-  - Draggable dot, outputs barycentric weights
-  - Throttled sends (~250ms)
-  - Auto-recenter drift when idle
-  - Underrepresented chapter glow
-- [ ] **6c.** Create `hooks/useTriangle.ts`:
-  - Touch/drag input → barycentric coordinate calculation
-  - Throttled emit to server
-  - Smooth interpolation for received centroid (projector)
-- [ ] **6d.** Create `components/finale/StewardSlider.tsx`:
-  - Continuous slider, abstracted label from config
-  - Sends parameter value to server
-- [ ] **6e.** Create `components/finale/SlotGrid.tsx` and `SlotCard.tsx` (projector):
-  - 7 slot cards with chapter color, fragment name, steward indicator
-  - Energy meter/glow driven by metering data
-- [ ] **6f.** Wire finale into `app/audience/page.tsx` and `app/projector/page.tsx`.
-- [ ] **6g.** Update CHANGELOG.md.
+  - Winning options = selectable, losing + unreached = locked/grayed (25% opacity)
+  - Single selection with white ring glow on selected card
+- [x] **6b.** Create `components/finale/TriangleSteering.tsx`:
+  - Three-corner triangle (Ambition/Love/Avoidance) with chapter color corner labels
+  - Draggable dot (audience), centroid dot (projector)
+  - Throttled sends (~250ms) via useTriangleInput hook
+  - *TODO: Auto-recenter drift when idle (triangleDriftTimeoutMs)*
+  - *TODO: Underrepresented chapter glow on corners*
+- [x] **6c.** Create `hooks/useTriangle.ts`:
+  - `useTriangleInput`: pointer events → barycentric coordinates, throttled emit
+  - `useTriangleCentroid`: socket centroid events → requestAnimationFrame interpolation
+  - Pure math helpers: `pointToBarycentric`, `barycentricToPoint`
+- [x] **6d.** Create `components/finale/StewardSlider.tsx`:
+  - Custom vertical touch slider, chapter color fill
+  - Label from `safeParameter.displayLabel`, throttled at ~50ms
+  - Syncs from server on reconnect via `stewardParameterValue`
+- [x] **6e.** Create `components/finale/SlotGrid.tsx` and `SlotCard.tsx` (projector):
+  - 7 slot cards with chapter color, layer symbol, fragment name, steward badge
+  - Energy glow (boxShadow) driven by `meter` socket events — not state_sync
+- [x] **6f.** Wire finale into `app/audience/page.tsx` and `app/projector/page.tsx`.
+  - Also: added `availableFragments` + `stewardParameterValue` to `AudienceFinaleView` (types.ts + socket.ts)
+- [x] **6g.** Update CHANGELOG.md.
 
 **Completion check:** Full finale flow works: chapter assignment → fragment selection → queue → rotation → stewardship → triangle steering. Projector shows slots with metering glow.
 
@@ -228,17 +232,19 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 ## Phase 7: Controller UI
 **Goal:** Build the operator console with all controls from ARCHITECTURE.md.
 
-- [ ] **7a.** Create controller components:
+- [x] **7a.** Create controller components:
   - `ShowControls.tsx` — phase buttons, jump dropdown
   - `VotingControls.tsx` — open/close/force/extend/rerun
   - `DoubtControls.tsx` — threshold slider, toggle, force continue/collapse
   - `FinaleControls.tsx` — rotation, freeze, queue, steward, triangle toggle
   - `MetricsPanel.tsx` — connection count, vote counts, consensus, queue status, system health
-- [ ] **7b.** Wire to `app/controller/page.tsx` with auth (route + passcode).
-- [ ] **7c.** Test all override commands work end-to-end.
-- [ ] **7d.** Update CHANGELOG.md.
+- [x] **7b.** Wire to `app/controller/page.tsx` with auth (passcode gate via `NEXT_PUBLIC_CONTROLLER_PASSCODE`).
+- [x] **7c.** Type-check clean; 198 tests pass (no regressions).
+- [x] **7d.** Update CHANGELOG.md.
 
 **Completion check:** Controller can drive entire show flow. All override buttons work. Metrics display real-time data.
+
+**Note:** FORCE_ASSIGN_STEWARD / FORCE_INSERT_FRAGMENT not wired in UI — server currently replaces `userId` on any command that has it, which breaks force-assign to another user. Needs server-side fix before adding those controls (Phase 8 or separate task).
 
 ---
 

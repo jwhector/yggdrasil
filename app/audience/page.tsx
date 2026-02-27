@@ -1,182 +1,422 @@
 'use client';
 
-/**
- * Audience Page
- *
- * This page is accessed via seat-specific QR codes: /audience?seat=<seatId>
- *
- * States:
- * - Lobby: Fig tree prompt input, waiting for show to start
- * - Assigning: Faction reveal animation
- * - Running: Vote interface, coup meter
- * - Finale: Watching personal timelines
- */
-
+import { useState } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { FigTreeInput } from '@/components/FigTreeInput';
-import { WaitingState } from '@/components/WaitingState';
-import { FactionReveal } from '@/components/FactionReveal';
-import { AuditionVoteInterface } from '@/components/AuditionVoteInterface';
-import { CoupMeter } from '@/components/CoupMeter';
-import type { AudienceClientState } from '@/conductor/types';
+import { LayerGrid } from '@/components/song-building/LayerGrid';
+import { FragmentSelector } from '@/components/finale/FragmentSelector';
+import { TriangleSteering } from '@/components/finale/TriangleSteering';
+import { StewardSlider } from '@/components/finale/StewardSlider';
+import { getChapterIdentity } from '@/lib/identity';
+import type { AudienceFinaleView, ShowPhase, TrianglePosition } from '@/conductor/types';
 
-// TODO: Get from environment or config
 const SHOW_ID = 'default-show';
 
-export default function AudiencePage() {
-  const searchParams = useSearchParams();
-  const seatId = searchParams.get('seat');
+// ---------------------------------------------------------------------------
+// Main export — wrapped in Suspense for useSearchParams
+// ---------------------------------------------------------------------------
 
-  const { socket, connectionState, userId } = useSocket({
+export default function AudiencePage() {
+  return (
+    <Suspense fallback={<FullDark />}>
+      <AudienceContent />
+    </Suspense>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inner component (has access to search params)
+// ---------------------------------------------------------------------------
+
+function AudienceContent() {
+  const searchParams = useSearchParams();
+  const seatId = searchParams.get('seat') ?? undefined;
+
+  const { socket, connectionState, userId, emit } = useSocket({
     showId: SHOW_ID,
-    seatId: seatId || undefined,
+    seatId: seatId ?? null,
     mode: 'audience',
   });
 
-  const { state, sendCommand, isLoading } = useShowState(
-    socket,
-    'audience',
-    userId
-  );
+  const { state, isLoading, currentAttempt } = useShowState(socket, 'audience', userId);
 
-  const audienceState = state as AudienceClientState | null;
+  const handleVote = (choice: 'A' | 'B') => {
+    emit('vote', { choice });
+  };
 
-  // Connection status color
-  const connectionColor =
-    connectionState === 'connected'
-      ? '#4ade80'
-      : connectionState === 'connecting' || connectionState === 'reconnecting'
-      ? '#fbbf24'
-      : '#f87171';
-
-  // Loading state
-  if (isLoading || !audienceState) {
+  // Loading / not yet connected
+  if (isLoading || !state) {
     return (
-      <main style={styles.container}>
-        <div style={styles.connectionIndicator}>
-          <div
-            style={{
-              ...styles.connectionDot,
-              backgroundColor: connectionColor,
-            }}
-          />
-          <span style={styles.connectionText}>
-            {connectionState === 'connected' ? 'Connected' : 'Connecting...'}
-          </span>
-        </div>
-        <div style={styles.loadingText}>Loading...</div>
-      </main>
+      <Screen>
+        <ConnectionIndicator state={connectionState} />
+        <PulsingDot />
+      </Screen>
     );
   }
 
+  const { phase, paused, config } = state;
+
   return (
-    <main style={styles.container}>
-      {/* Connection indicator */}
-      <div style={styles.connectionIndicator}>
+    <Screen>
+      {/* Pause overlay */}
+      {paused && <PauseOverlay />}
+
+      {/* Connection indicator (top-right corner) */}
+      <ConnectionIndicator state={connectionState} />
+
+      {/* Phase routing */}
+      {phase === 'lobby' && (
+        <LobbyScreen message={config.lobby.waitingMessage} />
+      )}
+
+      {(phase === 'opener' || phase === 'attempt_story') && (
+        <DarkListenScreen />
+      )}
+
+      {phase === 'attempt_build' && currentAttempt && (
         <div
           style={{
-            ...styles.connectionDot,
-            backgroundColor: connectionColor,
+            display: 'flex',
+            flexDirection: 'column',
+            width: '100%',
+            minHeight: '100vh',
+            overflowY: 'auto',
+            paddingTop: '16px',
+            paddingBottom: '32px',
           }}
+        >
+          {/* Chapter label */}
+          <ChapterLabel chapter={currentAttempt.chapter} attemptIndex={state.currentAttemptIndex} />
+
+          {/* Layer grid */}
+          <LayerGrid attempt={currentAttempt} onVote={handleVote} />
+
+          {/* Phase hint */}
+          <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+        </div>
+      )}
+
+      {phase === 'attempt_build' && !currentAttempt && (
+        <DarkListenScreen />
+      )}
+
+      {(phase === 'finale_setup' || phase === 'finale_rotating' || phase === 'finale_frozen') && (
+        state.myFinale
+          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} emit={emit} />
+          : <DarkListenScreen />
+      )}
+
+      {phase === 'ended' && (
+        <p style={{ fontSize: '1.5rem', color: 'rgba(255,255,255,0.7)' }}>Thank you</p>
+      )}
+    </Screen>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Finale audience view
+// ---------------------------------------------------------------------------
+
+function FinaleAudienceView({
+  myFinale,
+  phase,
+  emit,
+}: {
+  myFinale: AudienceFinaleView;
+  phase: ShowPhase;
+  emit: (event: string, data: unknown) => void;
+}) {
+  const [selectedFragmentId, setSelectedFragmentId] = useState<string | null>(null);
+
+  const chapterIdentity = myFinale.myChapter
+    ? getChapterIdentity(myFinale.myChapter)
+    : null;
+  const chapterColor = chapterIdentity?.color ?? 'rgba(255,255,255,0.6)';
+  const chapterLabel = chapterIdentity?.label ?? '';
+
+  const hasSelected = myFinale.myFragment !== null;
+
+  const handleSelectFragment = (fragmentId: string) => {
+    setSelectedFragmentId(fragmentId);
+    emit('select_fragment', { fragmentId });
+  };
+
+  const handleTriangleChange = (pos: TrianglePosition) => {
+    emit('triangle_update', pos);
+  };
+
+  const handleStewardParam = (value: number) => {
+    emit('steward_param', { value });
+  };
+
+  // --- Steward mode: show slider ---
+  if (myFinale.isSteward && myFinale.stewardFragment && myFinale.stewardParameterLabel) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          width: '100%',
+          minHeight: '100vh',
+          justifyContent: 'center',
+        }}
+      >
+        <StewardSlider
+          label={myFinale.stewardParameterLabel}
+          value={myFinale.stewardParameterValue ?? myFinale.stewardFragment.safeParameter.defaultValue}
+          min={myFinale.stewardFragment.safeParameter.min}
+          max={myFinale.stewardFragment.safeParameter.max}
+          fragmentName={myFinale.stewardFragment.displayName}
+          chapterColor={chapterColor}
+          onChange={handleStewardParam}
         />
       </div>
+    );
+  }
 
-      {/* Render based on show phase */}
-      {audienceState.showPhase === 'lobby' && (
-        <>
-          {!audienceState.figTreeResponseSubmitted ? (
-            <FigTreeInput sendCommand={sendCommand} />
-          ) : (
-            <WaitingState />
-          )}
-        </>
-      )}
+  // --- Fragment selection (before user has queued) ---
+  // Allowed during both finale_setup and finale_rotating
+  if (!hasSelected && myFinale.availableFragments.length > 0) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          minHeight: '100vh',
+          overflowY: 'auto',
+          paddingTop: '16px',
+          paddingBottom: '32px',
+          alignItems: 'center',
+        }}
+      >
+        <FragmentSelector
+          fragments={myFinale.availableFragments}
+          chapterColor={chapterColor}
+          chapterLabel={chapterLabel}
+          selectedFragmentId={selectedFragmentId}
+          onSelect={handleSelectFragment}
+        />
+      </div>
+    );
+  }
 
-      {audienceState.showPhase === 'assigning' && (
-        <FactionReveal faction={audienceState.faction} />
-      )}
+  // --- Queued and waiting for stewardship — show triangle if active ---
+  if (myFinale.triangleActive) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          width: '100%',
+          minHeight: '100vh',
+          justifyContent: 'center',
+        }}
+      >
+        {hasSelected && (
+          <div
+            style={{
+              textAlign: 'center',
+              color: chapterColor,
+              fontSize: '0.7rem',
+              letterSpacing: '0.1em',
+              marginBottom: '8px',
+            }}
+          >
+            {myFinale.myFragment?.displayName ?? 'Fragment queued'}
+          </div>
+        )}
+        <TriangleSteering
+          onPositionChange={handleTriangleChange}
+          interactive
+        />
+      </div>
+    );
+  }
 
-      {audienceState.showPhase === 'running' && audienceState.currentRow && (
-        <>
-          {/* Show combined audition and vote interface during voting phase */}
-          {audienceState.currentRow.phase === 'voting' && (
-            <AuditionVoteInterface
-              options={audienceState.currentRow.options}
-              rowIndex={audienceState.currentRow.index}
-              currentAuditionIndex={audienceState.currentRow.currentAuditionIndex}
-              auditionComplete={audienceState.currentRow.auditionComplete}
-              myVote={audienceState.myVote}
-              faction={audienceState.faction}
-              sendCommand={sendCommand}
-            />
-          )}
+  // --- Waiting (triangle not active or finale_frozen) ---
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '16px',
+      }}
+    >
+      <PulsingDot />
+      <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
+        {phase === 'finale_frozen' ? 'LISTEN' : 'FINALE IN PROGRESS'}
+      </p>
+    </div>
+  );
+}
 
-          {/* Show coup meter during coup window */}
-          {audienceState.currentRow.phase === 'coup_window' && (
-            <CoupMeter
-              faction={audienceState.faction}
-              coupMeter={audienceState.coupMeter}
-              canCoup={audienceState.canCoup}
-              sendCommand={sendCommand}
-            />
-          )}
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
 
-          {/* Show waiting during reveal and committed phases */}
-          {(audienceState.currentRow.phase === 'revealing' ||
-            audienceState.currentRow.phase === 'committed') && (
-            <WaitingState message="Watch the projector..." />
-          )}
-        </>
-      )}
-
-      {audienceState.showPhase === 'finale' && (
-        <WaitingState message="Watch the projector for your personal timeline..." />
-      )}
-
-      {audienceState.showPhase === 'paused' && (
-        <WaitingState message="Show paused" />
-      )}
-
-      {audienceState.showPhase === 'ended' && (
-        <WaitingState message="Thank you for participating!" />
-      )}
+function Screen({ children }: { children?: React.ReactNode }) {
+  return (
+    <main
+      style={{
+        minHeight: '100vh',
+        width: '100%',
+        backgroundColor: '#000',
+        color: '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+      }}
+    >
+      {children}
     </main>
   );
 }
 
-const styles = {
-  container: {
-    padding: '1rem',
-    fontFamily: 'system-ui',
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0a0a0a',
-    color: '#f5f5f5',
-  },
-  connectionIndicator: {
-    position: 'absolute' as const,
-    top: '1rem',
-    right: '1rem',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-  },
-  connectionDot: {
-    width: '12px',
-    height: '12px',
-    borderRadius: '50%',
-  },
-  connectionText: {
-    fontSize: '0.875rem',
-    color: '#a3a3a3',
-  },
-  loadingText: {
-    fontSize: '1.25rem',
-    color: '#a3a3a3',
-  },
-};
+function FullDark() {
+  return <div style={{ minHeight: '100vh', backgroundColor: '#000' }} />;
+}
+
+function DarkListenScreen() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+      <PulsingDot />
+      <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
+        LISTEN
+      </p>
+    </div>
+  );
+}
+
+function LobbyScreen({ message }: { message: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '24px',
+        padding: '32px',
+        textAlign: 'center',
+        maxWidth: '400px',
+      }}
+    >
+      <PulsingDot />
+      <p style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>
+        {message}
+      </p>
+    </div>
+  );
+}
+
+function PulsingDot() {
+  return (
+    <div
+      style={{
+        width: '8px',
+        height: '8px',
+        borderRadius: '50%',
+        backgroundColor: 'rgba(255,255,255,0.3)',
+      }}
+    />
+  );
+}
+
+function ChapterLabel({ chapter, attemptIndex }: { chapter: string; attemptIndex: number }) {
+  return (
+    <div
+      style={{
+        textAlign: 'center',
+        paddingBottom: '8px',
+        color: 'rgba(255,255,255,0.4)',
+        fontSize: '0.75rem',
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+      }}
+    >
+      Song {attemptIndex + 1} · {chapter}
+    </div>
+  );
+}
+
+function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean }) {
+  if (phase === 'voting' && !hasVoted) {
+    return (
+      <p
+        style={{
+          textAlign: 'center',
+          color: 'rgba(255,255,255,0.4)',
+          fontSize: '0.8rem',
+          marginTop: '16px',
+          letterSpacing: '0.08em',
+        }}
+      >
+        Tap to vote
+      </p>
+    );
+  }
+  if (phase === 'voting' && hasVoted) {
+    return (
+      <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', marginTop: '16px' }}>
+        Vote recorded
+      </p>
+    );
+  }
+  return null;
+}
+
+function PauseOverlay() {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <p style={{ color: 'rgba(255,255,255,0.4)', letterSpacing: '0.15em', fontSize: '0.9rem' }}>
+        PAUSED
+      </p>
+    </div>
+  );
+}
+
+function ConnectionIndicator({ state }: { state: string }) {
+  if (state === 'connected') return null;
+
+  const color = state === 'connecting' ? '#f5c542' : '#ef4444';
+  const label = state === 'connecting' ? 'connecting' : 'reconnecting';
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: '12px',
+        right: '12px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '4px 10px',
+        borderRadius: '20px',
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        border: `1px solid ${color}`,
+        zIndex: 100,
+      }}
+    >
+      <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: color }} />
+      <span style={{ fontSize: '0.65rem', color, letterSpacing: '0.08em' }}>{label}</span>
+    </div>
+  );
+}
