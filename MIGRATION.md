@@ -257,7 +257,6 @@ The operator (you, in Claude Code) should tackle **one phase per session**. At t
 - [ ] **8d.** Run full test suite. Fix any failures.
 - [ ] **8e.** Run `npx tsc --noEmit`. Fix any type errors.
 - [ ] **8f.** End-to-end smoke test: start server, connect audience + projector + controller, run full show flow.
-- [ ] **8g.** Delete this file (MIGRATION.md) — migration is complete.
 - [ ] **8h.** Remove the "⚠️ MIGRATION IN PROGRESS" section from CLAUDE.md. Update it to be the steady-state agent context.
 - [ ] **8i.** Final CHANGELOG.md entry.
 

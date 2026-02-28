@@ -14,6 +14,72 @@ import { join } from 'path';
 import type { ShowState, ShowId, UserId, User, LayerVote, SeatId, Chapter } from '@/conductor/types';
 import { serializeState, deserializeState } from '../lib/serialization';
 
+// ============================================================================
+// Schema Migrations
+// ============================================================================
+
+/**
+ * Versioned schema migrations. Each runs once, in order, inside a transaction.
+ * The DB's PRAGMA user_version tracks which migrations have been applied.
+ *
+ * Rules:
+ * - Never modify an existing migration — always append a new one.
+ * - Migrations must be idempotent (safe to re-run on a DB that already has
+ *   the change, e.g. from a fresh schema.sql run).
+ * - schema.sql defines the "current" table shapes. Migrations handle upgrading
+ *   DBs that were created from an older version of schema.sql.
+ */
+interface Migration {
+  version: number;
+  name: string;
+  up: (db: Database.Database) => void;
+}
+
+/** Helper: returns column names for a table. */
+function getColumnNames(db: Database.Database, table: string): string[] {
+  return (db.pragma(`table_info(${table})`) as { name: string }[]).map(c => c.name);
+}
+
+const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    name: 'add_finale_chapter_to_users',
+    up: (db) => {
+      if (!getColumnNames(db, 'users').includes('finale_chapter')) {
+        db.exec('ALTER TABLE users ADD COLUMN finale_chapter TEXT');
+      }
+    },
+  },
+  // Future migrations go here:
+  // { version: 2, name: '...', up: (db) => { ... } },
+];
+
+/**
+ * Run any pending migrations in a single transaction.
+ * Uses PRAGMA user_version to track the current schema version.
+ */
+function runMigrations(db: Database.Database): void {
+  const currentVersion = db.pragma('user_version', { simple: true }) as number;
+
+  const pending = MIGRATIONS.filter(m => m.version > currentVersion);
+  if (pending.length === 0) return;
+
+  const migrate = db.transaction(() => {
+    for (const migration of pending) {
+      migration.up(db);
+      console.log(`[DB] Migration ${migration.version}: ${migration.name}`);
+    }
+    db.pragma(`user_version = ${pending[pending.length - 1].version}`);
+  });
+
+  migrate();
+  console.log(`[DB] Schema at version ${pending[pending.length - 1].version} (ran ${pending.length} migration${pending.length > 1 ? 's' : ''})`);
+}
+
+// ============================================================================
+// Persistence Layer
+// ============================================================================
+
 export interface PersistenceLayer {
   saveState(state: ShowState): void;
   loadState(showId: ShowId): ShowState | null;
@@ -35,17 +101,13 @@ export function createPersistence(dbPath: string): PersistenceLayer {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
 
-  // Read and execute schema
+  // Read and execute schema (CREATE TABLE IF NOT EXISTS — safe on existing DBs)
   const schemaPath = join(__dirname, '../db/schema.sql');
   const schema = readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
 
-  // Migrations: add columns that may be missing from older DB files
-  // SQLite doesn't support ADD COLUMN IF NOT EXISTS, so check via PRAGMA first.
-  const userColumns = (db.pragma('table_info(users)') as { name: string }[]).map(c => c.name);
-  if (!userColumns.includes('finale_chapter')) {
-    db.exec(`ALTER TABLE users ADD COLUMN finale_chapter TEXT`);
-  }
+  // Run any pending versioned migrations
+  runMigrations(db);
 
   // Prepare statements for better performance
   const stmts = {

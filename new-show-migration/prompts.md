@@ -255,9 +255,7 @@ We're on Phase 8: final cleanup.
 
 7. Remove the "⚠️ MIGRATION IN PROGRESS" section from CLAUDE.md. Remove references to MIGRATION.md. Update CLAUDE.md to be the steady-state agent context for ongoing development.
 
-8. Delete MIGRATION.md.
-
-9. Write a final CHANGELOG.md entry summarizing the completed migration.
+8. Write a final CHANGELOG.md entry summarizing the completed migration.
 ```
 
 ---
