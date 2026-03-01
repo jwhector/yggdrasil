@@ -88,6 +88,8 @@ function createTestConfig(layerCount: number = 3): ShowConfig {
       resolveAnimationMs: 5000,
       collapseAnimationMs: 3000,
       autoAdvanceToStoryMs: 2000,
+      beatsPerLoop: 0,
+      auditionsPerLayer: 0,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: [],

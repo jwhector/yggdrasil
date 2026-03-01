@@ -61,6 +61,8 @@ function createTestConfig(layerThresholds: (number | null)[] = [null, null, 0.65
       resolveAnimationMs: 5000,
       collapseAnimationMs: 3000,
       autoAdvanceToStoryMs: 2000,
+      beatsPerLoop: 0,
+      auditionsPerLayer: 0,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1', 'seat-2'],
@@ -738,5 +740,161 @@ describe('Audio Commands', () => {
     const cue = events.find(e => e.type === 'AUDIO_CUE');
     expect(cue).toBeDefined();
     expect((cue as any).cue.type).toBe('panic');
+  });
+});
+
+// ============================================================================
+// Beat-Synced Audition (TOGGLE_AUDITION)
+// ============================================================================
+
+function createAuditionConfig(auditionsPerLayer = 2): ShowConfig {
+  const base = createTestConfig();
+  return {
+    ...base,
+    timing: {
+      ...base.timing,
+      beatsPerLoop: 32,
+      auditionsPerLayer,
+    },
+  };
+}
+
+describe('Beat-Synced Audition (TOGGLE_AUDITION)', () => {
+  test('START_AUDITION initializes currentAuditionOption to A and auditionLoopIndex to 0', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'START_AUDITION' });
+
+    const attempt = state.attempts[0];
+    expect(attempt.currentAuditionOption).toBe('A');
+    expect(attempt.auditionLoopIndex).toBe(0);
+  });
+
+  test('START_AUDITION emits AUDITION_OPTION_CHANGED with option A and loopIndex 0', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'START_AUDITION' });
+
+    const ev = findEvent(events, 'AUDITION_OPTION_CHANGED') as any;
+    expect(ev).toBeDefined();
+    expect(ev.option).toBe('A');
+    expect(ev.loopIndex).toBe(0);
+    expect(ev.totalLoops).toBe(4); // auditionsPerLayer(2) * 2
+  });
+
+  test('TOGGLE_AUDITION flips option from A to B and increments loopIndex', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    const attempt = state.attempts[0];
+    expect(attempt.currentAuditionOption).toBe('B');
+    expect(attempt.auditionLoopIndex).toBe(1);
+  });
+
+  test('TOGGLE_AUDITION flips option from B back to A on second call', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    const attempt = state.attempts[0];
+    expect(attempt.currentAuditionOption).toBe('A');
+    expect(attempt.auditionLoopIndex).toBe(2);
+  });
+
+  test('TOGGLE_AUDITION emits audition_stop for old option and audition_start for new option', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    const cues = events.filter(e => e.type === 'AUDIO_CUE') as any[];
+    const stopCue = cues.find(e => e.cue.type === 'audition_stop');
+    const startCue = cues.find(e => e.cue.type === 'audition_start');
+
+    expect(stopCue).toBeDefined();
+    expect(stopCue.cue.option).toBe('A');
+    expect(startCue).toBeDefined();
+    expect(startCue.cue.option).toBe('B');
+  });
+
+  test('TOGGLE_AUDITION emits AUDITION_OPTION_CHANGED with updated progress', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    const ev = findEvent(events, 'AUDITION_OPTION_CHANGED') as any;
+    expect(ev).toBeDefined();
+    expect(ev.option).toBe('B');
+    expect(ev.loopIndex).toBe(1);
+    expect(ev.totalLoops).toBe(4);
+  });
+
+  test('TOGGLE_AUDITION returns error when not in attempt_build', () => {
+    const state = createTestState(createAuditionConfig());
+    // Still in lobby — attempt_build not started
+
+    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('TOGGLE_AUDITION returns error when layer not in auditioning phase', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    // Layer is 'locked' — audition not started
+
+    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
+
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('RERUN_VOTE resets currentAuditionOption to A and auditionLoopIndex to 0', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'TOGGLE_AUDITION' }); // now B, loopIndex 1
+    processCommand(state, { type: 'OPEN_VOTING' });
+
+    processCommand(state, { type: 'RERUN_VOTE' });
+
+    const attempt = state.attempts[0];
+    expect(attempt.currentAuditionOption).toBe('A');
+    expect(attempt.auditionLoopIndex).toBe(0);
+  });
+
+  test('RERUN_VOTE emits AUDITION_OPTION_CHANGED with option A reset', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'TOGGLE_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+
+    const events = processCommand(state, { type: 'RERUN_VOTE' });
+
+    const ev = findEvent(events, 'AUDITION_OPTION_CHANGED') as any;
+    expect(ev).toBeDefined();
+    expect(ev.option).toBe('A');
+    expect(ev.loopIndex).toBe(0);
+  });
+
+  test('OPEN_VOTING clears currentAuditionOption', () => {
+    const state = createTestState(createAuditionConfig());
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    processCommand(state, { type: 'OPEN_VOTING' });
+
+    expect(state.attempts[0].currentAuditionOption).toBeNull();
   });
 });

@@ -187,6 +187,7 @@ async function main() {
   // Create unified command processor for timing engine
   // This processes a command, persists state, and broadcasts to all clients
   async function processCommandAndBroadcast(command: ConductorCommand): Promise<void> {
+    console.log('[Server] Processing command:', command);
     const state = getState();
     const events = processCommand(state, command);
     setState(state, events);

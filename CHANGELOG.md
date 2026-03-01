@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## 2026-02-28 — Beat-Synced Audition Cycling
+
+**Context:** Audiences previously heard only option A for a flat `auditionDurationMs` timer before voting opened. This adds beat-synced A/B alternation: each option plays for `beatsPerLoop` beats (32 = 8 bars), cycling `auditionsPerLayer` times per option (e.g., 2 → A-B-A-B = 4 total loops), then auto-advancing to voting.
+
+**New commands/events:**
+- `TOGGLE_AUDITION` — flips current option A↔B, increments `auditionLoopIndex`, emits `audition_stop` + `audition_start` AUDIO_CUE events
+- `AUDITION_OPTION_CHANGED` event — carries `option`, `loopIndex`, `totalLoops` for UI progress display
+
+**Modified files:**
+- `conductor/types.ts` — Added `beatsPerLoop` and `auditionsPerLayer` to `TimingConfig`; added `currentAuditionOption: 'A' | 'B' | null` and `auditionLoopIndex: number` to `AttemptState`; added `TOGGLE_AUDITION` to `ConductorCommand`; added `AUDITION_OPTION_CHANGED` to `ConductorEvent`; added `currentAuditionOption`, `auditionLoopIndex`, `auditionTotalLoops` to `AudienceAttemptView`
+- `conductor/conductor.ts` — `handleStartAudition` initializes `currentAuditionOption = 'A'` and emits `AUDITION_OPTION_CHANGED`; new `handleToggleAudition` flips option and emits stop/start cues; `handleOpenVoting` clears `currentAuditionOption`; `handleRerunVote` resets audition state and re-emits `AUDITION_OPTION_CHANGED`
+- `config/default-show.json` — Added `beatsPerLoop: 32` and `auditionsPerLayer: 2` to timing section
+- `server/timing.ts` — Replaced flat `auditionDurationMs` timer with `startAuditionTracking`: OSC mode counts beats (triggers TOGGLE_AUDITION every `beatsPerLoop` beats, OPEN_VOTING after `totalLoops`); fallback mode uses JS `setInterval` derived from `beatsPerLoop × (60000 / fallbackBpm)`; legacy path (beatsPerLoop = 0) preserves old flat timer; added `stopAuditionTracking()` to `stop()` lifecycle
+- `server/socket.ts` — Added `currentAuditionOption`, `auditionLoopIndex`, `auditionTotalLoops` to audience `filterStateForClient` current attempt object
+
+**Tests:** Added 11 conductor tests (TOGGLE_AUDITION behavior, error cases, RERUN_VOTE reset, OPEN_VOTING clearing option) and 7 timing tests (fallback interval cycling, OSC beat counting, phase-change cleanup for both modes). Fixed pre-existing version-check test to match intentionally-disabled guard. Updated test config literals with new required fields throughout.
+
+**Beat tracking detail:** Baseline is set on the first non-zero beat received (beat 0 is a no-op since 0 is the sentinel). With Ableton counting from beat 1, the first TOGGLE fires at beat 33 (1 + 32), subsequent at +32 each. Rotation tracking is unaffected (uses 0 as baseline directly).
+
+**Verification:** 216 tests passing across 9 suites (up from 198). `tsc --noEmit` clean.
+
+---
+
 ## 2026-02-28 — Phase 8: Cleanup & Polish (Migration Complete)
 
 **Context:** Final migration phase — remove all old code, verify everything works, update documentation for steady-state development.

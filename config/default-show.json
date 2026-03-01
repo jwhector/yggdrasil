@@ -197,6 +197,8 @@
   },
 
   "timing": {
+    "beatsPerLoop": 32,
+    "auditionsPerLayer": 2,
     "auditionDurationMs": 8000,
     "votingWindowMs": 10000,
     "resolveAnimationMs": 3000,

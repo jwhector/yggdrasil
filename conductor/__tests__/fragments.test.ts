@@ -48,6 +48,8 @@ function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     votes: [],
     status: 'completed',
     collapsedAtLayer: null,
+    currentAuditionOption: null,
+    auditionLoopIndex: 0,
   };
 }
 
@@ -80,6 +82,8 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     votes: [],
     status: 'collapsed',
     collapsedAtLayer: collapseAt,
+    currentAuditionOption: null,
+    auditionLoopIndex: 0,
   };
 }
 
@@ -163,6 +167,8 @@ describe('generateFragments', () => {
       votes: [],
       status: 'pending',
       collapsedAtLayer: null,
+      currentAuditionOption: null,
+      auditionLoopIndex: 0,
     };
     const configs = [makeAttemptConfig('avoidance', 1)];
     const fragments = generateFragments([pending], configs);

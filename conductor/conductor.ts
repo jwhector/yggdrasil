@@ -61,6 +61,8 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     votes: [],
     status: 'pending' as const,
     collapsedAtLayer: null,
+    currentAuditionOption: null,
+    auditionLoopIndex: 0,
   }));
 
   return {
@@ -103,6 +105,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Song-building
     case 'START_AUDITION':
       return handleStartAudition(state);
+    case 'TOGGLE_AUDITION':
+      return handleToggleAudition(state);
     case 'OPEN_VOTING':
       return handleOpenVoting(state);
     case 'CLOSE_VOTING':
@@ -337,6 +341,10 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
   }
 
   attempt.currentLayerPhase = 'auditioning';
+  attempt.currentAuditionOption = 'A';
+  attempt.auditionLoopIndex = 0;
+
+  const totalLoops = state.config.timing.auditionsPerLayer * 2;
 
   const events: ConductorEvent[] = [
     {
@@ -354,9 +362,69 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
         option: 'A',
       },
     },
+    {
+      type: 'AUDITION_OPTION_CHANGED',
+      attemptIndex: attempt.index,
+      layerIndex: attempt.currentLayerIndex,
+      option: 'A',
+      loopIndex: 0,
+      totalLoops,
+    },
   ];
 
   return events;
+}
+
+function handleToggleAudition(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_build') {
+    return [{ type: 'ERROR', message: 'Can only toggle audition during attempt_build' }];
+  }
+
+  const attempt = currentAttempt(state);
+  if (!attempt || attempt.status !== 'in_progress') {
+    return [{ type: 'ERROR', message: 'No active attempt' }];
+  }
+
+  if (attempt.currentLayerPhase !== 'auditioning') {
+    return [{ type: 'ERROR', message: `Cannot toggle audition from layer phase: ${attempt.currentLayerPhase}` }];
+  }
+
+  const oldOption = attempt.currentAuditionOption ?? 'A';
+  const newOption: 'A' | 'B' = oldOption === 'A' ? 'B' : 'A';
+  const newLoopIndex = attempt.auditionLoopIndex + 1;
+  const totalLoops = state.config.timing.auditionsPerLayer * 2;
+
+  attempt.currentAuditionOption = newOption;
+  attempt.auditionLoopIndex = newLoopIndex;
+
+  return [
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'audition_stop',
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+        option: oldOption,
+      },
+    },
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'audition_start',
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+        option: newOption,
+      },
+    },
+    {
+      type: 'AUDITION_OPTION_CHANGED',
+      attemptIndex: attempt.index,
+      layerIndex: attempt.currentLayerIndex,
+      option: newOption,
+      loopIndex: newLoopIndex,
+      totalLoops,
+    },
+  ];
 }
 
 function handleOpenVoting(state: ShowState): ConductorEvent[] {
@@ -374,6 +442,7 @@ function handleOpenVoting(state: ShowState): ConductorEvent[] {
   }
 
   attempt.currentLayerPhase = 'voting';
+  attempt.currentAuditionOption = null;
 
   return [
     {
@@ -381,6 +450,15 @@ function handleOpenVoting(state: ShowState): ConductorEvent[] {
       attemptIndex: attempt.index,
       layerIndex: attempt.currentLayerIndex,
       phase: 'voting',
+    },
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'audition_stop',
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+        option: attempt.currentAuditionOption,
+      },
     },
   ];
 }
@@ -471,8 +549,12 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
   // Clear votes for current layer
   attempt.votes = attempt.votes.filter(v => v.layerIndex !== attempt.currentLayerIndex);
 
-  // Reset to auditioning
+  // Reset to auditioning, restarting from option A
   attempt.currentLayerPhase = 'auditioning';
+  attempt.currentAuditionOption = 'A';
+  attempt.auditionLoopIndex = 0;
+
+  const totalLoops = state.config.timing.auditionsPerLayer * 2;
 
   return [
     {
@@ -489,6 +571,14 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
         layerIndex: attempt.currentLayerIndex,
         option: 'A',
       },
+    },
+    {
+      type: 'AUDITION_OPTION_CHANGED',
+      attemptIndex: attempt.index,
+      layerIndex: attempt.currentLayerIndex,
+      option: 'A',
+      loopIndex: 0,
+      totalLoops,
     },
   ];
 }
@@ -813,6 +903,8 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     votes: [],
     status: 'pending' as const,
     collapsedAtLayer: null,
+    currentAuditionOption: null,
+    auditionLoopIndex: 0,
   }));
 
   return [

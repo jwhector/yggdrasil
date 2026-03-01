@@ -153,6 +153,16 @@ export function createAudioRouter(
     routerState.collapseTimers.clear();
   }
 
+  function stopPlayback(): void {
+    oscBridge.send('/live/song/stop_playing');
+    routerState.transportStarted = false;
+  }
+
+  function startPlayback(): void {
+    oscBridge.send('/live/song/start_playing');
+    routerState.transportStarted = true;
+  }
+
   // --------------------------------------------------------------------------
   // AudioCue Handlers
   // --------------------------------------------------------------------------
@@ -171,8 +181,14 @@ export function createAudioRouter(
   }
 
   function handleAuditionStop(cue: Extract<AudioCue, { type: 'audition_stop' }>): void {
+    if (cue.option === null) {
+      console.log('Audition stop: cue.option is null, stopping playback');
+      stopPlayback();
+      return;
+    }
     const track = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.option, layout.maxLayersPerAttempt);
     muteTrack(track);
+    stopPlayback();
   }
 
   function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
@@ -294,17 +310,16 @@ export function createAudioRouter(
 
       if (event.type === 'SHOW_RESET') {
         muteAllTracks();
-        oscBridge.send('/live/song/stop_playing');
-        routerState.transportStarted = false;
+        stopPlayback();
         clearCollapseTimers();
       }
 
       if (event.type === 'PAUSED') {
-        oscBridge.send('/live/song/stop_playing');
+        stopPlayback();
       }
 
       if (event.type === 'RESUMED') {
-        oscBridge.send('/live/song/continue_playing');
+        startPlayback();
       }
     }
   }

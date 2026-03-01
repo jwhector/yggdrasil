@@ -631,6 +631,9 @@ export function filterStateForClient(
           currentLayerConfig,
           layerResults: attempt.layerResults,
           myVote,
+          currentAuditionOption: attempt.currentAuditionOption,
+          auditionLoopIndex: attempt.auditionLoopIndex,
+          auditionTotalLoops: state.config.timing.auditionsPerLayer * 2,
         } : null,
         myFinale,
         config: {

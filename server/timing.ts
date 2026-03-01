@@ -78,6 +78,16 @@ interface RotationTrackingState {
   rotationBeats: number;       // rotationBars * 4 (beats per rotation cycle)
 }
 
+/**
+ * Audition tracking state (for song-building A/B cycling)
+ */
+interface AuditionTrackingState {
+  lastToggleBeat: number;      // Beat number at last option toggle (0 = not yet set)
+  beatsPerLoop: number;        // From config
+  totalLoops: number;          // auditionsPerLayer * 2
+  currentLoopIndex: number;    // 0-based, increments on each toggle
+}
+
 const BEATS_PER_BAR = 4;
 
 // ============================================================================
@@ -108,6 +118,9 @@ export function createTimingEngine(
   let currentTimer: TimerState | null = null;
   let rotationState: RotationTrackingState | null = null;
   let fallbackRotationInterval: NodeJS.Timeout | null = null;
+  let auditionState: AuditionTrackingState | null = null;
+  let fallbackAuditionInterval: NodeJS.Timeout | null = null;
+  let fallbackAuditionLoopIndex = 0;
 
   // --------------------------------------------------------------------------
   // Timer Management
@@ -169,16 +182,76 @@ export function createTimingEngine(
   // --------------------------------------------------------------------------
 
   /**
-   * Handle layer entering 'auditioning' phase.
-   * Schedules auditionDurationMs timer → sends OPEN_VOTING.
+   * Start beat-synced audition tracking.
+   * OSC mode: counts beats from Ableton, toggles A/B every beatsPerLoop beats.
+   * Fallback mode: JS interval based on fallbackBpm.
+   * After all loops complete, sends OPEN_VOTING.
    */
-  function handleAuditioningPhase(state: ShowState): void {
-    const durationMs = state.config.timing.auditionDurationMs;
-    console.log(`[Timing] Auditioning: scheduling ${durationMs}ms timer → OPEN_VOTING`);
+  function startAuditionTracking(state: ShowState): void {
+    stopAuditionTracking();
 
-    scheduleTimer(durationMs, state.version, 'auditioning', () => {
-      sendCommand({ type: 'OPEN_VOTING' });
-    });
+    const { beatsPerLoop, auditionsPerLayer, auditionDurationMs } = state.config.timing;
+    const totalLoops = auditionsPerLayer * 2;
+
+    if (beatsPerLoop > 0 && engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
+      // OSC mode: track beats; first beat sets the baseline in handleBeatEvent
+      auditionState = {
+        lastToggleBeat: 0,
+        beatsPerLoop,
+        totalLoops,
+        currentLoopIndex: 0,
+      };
+      console.log(`[Timing] Audition tracking started (OSC, ${beatsPerLoop} beats/loop × ${totalLoops} loops)`);
+    } else if (beatsPerLoop > 0) {
+      // Fallback: derive interval from BPM
+      const msPerBeat = 60000 / engineConfig.fallbackBpm;
+      const intervalMs = beatsPerLoop * msPerBeat;
+      fallbackAuditionLoopIndex = 0;
+
+      fallbackAuditionInterval = setInterval(() => {
+        if (!running) return;
+        const currentState = getState();
+        const attempt = currentState.attempts[currentState.currentAttemptIndex];
+        if (!attempt || attempt.currentLayerPhase !== 'auditioning') {
+          stopAuditionTracking();
+          return;
+        }
+
+        fallbackAuditionLoopIndex++;
+
+        if (fallbackAuditionLoopIndex >= totalLoops) {
+          stopAuditionTracking();
+          sendCommand({ type: 'OPEN_VOTING' });
+        } else {
+          sendCommand({ type: 'TOGGLE_AUDITION' });
+        }
+      }, intervalMs);
+
+      console.log(`[Timing] Audition tracking started (fallback, ${intervalMs.toFixed(0)}ms/loop × ${totalLoops} loops)`);
+    } else {
+      // Legacy: flat timer using auditionDurationMs
+      console.log(`[Timing] Auditioning: scheduling ${auditionDurationMs}ms timer → OPEN_VOTING (legacy)`);
+      scheduleTimer(auditionDurationMs, state.version, 'auditioning', () => {
+        sendCommand({ type: 'OPEN_VOTING' });
+      });
+    }
+  }
+
+  /**
+   * Stop audition tracking (both OSC and fallback modes).
+   */
+  function stopAuditionTracking(): void {
+    const state = getState();
+    const attempt = state.attempts[state.currentAttemptIndex];
+    if (attempt?.currentAuditionOption) {
+      attempt.currentAuditionOption = null;
+    }
+    auditionState = null;
+    if (fallbackAuditionInterval) {
+      clearInterval(fallbackAuditionInterval);
+      fallbackAuditionInterval = null;
+    }
+    fallbackAuditionLoopIndex = 0;
   }
 
   /**
@@ -247,12 +320,44 @@ export function createTimingEngine(
   }
 
   /**
-   * Handle beat event from AbletonOSC for rotation timing.
+   * Handle beat event from AbletonOSC.
+   * Drives both audition A/B cycling and finale rotation.
    */
   function handleBeatEvent(beatNumber: number): void {
-    if (!running || !rotationState) return;
+    if (!running) return;
 
     const state = getState();
+
+    // --- Audition beat tracking ---
+    if (auditionState && state.phase === 'attempt_build') {
+      const attempt = state.attempts[state.currentAttemptIndex];
+      if (attempt?.currentLayerPhase === 'auditioning') {
+        // Initialize baseline on first beat received
+        if (auditionState.lastToggleBeat === 0) {
+          auditionState.lastToggleBeat = beatNumber;
+        }
+
+        const beatsSinceToggle = beatNumber - auditionState.lastToggleBeat;
+
+        // if (beatsSinceToggle >= auditionState.beatsPerLoop) {
+        if (beatNumber % auditionState.beatsPerLoop === 0 && beatNumber > 0) {
+          auditionState.lastToggleBeat = beatNumber;
+          auditionState.currentLoopIndex++;
+
+          if (auditionState.currentLoopIndex >= auditionState.totalLoops) {
+            stopAuditionTracking();
+            sendCommand({ type: 'OPEN_VOTING' });
+          } else {
+            sendCommand({ type: 'TOGGLE_AUDITION' });
+          }
+        }
+        // Audition tracking handled — do not fall through to rotation
+        return;
+      }
+    }
+
+    // --- Rotation beat tracking ---
+    if (!rotationState) return;
     if (state.phase !== 'finale_rotating') return;
     if (!state.finaleState?.rotationActive) return;
 
@@ -311,18 +416,18 @@ export function createTimingEngine(
 
       switch (layerPhaseEvent.phase) {
         case 'auditioning':
-          handleAuditioningPhase(state);
+          startAuditionTracking(state);
           break;
         case 'voting':
+          stopAuditionTracking();
           handleVotingPhase(state);
           break;
         case 'locked_in':
-          // No auto-advance — controller decides when to start next audition
+          stopAuditionTracking();
           console.log('[Timing] Layer locked in — waiting for manual advance');
           break;
         case 'collapsed':
-          // Conductor handles state transition synchronously
-          // Audio router handles collapse effect timing
+          stopAuditionTracking();
           console.log('[Timing] Attempt collapsed — no timer needed');
           break;
         default:
@@ -408,6 +513,7 @@ export function createTimingEngine(
     running = false;
     cancelCurrentTimer();
     stopRotationTracking();
+    stopAuditionTracking();
 
     // Unsubscribe from beat events
     if (engineConfig.oscBridge) {

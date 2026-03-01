@@ -116,6 +116,8 @@ export interface AttemptState {
   votes: LayerVote[];                   // All votes for this attempt
   status: 'pending' | 'in_progress' | 'completed' | 'collapsed';
   collapsedAtLayer: number | null;
+  currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing (null when not auditioning)
+  auditionLoopIndex: number;                  // 0-based count of loops completed so far
 }
 
 /** Static configuration for a single attempt. */
@@ -313,12 +315,13 @@ export interface FinaleConfig {
 }
 
 export interface TimingConfig {
-  auditionDurationMs: number;           // Per-option audition preview
+  beatsPerLoop: number;                 // Beats per audition loop (32 = 8 bars); used with OSC beat sync
+  auditionsPerLayer: number;            // Times each option is heard (2 = A-B-A-B); total loops = auditionsPerLayer * 2
+  auditionDurationMs: number;           // Fallback: used when beatsPerLoop is 0 or OSC unavailable
   votingWindowMs: number;               // How long voting stays open
   resolveAnimationMs: number;           // Result display duration
   collapseAnimationMs: number;          // Collapse gesture duration before auto-advance
   autoAdvanceToStoryMs: number;         // Delay after collapse before transitioning
-  // TODO: See DECISIONS.md O4 — audition cadence details TBD
 }
 
 // ============================================================================
@@ -327,7 +330,7 @@ export interface TimingConfig {
 
 export type AudioCue =
   | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' }
-  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null }
   | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'slot_activate'; slotIndex: number; fragment: Fragment }
@@ -349,6 +352,7 @@ export type ConductorCommand =
 
   // Song-building
   | { type: 'START_AUDITION' }
+  | { type: 'TOGGLE_AUDITION' }
   | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
@@ -407,6 +411,7 @@ export type ConductorEvent =
 
   // Song-building
   | { type: 'LAYER_PHASE_CHANGED'; attemptIndex: number; layerIndex: number; phase: LayerPhase }
+  | { type: 'AUDITION_OPTION_CHANGED'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; loopIndex: number; totalLoops: number }
   | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
@@ -466,6 +471,9 @@ export interface AudienceAttemptView {
   currentLayerConfig: LayerConfig | null;
   layerResults: LayerResult[];
   myVote: 'A' | 'B' | null;
+  currentAuditionOption: 'A' | 'B' | null;
+  auditionLoopIndex: number;
+  auditionTotalLoops: number;
 }
 
 /**
