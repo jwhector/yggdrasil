@@ -31,8 +31,16 @@
         {
           "index": 2,
           "type": "color",
-          "optionA": { "trackIndex": 4, "clipIndex": 0 },
-          "optionB": { "trackIndex": 5, "clipIndex": 0 },
+          "optionA": {
+            "trackIndex": 4,
+            "effectIndices": [0, 1],
+            "label": "Warm (reverb + chorus)"
+          },
+          "optionB": {
+            "trackIndex": 4,
+            "effectIndices": [2],
+            "label": "Sharp (delay)"
+          },
           "labelA": "Warm",
           "labelB": "Sharp",
           "doubtThreshold": 0.65

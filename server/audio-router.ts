@@ -27,6 +27,7 @@ import type {
   ShowState,
   ConductorEvent,
   AudioCue,
+  AudioReference,
 } from '../conductor/types';
 
 // ============================================================================
@@ -146,6 +147,22 @@ export function createAudioRouter(
     routerState.activatedSlotTracks.clear();
   }
 
+  function enableEffects(audioRef: AudioReference): void {
+    if (audioRef.effectIndices) {
+      for (const deviceIndex of audioRef.effectIndices) {
+        oscBridge.send('/live/device/set/parameter/value', audioRef.trackIndex, deviceIndex, 0, 1);
+      }
+    }
+  }
+
+  function disableEffects(audioRef: AudioReference): void {
+    if (audioRef.effectIndices) {
+      for (const deviceIndex of audioRef.effectIndices) {
+        oscBridge.send('/live/device/set/parameter/value', audioRef.trackIndex, deviceIndex, 0, 0);
+      }
+    }
+  }
+
   function clearCollapseTimers(): void {
     for (const timer of routerState.collapseTimers.values()) {
       clearTimeout(timer);
@@ -158,11 +175,6 @@ export function createAudioRouter(
     routerState.transportStarted = false;
   }
 
-  function startPlayback(): void {
-    oscBridge.send('/live/song/start_playing');
-    routerState.transportStarted = true;
-  }
-
   // --------------------------------------------------------------------------
   // AudioCue Handlers
   // --------------------------------------------------------------------------
@@ -170,34 +182,43 @@ export function createAudioRouter(
   function handleAuditionStart(cue: Extract<AudioCue, { type: 'audition_start' }>): void {
     ensureTransportStarted();
 
-    // Mute the other option for the same layer (in case it was previously unmuted)
-    const otherOption: 'A' | 'B' = cue.option === 'A' ? 'B' : 'A';
-    const otherTrack = computeTrackIndex(cue.attemptIndex, cue.layerIndex, otherOption, layout.maxLayersPerAttempt);
-    muteTrack(otherTrack);
+    const { audioRef, otherAudioRef } = cue;
 
-    // Unmute this option
-    const track = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.option, layout.maxLayersPerAttempt);
-    unmuteTrack(track);
+    // Disable the other option's effects first
+    disableEffects(otherAudioRef);
+
+    // When both options share the same track (effect-only swap), skip track mute/unmute entirely
+    // to avoid a brief audio glitch from muting then immediately unmuting the same track.
+    const sameTrack = otherAudioRef.trackIndex === audioRef.trackIndex;
+    if (!sameTrack) {
+      muteTrack(otherAudioRef.trackIndex);
+    }
+    
+    unmuteTrack(audioRef.trackIndex);
+    // Enable this option's effects
+    enableEffects(audioRef);
   }
 
   function handleAuditionStop(cue: Extract<AudioCue, { type: 'audition_stop' }>): void {
-    if (cue.option === null) {
-      console.log('Audition stop: cue.option is null, stopping playback');
+    if (!cue.audioRef) {
       stopPlayback();
       return;
     }
-    const track = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.option, layout.maxLayersPerAttempt);
-    muteTrack(track);
+    disableEffects(cue.audioRef);
+    muteTrack(cue.audioRef.trackIndex);
     stopPlayback();
   }
 
   function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
-    const winnerTrack = computeTrackIndex(cue.attemptIndex, cue.layerIndex, cue.winner, layout.maxLayersPerAttempt);
-    const loser: 'A' | 'B' = cue.winner === 'A' ? 'B' : 'A';
-    const loserTrack = computeTrackIndex(cue.attemptIndex, cue.layerIndex, loser, layout.maxLayersPerAttempt);
+    const { winnerAudioRef, loserAudioRef } = cue;
 
-    unmuteTrack(winnerTrack);
-    muteTrack(loserTrack);
+    unmuteTrack(winnerAudioRef.trackIndex);
+    enableEffects(winnerAudioRef);
+
+    disableEffects(loserAudioRef);
+    if (loserAudioRef.trackIndex !== winnerAudioRef.trackIndex) {
+      muteTrack(loserAudioRef.trackIndex);
+    }
   }
 
   function handleCollapseGesture(
@@ -319,7 +340,8 @@ export function createAudioRouter(
       }
 
       if (event.type === 'RESUMED') {
-        startPlayback();
+        oscBridge.send('/live/song/continue_playing');
+        routerState.transportStarted = true;
       }
     }
   }

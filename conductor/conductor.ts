@@ -29,6 +29,7 @@ import type {
   SeatId,
   User,
   TrianglePosition,
+  AudioReference,
 } from './types';
 import { calculateConsensus, resolveVote } from './consensus';
 import {
@@ -360,6 +361,8 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: 'A',
+        audioRef: getLayerAudioRef(attempt, 'A'),
+        otherAudioRef: getLayerAudioRef(attempt, 'B'),
       },
     },
     {
@@ -405,6 +408,7 @@ function handleToggleAudition(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: oldOption,
+        audioRef: getLayerAudioRef(attempt, oldOption),
       },
     },
     {
@@ -414,6 +418,8 @@ function handleToggleAudition(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: newOption,
+        audioRef: getLayerAudioRef(attempt, newOption),
+        otherAudioRef: getLayerAudioRef(attempt, oldOption),
       },
     },
     {
@@ -457,7 +463,7 @@ function handleOpenVoting(state: ShowState): ConductorEvent[] {
         type: 'audition_stop',
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
-        option: attempt.currentAuditionOption,
+        option: null,
       },
     },
   ];
@@ -570,6 +576,8 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: 'A',
+        audioRef: getLayerAudioRef(attempt, 'A'),
+        otherAudioRef: getLayerAudioRef(attempt, 'B'),
       },
     },
     {
@@ -721,6 +729,9 @@ function lockInLayer(
     winner,
   });
 
+  const loser: 'A' | 'B' = winner === 'A' ? 'B' : 'A';
+  const winnerAudioRef = winner === 'A' ? layerConfig?.optionA : layerConfig?.optionB;
+  const loserAudioRef = loser === 'A' ? layerConfig?.optionA : layerConfig?.optionB;
   events.push({
     type: 'AUDIO_CUE',
     cue: {
@@ -728,6 +739,8 @@ function lockInLayer(
       attemptIndex: attempt.index,
       layerIndex,
       winner,
+      winnerAudioRef: winnerAudioRef ?? { trackIndex: 0 },
+      loserAudioRef: loserAudioRef ?? { trackIndex: 0 },
     },
   });
 
@@ -1161,4 +1174,10 @@ function handleToggleTriangle(state: ShowState, active: boolean): ConductorEvent
 /** Get the current attempt, or null if none. */
 function currentAttempt(state: ShowState): AttemptState | null {
   return state.attempts[state.currentAttemptIndex] ?? null;
+}
+
+/** Get the AudioReference for the given option on the current layer. */
+function getLayerAudioRef(attempt: AttemptState, option: 'A' | 'B'): AudioReference {
+  const layerConfig = attempt.layerPlan[attempt.currentLayerIndex];
+  return option === 'A' ? layerConfig.optionA : layerConfig.optionB;
 }

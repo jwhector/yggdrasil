@@ -57,3 +57,5 @@ pnpm-lock.yaml
 # State exports (manual backups from controller)
 state-exports/
 *.state.json
+
+.next/

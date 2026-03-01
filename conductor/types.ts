@@ -184,6 +184,7 @@ export interface FragmentSelection {
 export interface AudioReference {
   trackIndex: number;                   // Computed from track layout formula
   clipSlot?: number;
+  effectIndices?: number[];             // Device indices to enable/disable for this option (additive with track mute/unmute)
   label?: string;                       // Human-readable reference
 }
 
@@ -329,9 +330,9 @@ export interface TimingConfig {
 // ============================================================================
 
 export type AudioCue =
-  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' }
-  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null }
-  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
+  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; audioRef: AudioReference; otherAudioRef: AudioReference }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
+  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'slot_activate'; slotIndex: number; fragment: Fragment }
   | { type: 'slot_deactivate'; slotIndex: number }

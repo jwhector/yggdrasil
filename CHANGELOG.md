@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2026-02-28 — AudioReference Effects Support + AudioCue Simplification
+
+**Context:** Some song-building options are implemented as Ableton device effects (e.g., reverb/delay on a shared foundation track) rather than mute/unmute of a dedicated track. The previous system always computed track indices via formula in the audio router and had no way to express effect-based options. This change adds `effectIndices` to `AudioReference` and embeds resolved audio references directly in `AudioCue` events, so the audio router no longer needs to compute track indices at runtime.
+
+**Changes:**
+- `AudioReference` gains optional `effectIndices: number[]` — device indices to enable/disable for this option (additive with track mute/unmute)
+- `AudioCue` variants `audition_start`, `audition_stop`, and `lock_in` now carry resolved `AudioReference` objects (`audioRef`/`otherAudioRef` or `winnerAudioRef`/`loserAudioRef`)
+- `conductor/conductor.ts` — helper `getLayerAudioRef()` added; all song-building AUDIO_CUE emissions populate the new fields from `LayerConfig`
+- `server/audio-router.ts` — `handleAuditionStart`, `handleAuditionStop`, `handleLockIn` rewritten to read `audioRef` directly from cue; added `enableEffects`/`disableEffects` helpers; shared-track optimization skips track mute/unmute when both options reference the same `trackIndex`; fixed `RESUMED` to send `continue_playing` (resume from position) instead of `start_playing` (restart from beginning)
+- `config/default-show.json` — no changes needed (`effectIndices` is optional; existing track-only configs work unchanged)
+
+**Implications:** All `audition_start`/`audition_stop`/`lock_in` AudioCue objects now require `AudioReference` fields. Tests and any external callers that manually construct these cues must be updated. `computeTrackIndex` remains exported as a utility but is no longer called in the audio router's runtime path.
+
+**Modified files:** `conductor/types.ts`, `conductor/conductor.ts`, `server/audio-router.ts`, `server/__tests__/audio-router.test.ts`, `ARCHITECTURE.md`
+
+---
+
 ## 2026-02-28 — Beat-Synced Audition Cycling
 
 **Context:** Audiences previously heard only option A for a flat `auditionDurationMs` timer before voting opened. This adds beat-synced A/B alternation: each option plays for `beatsPerLoop` beats (32 = 8 bars), cycling `auditionsPerLayer` times per option (e.g., 2 → A-B-A-B = 4 total loops), then auto-advancing to voting.

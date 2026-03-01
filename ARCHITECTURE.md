@@ -515,6 +515,8 @@ When a user's queued fragment enters an active slot:
 - Example: Attempt 1, Layer 0, Option A = `1 * 14 + 0 * 2 + 0 = track 14`
 - Example: Attempt 2, Layer 3, Option A = `2 * 14 + 3 * 2 + 0 = track 34`
 
+**Effect-based options:** Some options control Ableton devices (effects) rather than (or in addition to) a dedicated track. An `AudioReference` with `effectIndices` enables/disables those device indices on `trackIndex` instead of (or alongside) track muting. Both options can share the same `trackIndex` when the distinction between A and B is purely which effects are active on that track.
+
 **Finale fragment tracks** are a **subset** of the song-building tracks. When a fragment is activated in a finale slot, it references the same Ableton track/clip that was used during song-building.
 
 **Collapse gesture**: A master return track with specific effects (distortion, filter sweep, reverb tail) that are enabled briefly during collapse. All song-building tracks route through this return.
@@ -553,7 +555,7 @@ Uses the **AbletonOSC** plugin (by ideoforms). All addresses follow the `/live/*
 | `/live/clip/fire` | `trackIndex`, `clipIndex` | Fire clip (always slot 0) |
 | `/live/clip/stop` | `trackIndex`, `clipIndex` | Stop clip |
 | `/live/track/set/mute` | `trackIndex`, `mute` | Mute (1) / unmute (0) track |
-| `/live/device/set/parameter/value` | `trackIndex`, `deviceIndex`, `paramIndex`, `value` | Set device parameter (stewardship control) |
+| `/live/device/set/parameter/value` | `trackIndex`, `deviceIndex`, `paramIndex`, `value` | Set device parameter — used for stewardship control AND effect enable/disable (paramIndex 0 = Device On, value 0/1) |
 | `/live/return/set/mute` | `returnIndex`, `mute` | Mute/unmute return track (collapse gesture) |
 
 **AbletonOSC → Server (Port 11001)**
