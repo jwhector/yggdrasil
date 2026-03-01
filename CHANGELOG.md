@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## 2026-02-28 — Phase 8: Cleanup & Polish (Migration Complete)
+
+**Context:** Final migration phase — remove all old code, verify everything works, update documentation for steady-state development.
+
+**Deleted old component files (no new equivalent):**
+- `components/SongTree.tsx`, `components/AuditionVoteInterface.tsx`, `components/VoteInterface.tsx`
+- `components/CoupMeter.tsx`, `components/FactionReveal.tsx`, `components/PhaseIndicator.tsx`
+- `components/SeatMap.tsx`, `components/AuditionDisplay.tsx`, `components/FigTreeInput.tsx`
+- `components/WaitingState.tsx`
+
+**Deleted old documentation:**
+- `ARCHITECTURE_OLD.md`, `CHANGELOG_OLD.md`, `DECISIONS_OLD.md`, `CLAUDE_OLD.md`, `AI_CONTEXT_OLD.md`
+- `NEW_SHOW.md`, `ROADMAP.md`, `ROADMAP_OLD.md`, `TESTING.md`, `SongTreePrototype.jsx`
+- `new-show-migration/` directory (analysis.md, prompts.md)
+
+**Updated:**
+- `README.md` — Updated description (removed faction reference), removed TESTING.md link
+- `CLAUDE.md` — Complete rewrite for steady-state development. Removed migration-in-progress section, old/new keyword guides, and MIGRATION.md references. Now describes the system as-is: architecture overview, project structure, commands, common patterns, state filtering, audio/OSC layout.
+
+**Verification:**
+- Zero references to old keywords (faction, coherence, coup, figTree, songTree, etc.) in any source files
+- 198 tests passing across 9 suites
+- `tsc --noEmit` clean
+- Old conductor files (coherence.ts, coup.ts, ties.ts, assignment.ts) already deleted in Phase 1
+
+**Migration summary (Phases 0-8):**
+The codebase has been fully migrated from the old show design (factions, coherence scoring, coups, 4-option voting, song tree, dual paths) to the new design (binary A/B voting, consensus/doubt thresholds, 3-attempt structure with collapse, collaborative finale with fragment selection, 7-slot rotation, triangle steering, and stewardship). All infrastructure was preserved (Next.js + custom server, Socket.IO, SQLite persistence, OSC/Ableton bridge, client reconnection/recovery). The migration produced 198 tests across 9 suites covering conductor logic, persistence, backup, audio routing, OSC, and timing.
+
+---
+
 ## 2026-02-27 — Phase 7: Controller UI
 
 **Context:** Migration Phase 7 — build the operator console at `/controller`. All conductor commands and server socket infrastructure were already in place. This phase adds a full performer-facing control surface: phase management, live vote metrics, doubt threshold adjustment, finale management, audio controls, and emergency recovery tools.

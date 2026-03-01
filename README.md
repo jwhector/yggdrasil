@@ -1,6 +1,6 @@
 # Yggdrasil
 
-An interactive live performance system where an audience collectively builds a song in real time, embodying factions of the performer's subconscious.
+An interactive live performance system where an audience collectively builds a song in real time through binary voting, consensus thresholds, and a collaborative finale.
 
 ## Quick Start
 
@@ -47,8 +47,6 @@ Then on your phone (same Wi-Fi network):
 ```
 http://YOUR_IP:3000/audience?seat=A1
 ```
-
-**📱 Full testing guide:** See [TESTING.md](TESTING.md) for comprehensive testing instructions, troubleshooting, and pre-performance checklists.
 
 ## Architecture
 

@@ -1,61 +1,49 @@
 # CLAUDE.md — Claude Code Agent Context
 
-## ⚠️ MIGRATION IN PROGRESS
-This codebase is being migrated from an old show design to a new one. **The old code still exists in many files.** Do not assume existing code is correct or current — always check against ARCHITECTURE.md before preserving, extending, or imitating existing patterns.
-
-### What changed (high level)
-- **REMOVED:** Factions, coherence scoring, coups, 4-option voting, song tree, dual paths, personal trees, fig tree prompt, seat topology algorithms
-- **KEPT:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy
-- **NEW:** Binary A/B voting, doubt/consensus threshold, attempt collapse, 3-attempt structure, finale with triangle steering + slot rotation + stewardship + fragment selection, audio metering
-
-### How to tell old from new
-- **Old code references these → DELETE or REPLACE:** `faction`, `FactionId`, `coherence`, `coup`, `coupMeter`, `coupMultiplier`, `coupThreshold`, `personalVote`, `factionVote`, `personalTree`, `figTree`, `songTree`, `dualPath`, `popularPath`, `factionPath`, `SeatTopologyProvider`, `AdjacencyGraph`, `FactionAssigner`, `RevealPayload`, `COUP_TRIGGERED`, `COUP_METER_UPDATE`, `FactionReveal`, `TiebreakerAnimation`
-- **Old code references these → KEEP and ADAPT:** `Conductor`, `ConductorCommand`, `ConductorEvent`, `ShowState`, `ShowPhase`, `ShowConfig`, `Socket.IO`, `state_sync`, `persistence`, `recovery`, `osc`, `timing`, `AudioAdapter`, `NullAdapter`, `heartbeat`, `version` (state versioning), `ADVANCE_PHASE`, `PAUSE`, `RESUME`, `USER_CONNECT`, `USER_DISCONNECT`
-- **New concepts to BUILD:** `LayerVote`, `LayerPhase`, `consensus`, `doubtThreshold`, `collapse`, `AttemptState`, `AttemptResult`, `Fragment`, `FinaleState`, `ActiveSlot`, `QueueEntry`, `TrianglePosition`, `centroid`, `Stewardship`, `SafeParameter`, `Chapter`, `LayerType`, `metering`
+## Read Order
+1. **This file** (you're here — read fully before doing anything)
+2. **ARCHITECTURE.md** — The authoritative spec. If code contradicts this, the code is wrong.
+3. **DECISIONS.md** — Resolved design decisions (with rationale) and open questions (do NOT invent answers)
+4. **conductor/types.ts** — Shared type definitions
+5. **CHANGELOG.md** — Recent changes with context
 
 ---
 
-## Read Order
-1. **This file** (you're here — read fully before doing anything)
-2. **ARCHITECTURE.md** — The authoritative spec for the NEW system. If code contradicts this, the code is wrong.
-3. **DECISIONS.md** — Resolved design decisions (with rationale) and open questions (do NOT invent answers)
-4. **MIGRATION.md** — Step-by-step migration plan with phases. Check which phase is current before working.
-5. **conductor/types.ts** — Shared type definitions (update this when it exists for the new system)
-6. **CHANGELOG.md** — Recent changes with context
+## What This System Is
+
+Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting with consensus thresholds, across 3 song attempts that can collapse if doubt rises too high. The finale features fragment selection, a 7-slot rotation queue, triangle steering (audience → centroid), and stewardship (one person per slot controls a safe parameter in real time).
+
+**Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
 
 ---
 
 ## Critical Rules
 
 ### 1. ARCHITECTURE.md is the source of truth
-If you're unsure whether existing code is old or new, check ARCHITECTURE.md. If a concept isn't in ARCHITECTURE.md, it's old and should be removed or replaced.
+If code contradicts ARCHITECTURE.md, the code is wrong.
 
-### 2. Don't preserve old game logic
-When you encounter faction/coherence/coup logic in the Conductor, do NOT try to adapt it. The new game logic (binary voting, consensus, doubt thresholds, collapse) is fundamentally different. Write it fresh using the spec in ARCHITECTURE.md.
-
-### 3. DO preserve infrastructure
-The server scaffolding, Socket.IO setup, SQLite persistence pattern, OSC bridge, recovery protocol, heartbeat, state versioning, client reconnection, and full-state-sync strategy are all good. Adapt them to the new data shapes, but keep the patterns.
-
-### 4. Types first
+### 2. Types first
 When building new features, define the types in `conductor/types.ts` FIRST. Then implement logic. Then wire up server/client. This prevents drift.
 
-### 5. Don't invent answers to open questions
+### 3. Don't invent answers to open questions
 DECISIONS.md has an "Open Decisions" section. If your current task touches one of these (e.g., exact layer count, threshold schedule, color assignments), implement a configurable placeholder and add a `// TODO: See DECISIONS.md O[N]` comment. Do not hardcode a guess.
 
-### 6. Track your work in MIGRATION.md
-After completing a migration phase, update MIGRATION.md to mark it done and note anything surprising or incomplete.
+### 4. Conductor is pure
+The `conductor/` directory contains pure game logic — no I/O, no Socket.IO, no database calls. All side effects live in `server/`. The conductor receives commands and returns events.
+
+### 5. High-frequency data bypasses state_sync
+Triangle positions and audio metering use dedicated socket events at high frequency (4–30 Hz). They do NOT go through `state_sync` or persistence.
 
 ---
 
-## Project Structure (target — may not match current state during migration)
+## Project Structure
 
 ```
-solo-show/
-├── ARCHITECTURE.md              # Source of truth (NEW)
+yggdrasil/
+├── ARCHITECTURE.md              # Source of truth
 ├── CHANGELOG.md                 # Change history with intent
 ├── CLAUDE.md                    # This file
 ├── DECISIONS.md                 # Design decisions log
-├── MIGRATION.md                 # Migration checklist (DELETE when done)
 │
 ├── conductor/                   # Pure game logic (no I/O)
 │   ├── index.ts
@@ -70,7 +58,7 @@ solo-show/
 │   ├── index.ts                 # Entry point
 │   ├── socket.ts                # Socket.IO handlers
 │   ├── persistence.ts           # SQLite
-│   ├── recovery.ts              # Backup + restore
+│   ├── backup.ts                # Backup + restore
 │   ├── timing.ts                # Quantized timing
 │   ├── osc.ts                   # OSC bridge
 │   ├── audio-router.ts          # AUDIO_CUE → OSC mapping
@@ -83,9 +71,9 @@ solo-show/
 │   └── controller/page.tsx
 │
 ├── components/
+│   ├── LobbyDisplay.tsx         # Projector lobby screen
 │   ├── song-building/           # Layer grid, option cards, meters
 │   ├── finale/                  # Fragment selector, triangle, steward slider, slots
-│   ├── shared/                  # Chapter badge, layer icon, phase indicator
 │   └── controller/              # Operator controls
 │
 ├── hooks/
@@ -96,7 +84,7 @@ solo-show/
 ├── lib/
 │   ├── socket-client.ts
 │   ├── storage.ts
-│   ├── serialization.ts
+│   ├── serialization.ts         # Maps → arrays for JSON transport
 │   └── identity.ts              # Chapter/layer color+symbol mappings
 │
 ├── config/
@@ -117,11 +105,17 @@ npm run dev
 # Run conductor tests (most important — pure logic, no mocks)
 npm test -- conductor/
 
-# Run all tests
+# Run all tests (198 tests across 9 suites)
 npm test
+
+# Type check
+npx tsc --noEmit
 
 # Run without Ableton (testing mode)
 OSC_ENABLED=false npm run dev
+
+# Network access (for testing on phones)
+npm run dev:network
 ```
 
 ---
@@ -148,3 +142,15 @@ These do NOT go through state_sync (too slow/heavy):
 - **Triangle positions**: Client throttles to ~250ms, server computes centroid, broadcasts to projector at ~3-4 Hz
 - **Audio metering**: M4L sends at ~15-30 Hz per slot, server aggregates, broadcasts to projector at ~10 Hz
 - Both use dedicated socket events, not state mutations
+
+### State filtering by client mode
+- **Controller**: full serialized state (Maps converted to arrays)
+- **Projector**: public state (no per-user data)
+- **Audience**: personalized (user's chapter, vote, stewardship status, available fragments)
+
+### Audio/OSC track layout
+- Track index: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`
+- 42 total tracks (3 attempts × 7 layers × 2 options)
+- Arrangement mode only (mute/unmute, no clip firing)
+- Collapse gesture: return track effects enabled, delayed mute after animation
+- Config: `config/ableton-layout.json`
