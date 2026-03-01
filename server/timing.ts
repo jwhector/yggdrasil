@@ -140,12 +140,13 @@ export function createTimingEngine(
     const timer = setTimeout(() => {
       const state = getState();
 
+      // Version check disabled - votes update state
       // Verify state hasn't changed (version check)
-      if (state.version !== scheduledVersion) {
-        console.log(`[Timing] Timer fired but state version changed (scheduled: ${scheduledVersion}, current: ${state.version}). Skipping.`);
-        currentTimer = null;
-        return;
-      }
+      // if (state.version !== scheduledVersion) {
+      //   console.log(`[Timing] Timer fired but state version changed (scheduled: ${scheduledVersion}, current: ${state.version}). Skipping.`);
+      //   currentTimer = null;
+      //   return;
+      // }
 
       console.log(`[Timing] Timer fired for ${phase}`);
       callback();

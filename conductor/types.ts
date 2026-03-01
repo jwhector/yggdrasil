@@ -392,7 +392,8 @@ export type ConductorCommand =
   | { type: 'EXPORT_STATE' }
   | { type: 'IMPORT_STATE'; state: ShowState }
   | { type: 'FORCE_RECONNECT_ALL' }
-  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean };
+  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean }
+  | { type: 'NEW_SHOW' };
 
 // ============================================================================
 // Conductor Events (Output)

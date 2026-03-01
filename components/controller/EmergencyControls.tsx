@@ -28,7 +28,7 @@ interface EmergencyControlsProps {
   sendCommand: (cmd: ConductorCommand) => void;
 }
 
-type ConfirmAction = 'reset' | 'reconnect' | null;
+type ConfirmAction = 'reset' | 'reconnect' | 'newshow' | null;
 
 export function EmergencyControls({ fullState, rawState, sendCommand }: EmergencyControlsProps) {
   const [confirm, setConfirm] = useState<ConfirmAction>(null);
@@ -145,6 +145,12 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                 >
                   Reset to Lobby
                 </button>
+                <button
+                  onClick={() => setConfirm('newshow')}
+                  style={{ ...btn, ...btnDanger }}
+                >
+                  New Show
+                </button>
               </div>
             ) : confirm === 'reconnect' ? (
               <div style={styles.confirmBox}>
@@ -161,7 +167,7 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : confirm === 'reset' ? (
               <div style={styles.confirmBox}>
                 <p style={styles.confirmText}>Reset show to lobby?</p>
                 <div style={styles.buttonRow}>
@@ -176,6 +182,21 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                     style={{ ...btn, ...btnDanger }}
                   >
                     Reset (Clear All)
+                  </button>
+                  <button onClick={() => setConfirm(null)} style={{ ...btn, ...btnSecondary }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={styles.confirmBox}>
+                <p style={styles.confirmText}>Start a completely new show? This generates a new show ID, reloads config from disk, and clears all users.</p>
+                <div style={styles.buttonRow}>
+                  <button
+                    onClick={() => { send({ type: 'NEW_SHOW' }); setConfirm(null); }}
+                    style={{ ...btn, ...btnDanger }}
+                  >
+                    Confirm New Show
                   </button>
                   <button onClick={() => setConfirm(null)} style={{ ...btn, ...btnSecondary }}>
                     Cancel

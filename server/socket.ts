@@ -395,7 +395,7 @@ export function setupSocketHandlers(
       console.log(`[Socket] Command: ${command.type}`);
 
       // NEW_SHOW is handled at server level (needs I/O to read config)
-      if ((command as any).type === 'NEW_SHOW') {
+      if (command.type === 'NEW_SHOW') {
         if (!createNewShow) {
           console.error('[Socket] NEW_SHOW rejected: no createNewShow callback');
           return;
