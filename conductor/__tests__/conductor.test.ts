@@ -623,6 +623,93 @@ describe('Force Commands', () => {
     expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
   });
 
+  test('RESET_LAYER from auditioning resets to locked and clears audition state', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    expect(state.attempts[0].currentLayerPhase).toBe('auditioning');
+
+    const events = processCommand(state, { type: 'RESET_LAYER' });
+
+    expect(state.attempts[0].currentLayerPhase).toBe('locked');
+    expect(state.attempts[0].currentAuditionOption).toBeNull();
+    expect(state.attempts[0].auditionLoopIndex).toBe(0);
+    const phaseEvent = findEvent(events, 'LAYER_PHASE_CHANGED') as any;
+    expect(phaseEvent).toBeDefined();
+    expect(phaseEvent.phase).toBe('locked');
+    expect(findEvent(events, 'AUDIO_CUE')).toBeDefined();
+  });
+
+  test('RESET_LAYER from voting clears votes and resets to locked', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+
+    expect(state.attempts[0].votes).toHaveLength(1);
+
+    processCommand(state, { type: 'RESET_LAYER' });
+
+    expect(state.attempts[0].currentLayerPhase).toBe('locked');
+    expect(state.attempts[0].votes).toHaveLength(0);
+  });
+
+  test('RESET_LAYER from locked_in removes layerResult (defensive)', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    // Manually simulate locked_in state (normally unreachable via standard flow
+    // since lockInLayer immediately advances to next layer)
+    const attempt = state.attempts[0];
+    attempt.currentLayerPhase = 'locked_in';
+    attempt.layerResults.push({
+      layerIndex: 0,
+      type: 'foundation',
+      status: 'locked_in',
+      chosenOption: 'A',
+      consensus: 1.0,
+    });
+
+    const events = processCommand(state, { type: 'RESET_LAYER' });
+
+    expect(attempt.currentLayerPhase).toBe('locked');
+    expect(attempt.layerResults).toHaveLength(0);
+    expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
+  });
+
+  test('RESET_LAYER is a no-op when layer is already locked', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    expect(state.attempts[0].currentLayerPhase).toBe('locked');
+
+    const events = processCommand(state, { type: 'RESET_LAYER' });
+
+    expect(events).toHaveLength(0);
+  });
+
+  test('RESET_LAYER returns error when not in attempt_build', () => {
+    const state = createTestState();
+
+    const events = processCommand(state, { type: 'RESET_LAYER' });
+
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('RESET_LAYER does not change currentLayerIndex', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    const layerBefore = state.attempts[0].currentLayerIndex;
+    processCommand(state, { type: 'RESET_LAYER' });
+
+    expect(state.attempts[0].currentLayerIndex).toBe(layerBefore);
+  });
+
   test('SET_THRESHOLD updates the doubt threshold for a specific layer', () => {
     const state = createTestState();
     advanceToBuild(state);

@@ -360,6 +360,7 @@ export type ConductorCommand =
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
   | { type: 'RERUN_VOTE' }
+  | { type: 'RESET_LAYER' }
   | { type: 'FORCE_CONTINUE' }
   | { type: 'FORCE_COLLAPSE' }
 

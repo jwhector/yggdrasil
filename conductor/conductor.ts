@@ -121,6 +121,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [];
     case 'RERUN_VOTE':
       return handleRerunVote(state);
+    case 'RESET_LAYER':
+      return handleResetLayer(state);
     case 'FORCE_CONTINUE':
       return handleForceContinue(state);
     case 'FORCE_COLLAPSE':
@@ -589,6 +591,58 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
       totalLoops,
     },
   ];
+}
+
+function handleResetLayer(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_build') {
+    return [{ type: 'ERROR', message: 'Can only reset layer during attempt_build' }];
+  }
+
+  const attempt = currentAttempt(state);
+  if (!attempt || attempt.status !== 'in_progress') {
+    return [{ type: 'ERROR', message: 'No active attempt' }];
+  }
+
+  if (attempt.currentLayerPhase === 'locked') {
+    return []; // Already at initial state, no-op
+  }
+
+  const events: ConductorEvent[] = [];
+  const layerIndex = attempt.currentLayerIndex;
+
+  // If locked_in, remove the layer result so it can be re-auditioned
+  if (attempt.currentLayerPhase === 'locked_in') {
+    attempt.layerResults = attempt.layerResults.filter(r => r.layerIndex !== layerIndex);
+  }
+
+  // Stop any playing audio
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: {
+      type: 'audition_stop',
+      attemptIndex: attempt.index,
+      layerIndex,
+      option: null,
+    },
+  });
+
+  // Clear votes for this layer
+  attempt.votes = attempt.votes.filter(v => v.layerIndex !== layerIndex);
+
+  // Reset audition state
+  attempt.currentLayerPhase = 'locked';
+  attempt.currentAuditionOption = null;
+  attempt.auditionLoopIndex = 0;
+
+  // Emit phase change — timing engine reacts to stop timers and audition tracking
+  events.push({
+    type: 'LAYER_PHASE_CHANGED',
+    attemptIndex: attempt.index,
+    layerIndex,
+    phase: 'locked',
+  });
+
+  return events;
 }
 
 function handleForceContinue(state: ShowState): ConductorEvent[] {

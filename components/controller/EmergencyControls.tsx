@@ -112,6 +112,14 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
               </button>
 
               <button
+                onClick={() => send({ type: 'RESET_LAYER' })}
+                style={{ ...btn, ...btnWarning }}
+                title="Reset current layer to locked state (clears votes, stops audition)"
+              >
+                Reset Layer
+              </button>
+
+              <button
                 onClick={() => send({ type: 'AUDIO_PANIC' })}
                 style={{ ...btn, ...btnDanger, minWidth: '120px' }}
                 title="Hard mute all Ableton tracks"

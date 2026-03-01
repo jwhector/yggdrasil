@@ -430,6 +430,10 @@ export function createTimingEngine(
           stopAuditionTracking();
           console.log('[Timing] Attempt collapsed — no timer needed');
           break;
+        case 'locked':
+          stopAuditionTracking();
+          console.log('[Timing] Layer reset to locked — timers cancelled');
+          break;
         default:
           break;
       }

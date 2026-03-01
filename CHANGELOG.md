@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-03-01 — RESET_LAYER Command
+
+**Context:** Operators needed a way to abort a layer mid-flow and start it over from scratch — for example, if audition or voting started at the wrong moment. This adds a `RESET_LAYER` emergency control that returns the current layer to its initial `locked` state from any in-progress phase.
+
+**Changes:**
+- `conductor/types.ts` — Added `{ type: 'RESET_LAYER' }` to `ConductorCommand` union
+- `conductor/conductor.ts` — Added `handleResetLayer()`: validates phase/status, stops audio via `audition_stop` cue (matching `handleOpenVoting` pattern), clears votes for the current layer, resets `currentLayerPhase → 'locked'`, `currentAuditionOption → null`, `auditionLoopIndex → 0`; emits `LAYER_PHASE_CHANGED`; no-op if layer is already `locked`; defensive path removes `layerResults` entry if layer was in `locked_in` state
+- `server/timing.ts` — Added `case 'locked':` to the `LAYER_PHASE_CHANGED` switch in `onStateChanged`; calls `stopAuditionTracking()` to clean up any active beat-tracking interval or fallback timer (`cancelCurrentTimer()` already runs unconditionally for all phase changes)
+- `components/controller/EmergencyControls.tsx` — Added "Reset Layer" button (warning style) in the Audio group between Collapse Gesture and Audio Panic; no confirmation step since the action is reversible
+
+**No changes needed:** `server/socket.ts` (generic command pass-through), `server/audio-router.ts` (`audition_stop` with `option: null` already calls `stopPlayback()`)
+
+**Tests:** 6 new conductor tests — reset from auditioning, reset from voting (clears votes), reset from `locked_in` (defensive, removes layer result), no-op when already locked, error outside `attempt_build`, `currentLayerIndex` unchanged after reset.
+
+**Modified files:** `conductor/types.ts`, `conductor/conductor.ts`, `server/timing.ts`, `components/controller/EmergencyControls.tsx`, `conductor/__tests__/conductor.test.ts`
+
+---
+
 ## 2026-02-28 — AudioReference Effects Support + AudioCue Simplification
 
 **Context:** Some song-building options are implemented as Ableton device effects (e.g., reverb/delay on a shared foundation track) rather than mute/unmute of a dedicated track. The previous system always computed track indices via formula in the audio router and had no way to express effect-based options. This change adds `effectIndices` to `AudioReference` and embeds resolved audio references directly in `AudioCue` events, so the audio router no longer needs to compute track indices at runtime.
