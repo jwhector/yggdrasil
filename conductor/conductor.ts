@@ -107,6 +107,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Song-building
     case 'START_AUDITION':
       return handleStartAudition(state);
+    case 'TOGGLE_AUDITION':
+      return handleToggleAudition(state);
     case 'OPEN_VOTING':
       return handleOpenVoting(state);
     case 'CLOSE_VOTING':
@@ -369,6 +371,58 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
       layerIndex: attempt.currentLayerIndex,
       option: 'A',
       loopIndex: 0,
+      totalLoops: 0, // Managed by timing engine
+    },
+  ];
+}
+
+function handleToggleAudition(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_build') {
+    return [{ type: 'ERROR', message: 'Can only toggle audition during attempt_build' }];
+  }
+
+  const attempt = currentAttempt(state);
+  if (!attempt || attempt.status !== 'in_progress') {
+    return [{ type: 'ERROR', message: 'No active attempt' }];
+  }
+
+  if (attempt.currentLayerPhase !== 'auditioning') {
+    return [{ type: 'ERROR', message: `Cannot toggle audition from layer phase: ${attempt.currentLayerPhase}` }];
+  }
+
+  const prevOption = attempt.currentAuditionOption ?? 'A';
+  const nextOption: 'A' | 'B' = prevOption === 'A' ? 'B' : 'A';
+  attempt.currentAuditionOption = nextOption;
+  attempt.auditionLoopIndex++;
+
+  return [
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'audition_stop',
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+        option: prevOption,
+        audioRef: getLayerAudioRef(attempt, prevOption),
+      },
+    },
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'audition_start',
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+        option: nextOption,
+        audioRef: getLayerAudioRef(attempt, nextOption),
+        otherAudioRef: getLayerAudioRef(attempt, prevOption),
+      },
+    },
+    {
+      type: 'AUDITION_OPTION_CHANGED',
+      attemptIndex: attempt.index,
+      layerIndex: attempt.currentLayerIndex,
+      option: nextOption,
+      loopIndex: attempt.auditionLoopIndex,
       totalLoops: 0, // Managed by timing engine
     },
   ];

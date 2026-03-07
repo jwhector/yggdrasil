@@ -1,10 +1,10 @@
 /**
- * Persistence Layer Tests (NEW SYSTEM)
+ * Persistence Layer Tests (V2)
  *
  * Tests cover:
  * - Database initialization and WAL mode
  * - State save/load with Map serialization (users, finaleState)
- * - Layer vote, user, and fragment selection persistence
+ * - Layer vote, user, and consensus round persistence
  * - Transaction atomicity
  * - getLatestShow recovery flow
  */
@@ -22,45 +22,54 @@ import type { ShowConfig, LayerVote, User } from '../../conductor/types';
 
 function createTestConfig(): ShowConfig {
   return {
-    maxLayersPerAttempt: 7,
+    layersPerAttempt: 7,
     attempts: [
       {
         chapter: 'ambition',
         title: 'Ambition',
+        drainFactor: 0.5,
+        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
         layers: [
-          { index: 0, type: 'foundation', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
-          { index: 1, type: 'pulse', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
+          { index: 1, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
         ],
       },
       {
         chapter: 'love',
         title: 'Love',
+        drainFactor: 0.6,
+        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
         layers: [
-          { index: 0, type: 'color', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
         ],
       },
       {
         chapter: 'avoidance',
         title: 'Avoidance',
+        drainFactor: 0.7,
+        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
         layers: [
-          { index: 0, type: 'space', optionA: { trackIndex: 6 }, optionB: { trackIndex: 7 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 0, type: 'bass', optionA: { trackIndex: 6 }, optionB: { trackIndex: 7 }, labelA: 'A', labelB: 'B' },
         ],
       },
     ],
     finale: {
-      slotCount: 7,
-      rotationBars: 8,
-      defaultRotationRate: 2,
-      triangleDriftTimeoutMs: 10000,
-      triangleDriftSpeedMs: 3000,
-      fragments: [],
+      consensusRoundDurationMs: 15000,
+      firstRoundDurationMs: 20000,
+      initialThreshold: 0.4,
+      thresholdDecayPerFailure: 0.05,
+      minThreshold: 0.25,
+      interRoundDelayMs: 3000,
+      successCelebrationMs: 6000,
+      npcAutoTriggers: [],
     },
     timing: {
       auditionDurationMs: 4000,
       votingWindowMs: 30000,
-      resolveAnimationMs: 5000,
-      collapseAnimationMs: 3000,
-      autoAdvanceToStoryMs: 2000,
+      revealSequenceDurationMs: 5000,
+      rejectionEffectDurationMs: 2000,
+      beatsPerLoop: 0,
+      auditionsPerLayer: 2,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1', 'seat-2'],
@@ -132,8 +141,8 @@ describe('State persistence', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
-    state.users.set('user-1', { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null });
-    state.users.set('user-2', { id: 'user-2', seatId: 'A2', connected: false, joinedAt: 2000, finaleChapter: 'love' });
+    state.users.set('user-1', { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000 });
+    state.users.set('user-2', { id: 'user-2', seatId: 'A2', connected: false, joinedAt: 2000 });
 
     db.saveState(state);
     const loaded = db.loadState('show-1');
@@ -141,7 +150,7 @@ describe('State persistence', () => {
     expect(loaded!.users).toBeInstanceOf(Map);
     expect(loaded!.users.size).toBe(2);
     expect(loaded!.users.get('user-1')?.seatId).toBe('A1');
-    expect(loaded!.users.get('user-2')?.finaleChapter).toBe('love');
+    expect(loaded!.users.get('user-2')?.seatId).toBe('A2');
 
     db.close();
   });
@@ -158,33 +167,47 @@ describe('State persistence', () => {
     db.close();
   });
 
-  test('preserves finaleState Maps (chapterAssignments, trianglePositions)', () => {
+  test('preserves finaleState Maps (consensusGame votes, lockedRoles, performerMix activeLayers)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
-    // Manually attach a minimal finaleState for persistence testing
     state.finaleState = {
-      chapterAssignments: new Map([['user-1', 'ambition'], ['user-2', 'love']]),
-      queue: [],
-      activeSlots: new Array(7).fill(null),
-      trianglePositions: new Map([['user-1', { wAmbition: 0.5, wLove: 0.3, wAvoidance: 0.2 }]]),
-      centroid: { wAmbition: 0.5, wLove: 0.3, wAvoidance: 0.2 },
-      rotationActive: false,
-      rotationRate: 2,
-      frozen: false,
-      stewardshipLog: [],
-      triangleActive: true,
+      phase: 'consensus_game',
+      availableFragments: [],
+      allFragments: [],
+      lockedFragments: [],
+      consensusGame: {
+        active: true,
+        currentRound: 2,
+        roundTimeRemaining: 10000,
+        votes: new Map([['user-1', 'frag-0-0-A'], ['user-2', 'frag-0-1-B']]),
+        convergenceValue: 0.6,
+        threshold: 0.4,
+        consecutiveFailures: 0,
+        lockedRoles: new Map([['melody', 'frag-0-0-A']]),
+      },
+      npc: { currentMessage: 'Try again', autoTriggersEnabled: true },
+      performerMix: {
+        activeLayers: new Map([['melody', 'frag-0-0-A'], ['drums', null]]),
+        pendingChanges: [],
+        loopPosition: 0,
+        loopCount: 0,
+        liveTracksActive: [],
+      },
     };
 
     db.saveState(state);
     const loaded = db.loadState('show-1');
 
     expect(loaded!.finaleState).not.toBeNull();
-    expect(loaded!.finaleState!.chapterAssignments).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.chapterAssignments.get('user-1')).toBe('ambition');
-    expect(loaded!.finaleState!.chapterAssignments.get('user-2')).toBe('love');
-    expect(loaded!.finaleState!.trianglePositions).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.trianglePositions.get('user-1')?.wAmbition).toBe(0.5);
+    expect(loaded!.finaleState!.consensusGame.votes).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.consensusGame.votes.get('user-1')).toBe('frag-0-0-A');
+    expect(loaded!.finaleState!.consensusGame.votes.get('user-2')).toBe('frag-0-1-B');
+    expect(loaded!.finaleState!.consensusGame.lockedRoles).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.consensusGame.lockedRoles.get('melody')).toBe('frag-0-0-A');
+    expect(loaded!.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
+    expect(loaded!.finaleState!.performerMix.activeLayers.get('drums')).toBeNull();
 
     db.close();
   });
@@ -231,7 +254,7 @@ describe('Layer vote persistence', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null }, 'show-1');
+    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000 }, 'show-1');
 
     const vote: LayerVote = {
       userId: 'user-1',
@@ -250,7 +273,7 @@ describe('Layer vote persistence', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null }, 'show-1');
+    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000 }, 'show-1');
 
     db.saveLayerVote({ userId: 'user-1', attemptIndex: 0, layerIndex: 0, choice: 'A', timestamp: Date.now() }, 'show-1');
     db.saveLayerVote({ userId: 'user-1', attemptIndex: 0, layerIndex: 1, choice: 'B', timestamp: Date.now() }, 'show-1');
@@ -265,7 +288,7 @@ describe('User persistence', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
-    const user: User = { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null };
+    const user: User = { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000 };
     expect(() => db.saveUser(user, 'show-1')).not.toThrow();
 
     db.close();
@@ -276,18 +299,16 @@ describe('User persistence', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
-    const user: User = { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null };
+    const user: User = { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000 };
     db.saveUser(user, 'show-1');
 
-    // Update seat and finaleChapter
+    // Update seat
     user.seatId = 'B2';
-    user.finaleChapter = 'ambition';
     db.saveUser(user, 'show-1');
 
     const users = db.getUsersByShow('show-1');
     expect(users.length).toBe(1);
     expect(users[0].seatId).toBe('B2');
-    expect(users[0].finaleChapter).toBe('ambition');
 
     db.close();
   });
@@ -298,9 +319,9 @@ describe('User persistence', () => {
     db.saveState(createInitialState(config, 'show-1'));
     db.saveState(createInitialState(config, 'show-2'));
 
-    db.saveUser({ id: 'u1', seatId: 'A1', connected: true, joinedAt: 0, finaleChapter: null }, 'show-1');
-    db.saveUser({ id: 'u2', seatId: 'A2', connected: true, joinedAt: 0, finaleChapter: null }, 'show-1');
-    db.saveUser({ id: 'u3', seatId: 'B1', connected: true, joinedAt: 0, finaleChapter: null }, 'show-2');
+    db.saveUser({ id: 'u1', seatId: 'A1', connected: true, joinedAt: 0 }, 'show-1');
+    db.saveUser({ id: 'u2', seatId: 'A2', connected: true, joinedAt: 0 }, 'show-1');
+    db.saveUser({ id: 'u3', seatId: 'B1', connected: true, joinedAt: 0 }, 'show-2');
 
     expect(db.getUsersByShow('show-1').length).toBe(2);
     expect(db.getUsersByShow('show-2').length).toBe(1);
@@ -309,28 +330,40 @@ describe('User persistence', () => {
   });
 });
 
-describe('Fragment selection persistence', () => {
-  test('saves a fragment selection', () => {
+describe('Consensus round persistence', () => {
+  test('saves a successful consensus round', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 0, finaleChapter: 'ambition' }, 'show-1');
 
-    expect(() => db.saveFragmentSelection('user-1', 'frag-ambition-0-A', 'show-1')).not.toThrow();
+    expect(() =>
+      db.saveConsensusRound('show-1', 1, 'frag-0-0-A', 0.8, 0.4, true)
+    ).not.toThrow();
 
     db.close();
   });
 
-  test('updates selection on conflict (one per user)', () => {
+  test('saves a failed round with null fragmentId', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: 'A1', connected: true, joinedAt: 0, finaleChapter: 'ambition' }, 'show-1');
 
-    db.saveFragmentSelection('user-1', 'frag-ambition-0-A', 'show-1');
-    expect(() => db.saveFragmentSelection('user-1', 'frag-ambition-1-B', 'show-1')).not.toThrow();
+    expect(() =>
+      db.saveConsensusRound('show-1', 1, null, 0.3, 0.4, false)
+    ).not.toThrow();
 
     db.close();
+  });
+
+  test('saves multiple rounds for same show', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    db.saveConsensusRound('show-1', 1, null, 0.2, 0.4, false);
+    db.saveConsensusRound('show-1', 2, 'frag-0-0-A', 0.7, 0.35, true);
+
+    db.close(); // No error = pass
   });
 });
 

@@ -867,6 +867,8 @@ interface TimingConfig {
   votingWindowMs: number;
   revealSequenceDurationMs: number;
   rejectionEffectDurationMs: number;
+  beatsPerLoop: number;        // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
+  auditionsPerLayer: number;   // Number of A/B cycles per layer before voting opens
 }
 
 interface Fragment {

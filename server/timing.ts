@@ -2,15 +2,17 @@
  * Timing Engine — Hybrid Timing with AbletonOSC + Server Timers
  *
  * Manages automatic phase advancement with a hybrid approach:
- * - Server JS timers control game logic timing (audition duration, voting window)
- * - AbletonOSC beat events drive finale rotation ticks
+ * - Server JS timers control game logic timing (audition duration, voting window,
+ *   consensus round duration)
+ * - AbletonOSC beat events drive audition A/B cycling and performer mix loop boundaries
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
  * - For auditioning: Schedules auditionDurationMs timer → sends OPEN_VOTING
+ *   (or beat-synced cycling if beatsPerLoop > 0)
  * - For voting: Schedules votingWindowMs timer → sends CLOSE_VOTING
- * - For finale rotation: Counts beats → sends PERFORM_ROTATION_TICK
- * - Manual advances always take precedence (version check)
+ * - For consensus rounds: Schedules round duration timer → sends END_CONSENSUS_ROUND
+ * - For performer mix: Counts beats/bars → sends FIRE_PENDING_CHANGES at loop boundary
  *
  * Fallback Mode:
  * - When OSC bridge is not available, uses JS timers for all phases
@@ -37,7 +39,7 @@ export interface TimingEngineConfig {
   enabled: boolean;
   /** OSC bridge for Ableton communication (null = fallback to JS timers) */
   oscBridge: OSCBridge | null;
-  /** BPM for fallback rotation timing (default: 120) */
+  /** BPM for fallback timing (default: 120) */
   fallbackBpm: number;
 }
 
@@ -71,14 +73,6 @@ interface TimerState {
 }
 
 /**
- * Rotation tracking state (for finale beat-based rotation)
- */
-interface RotationTrackingState {
-  lastRotationBeat: number;
-  rotationBeats: number;       // rotationBars * 4 (beats per rotation cycle)
-}
-
-/**
  * Audition tracking state (for song-building A/B cycling)
  */
 interface AuditionTrackingState {
@@ -88,7 +82,16 @@ interface AuditionTrackingState {
   currentLoopIndex: number;    // 0-based, increments on each toggle
 }
 
+/**
+ * Loop boundary tracking state (for performer mix pending changes)
+ */
+interface LoopTrackingState {
+  lastBoundaryBeat: number;    // Beat number at last loop boundary (0 = not yet set)
+  loopBeats: number;           // LOOP_BARS * BEATS_PER_BAR
+}
+
 const BEATS_PER_BAR = 4;
+const LOOP_BARS = 8;          // Performer mix loop length in bars
 
 // ============================================================================
 // Factory
@@ -116,11 +119,12 @@ export function createTimingEngine(
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let rotationState: RotationTrackingState | null = null;
-  let fallbackRotationInterval: NodeJS.Timeout | null = null;
+  let consensusRoundTimer: NodeJS.Timeout | null = null;
   let auditionState: AuditionTrackingState | null = null;
   let fallbackAuditionInterval: NodeJS.Timeout | null = null;
   let fallbackAuditionLoopIndex = 0;
+  let loopState: LoopTrackingState | null = null;
+  let fallbackLoopInterval: NodeJS.Timeout | null = null;
 
   // --------------------------------------------------------------------------
   // Timer Management
@@ -139,8 +143,7 @@ export function createTimingEngine(
 
   /**
    * Schedule a timer to fire after the given duration.
-   * Includes version-check safety: if state has changed by the time the timer
-   * fires, the callback is skipped.
+   * Version check disabled — votes update state frequently.
    */
   function scheduleTimer(
     durationMs: number,
@@ -151,16 +154,6 @@ export function createTimingEngine(
     cancelCurrentTimer();
 
     const timer = setTimeout(() => {
-      const state = getState();
-
-      // Version check disabled - votes update state
-      // Verify state hasn't changed (version check)
-      // if (state.version !== scheduledVersion) {
-      //   console.log(`[Timing] Timer fired but state version changed (scheduled: ${scheduledVersion}, current: ${state.version}). Skipping.`);
-      //   currentTimer = null;
-      //   return;
-      // }
-
       console.log(`[Timing] Timer fired for ${phase}`);
       callback();
       currentTimer = null;
@@ -178,6 +171,38 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
+  // Consensus Round Timer
+  // --------------------------------------------------------------------------
+
+  /**
+   * Start consensus round timer. Fires END_CONSENSUS_ROUND when duration expires.
+   */
+  function startConsensusRoundTimer(durationMs: number): void {
+    clearConsensusRoundTimer();
+
+    console.log(`[Timing] Consensus round timer: ${durationMs}ms`);
+    consensusRoundTimer = setTimeout(() => {
+      if (!running) return;
+      const state = getState();
+      if (state.phase === 'finale_consensus' && state.finaleState?.consensusGame.active) {
+        console.log('[Timing] Consensus round timer expired → END_CONSENSUS_ROUND');
+        sendCommand({ type: 'END_CONSENSUS_ROUND' });
+      }
+      consensusRoundTimer = null;
+    }, durationMs);
+  }
+
+  /**
+   * Clear the consensus round timer (round ended by other means).
+   */
+  function clearConsensusRoundTimer(): void {
+    if (consensusRoundTimer) {
+      clearTimeout(consensusRoundTimer);
+      consensusRoundTimer = null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // Layer Phase Handlers
   // --------------------------------------------------------------------------
 
@@ -190,7 +215,9 @@ export function createTimingEngine(
   function startAuditionTracking(state: ShowState): void {
     stopAuditionTracking();
 
-    const { beatsPerLoop, auditionsPerLayer, auditionDurationMs } = state.config.timing;
+    const beatsPerLoop = state.config.timing.beatsPerLoop ?? 0;
+    const auditionsPerLayer = state.config.timing.auditionsPerLayer ?? 2;
+    const { auditionDurationMs } = state.config.timing;
     const totalLoops = auditionsPerLayer * 2;
 
     if (beatsPerLoop > 0 && engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
@@ -241,11 +268,6 @@ export function createTimingEngine(
    * Stop audition tracking (both OSC and fallback modes).
    */
   function stopAuditionTracking(): void {
-    const state = getState();
-    const attempt = state.attempts[state.currentAttemptIndex];
-    if (attempt?.currentAuditionOption) {
-      attempt.currentAuditionOption = null;
-    }
     auditionState = null;
     if (fallbackAuditionInterval) {
       clearInterval(fallbackAuditionInterval);
@@ -268,67 +290,70 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
-  // Rotation Beat Tracking (Finale)
+  // Loop Boundary Tracking (Performer Mix)
   // --------------------------------------------------------------------------
 
   /**
-   * Start tracking beats for finale rotation.
+   * Start loop boundary tracking for performer mix phase.
+   * Fires FIRE_PENDING_CHANGES at each 8-bar boundary.
    */
-  function startRotationTracking(state: ShowState): void {
-    stopRotationTracking();
+  function startLoopTracking(): void {
+    stopLoopTracking();
 
-    const rotationBars = state.config.finale.rotationBars;
-    const rotationBeats = rotationBars * BEATS_PER_BAR;
+    const loopBeats = LOOP_BARS * BEATS_PER_BAR;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
-      // OSC mode: use beat events
-      rotationState = {
-        lastRotationBeat: 0,
-        rotationBeats,
+      // OSC mode: track beats
+      loopState = {
+        lastBoundaryBeat: 0,
+        loopBeats,
       };
-      console.log(`[Timing] Rotation tracking started (OSC, every ${rotationBars} bars / ${rotationBeats} beats)`);
+      console.log(`[Timing] Loop boundary tracking started (OSC, every ${LOOP_BARS} bars / ${loopBeats} beats)`);
     } else {
-      // Fallback: use JS interval
+      // Fallback: JS interval
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
-      const intervalMs = rotationBeats * msPerBeat;
+      const intervalMs = loopBeats * msPerBeat;
 
-      fallbackRotationInterval = setInterval(() => {
+      fallbackLoopInterval = setInterval(() => {
         if (!running) return;
-        const currentState = getState();
-        if (currentState.phase !== 'finale_rotating') {
-          stopRotationTracking();
+        const state = getState();
+        if (state.phase !== 'finale_performer_mix') {
+          stopLoopTracking();
           return;
         }
-        if (!currentState.finaleState?.rotationActive) return;
-
-        sendCommand({ type: 'PERFORM_ROTATION_TICK', beat: 0 });
+        console.log('[Timing] Loop boundary → FIRE_PENDING_CHANGES');
+        sendCommand({ type: 'FIRE_PENDING_CHANGES' });
       }, intervalMs);
 
-      console.log(`[Timing] Rotation tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
+      console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
     }
   }
 
   /**
-   * Stop rotation tracking.
+   * Stop loop boundary tracking.
    */
-  function stopRotationTracking(): void {
-    rotationState = null;
-    if (fallbackRotationInterval) {
-      clearInterval(fallbackRotationInterval);
-      fallbackRotationInterval = null;
+  function stopLoopTracking(): void {
+    loopState = null;
+    if (fallbackLoopInterval) {
+      clearInterval(fallbackLoopInterval);
+      fallbackLoopInterval = null;
     }
   }
+
+  // --------------------------------------------------------------------------
+  // Beat Event Handling
+  // --------------------------------------------------------------------------
 
   /**
    * Handle beat event from AbletonOSC.
-   * Drives both audition A/B cycling and finale rotation.
+   * Drives audition A/B cycling and performer mix loop boundaries.
    */
   function handleBeatEvent(beatNumber: number): void {
     if (!running) return;
 
     const state = getState();
 
-    // --- Audition beat tracking ---
+    // --- Audition beat tracking (song-building) ---
     if (auditionState && state.phase === 'attempt_build') {
       const attempt = state.attempts[state.currentAttemptIndex];
       if (attempt?.currentLayerPhase === 'auditioning') {
@@ -337,10 +362,8 @@ export function createTimingEngine(
           auditionState.lastToggleBeat = beatNumber;
         }
 
-        const beatsSinceToggle = beatNumber - auditionState.lastToggleBeat;
-
-        // if (beatsSinceToggle >= auditionState.beatsPerLoop) {
-        if (beatNumber % auditionState.beatsPerLoop === 0 && beatNumber > 0) {
+        const beatsSinceLastToggle = beatNumber - auditionState.lastToggleBeat;
+        if (beatsSinceLastToggle >= auditionState.beatsPerLoop) {
           auditionState.lastToggleBeat = beatNumber;
           auditionState.currentLoopIndex++;
 
@@ -351,21 +374,25 @@ export function createTimingEngine(
             sendCommand({ type: 'TOGGLE_AUDITION' });
           }
         }
-        // Audition tracking handled — do not fall through to rotation
+        // Audition tracking handled — do not fall through
         return;
       }
     }
 
-    // --- Rotation beat tracking ---
-    if (!rotationState) return;
-    if (state.phase !== 'finale_rotating') return;
-    if (!state.finaleState?.rotationActive) return;
+    // --- Loop boundary tracking (performer mix) ---
+    if (!loopState) return;
+    if (state.phase !== 'finale_performer_mix') return;
 
-    const beatsSinceLastRotation = beatNumber - rotationState.lastRotationBeat;
+    // Initialize baseline on first beat
+    if (loopState.lastBoundaryBeat === 0) {
+      loopState.lastBoundaryBeat = beatNumber;
+    }
 
-    if (beatsSinceLastRotation >= rotationState.rotationBeats) {
-      rotationState.lastRotationBeat = beatNumber;
-      sendCommand({ type: 'PERFORM_ROTATION_TICK', beat: beatNumber });
+    const beatsSinceBoundary = beatNumber - loopState.lastBoundaryBeat;
+    if (beatsSinceBoundary >= loopState.loopBeats) {
+      loopState.lastBoundaryBeat = beatNumber;
+      console.log(`[Timing] Loop boundary at beat ${beatNumber} → FIRE_PENDING_CHANGES`);
+      sendCommand({ type: 'FIRE_PENDING_CHANGES' });
     }
   }
 
@@ -403,6 +430,7 @@ export function createTimingEngine(
     // Don't schedule if paused
     if (state.paused) {
       cancelCurrentTimer();
+      clearConsensusRoundTimer();
       return;
     }
 
@@ -446,12 +474,29 @@ export function createTimingEngine(
 
     if (showPhaseEvent) {
       cancelCurrentTimer();
+      stopLoopTracking();
+      clearConsensusRoundTimer();
 
-      if (showPhaseEvent.phase === 'finale_rotating') {
-        startRotationTracking(state);
-      } else {
-        stopRotationTracking();
+      if (showPhaseEvent.phase === 'finale_performer_mix') {
+        startLoopTracking();
       }
+    }
+
+    // Consensus round started — set round timer
+    const roundStartedEvent = events.find(e => e.type === 'CONSENSUS_ROUND_STARTED') as
+      | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
+      | undefined;
+
+    if (roundStartedEvent && state.finaleState) {
+      startConsensusRoundTimer(state.finaleState.consensusGame.roundTimeRemaining);
+    }
+
+    // Consensus round ended (success or failure) — clear timer
+    const roundEndedEvent = events.find(
+      e => e.type === 'CONSENSUS_ROUND_SUCCESS' || e.type === 'CONSENSUS_ROUND_FAILURE'
+    );
+    if (roundEndedEvent) {
+      clearConsensusRoundTimer();
     }
   }
 
@@ -486,14 +531,13 @@ export function createTimingEngine(
     }
 
     console.log('[Timing] Engine started');
-    console.log(`[Timing] Mode: ${engineConfig.oscBridge ? 'AbletonOSC (beat-based rotation)' : 'Fallback (JS timers)'}`);
+    console.log(`[Timing] Mode: ${engineConfig.oscBridge ? 'AbletonOSC (beat-synced)' : 'Fallback (JS timers)'}`);
 
     // Initialize based on current state
     const state = getState();
     if (state.phase === 'attempt_build') {
       const attempt = state.attempts[state.currentAttemptIndex];
       if (attempt && attempt.status === 'in_progress') {
-        // Synthesize event to trigger scheduling for current layer
         onStateChanged(state, [
           {
             type: 'LAYER_PHASE_CHANGED',
@@ -503,8 +547,10 @@ export function createTimingEngine(
           },
         ]);
       }
-    } else if (state.phase === 'finale_rotating') {
-      startRotationTracking(state);
+    } else if (state.phase === 'finale_performer_mix') {
+      startLoopTracking();
+    } else if (state.phase === 'finale_consensus' && state.finaleState?.consensusGame.active) {
+      startConsensusRoundTimer(state.finaleState.consensusGame.roundTimeRemaining);
     }
   }
 
@@ -516,8 +562,9 @@ export function createTimingEngine(
 
     running = false;
     cancelCurrentTimer();
-    stopRotationTracking();
+    clearConsensusRoundTimer();
     stopAuditionTracking();
+    stopLoopTracking();
 
     // Unsubscribe from beat events
     if (engineConfig.oscBridge) {

@@ -11,7 +11,7 @@
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import type { ShowState, ShowId, UserId, User, LayerVote, SeatId, Chapter } from '@/conductor/types';
+import type { ShowState, ShowId, UserId, User, LayerVote, SeatId } from '../conductor/types';
 import { serializeState, deserializeState } from '../lib/serialization';
 
 // ============================================================================
@@ -24,7 +24,7 @@ import { serializeState, deserializeState } from '../lib/serialization';
  *
  * Rules:
  * - Never modify an existing migration — always append a new one.
- * - Migrations must be idempotent (safe to re-run on a DB that already has
+ * - Migrations must be idempotent (safe to re-run on a DB that already had
  *   the change, e.g. from a fresh schema.sql run).
  * - schema.sql defines the "current" table shapes. Migrations handle upgrading
  *   DBs that were created from an older version of schema.sql.
@@ -40,6 +40,11 @@ function getColumnNames(db: Database.Database, table: string): string[] {
   return (db.pragma(`table_info(${table})`) as { name: string }[]).map(c => c.name);
 }
 
+/** Helper: returns table names in the DB. */
+function getTableNames(db: Database.Database): string[] {
+  return (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(t => t.name);
+}
+
 const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -50,8 +55,39 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
-  // Future migrations go here:
-  // { version: 2, name: '...', up: (db) => { ... } },
+  {
+    version: 2,
+    name: 'v2_schema_update',
+    up: (db) => {
+      // Drop fragment_selections table (V1 — no longer needed in V2)
+      const tables = getTableNames(db);
+      if (tables.includes('fragment_selections')) {
+        db.exec('DROP TABLE IF EXISTS fragment_selections');
+      }
+
+      // Add consensus_rounds table (V2)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS consensus_rounds (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          round_number INTEGER NOT NULL,
+          winning_fragment_id TEXT,
+          convergence REAL,
+          threshold REAL NOT NULL,
+          success BOOLEAN NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id)
+        )
+      `);
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_consensus_rounds_show ON consensus_rounds(show_id)
+      `);
+
+      // Note: finale_chapter column left in place on users table for SQLite
+      // compatibility (can't drop columns). It is no longer read or written.
+    },
+  },
 ];
 
 /**
@@ -86,8 +122,15 @@ export interface PersistenceLayer {
   getLatestShow(): ShowState | null;
   saveLayerVote(vote: LayerVote, showId: ShowId): void;
   saveUser(user: User, showId: ShowId): void;
-  saveFragmentSelection(userId: UserId, fragmentId: string, showId: ShowId): void;
-  getUsersByShow(showId: ShowId): User[];
+  saveConsensusRound(
+    showId: ShowId,
+    roundNumber: number,
+    winningFragmentId: string | null,
+    convergence: number,
+    threshold: number,
+    success: boolean,
+  ): void;
+  getUsersByShow(showId: ShowId): Pick<User, 'id' | 'seatId'>[];
   close(): void;
 }
 
@@ -129,15 +172,14 @@ export function createPersistence(dbPath: string): PersistenceLayer {
     `),
 
     insertUser: db.prepare(`
-      INSERT INTO users (id, show_id, seat_id, finale_chapter, created_at)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO users (id, show_id, seat_id, created_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET
-        seat_id = excluded.seat_id,
-        finale_chapter = excluded.finale_chapter
+        seat_id = excluded.seat_id
     `),
 
     getUsersByShow: db.prepare(`
-      SELECT id, seat_id, finale_chapter FROM users WHERE show_id = ?
+      SELECT id, seat_id FROM users WHERE show_id = ?
     `),
 
     insertVote: db.prepare(`
@@ -145,11 +187,9 @@ export function createPersistence(dbPath: string): PersistenceLayer {
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    insertFragmentSelection: db.prepare(`
-      INSERT INTO fragment_selections (user_id, show_id, fragment_id, created_at)
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(user_id) DO UPDATE SET
-        fragment_id = excluded.fragment_id
+    insertConsensusRound: db.prepare(`
+      INSERT INTO consensus_rounds (show_id, round_number, winning_fragment_id, convergence, threshold, success, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
   };
 
@@ -211,34 +251,43 @@ export function createPersistence(dbPath: string): PersistenceLayer {
         user.id,
         showId,
         user.seatId,
-        user.finaleChapter
       );
     },
 
     /**
-     * Save a fragment selection (upsert — one per user).
+     * Save a consensus round result for analysis.
      */
-    saveFragmentSelection(userId: UserId, fragmentId: string, showId: ShowId): void {
-      stmts.insertFragmentSelection.run(userId, showId, fragmentId);
+    saveConsensusRound(
+      showId: ShowId,
+      roundNumber: number,
+      winningFragmentId: string | null,
+      convergence: number,
+      threshold: number,
+      success: boolean,
+    ): void {
+      stmts.insertConsensusRound.run(
+        showId,
+        roundNumber,
+        winningFragmentId,
+        convergence,
+        threshold,
+        success ? 1 : 0,
+      );
     },
 
     /**
      * Get all users for a show (useful for debugging / recovery).
      * Note: Returns partial User objects — full state comes from ShowState.users.
      */
-    getUsersByShow(showId: ShowId): User[] {
+    getUsersByShow(showId: ShowId): Pick<User, 'id' | 'seatId'>[] {
       const rows = stmts.getUsersByShow.all(showId) as Array<{
         id: UserId;
         seat_id: SeatId | null;
-        finale_chapter: Chapter | null;
       }>;
 
       return rows.map(row => ({
         id: row.id,
         seatId: row.seat_id,
-        finaleChapter: row.finale_chapter,
-        connected: false,   // Unknown from DB alone
-        joinedAt: 0,        // Unknown from DB alone
       }));
     },
 

@@ -1,4 +1,4 @@
--- Yggdrasil Database Schema (NEW SYSTEM)
+-- Yggdrasil Database Schema (V2)
 -- SQLite with WAL mode for crash resilience
 
 PRAGMA journal_mode=WAL;
@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   show_id TEXT NOT NULL,
   seat_id TEXT,
-  finale_chapter TEXT,                  -- NULL until finale_setup; 'ambition' | 'love' | 'avoidance'
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
@@ -36,18 +35,21 @@ CREATE TABLE IF NOT EXISTS votes (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Fragment selections: finale queue entries
-CREATE TABLE IF NOT EXISTS fragment_selections (
-  user_id TEXT PRIMARY KEY,
+-- Consensus rounds: records each finale consensus game round for analysis
+CREATE TABLE IF NOT EXISTS consensus_rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
-  fragment_id TEXT NOT NULL,
+  round_number INTEGER NOT NULL,
+  winning_fragment_id TEXT,          -- NULL if round failed
+  convergence REAL,
+  threshold REAL NOT NULL,
+  success BOOLEAN NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (show_id) REFERENCES shows(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_users_show ON users(show_id);
 CREATE INDEX IF NOT EXISTS idx_votes_show ON votes(show_id);
 CREATE INDEX IF NOT EXISTS idx_votes_user ON votes(user_id);
-CREATE INDEX IF NOT EXISTS idx_fragment_selections_show ON fragment_selections(show_id);
+CREATE INDEX IF NOT EXISTS idx_consensus_rounds_show ON consensus_rounds(show_id);

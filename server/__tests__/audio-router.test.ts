@@ -1,5 +1,5 @@
 /**
- * Audio Router Tests (NEW SYSTEM)
+ * Audio Router Tests (V2)
  *
  * Tests that AUDIO_CUE events are correctly translated to AbletonOSC messages.
  */
@@ -15,6 +15,7 @@ import type {
   LayerConfig,
   AudioReference,
   Fragment,
+  FinaleState,
 } from '../../conductor/types';
 
 // ============================================================================
@@ -25,7 +26,7 @@ const TEST_LAYOUT: AbletonLayoutConfig = {
   maxLayersPerAttempt: 7,
   attemptCount: 3,
   collapseReturnTrackIndex: 0,
-  finaleSlotCount: 7,
+  rejectionReturnTrackIndex: 0,
 };
 
 function makeAudioRef(index: number, effectIndices?: number[]): AudioReference {
@@ -35,12 +36,11 @@ function makeAudioRef(index: number, effectIndices?: number[]): AudioReference {
 function makeLayerConfig(index: number): LayerConfig {
   return {
     index,
-    type: 'foundation',
+    type: 'melody',
     optionA: makeAudioRef(index * 2),
     optionB: makeAudioRef(index * 2 + 1),
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
-    doubtThreshold: null,
   };
 }
 
@@ -48,34 +48,37 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): AttemptC
   return {
     chapter,
     title: chapter,
+    drainFactor: 0.5,
+    layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
     layers: [0, 1, 2].map(i => makeLayerConfig(i)),
   };
 }
 
 function createTestConfig(): ShowConfig {
   return {
-    maxLayersPerAttempt: 7,
+    layersPerAttempt: 7,
     attempts: [
       makeAttemptConfig('ambition'),
       makeAttemptConfig('love'),
       makeAttemptConfig('avoidance'),
     ],
     finale: {
-      slotCount: 7,
-      rotationBars: 8,
-      defaultRotationRate: 2,
-      triangleDriftTimeoutMs: 10000,
-      triangleDriftSpeedMs: 3000,
-      fragments: [],
+      consensusRoundDurationMs: 15000,
+      firstRoundDurationMs: 20000,
+      initialThreshold: 0.4,
+      thresholdDecayPerFailure: 0.05,
+      minThreshold: 0.25,
+      interRoundDelayMs: 3000,
+      successCelebrationMs: 6000,
+      npcAutoTriggers: [],
     },
     timing: {
       beatsPerLoop: 32,
       auditionsPerLayer: 2,
       auditionDurationMs: 4000,
       votingWindowMs: 30000,
-      resolveAnimationMs: 5000,
-      collapseAnimationMs: 3000,
-      autoAdvanceToStoryMs: 2000,
+      revealSequenceDurationMs: 3000,
+      rejectionEffectDurationMs: 2000,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: [],
@@ -94,17 +97,35 @@ function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B
     layerIndex,
     option,
     chapter: 'ambition',
-    layerType: 'foundation',
-    displayName: `Fragment ${attemptIndex}.${layerIndex}.${option}`,
+    layerType: 'melody',
+    displayLabel: `Fragment ${attemptIndex}.${layerIndex}.${option}`,
     audioRef: { trackIndex },
-    safeParameter: {
-      name: 'intensity',
-      displayLabel: 'Intensity',
-      abletonMapping: { trackIndex, deviceIndex: 0, paramIndex: 1 },
-      min: 0.1,
-      max: 0.9,
-      defaultValue: 0.5,
-      smoothingMs: 50,
+  };
+}
+
+function makeV2FinaleState(allFragments: Fragment[] = []): FinaleState {
+  return {
+    phase: 'consensus_game',
+    availableFragments: allFragments,
+    allFragments,
+    lockedFragments: [],
+    consensusGame: {
+      active: false,
+      currentRound: 0,
+      roundTimeRemaining: 0,
+      votes: new Map(),
+      convergenceValue: 0,
+      threshold: 0.4,
+      consecutiveFailures: 0,
+      lockedRoles: new Map(),
+    },
+    npc: { currentMessage: null, autoTriggersEnabled: false },
+    performerMix: {
+      activeLayers: new Map(),
+      pendingChanges: [],
+      loopPosition: 0,
+      loopCount: 0,
+      liveTracksActive: [],
     },
   };
 }
@@ -497,7 +518,7 @@ describe('AudioRouter', () => {
       expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
     });
 
-    test('mutes all attempt tracks after collapseAnimationMs', () => {
+    test('mutes all attempt tracks after revealSequenceDurationMs', () => {
       // Unmute some tracks first
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
@@ -524,7 +545,7 @@ describe('AudioRouter', () => {
 
       mockSend.mockClear();
 
-      // Advance timer (collapseAnimationMs = 3000)
+      // Advance timer (revealSequenceDurationMs = 3000)
       jest.advanceTimersByTime(3000);
 
       // Track 0 was unmuted, so it should be muted
@@ -535,110 +556,169 @@ describe('AudioRouter', () => {
   });
 
   // --------------------------------------------------------------------------
-  // slot_activate / slot_deactivate
+  // rejection_gesture
   // --------------------------------------------------------------------------
 
-  describe('slot_activate', () => {
-    test('unmutes fragment track and starts transport', () => {
+  describe('rejection_gesture', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    test('enables rejection return track effects immediately', () => {
+      sendCue(router, state, {
+        type: 'rejection_gesture', attemptIndex: 0,
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
+    });
+
+    test('mutes all attempt tracks after rejectionEffectDurationMs', () => {
+      // Unmute some tracks first
+      sendCue(router, state, {
+        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
+        audioRef: makeAudioRef(0),
+        otherAudioRef: makeAudioRef(1),
+      });
+      mockSend.mockClear();
+
+      sendCue(router, state, {
+        type: 'rejection_gesture', attemptIndex: 0,
+      });
+
+      // Before timer fires: only return track unmuted
+      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
+      const muteCallsBefore = mockSend.mock.calls.filter(
+        (c: any[]) => c[0] === '/live/track/set/mute' && c[2] === 1,
+      );
+      expect(muteCallsBefore.length).toBe(0);
+
+      mockSend.mockClear();
+
+      // Advance timer (rejectionEffectDurationMs = 2000)
+      jest.advanceTimersByTime(2000);
+
+      // Track 0 was unmuted, so it should be muted
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+      // Return track re-muted
+      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 1);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // consensus_activate
+  // --------------------------------------------------------------------------
+
+  describe('consensus_activate', () => {
+    test('starts transport and unmutes fragment track', () => {
       const fragment = makeFragment(0, 2, 'B'); // track 5
 
       sendCue(router, state, {
-        type: 'slot_activate', slotIndex: 0, fragment,
+        type: 'consensus_activate',
+        layerType: 'melody',
+        fragmentId: fragment.id,
+        audioRef: fragment.audioRef,
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
     });
-  });
 
-  describe('slot_deactivate', () => {
-    test('mutes the track that was activated for this slot', () => {
-      const fragment = makeFragment(0, 2, 'B'); // track 5
-
-      // Activate then deactivate
+    test('does not restart transport if already playing', () => {
+      const fragment = makeFragment(0, 0, 'A'); // track 0
+      // Start transport first
       sendCue(router, state, {
-        type: 'slot_activate', slotIndex: 3, fragment,
+        type: 'consensus_activate',
+        layerType: 'melody',
+        fragmentId: fragment.id,
+        audioRef: fragment.audioRef,
       });
       mockSend.mockClear();
 
+      const fragment2 = makeFragment(0, 1, 'A'); // track 2
       sendCue(router, state, {
-        type: 'slot_deactivate', slotIndex: 3,
+        type: 'consensus_activate',
+        layerType: 'drums',
+        fragmentId: fragment2.id,
+        audioRef: fragment2.audioRef,
       });
 
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 1);
-    });
-
-    test('does nothing if slot was never activated', () => {
-      sendCue(router, state, {
-        type: 'slot_deactivate', slotIndex: 5,
-      });
-
-      expect(mockSend).not.toHaveBeenCalled();
+      expect(mockSend).not.toHaveBeenCalledWith('/live/song/start_playing');
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0);
     });
   });
 
   // --------------------------------------------------------------------------
-  // steward_param
+  // mix_update
   // --------------------------------------------------------------------------
 
-  describe('steward_param', () => {
-    test('sends device parameter value to correct Ableton mapping', () => {
-      const fragment = makeFragment(1, 0, 'A'); // track 14
+  describe('mix_update', () => {
+    test('unmutes new fragment track and mutes previous', () => {
+      const fragA = makeFragment(0, 0, 'A'); // track 0
+      const fragB = makeFragment(0, 1, 'A'); // track 2
 
-      // Set up finale state with an active slot
-      state.finaleState = {
-        chapterAssignments: new Map(),
-        queue: [],
-        activeSlots: Array(7).fill(null),
-        trianglePositions: new Map(),
-        centroid: { wAmbition: 1 / 3, wLove: 1 / 3, wAvoidance: 1 / 3 },
-        rotationActive: false,
-        rotationRate: 2,
-        frozen: false,
-        stewardshipLog: [],
-        triangleActive: true,
-      };
-      state.finaleState.activeSlots[2] = {
-        slotIndex: 2,
-        fragment,
-        stewardUserId: 'user-1',
-        parameterValue: 0.5,
-        activatedAtBeat: 0,
-        energyLevel: 0,
-      };
-
+      // First activate fragA via consensus_activate so activeLayerTracks knows it
       sendCue(router, state, {
-        type: 'steward_param', slotIndex: 2, value: 0.7,
+        type: 'consensus_activate',
+        layerType: 'melody',
+        fragmentId: fragA.id,
+        audioRef: fragA.audioRef,
+      });
+      mockSend.mockClear();
+
+      // Set up finaleState with allFragments
+      state.finaleState = makeV2FinaleState([fragA, fragB]);
+
+      // mix_update swaps melody from fragA to fragB
+      sendCue(router, state, {
+        type: 'mix_update',
+        changes: [{ layerType: 'melody', fragmentId: fragB.id, queuedAt: 0 }],
       });
 
-      expect(mockSend).toHaveBeenCalledWith(
-        '/live/device/set/parameter/value',
-        14, // trackIndex from abletonMapping
-        0,  // deviceIndex
-        1,  // paramIndex
-        0.7,
-      );
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1); // mute fragA
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0); // unmute fragB
     });
 
-    test('does nothing if slot is empty', () => {
-      state.finaleState = {
-        chapterAssignments: new Map(),
-        queue: [],
-        activeSlots: Array(7).fill(null),
-        trianglePositions: new Map(),
-        centroid: { wAmbition: 1 / 3, wLove: 1 / 3, wAvoidance: 1 / 3 },
-        rotationActive: false,
-        rotationRate: 2,
-        frozen: false,
-        stewardshipLog: [],
-        triangleActive: true,
-      };
+    test('mutes layer when fragmentId is null', () => {
+      const fragA = makeFragment(0, 0, 'A'); // track 0
 
       sendCue(router, state, {
-        type: 'steward_param', slotIndex: 2, value: 0.7,
+        type: 'consensus_activate',
+        layerType: 'melody',
+        fragmentId: fragA.id,
+        audioRef: fragA.audioRef,
+      });
+      mockSend.mockClear();
+
+      state.finaleState = makeV2FinaleState([fragA]);
+
+      sendCue(router, state, {
+        type: 'mix_update',
+        changes: [{ layerType: 'melody', fragmentId: null, queuedAt: 0 }],
       });
 
-      expect(mockSend).not.toHaveBeenCalled();
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+    });
+
+    test('handles multiple simultaneous changes', () => {
+      const fragMelody = makeFragment(0, 0, 'A'); // track 0
+      const fragDrums = makeFragment(0, 1, 'B');  // track 3
+
+      state.finaleState = makeV2FinaleState([fragMelody, fragDrums]);
+
+      sendCue(router, state, {
+        type: 'mix_update',
+        changes: [
+          { layerType: 'melody', fragmentId: fragMelody.id, queuedAt: 0 },
+          { layerType: 'drums', fragmentId: fragDrums.id, queuedAt: 0 },
+        ],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0); // unmute melody
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 0); // unmute drums
     });
   });
 

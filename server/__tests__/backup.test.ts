@@ -22,44 +22,53 @@ import type { ShowConfig } from '../../conductor/types';
 
 function createTestConfig(): ShowConfig {
   return {
-    maxLayersPerAttempt: 7,
+    layersPerAttempt: 7,
     attempts: [
       {
         chapter: 'ambition',
         title: 'Ambition',
+        drainFactor: 0.5,
+        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
         layers: [
-          { index: 0, type: 'foundation', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
         ],
       },
       {
         chapter: 'love',
         title: 'Love',
+        drainFactor: 0.6,
+        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
         layers: [
-          { index: 0, type: 'pulse', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 0, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
         ],
       },
       {
         chapter: 'avoidance',
         title: 'Avoidance',
+        drainFactor: 0.7,
+        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
         layers: [
-          { index: 0, type: 'color', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B', doubtThreshold: null },
+          { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
         ],
       },
     ],
     finale: {
-      slotCount: 7,
-      rotationBars: 8,
-      defaultRotationRate: 2,
-      triangleDriftTimeoutMs: 10000,
-      triangleDriftSpeedMs: 3000,
-      fragments: [],
+      consensusRoundDurationMs: 15000,
+      firstRoundDurationMs: 20000,
+      initialThreshold: 0.4,
+      thresholdDecayPerFailure: 0.05,
+      minThreshold: 0.25,
+      interRoundDelayMs: 3000,
+      successCelebrationMs: 6000,
+      npcAutoTriggers: [],
     },
     timing: {
       auditionDurationMs: 4000,
       votingWindowMs: 30000,
-      resolveAnimationMs: 5000,
-      collapseAnimationMs: 3000,
-      autoAdvanceToStoryMs: 2000,
+      revealSequenceDurationMs: 5000,
+      rejectionEffectDurationMs: 2000,
+      beatsPerLoop: 0,
+      auditionsPerLayer: 2,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1'],
@@ -130,15 +139,15 @@ describe('loadBackup', () => {
 
   test('preserves Map<UserId, User>', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
-    state.users.set('user-1', { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000, finaleChapter: null });
-    state.users.set('user-2', { id: 'user-2', seatId: 'A2', connected: false, joinedAt: 2000, finaleChapter: 'love' });
+    state.users.set('user-1', { id: 'user-1', seatId: 'A1', connected: true, joinedAt: 1000 });
+    state.users.set('user-2', { id: 'user-2', seatId: 'A2', connected: false, joinedAt: 2000 });
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
     expect(loaded.users).toBeInstanceOf(Map);
     expect(loaded.users.size).toBe(2);
     expect(loaded.users.get('user-1')?.seatId).toBe('A1');
-    expect(loaded.users.get('user-2')?.finaleChapter).toBe('love');
+    expect(loaded.users.get('user-2')?.seatId).toBe('A2');
   });
 
   test('preserves null finaleState', () => {
@@ -151,24 +160,38 @@ describe('loadBackup', () => {
   test('preserves finaleState Maps', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     state.finaleState = {
-      chapterAssignments: new Map([['u1', 'ambition'], ['u2', 'love']]),
-      queue: [],
-      activeSlots: new Array(7).fill(null),
-      trianglePositions: new Map([['u1', { wAmbition: 0.6, wLove: 0.2, wAvoidance: 0.2 }]]),
-      centroid: { wAmbition: 0.6, wLove: 0.2, wAvoidance: 0.2 },
-      rotationActive: false,
-      rotationRate: 2,
-      frozen: false,
-      stewardshipLog: [],
-      triangleActive: true,
+      phase: 'consensus_game',
+      availableFragments: [],
+      allFragments: [],
+      lockedFragments: [],
+      consensusGame: {
+        active: true,
+        currentRound: 1,
+        roundTimeRemaining: 10000,
+        votes: new Map([['u1', 'frag-0-0-A'], ['u2', 'frag-0-1-B']]),
+        convergenceValue: 0.6,
+        threshold: 0.4,
+        consecutiveFailures: 0,
+        lockedRoles: new Map([['melody', 'frag-0-0-A']]),
+      },
+      npc: { currentMessage: null, autoTriggersEnabled: false },
+      performerMix: {
+        activeLayers: new Map([['melody', 'frag-0-0-A']]),
+        pendingChanges: [],
+        loopPosition: 0,
+        loopCount: 0,
+        liveTracksActive: [],
+      },
     };
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
-    expect(loaded.finaleState!.chapterAssignments).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.chapterAssignments.get('u1')).toBe('ambition');
-    expect(loaded.finaleState!.trianglePositions).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.trianglePositions.get('u1')?.wAmbition).toBe(0.6);
+    expect(loaded.finaleState!.consensusGame.votes).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.consensusGame.votes.get('u1')).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.consensusGame.lockedRoles).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.consensusGame.lockedRoles.get('melody')).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
   });
 
   test('throws for non-existent file', () => {

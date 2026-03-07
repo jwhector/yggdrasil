@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 2026-03-06 — V2 Migration Phase 4: Server Layer Update
+
+**Context:** MIGRATION.md Phase 4. Updates the entire server layer to compile and work with the V2 conductor. Removes all V1 rotation/stewardship/triangle wiring and replaces with consensus game + performer mix.
+
+**Deleted files:**
+- `server/metering.ts` — V1 audio metering service for slot energy levels (no slots in V2)
+
+**Modified files:**
+- `conductor/types.ts` — Added `TOGGLE_AUDITION` to `ConductorCommand` (was missing from V2 types, needed by timing engine for beat-synced A/B cycling)
+- `conductor/conductor.ts` — Added `handleToggleAudition`: flips `currentAuditionOption` A↔B, increments `auditionLoopIndex`, emits `audition_stop` + `audition_start` AUDIO_CUE + `AUDITION_OPTION_CHANGED`
+- `lib/serialization.ts` — Complete rewrite for V2 `FinaleState`: serializes `consensusGame.votes`, `consensusGame.lockedRoles`, `performerMix.activeLayers` Maps to arrays; removed all V1 fields (chapterAssignments, trianglePositions, centroid, rotationActive, etc.)
+- `db/schema.sql` — V2 schema: removed `fragment_selections` table, removed `finale_chapter` from `users`, added `consensus_rounds` table
+- `server/persistence.ts` — V2 migration (version 2): drops `fragment_selections`, adds `consensus_rounds`; removed `saveFragmentSelection()`; added `saveConsensusRound()`; `saveUser()` no longer writes `finale_chapter`; `getUsersByShow()` returns `Pick<User, 'id' | 'seatId'>[]`
+- `server/socket.ts` — Removed V1 handlers (`select_fragment`, `triangle_update`, `steward_param`, centroid broadcast interval); added `consensus_vote` handler routing to `SUBMIT_CONSENSUS_VOTE`; added convergence broadcast interval at ~5 Hz during active rounds; added `NPC_MESSAGE` event broadcast; updated `filterStateForClient` for V2 shapes (audience gets `myFinale` with consensus/mix data; projector gets V2 finaleState)
+- `server/timing.ts` — Removed rotation tracking (RotationTrackingState, fallbackRotationInterval); added consensus round timer (fires `END_CONSENSUS_ROUND`); added loop boundary tracking for performer mix (fires `FIRE_PENDING_CHANGES` every 8 bars, OSC beat-synced or JS fallback); fixed OSC audition beat tracking to use delta-from-baseline logic
+- `server/audio-router.ts` — Removed `slot_activate`, `slot_deactivate`, `steward_param` handlers; added `rejection_gesture` (enables return track, schedules delayed mute after `rejectionEffectDurationMs`); added `consensus_activate` (unmutes fragment track, tracks in `activeLayerTracks`); added `mix_update` (batch mute old/unmute new tracks per `PendingChange`); replaced `finaleSlotCount` config with `rejectionReturnTrackIndex`
+- `server/index.ts` — Removed metering service; added env vars for V2 consensus game and health bar config; updated backup phase lists (`finale_rotating` → `finale_elegy`/`finale_consensus`/`finale_performer_mix`)
+
+**Test updates:**
+- `server/__tests__/audio-router.test.ts` — Updated config helpers for V2 types; removed V1 tests (`slot_activate`, `slot_deactivate`, `steward_param`); added V2 tests (`rejection_gesture`, `consensus_activate`, `mix_update`)
+- `server/__tests__/timing.test.ts` — Updated config helpers for V2 types; removed rotation tests; added consensus round timer tests and loop boundary tests (fallback + OSC)
+- `server/__tests__/persistence.test.ts` — Updated config helpers for V2 types; removed `finaleChapter` from User objects; replaced V1 finaleState test with V2; replaced `fragment_selections` test with `consensus_rounds` test
+- `server/__tests__/backup.test.ts` — Updated config helpers for V2 types; updated finaleState test for V2 shape
+
+**Tests:** 300 tests passing across 14 suites (up from 185 conductor tests; added 115 server tests passing).
+
 ## 2026-03-06 — V2 Migration Phase 3: Finale — Consensus Game + Performer Mix
 
 **Context:** MIGRATION.md Phase 3. Replaces the V1 rotation/stewardship/triangle finale system with the V2 design: a consensus game where the audience collectively activates fragments by achieving convergence above a threshold, followed by a performer mixing surface where changes queue and fire at loop boundaries.

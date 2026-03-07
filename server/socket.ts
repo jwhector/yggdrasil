@@ -10,8 +10,7 @@
  * - 'controller'  — Performer controller
  *
  * High-frequency channels (NOT via state_sync):
- * - 'centroid'  → projector at ~4 Hz  (triangle steering)
- * - 'meter'     → projector at ~10 Hz (audio metering, via metering.ts)
+ * - 'convergence_update' → audience + projector at ~5 Hz (during consensus rounds)
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -21,12 +20,9 @@ import type {
   ConductorEvent,
   UserId,
   AttemptState,
-  TrianglePosition,
   LayerConfig,
-  Fragment,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
-import { getAvailableFragments } from '../conductor/finale';
 import type { PersistenceLayer } from './persistence';
 import { serializeState } from '../lib/serialization';
 
@@ -47,10 +43,10 @@ interface ClientHeartbeat {
 // Constants
 // ============================================================================
 
-const HEARTBEAT_INTERVAL_MS = 15000;   // Ping every 15 seconds
-const HEARTBEAT_TIMEOUT_MS = 5000;     // Client must respond within 5 seconds
-const MAX_MISSED_HEARTBEATS = 2;       // 2 missed = mark disconnected
-const CENTROID_BROADCAST_INTERVAL_MS = 250;  // ~4 Hz
+const HEARTBEAT_INTERVAL_MS = 15000;            // Ping every 15 seconds
+const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 seconds
+const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
+const CONVERGENCE_BROADCAST_INTERVAL_MS = 200;  // ~5 Hz
 
 // ============================================================================
 // Setup
@@ -74,9 +70,6 @@ export function setupSocketHandlers(
 ): void {
   // Heartbeat tracking
   const heartbeats = new Map<string, ClientHeartbeat>();
-
-  // Triangle: flag for throttled centroid broadcast
-  let pendingCentroidBroadcast = false;
 
   // ============================================================================
   // Heartbeat monitor
@@ -109,18 +102,20 @@ export function setupSocketHandlers(
   }, HEARTBEAT_INTERVAL_MS);
 
   // ============================================================================
-  // Triangle centroid broadcast (throttled ~4 Hz)
+  // Convergence broadcast (throttled ~5 Hz during active consensus rounds)
   // ============================================================================
 
-  const centroidInterval = setInterval(() => {
-    if (!pendingCentroidBroadcast) return;
-    pendingCentroidBroadcast = false;
-
+  const convergenceInterval = setInterval(() => {
     const state = getState();
-    if (state.finaleState) {
-      io.to('projector').emit('centroid', state.finaleState.centroid);
+    if (
+      state.phase === 'finale_consensus' &&
+      state.finaleState?.consensusGame.active
+    ) {
+      const value = state.finaleState.consensusGame.convergenceValue;
+      io.to('audience').emit('convergence_update', { value });
+      io.to('projector').emit('convergence_update', { value });
     }
-  }, CENTROID_BROADCAST_INTERVAL_MS);
+  }, CONVERGENCE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
   // Cleanup
@@ -128,7 +123,7 @@ export function setupSocketHandlers(
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
-    clearInterval(centroidInterval);
+    clearInterval(convergenceInterval);
   });
 
   // ============================================================================
@@ -261,10 +256,11 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // vote — binary A/B vote for current layer
+    // vote — binary A/B vote for current layer (song-building)
     //
     // Payload: { choice: 'A' | 'B' }
-    // userId taken from socket session (not payload) for security
+    // Vote is final — no changing during window (blind vote mechanic).
+    // userId taken from socket session (not payload) for security.
     // ------------------------------------------------------------------
     socket.on('vote', async (data: { choice: 'A' | 'B' }) => {
       const userId = (socket as any).userId as UserId;
@@ -277,6 +273,18 @@ export function setupSocketHandlers(
 
       const state = getState();
 
+      // Reject if user already voted this layer (enforce blind vote / no-change)
+      const attempt = state.attempts[state.currentAttemptIndex];
+      const alreadyVoted = attempt?.votes.some(
+        v => v.userId === userId &&
+             v.attemptIndex === state.currentAttemptIndex &&
+             v.layerIndex === attempt.currentLayerIndex
+      );
+      if (alreadyVoted) {
+        console.warn(`[Socket] Vote rejected: ${userId} already voted this layer`);
+        return;
+      }
+
       const events = processCommand(state, {
         type: 'SUBMIT_VOTE',
         userId,
@@ -287,11 +295,11 @@ export function setupSocketHandlers(
       persistence.saveState(state);
 
       // Save vote record to DB for analysis / recovery
-      const attempt = state.attempts[state.currentAttemptIndex];
-      const vote = attempt?.votes.find(
+      const updatedAttempt = state.attempts[state.currentAttemptIndex];
+      const vote = updatedAttempt?.votes.find(
         v => v.userId === userId &&
              v.attemptIndex === state.currentAttemptIndex &&
-             v.layerIndex === attempt.currentLayerIndex
+             v.layerIndex === updatedAttempt.currentLayerIndex
       );
       if (vote) {
         persistence.saveLayerVote(vote, state.id);
@@ -301,89 +309,36 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // select_fragment — audience member queues a fragment for finale
+    // consensus_vote — audience votes for a fragment during finale consensus
     //
     // Payload: { fragmentId: string }
+    // Votes are ephemeral within a round — not persisted to DB.
+    // userId taken from socket session (not payload) for security.
     // ------------------------------------------------------------------
-    socket.on('select_fragment', async (data: { fragmentId: string }) => {
+    socket.on('consensus_vote', async (data: { fragmentId: string }) => {
       const userId = (socket as any).userId as UserId;
       if (!userId) {
-        console.warn('[Socket] select_fragment rejected: no userId on socket');
+        console.warn('[Socket] consensus_vote rejected: no userId on socket');
         return;
       }
 
-      console.log(`[Socket] Fragment selection from ${userId}: ${data.fragmentId}`);
+      if (typeof data.fragmentId !== 'string' || !data.fragmentId) {
+        console.warn(`[Socket] consensus_vote rejected: invalid fragmentId from ${userId}`);
+        return;
+      }
+
+      console.log(`[Socket] Consensus vote from ${userId}: ${data.fragmentId}`);
 
       const state = getState();
 
       const events = processCommand(state, {
-        type: 'SELECT_FRAGMENT',
+        type: 'SUBMIT_CONSENSUS_VOTE',
         userId,
         fragmentId: data.fragmentId,
       });
 
       setState(state, events);
-      persistence.saveState(state);
-
-      // Save fragment selection to DB
-      persistence.saveFragmentSelection(userId, data.fragmentId, state.id);
-
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // triangle_update — high-frequency triangle position (audience → projector)
-    //
-    // Payload: { wAmbition: number, wLove: number, wAvoidance: number }
-    //
-    // Does NOT go through full state_sync pipeline — centroid is broadcast
-    // separately on the throttled centroidInterval (~4 Hz).
-    // ------------------------------------------------------------------
-    socket.on('triangle_update', (data: TrianglePosition) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
-      const state = getState();
-
-      const events = processCommand(state, {
-        type: 'UPDATE_TRIANGLE',
-        userId,
-        position: data,
-      });
-
-      // Check for errors (e.g., wrong phase) but skip full state_sync
-      const err = events.find(e => e.type === 'ERROR');
-      if (err) {
-        console.warn('[Socket] triangle_update error:', (err as any).message);
-        return;
-      }
-
-      // Flag centroid for next throttled broadcast
-      pendingCentroidBroadcast = true;
-    });
-
-    // ------------------------------------------------------------------
-    // steward_param — active steward adjusts their fragment's parameter
-    //
-    // Payload: { value: number }
-    // ------------------------------------------------------------------
-    socket.on('steward_param', async (data: { value: number }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) {
-        console.warn('[Socket] steward_param rejected: no userId on socket');
-        return;
-      }
-
-      const state = getState();
-
-      const events = processCommand(state, {
-        type: 'UPDATE_STEWARD_PARAM',
-        userId,
-        value: data.value,
-      });
-
-      setState(state, events);
-      persistence.saveState(state);
+      // No persistence — consensus votes are ephemeral within a round
 
       await broadcastEvents(io, events, state);
     });
@@ -424,6 +379,26 @@ export function setupSocketHandlers(
       const events = processCommand(state, processedCommand);
       setState(state, events);
       persistence.saveState(state);
+
+      // Persist consensus round results when a round ends
+      if (processedCommand.type === 'END_CONSENSUS_ROUND') {
+        const successEvent = events.find(e => e.type === 'CONSENSUS_ROUND_SUCCESS') as
+          | { type: 'CONSENSUS_ROUND_SUCCESS'; fragmentId: string; convergence: number }
+          | undefined;
+        const failureEvent = events.find(e => e.type === 'CONSENSUS_ROUND_FAILURE') as
+          | { type: 'CONSENSUS_ROUND_FAILURE'; highestConvergence: number }
+          | undefined;
+        const finaleState = state.finaleState;
+        if (finaleState) {
+          const roundNumber = finaleState.consensusGame.currentRound;
+          const threshold = finaleState.consensusGame.threshold;
+          if (successEvent) {
+            persistence.saveConsensusRound(state.id, roundNumber, successEvent.fragmentId, successEvent.convergence, threshold, true);
+          } else if (failureEvent) {
+            persistence.saveConsensusRound(state.id, roundNumber, null, failureEvent.highestConvergence, threshold, false);
+          }
+        }
+      }
 
       await broadcastEvents(io, events, state);
     });
@@ -487,9 +462,14 @@ export async function broadcastEvents(
         io.emit('force_reconnect', { reason: event.reason });
         break;
 
+      case 'NPC_MESSAGE':
+        io.to('audience').emit('npc_message', { message: event.message });
+        io.to('projector').emit('npc_message', { message: event.message });
+        break;
+
       case 'ERROR':
         io.to('controller').emit('error', event);
-        console.error('[Conductor Error]:', event.message, event.command?.type);
+        console.error('[Conductor Error]:', event.message, (event as any).command?.type);
         break;
 
       default:
@@ -507,7 +487,7 @@ export async function broadcastEvents(
  *
  * Controller: full serialized state (Maps → arrays for JSON compatibility)
  * Projector:  public display state (no per-user data)
- * Audience:   personalized state (their chapter, votes, stewardship)
+ * Audience:   personalized state (their vote, their consensus vote)
  */
 export function filterStateForClient(
   state: ShowState,
@@ -530,14 +510,24 @@ export function filterStateForClient(
         userCount: state.users.size,
         attempts: state.attempts,
         finaleState: fs ? {
-          queue: fs.queue,
-          activeSlots: fs.activeSlots,
-          centroid: fs.centroid,
-          rotationActive: fs.rotationActive,
-          rotationRate: fs.rotationRate,
-          frozen: fs.frozen,
-          triangleActive: fs.triangleActive,
-          stewardshipLog: fs.stewardshipLog,
+          phase: fs.phase,
+          availableFragments: fs.availableFragments,
+          lockedFragments: fs.lockedFragments,
+          consensusGame: {
+            active: fs.consensusGame.active,
+            currentRound: fs.consensusGame.currentRound,
+            convergenceValue: fs.consensusGame.convergenceValue,
+            threshold: fs.consensusGame.threshold,
+            consecutiveFailures: fs.consensusGame.consecutiveFailures,
+            lockedRoles: Array.from(fs.consensusGame.lockedRoles.entries()),
+          },
+          npc: fs.npc,
+          performerMix: {
+            activeLayers: Array.from(fs.performerMix.activeLayers.entries()),
+            pendingChanges: fs.performerMix.pendingChanges,
+            loopPosition: fs.performerMix.loopPosition,
+            loopCount: fs.performerMix.loopCount,
+          },
         } : null,
         config: state.config,
       };
@@ -571,45 +561,19 @@ export function filterStateForClient(
       let myFinale: object | null = null;
       const fs = state.finaleState;
       if (fs) {
-        // Find steward slot for this user
-        let stewardSlotIndex: number | null = null;
-        let stewardFragment: Fragment | null = null;
-        let stewardParameterLabel: string | null = null;
-        let stewardParameterValue: number | null = null;
-
-        for (let i = 0; i < fs.activeSlots.length; i++) {
-          const slot = fs.activeSlots[i];
-          if (slot?.stewardUserId === userId) {
-            stewardSlotIndex = i;
-            stewardFragment = slot.fragment;
-            stewardParameterLabel = slot.fragment.safeParameter.displayLabel;
-            stewardParameterValue = slot.parameterValue;
-            break;
-          }
-        }
-
-        // Find this user's queued fragment
-        const myQueueEntry = fs.queue.find(q => q.userId === userId);
-        const myFragment: Fragment | null = myQueueEntry?.fragment ?? null;
-
-        // Fragments for this user's chapter (selectable = winner, false = loser/unreached)
-        const availableFragments = user.finaleChapter
-          ? getAvailableFragments(state)
-              .filter(fa => fa.fragment.chapter === user.finaleChapter)
-              .map(fa => ({ fragment: fa.fragment, selectable: fa.selectable }))
-          : [];
+        // Find this user's consensus vote (null if not voted this round)
+        const myConsensusVote: string | null = fs.consensusGame.votes.get(userId) ?? null;
 
         myFinale = {
-          myChapter: user.finaleChapter,
-          isSteward: stewardSlotIndex !== null,
-          stewardSlotIndex,
-          stewardFragment,
-          stewardParameterLabel,
-          stewardParameterValue,
-          myTrianglePosition: fs.trianglePositions.get(userId) ?? null,
-          myFragment,
-          triangleActive: fs.triangleActive,
-          availableFragments,
+          finalePhase: fs.phase,
+          myConsensusVote,
+          convergenceValue: fs.consensusGame.convergenceValue,
+          threshold: fs.consensusGame.threshold,
+          roundActive: fs.consensusGame.active,
+          currentRound: fs.consensusGame.currentRound,
+          lockedRoles: Array.from(fs.consensusGame.lockedRoles.entries()),
+          npcMessage: fs.npc.currentMessage,
+          availableFragments: fs.availableFragments,
         };
       }
 
@@ -619,7 +583,6 @@ export function filterStateForClient(
         phase: state.phase,
         paused: state.paused,
         version: state.version,
-        finaleChapter: user.finaleChapter,
         currentAttemptIndex: state.currentAttemptIndex,
         currentAttempt: attempt ? {
           index: attempt.index,
@@ -633,7 +596,11 @@ export function filterStateForClient(
           myVote,
           currentAuditionOption: attempt.currentAuditionOption,
           auditionLoopIndex: attempt.auditionLoopIndex,
-          auditionTotalLoops: state.config.timing.auditionsPerLayer * 2,
+          auditionTotalLoops: (state.config.timing.auditionsPerLayer ?? 2) * 2,
+          healthBar: {
+            current: attempt.healthBar.current,
+            drainFactor: attempt.healthBar.drainFactor,
+          },
         } : null,
         myFinale,
         config: {

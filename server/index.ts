@@ -1,13 +1,12 @@
 /**
  * Yggdrasil Custom Server
- * 
+ *
  * This file creates an HTTP server that:
  * 1. Serves Next.js pages (app/ routes)
  * 2. Handles Socket.IO connections (real-time events)
  * 3. Manages SQLite persistence
  * 4. Runs the Conductor (game logic)
- * 5. 
- * 
+ *
  * Start with: npm run dev (development) or npm run start (production)
  */
 
@@ -31,7 +30,6 @@ import { createAndPruneBackup } from './backup';
 import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
 import { createAudioRouter, type AudioRouter, type AbletonLayoutConfig } from './audio-router';
-import { createMeteringService } from './metering';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || 'localhost';
@@ -54,21 +52,35 @@ const TIMING_ENGINE_ENABLED = process.env.TIMING_ENGINE_ENABLED !== 'false'; // 
 const OSC_ENABLED = process.env.OSC_ENABLED !== 'false'; // Default: true
 const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '11000', 10);
 const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
-const ABLETON_HOST = process.env.ABLETON_HOST || '127.0.0.1';
+const ABLETON_HOST = process.env.ABLETON_HOST || process.env.OSC_HOST || '127.0.0.1';
+
+// Health Bar defaults (used as config overrides when not specified in show config)
+const _DEFAULT_DRAIN_FACTOR = parseFloat(process.env.DEFAULT_DRAIN_FACTOR || '0.5');
+const _DEFAULT_LAYER_MULTIPLIERS = (process.env.DEFAULT_LAYER_MULTIPLIERS || '0.5,0.6,0.8,1.0,1.3,1.6,2.0')
+  .split(',').map(Number);
+
+// Consensus Game timing (used as config overrides when not specified in show config)
+const _CONSENSUS_ROUND_DURATION_MS = parseInt(process.env.CONSENSUS_ROUND_DURATION_MS || '15000', 10);
+const _CONSENSUS_FIRST_ROUND_DURATION_MS = parseInt(process.env.CONSENSUS_FIRST_ROUND_DURATION_MS || '20000', 10);
+const _CONSENSUS_INITIAL_THRESHOLD = parseFloat(process.env.CONSENSUS_INITIAL_THRESHOLD || '0.4');
+const _CONSENSUS_FAILURE_THRESHOLD_DECAY = parseFloat(process.env.CONSENSUS_FAILURE_THRESHOLD_DECAY || '0.05');
+const _CONSENSUS_MIN_THRESHOLD = parseFloat(process.env.CONSENSUS_MIN_THRESHOLD || '0.25');
+const _CONSENSUS_INTER_ROUND_DELAY_MS = parseInt(process.env.CONSENSUS_INTER_ROUND_DELAY_MS || '3000', 10);
+const _CONSENSUS_SUCCESS_CELEBRATION_MS = parseInt(process.env.CONSENSUS_SUCCESS_CELEBRATION_MS || '6000', 10);
 
 async function main() {
   // Initialize Next.js
   const app = next({ dev, hostname, port });
   const handle = app.getRequestHandler();
-  
+
   await app.prepare();
-  
+
   // Create HTTP server
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true);
     handle(req, res, parsedUrl);
   });
-  
+
   // Attach Socket.IO
   const io = new SocketIOServer(server, {
     cors: {
@@ -78,7 +90,7 @@ async function main() {
     pingTimeout: 5000,
     pingInterval: 15000,
   });
-  
+
   // Ensure data directories exist
   try {
     mkdirSync(DATA_DIR, { recursive: true });
@@ -121,18 +133,18 @@ async function main() {
     return currentState;
   }
 
-  // Hooks for state change notifications (registered by timing engine and OSC)
+  // Hooks for state change notifications (registered by timing engine and audio router)
   const stateChangeHooks: Array<(state: ShowState, events: ConductorEvent[]) => void> = [];
 
   function setState(state: ShowState, events: ConductorEvent[]): void {
     currentState = state;
 
-    // Create backup on phase transitions
+    // Create backup on key phase transitions
     if (events.some(e => e.type === 'SHOW_PHASE_CHANGED')) {
       const phaseEvent = events.find(e => e.type === 'SHOW_PHASE_CHANGED') as any;
 
       // Backup when the show starts and when the finale begins
-      if (phaseEvent.phase === 'opener' || phaseEvent.phase === 'finale_rotating') {
+      if (phaseEvent.phase === 'opener' || phaseEvent.phase === 'finale_elegy') {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, 10);
           console.log(`[Backup] Created backup: ${backupPath}`);
@@ -236,16 +248,6 @@ async function main() {
     audioRouter.handleStateChange(state, events);
   });
 
-  // Create metering service and wire OSC → projector
-  const meteringService = createMeteringService(io);
-  const FINALE_SLOT_COUNT = abletonLayoutConfig.finaleSlotCount ?? 7;
-  for (let i = 0; i < FINALE_SLOT_COUNT; i++) {
-    oscBridge.on(`/meter/slot/${i}`, (level: number) => {
-      meteringService.updateSlotLevel(i, level);
-    });
-  }
-  console.log(`[Server] Metering wired for ${FINALE_SLOT_COUNT} slots`);
-
   // Start OSC bridge and timing engine
   try {
     await oscBridge.start();
@@ -269,8 +271,8 @@ async function main() {
     periodicBackupInterval = setInterval(() => {
       const state = getState();
 
-      // Only backup during active show phases to avoid cluttering with lobby backups
-      const activePhases = ['attempt_story', 'attempt_build', 'finale_setup', 'finale_rotating', 'finale_frozen'];
+      // Only backup during active show phases
+      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_consensus', 'finale_performer_mix'];
       if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);
@@ -292,10 +294,9 @@ async function main() {
       console.log('[Server] Timing engine stopped');
     }
 
-    // Stop audio router and metering
+    // Stop audio router
     audioRouter.dispose();
-    meteringService.dispose();
-    console.log('[Server] Audio router and metering stopped');
+    console.log('[Server] Audio router stopped');
 
     // Stop OSC bridge
     oscBridge.stop();

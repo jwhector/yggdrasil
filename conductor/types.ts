@@ -338,6 +338,8 @@ export interface TimingConfig {
   votingWindowMs: number;               // How long voting stays open
   revealSequenceDurationMs: number;     // Duration of post-vote reveal animation
   rejectionEffectDurationMs: number;    // Duration of song rejection effect
+  beatsPerLoop: number;                 // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
+  auditionsPerLayer: number;            // Number of A/B cycles per layer before voting opens
 }
 
 // ============================================================================
@@ -368,6 +370,7 @@ export type ConductorCommand =
 
   // Song-building
   | { type: 'START_AUDITION' }
+  | { type: 'TOGGLE_AUDITION' }
   | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }

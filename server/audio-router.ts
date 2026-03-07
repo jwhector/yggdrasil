@@ -9,17 +9,18 @@
  * The audio router handles ALL outbound audio OSC messages.
  *
  * Track Layout (arrangement mode — all clips pre-laid out, mute/unmute only):
- *   trackIndex = attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset
+ *   trackIndex = attemptIndex * (layersPerAttempt * 2) + layerIndex * 2 + optionOffset
  *   - optionOffset: 0 for Option A, 1 for Option B
- *   - With maxLayersPerAttempt=7: 42 tracks total (0–41)
+ *   - With layersPerAttempt=7: 42 tracks total (0–41)
  *   - Example: Attempt 0, Layer 2, Option B = 0*14 + 2*2 + 1 = track 5
  *
  * Collapse gesture uses a master return track with effects (distortion, filter sweep,
  * reverb tail). All song-building tracks route through this return.
  *
- * Finale fragments reference the same Ableton tracks used during song-building.
- * Stewardship parameters map to Ableton device parameters via SafeParameter.abletonMapping.
- * Smoothing is handled by the Ableton device configuration, not the server.
+ * Song rejection uses the same return track (or a configurable separate one).
+ *
+ * Finale consensus activation: unmute the winning fragment's track.
+ * Performer mix updates: batch mute/unmute at loop boundary.
  */
 
 import type { OSCBridge } from './osc';
@@ -28,6 +29,7 @@ import type {
   ConductorEvent,
   AudioCue,
   AudioReference,
+  LayerType,
 } from '../conductor/types';
 
 // ============================================================================
@@ -35,17 +37,17 @@ import type {
 // ============================================================================
 
 export interface AbletonLayoutConfig {
-  maxLayersPerAttempt: number;      // Default: 7
-  attemptCount: number;              // Default: 3
-  collapseReturnTrackIndex: number;  // Return track index for collapse effects
-  finaleSlotCount: number;           // Default: 7
+  maxLayersPerAttempt: number;       // Default: 7
+  attemptCount: number;               // Default: 3
+  collapseReturnTrackIndex: number;   // Return track index for collapse effects
+  rejectionReturnTrackIndex: number;  // Return track index for rejection effects (can be same as collapse)
 }
 
 const DEFAULT_LAYOUT: AbletonLayoutConfig = {
   maxLayersPerAttempt: 7,
   attemptCount: 3,
   collapseReturnTrackIndex: 0,
-  finaleSlotCount: 7,
+  rejectionReturnTrackIndex: 0,
 };
 
 // ============================================================================
@@ -89,8 +91,10 @@ interface AudioRouterState {
   transportStarted: boolean;
   /** Pending collapse cleanup timers, keyed by attemptIndex */
   collapseTimers: Map<number, NodeJS.Timeout>;
-  /** Maps finale slotIndex → trackIndex for deactivation lookup */
-  activatedSlotTracks: Map<number, number>;
+  /** Pending rejection cleanup timers, keyed by attemptIndex */
+  rejectionTimers: Map<number, NodeJS.Timeout>;
+  /** Active layer type → track index for performer mix */
+  activeLayerTracks: Map<LayerType, number>;
 }
 
 // ============================================================================
@@ -110,7 +114,8 @@ export function createAudioRouter(
     unmutedTracks: new Set(),
     transportStarted: false,
     collapseTimers: new Map(),
-    activatedSlotTracks: new Map(),
+    rejectionTimers: new Map(),
+    activeLayerTracks: new Map(),
   };
 
   // --------------------------------------------------------------------------
@@ -144,7 +149,7 @@ export function createAudioRouter(
       oscBridge.send('/live/track/set/mute', i, 1);
     }
     routerState.unmutedTracks.clear();
-    routerState.activatedSlotTracks.clear();
+    routerState.activeLayerTracks.clear();
   }
 
   function enableEffects(audioRef: AudioReference): void {
@@ -170,6 +175,13 @@ export function createAudioRouter(
     routerState.collapseTimers.clear();
   }
 
+  function clearRejectionTimers(): void {
+    for (const timer of routerState.rejectionTimers.values()) {
+      clearTimeout(timer);
+    }
+    routerState.rejectionTimers.clear();
+  }
+
   function stopPlayback(): void {
     oscBridge.send('/live/song/stop_playing');
     routerState.transportStarted = false;
@@ -187,15 +199,14 @@ export function createAudioRouter(
     // Disable the other option's effects first
     disableEffects(otherAudioRef);
 
-    // When both options share the same track (effect-only swap), skip track mute/unmute entirely
+    // When both options share the same track (effect-only swap), skip track mute/unmute
     // to avoid a brief audio glitch from muting then immediately unmuting the same track.
     const sameTrack = otherAudioRef.trackIndex === audioRef.trackIndex;
     if (!sameTrack) {
       muteTrack(otherAudioRef.trackIndex);
     }
-    
+
     unmuteTrack(audioRef.trackIndex);
-    // Enable this option's effects
     enableEffects(audioRef);
   }
 
@@ -229,7 +240,7 @@ export function createAudioRouter(
     oscBridge.send('/live/return/set/mute', layout.collapseReturnTrackIndex, 0);
 
     // Schedule cleanup: mute all attempt tracks + re-mute return after animation
-    const collapseMs = state.config.timing.collapseAnimationMs;
+    const collapseMs = state.config.timing.revealSequenceDurationMs;
     const timer = setTimeout(() => {
       const baseTrack = cue.attemptIndex * (layout.maxLayersPerAttempt * 2);
       const trackCount = layout.maxLayersPerAttempt * 2;
@@ -244,36 +255,64 @@ export function createAudioRouter(
     routerState.collapseTimers.set(cue.attemptIndex, timer);
   }
 
-  function handleSlotActivate(cue: Extract<AudioCue, { type: 'slot_activate' }>): void {
-    ensureTransportStarted();
-    const trackIndex = cue.fragment.audioRef.trackIndex;
-    unmuteTrack(trackIndex);
-    routerState.activatedSlotTracks.set(cue.slotIndex, trackIndex);
-  }
-
-  function handleSlotDeactivate(cue: Extract<AudioCue, { type: 'slot_deactivate' }>): void {
-    const trackIndex = routerState.activatedSlotTracks.get(cue.slotIndex);
-    if (trackIndex !== undefined) {
-      muteTrack(trackIndex);
-      routerState.activatedSlotTracks.delete(cue.slotIndex);
-    }
-  }
-
-  function handleStewardParam(
-    cue: Extract<AudioCue, { type: 'steward_param' }>,
+  function handleRejectionGesture(
+    cue: Extract<AudioCue, { type: 'rejection_gesture' }>,
     state: ShowState,
   ): void {
-    const slot = state.finaleState?.activeSlots[cue.slotIndex];
-    if (!slot) return;
+    // Enable rejection return track effects
+    oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 0);
 
-    const mapping = slot.fragment.safeParameter.abletonMapping;
-    oscBridge.send(
-      '/live/device/set/parameter/value',
-      mapping.trackIndex,
-      mapping.deviceIndex,
-      mapping.paramIndex,
-      cue.value,
-    );
+    // Schedule cleanup: mute all attempt tracks + re-mute return after effect
+    const rejectionMs = state.config.timing.rejectionEffectDurationMs;
+    const timer = setTimeout(() => {
+      const baseTrack = cue.attemptIndex * (layout.maxLayersPerAttempt * 2);
+      const trackCount = layout.maxLayersPerAttempt * 2;
+      for (let i = 0; i < trackCount; i++) {
+        muteTrack(baseTrack + i);
+      }
+      oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 1);
+      routerState.rejectionTimers.delete(cue.attemptIndex);
+    }, rejectionMs);
+
+    routerState.rejectionTimers.set(cue.attemptIndex, timer);
+  }
+
+  function handleConsensusActivate(cue: Extract<AudioCue, { type: 'consensus_activate' }>): void {
+    ensureTransportStarted();
+    unmuteTrack(cue.audioRef.trackIndex);
+    routerState.activeLayerTracks.set(cue.layerType, cue.audioRef.trackIndex);
+  }
+
+  function handleMixUpdate(
+    cue: Extract<AudioCue, { type: 'mix_update' }>,
+    state: ShowState,
+  ): void {
+    // Apply all pending changes simultaneously at loop boundary
+    for (const change of cue.changes) {
+      const { layerType, fragmentId } = change;
+
+      // Mute previous track for this layer type (if any)
+      const previousTrack = routerState.activeLayerTracks.get(layerType);
+      if (previousTrack !== undefined) {
+        muteTrack(previousTrack);
+      }
+
+      if (fragmentId !== null) {
+        // Find the new fragment's track from the finale state
+        const finaleState = state.finaleState;
+        const fragment = finaleState?.allFragments.find(f => f.id === fragmentId);
+        if (fragment) {
+          unmuteTrack(fragment.audioRef.trackIndex);
+          routerState.activeLayerTracks.set(layerType, fragment.audioRef.trackIndex);
+        } else {
+          console.warn(`[AudioRouter] mix_update: fragment ${fragmentId} not found in allFragments`);
+          routerState.activeLayerTracks.delete(layerType);
+        }
+      } else {
+        // Muting this layer — no new track to activate
+        routerState.activeLayerTracks.delete(layerType);
+      }
+    }
   }
 
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
@@ -311,14 +350,14 @@ export function createAudioRouter(
           case 'collapse_gesture':
             handleCollapseGesture(cue, state);
             break;
-          case 'slot_activate':
-            handleSlotActivate(cue);
+          case 'rejection_gesture':
+            handleRejectionGesture(cue, state);
             break;
-          case 'slot_deactivate':
-            handleSlotDeactivate(cue);
+          case 'consensus_activate':
+            handleConsensusActivate(cue);
             break;
-          case 'steward_param':
-            handleStewardParam(cue, state);
+          case 'mix_update':
+            handleMixUpdate(cue, state);
             break;
           case 'transport':
             handleTransport(cue);
@@ -333,6 +372,7 @@ export function createAudioRouter(
         muteAllTracks();
         stopPlayback();
         clearCollapseTimers();
+        clearRejectionTimers();
       }
 
       if (event.type === 'PAUSED') {
@@ -352,9 +392,10 @@ export function createAudioRouter(
 
   function dispose(): void {
     routerState.unmutedTracks.clear();
-    routerState.activatedSlotTracks.clear();
+    routerState.activeLayerTracks.clear();
     routerState.transportStarted = false;
     clearCollapseTimers();
+    clearRejectionTimers();
   }
 
   return {
