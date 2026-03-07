@@ -87,6 +87,17 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Decision:** When Song 3 collapses or completes, the transition to the finale is performer-triggered (manual), unlike Songs 1→2 and 2→3 which auto-advance.
 **Rationale:** The performer needs a narrative beat between the last attempt and the finale. This may change later.
 
+### R16: Revealing phase — Two-command split (CLOSE_VOTING + ADVANCE_FROM_REVEAL)
+**Date:** 2026-03-06
+**Decision:** `CLOSE_VOTING` resolves the vote and pauses at `revealing` phase; a separate `ADVANCE_FROM_REVEAL` command (auto-fired by the timing engine after `revealSequenceDurationMs`) advances to `locked_in` or `collapsed`. Vote result and drain are stored on `AttemptState` (`currentVoteResult`, `currentDrain`) during the revealing window.
+**Rationale:** The RevealSequence UI (~5s animation) requires the conductor to hold at `revealing` as a true resting state so clients can observe it. The previous atomic `resolveCurrentLayer()` processed `revealing` → `locked_in` in one step, making the UI impossible. Splitting into two commands also makes the timing engine's role explicit and keeps conductor logic pure.
+**Impact:** `ConductorCommand` gained `ADVANCE_FROM_REVEAL`. `AttemptState` gained `currentVoteResult` and `currentDrain`. All test helpers that call `CLOSE_VOTING` must also call `ADVANCE_FROM_REVEAL`.
+
+### R17: Reveal beat durations
+**Date:** 2026-03-06
+**Decision:** Tension: 900ms, Split: 2000ms, Drain: 1500ms, Lock-in: 500ms (total ~4.9s). Client-side only (useState + useEffect timeouts); no server clock.
+**Rationale:** Total matches `revealSequenceDurationMs` (~5s). Drain gets more time than lock-in because the health bar animation is the primary tension moment. Audience and projector run independent timers — slight drift is acceptable since they're decorative, not mechanically coupled.
+
 ---
 
 ## Open Decisions

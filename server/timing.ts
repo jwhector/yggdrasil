@@ -450,6 +450,14 @@ export function createTimingEngine(
           stopAuditionTracking();
           handleVotingPhase(state);
           break;
+        case 'revealing': {
+          const revealMs = state.config.timing.revealSequenceDurationMs;
+          console.log(`[Timing] Revealing: scheduling ${revealMs}ms timer → ADVANCE_FROM_REVEAL`);
+          scheduleTimer(revealMs, state.version, 'revealing', () => {
+            sendCommand({ type: 'ADVANCE_FROM_REVEAL' });
+          });
+          break;
+        }
         case 'locked_in':
           stopAuditionTracking();
           console.log('[Timing] Layer locked in — waiting for manual advance');

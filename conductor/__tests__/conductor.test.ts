@@ -111,14 +111,16 @@ function connectUser(state: ShowState, userId: string): void {
   processCommand(state, { type: 'USER_CONNECT', userId });
 }
 
-/** Run through the full layer cycle: audition → vote → close. */
+/** Run through the full layer cycle: audition → vote → close → advance from reveal. */
 function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | 'B' = 'A'): ConductorEvent[] {
   processCommand(state, { type: 'START_AUDITION' });
   processCommand(state, { type: 'OPEN_VOTING' });
   for (const userId of voters) {
     processCommand(state, { type: 'SUBMIT_VOTE', userId, choice });
   }
-  return processCommand(state, { type: 'CLOSE_VOTING' });
+  const revealEvents = processCommand(state, { type: 'CLOSE_VOTING' });
+  const lockInEvents = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+  return [...revealEvents, ...lockInEvents];
 }
 
 /** Run through N layers with unanimous votes (no drain). */
@@ -448,6 +450,7 @@ describe('Health Bar Drain Mechanics', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     const layer0Events = processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     // Layer 1: 50/50 split → drain = 0.5 * 100 * 0.5 * 2.0 = 50
     processCommand(state, { type: 'START_AUDITION' });
@@ -590,13 +593,15 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
-    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    const closeEvents = processCommand(state, { type: 'CLOSE_VOTING' });
+    const advanceEvents = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    const allEvents = [...closeEvents, ...advanceEvents];
 
     expect(state.attempts[0].status).toBe('collapsed');
     expect(state.attempts[0].collapsedAtLayer).toBe(0);
     expect(state.attempts[0].healthBar.current).toBe(0);
-    expect(findEvent(events, 'ATTEMPT_COLLAPSED')).toBeDefined();
-    expect(findEvent(events, 'HEALTH_BAR_DRAINED')).toBeDefined();
+    expect(findEvent(allEvents, 'ATTEMPT_COLLAPSED')).toBeDefined();
+    expect(findEvent(allEvents, 'HEALTH_BAR_DRAINED')).toBeDefined();
   });
 
   test('ATTEMPT_COLLAPSED event includes healthBar state', () => {
@@ -610,7 +615,8 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
-    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    const events = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
     const collapsed = findEvent(events, 'ATTEMPT_COLLAPSED') as any;
 
     expect(collapsed).toBeDefined();
@@ -632,6 +638,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
     expect(state.attempts[0].status).toBe('in_progress');
 
     // Layer 1: 50/50, multiplier=1.0, drainFactor=2.0 → drain=100 → collapse
@@ -640,6 +647,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     expect(state.attempts[0].status).toBe('collapsed');
     expect(state.attempts[0].collapsedAtLayer).toBe(1);
@@ -657,7 +665,8 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
-    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    const events = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
     const collapseAudio = events.find(
       e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'collapse_gesture'
     );
@@ -676,6 +685,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     expect(state.phase).toBe('attempt_story');
     expect(state.currentAttemptIndex).toBe(1);
@@ -694,6 +704,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
     // Now at attempt_story index 1
 
     // Advance to attempt_build 1 and collapse
@@ -703,6 +714,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     expect(state.phase).toBe('attempt_story');
     expect(state.currentAttemptIndex).toBe(2);
@@ -720,6 +732,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     // Should stay in attempt_build (not auto-advance to finale)
     expect(state.phase).toBe('attempt_build');
@@ -741,6 +754,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     // Layer 1: collapses (drainFactor=2.0, multiplier=1.0, 50/50 → drain=100)
     processCommand(state, { type: 'START_AUDITION' });
@@ -748,6 +762,7 @@ describe('Health Bar Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
     const results = state.attempts[0].layerResults;
     expect(results.find(r => r.layerIndex === 0)?.status).toBe('locked_in');

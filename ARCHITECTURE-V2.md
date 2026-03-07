@@ -315,12 +315,13 @@ The vote window is a configurable duration (default: 10–15 seconds). During th
 - **No live feedback** on vote distribution. The audience cannot see which option is leading.
 - This preserves authentic expression: you vote your preference, not the crowd's momentum
 
-When the vote window closes, the **Reveal Sequence** plays:
-1. **Tension beat** (~1s): both options displayed, no result
-2. **Split reveal** (~2s): winning option grows, losing option shrinks proportionally
-3. **Health bar drain** (~2s): animated depletion based on losing proportion
-4. **Lock-in** (~2s): winning option's audio unmutes and enters the mix
-5. **Advance**: next layer begins auditioning
+When the vote window closes, the **Reveal Sequence** plays (~5s total, matching `revealSequenceDurationMs`). The conductor pauses at `revealing` phase until `ADVANCE_FROM_REVEAL` fires from the timing engine after this duration.
+
+1. **Tension beat** (~0.9s): both options displayed equal size, muted, no result
+2. **Split reveal** (~2s): winning option grows (flex proportional to consensus), losing option shrinks + dims
+3. **Health bar drain** (~1.5s): drain shadow appears briefly then animates actual depletion; projector shows exact vote counts, audience sees only the visual split
+4. **Lock-in** (~0.5s): winning option gets glow accent
+5. **Advance**: `ADVANCE_FROM_REVEAL` fires → `lockInLayer()` or `collapseAttempt()`; next layer begins auditioning
 
 ### Health Bar
 

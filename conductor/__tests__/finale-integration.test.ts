@@ -92,6 +92,7 @@ function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | '
   processCommand(state, { type: 'OPEN_VOTING' });
   for (const userId of voters) processCommand(state, { type: 'SUBMIT_VOTE', userId, choice });
   processCommand(state, { type: 'CLOSE_VOTING' });
+  processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 }
 
 /**

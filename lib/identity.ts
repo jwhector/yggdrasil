@@ -29,12 +29,14 @@ export const CHAPTER_IDENTITY: Record<Chapter, ChapterIdentity> = {
 };
 
 // TODO: See DECISIONS.md O3
-export const LAYER_IDENTITY: Record<string, LayerIdentity> = {
-  foundation: { color: '#8b1a1a', symbol: '\u25A0', label: 'The ground' },    // ■
-  pulse:      { color: '#f5c542', symbol: '\u25B2', label: 'The heartbeat' }, // ▲
-  color:      { color: '#7b2d8b', symbol: '\u25CF', label: 'The warmth' },    // ●
-  space:      { color: '#2563eb', symbol: '~',      label: 'The distance' },
-  voice:      { color: '#e5e5e5', symbol: '\u2726', label: 'The voice' },     // ✦
+export const LAYER_IDENTITY: Record<LayerType, LayerIdentity> = {
+  melody:  { color: '#e5e5e5', symbol: '\u2726', label: 'The voice' },      // ✦
+  drums:   { color: '#f5c542', symbol: '\u25B2', label: 'The heartbeat' },  // ▲
+  pad:     { color: '#7b2d8b', symbol: '\u25C6', label: 'The warmth' },     // ◆
+  bass:    { color: '#8b1a1a', symbol: '\u25A0', label: 'The ground' },     // ■
+  harmony: { color: '#2563eb', symbol: '\u25CF', label: 'The color' },      // ●
+  fx1:     { color: '#22c55e', symbol: '~',      label: 'The shimmer' },
+  fx2:     { color: '#6b7280', symbol: '\u223F', label: 'The shadow' },     // ∿
 };
 
 const FALLBACK_LAYER: LayerIdentity = {

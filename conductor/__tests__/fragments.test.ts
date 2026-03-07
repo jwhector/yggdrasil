@@ -14,12 +14,11 @@ function makeAudioRef(index: number): AudioReference {
 function makeLayerConfig(index: number, threshold: number | null = null): LayerConfig {
   return {
     index,
-    type: 'foundation',
+    type: 'melody',
     optionA: makeAudioRef(index * 2),
     optionB: makeAudioRef(index * 2 + 1),
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
-    doubtThreshold: threshold,
   };
 }
 
@@ -55,6 +54,8 @@ function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     currentAuditionOption: null,
     auditionLoopIndex: 0,
     healthBar: createHealthBar(0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]),
+    currentVoteResult: null,
+    currentDrain: null,
   };
 }
 
@@ -92,6 +93,8 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     currentAuditionOption: null,
     auditionLoopIndex: 0,
     healthBar: createHealthBar(0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]),
+    currentVoteResult: null,
+    currentDrain: null,
   };
 }
 
@@ -178,6 +181,8 @@ describe('generateFragments', () => {
       currentAuditionOption: null,
       auditionLoopIndex: 0,
       healthBar: createHealthBar(0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]),
+      currentVoteResult: null,
+      currentDrain: null,
     };
     const configs = [makeAttemptConfig('avoidance', 1)];
     const fragments = generateFragments([pending], configs);

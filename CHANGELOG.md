@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 2026-03-06 — Song-Building UI: Health Bar System + Reveal Phase Split
+
+**Context:** Replaces the old doubt-based song-building UI (ConsensusBar, DoubtMeter, LayerGrid, OptionCard) with the V2 health bar design. Implements the revealing phase as a true resting state so the 4-beat RevealSequence can play on both audience and projector. All 185 conductor tests passing.
+
+**Critical architectural fix — Revealing phase split:**
+
+Previously `resolveCurrentLayer()` in `conductor.ts` processed `revealing` → `locked_in` atomically — the client never observed `revealing` as a resting state. This made the RevealSequence UI impossible to implement. The fix splits the transition into two steps:
+- `CLOSE_VOTING` → resolves vote, calculates drain, stores `currentVoteResult` + `currentDrain` on `AttemptState`, pauses at `revealing`
+- `ADVANCE_FROM_REVEAL` → reads stored result, calls `lockInLayer()` or `collapseAttempt()`, clears `currentVoteResult` + `currentDrain`
+- Timing engine schedules `ADVANCE_FROM_REVEAL` after `revealSequenceDurationMs` when `LAYER_PHASE_CHANGED` → `revealing` fires
+
+**New files:**
+- `components/song-building/HealthBar.tsx` — Horizontal health gauge (0–100). Color interpolates green→yellow→red. `drainShadow` prop shows translucent red preview of pending drain. `audience` variant: 10px height; `projector` variant: 20px height with subtle glow.
+- `components/song-building/LayerProgress.tsx` — Horizontal 7-slot strip showing layer history for current attempt. Completed = chapter color background + layer symbol. Current = highlighted border, pulse animation during voting. Future = dimmed layer symbol.
+- `components/song-building/OptionCards.tsx` — Two large side-by-side `<button>` elements for A/B voting. Option A = solid fill; Option B = outlined. Blind vote (no live split). After voting: selected card gets white ring glow, other dims to 0.4 opacity. Vote is final. Mobile-optimized.
+- `components/song-building/RevealSequence.tsx` — 4-beat reveal animation orchestrated via `useState` + `useEffect` timeouts: Tension (900ms) → Split (2000ms) → Drain (1500ms) → Lock-in (500ms). Winner card grows via flex proportional to consensus. HealthBar animates drain during Drain beat. Projector variant shows exact vote counts; audience variant does not.
+
+**Deleted files:**
+- `components/song-building/ConsensusBar.tsx`
+- `components/song-building/DoubtMeter.tsx`
+- `components/song-building/LayerGrid.tsx`
+- `components/song-building/OptionCard.tsx`
+
+**Modified files:**
+- `conductor/types.ts` — Added `currentVoteResult: VoteResult | null` and `currentDrain: HealthBarDrain | null` to `AttemptState`; added `{ type: 'ADVANCE_FROM_REVEAL' }` to `ConductorCommand`; added `currentVoteResult`/`currentDrain` to `AudienceAttemptView`; expanded `AudienceAttemptView.healthBar` to include `history: HealthBarDrain[]`
+- `conductor/conductor.ts` — Split `resolveCurrentLayer()` to pause at `revealing`; added `handleAdvanceFromReveal()`; updated `lockInLayer()` to handle pre-pushed results (for `FORCE_OPTION` bypass path); added `currentVoteResult: null, currentDrain: null` to all attempt initializations
+- `server/timing.ts` — Added `case 'revealing'` to `LAYER_PHASE_CHANGED` switch: schedules `ADVANCE_FROM_REVEAL` after `config.timing.revealSequenceDurationMs`
+- `server/socket.ts` — Expanded audience health bar filter to include `history`; added `currentVoteResult` (winner + consensus only, no vote counts) and `currentDrain` to audience attempt view
+- `lib/identity.ts` — Fixed `LAYER_IDENTITY` keys from old names (`foundation`, `pulse`, `color`, `space`, `voice`) to match actual `LayerType` values (`melody`, `drums`, `pad`, `bass`, `harmony`, `fx1`, `fx2`)
+- `app/audience/page.tsx` — Replaced `LayerGrid` with: `HealthBar` (top, always visible), `LayerProgress` (below health bar), then `RevealSequence` (during `revealing` phase) or `OptionCards` (otherwise). `disabled` when phase ≠ `voting` or user already voted.
+- `app/projector/page.tsx` — Replaced `ConsensusBar`/`DoubtMeter` with: `HealthBar` (variant="projector"), then `RevealSequence` or `ProjectorLayerCard` based on `currentLayerPhase`. Vote result computed from full votes array (projector has all votes); drain from `healthBar.history`.
+- `conductor/__tests__/conductor.test.ts` — Updated `completeSingleLayer` helper to include `ADVANCE_FROM_REVEAL` after `CLOSE_VOTING`; updated all inline collapse tests similarly
+- `conductor/__tests__/finale-integration.test.ts` — Updated `completeSingleLayer` helper to include `ADVANCE_FROM_REVEAL`
+- `conductor/__tests__/fragments.test.ts` — Added `currentVoteResult: null, currentDrain: null` to inline `AttemptState` fixtures; fixed `type: 'foundation'` → `type: 'melody'`; removed stale `doubtThreshold` field
+
+**Tests:** 185 passing across 9 conductor suites (unchanged count; all tests updated to two-phase vote resolution).
+
+---
+
 ## 2026-03-06 — V2 Migration Phase 4: Server Layer Update
 
 **Context:** MIGRATION.md Phase 4. Updates the entire server layer to compile and work with the V2 conductor. Removes all V1 rotation/stewardship/triangle wiring and replaces with consensus game + performer mix.

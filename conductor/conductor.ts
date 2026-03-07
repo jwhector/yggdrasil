@@ -26,7 +26,6 @@ import type {
   ShowConfig,
   AttemptState,
   LayerPhase,
-  LayerResult,
   LayerVote,
   ConductorCommand,
   ConductorEvent,
@@ -65,6 +64,8 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     currentAuditionOption: null,
     auditionLoopIndex: 0,
     healthBar: createHealthBar(attemptConfig.drainFactor, attemptConfig.layerMultipliers),
+    currentVoteResult: null,
+    currentDrain: null,
   }));
 
   return {
@@ -113,6 +114,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleOpenVoting(state);
     case 'CLOSE_VOTING':
       return handleCloseVoting(state);
+    case 'ADVANCE_FROM_REVEAL':
+      return handleAdvanceFromReveal(state);
     case 'SUBMIT_VOTE':
       return handleSubmitVote(state, command.userId, command.choice);
     case 'FORCE_OPTION':
@@ -669,7 +672,27 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   // 2. Apply drain to health bar (also sets drain.healthAfter)
   applyDrain(attempt.healthBar, drain);
 
-  // 3. Transition to revealing
+  // 3. For non-collapse paths: record the layer result early (during revealing)
+  //    so the UI can display it before lock-in. For collapse paths, collapseAttempt
+  //    handles the result with status='unreached'/drainAmount=null.
+  if (!isCollapsed(attempt.healthBar)) {
+    const { consensus } = calculateConsensus(layerVotes);
+    const layerConfig = attempt.layerPlan[layerIndex];
+    attempt.layerResults.push({
+      layerIndex,
+      type: layerConfig?.type ?? 'melody',
+      status: 'locked_in',
+      chosenOption: voteResult.winner,
+      consensus,
+      drainAmount: drain.drainAmount,
+    });
+  }
+
+  // 4. Store reveal data on attempt for client access during revealing phase
+  attempt.currentVoteResult = voteResult;
+  attempt.currentDrain = drain;
+
+  // 5. Transition to revealing
   attempt.currentLayerPhase = 'revealing';
   events.push({
     type: 'LAYER_PHASE_CHANGED',
@@ -678,7 +701,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
     phase: 'revealing',
   });
 
-  // 4. Emit VOTE_RESULT
+  // 6. Emit VOTE_RESULT
   events.push({
     type: 'VOTE_RESULT',
     attemptIndex: attempt.index,
@@ -686,7 +709,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
     result: voteResult,
   });
 
-  // 5. Emit HEALTH_BAR_DRAINED (drain.healthAfter now set)
+  // 7. Emit HEALTH_BAR_DRAINED (drain.healthAfter now set)
   events.push({
     type: 'HEALTH_BAR_DRAINED',
     attemptIndex: attempt.index,
@@ -694,14 +717,43 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
     drain,
   });
 
-  // 6. Check health bar outcome
-  if (isCollapsed(attempt.healthBar)) {
-    events.push(...collapseAttempt(state, attempt));
-  } else {
-    events.push(...lockInLayer(state, attempt, voteResult.winner, drain.drainAmount));
+  // The actual lock-in or collapse happens when ADVANCE_FROM_REVEAL is received
+  // (scheduled by the timing engine after revealSequenceDurationMs).
+  return events;
+}
+
+/**
+ * Advance from the revealing phase to locked_in or collapsed.
+ * Called by the timing engine after the reveal animation completes.
+ */
+function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_build') {
+    return [{ type: 'ERROR', message: 'Can only advance from reveal during attempt_build' }];
   }
 
-  return events;
+  const attempt = currentAttempt(state);
+  if (!attempt || attempt.status !== 'in_progress') {
+    return [{ type: 'ERROR', message: 'No active attempt' }];
+  }
+
+  if (attempt.currentLayerPhase !== 'revealing') {
+    return []; // Already advanced; ignore duplicate
+  }
+
+  const voteResult = attempt.currentVoteResult;
+  const drain = attempt.currentDrain;
+
+  // Clear reveal data
+  attempt.currentVoteResult = null;
+  attempt.currentDrain = null;
+
+  if (isCollapsed(attempt.healthBar)) {
+    return collapseAttempt(state, attempt);
+  } else {
+    const winner = voteResult?.winner ?? 'A';
+    const drainAmount = drain?.drainAmount ?? null;
+    return lockInLayer(state, attempt, winner, drainAmount);
+  }
 }
 
 /**
@@ -718,19 +770,25 @@ function lockInLayer(
   const layerIndex = attempt.currentLayerIndex;
   const layerConfig = attempt.layerPlan[layerIndex];
 
-  // Record layer result
-  const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
-  const { consensus } = calculateConsensus(layerVotes);
-
-  const layerResult: LayerResult = {
-    layerIndex,
-    type: layerConfig?.type ?? 'melody',
-    status: 'locked_in',
-    chosenOption: winner,
-    consensus,
-    drainAmount,
-  };
-  attempt.layerResults.push(layerResult);
+  // Layer result is normally recorded in resolveCurrentLayer during revealing phase.
+  // For forced lock-ins (FORCE_OPTION) that bypass resolveCurrentLayer, push it now.
+  const existingResult = attempt.layerResults.find(r => r.layerIndex === layerIndex);
+  if (!existingResult) {
+    const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
+    const { consensus } = calculateConsensus(layerVotes);
+    attempt.layerResults.push({
+      layerIndex,
+      type: layerConfig?.type ?? 'melody',
+      status: 'locked_in',
+      chosenOption: winner,
+      consensus,
+      drainAmount,
+    });
+  } else {
+    // Update status/chosenOption in case it was set as 'unreached' during revealing
+    existingResult.status = 'locked_in';
+    existingResult.chosenOption = winner;
+  }
 
   attempt.currentLayerPhase = 'locked_in';
 
@@ -934,6 +992,8 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     currentAuditionOption: null,
     auditionLoopIndex: 0,
     healthBar: createHealthBar(attemptConfig.drainFactor, attemptConfig.layerMultipliers),
+    currentVoteResult: null,
+    currentDrain: null,
   }));
 
   return [

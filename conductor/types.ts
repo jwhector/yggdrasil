@@ -138,6 +138,8 @@ export interface AttemptState {
   currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing
   auditionLoopIndex: number;                  // 0-based count of loops completed
   healthBar: HealthBarState;
+  currentVoteResult: VoteResult | null;       // Set during revealing phase, cleared on lock-in
+  currentDrain: HealthBarDrain | null;        // Set during revealing phase, cleared on lock-in
 }
 
 /** Static configuration for a single attempt. */
@@ -373,6 +375,7 @@ export type ConductorCommand =
   | { type: 'TOGGLE_AUDITION' }
   | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
+  | { type: 'ADVANCE_FROM_REVEAL' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
@@ -495,7 +498,13 @@ export interface AudienceAttemptView {
   currentAuditionOption: 'A' | 'B' | null;
   auditionLoopIndex: number;
   auditionTotalLoops: number;
-  healthBar: HealthBarState;
+  healthBar: {
+    current: number;
+    drainFactor: number;
+    history: HealthBarDrain[];
+  };
+  currentVoteResult: { winner: 'A' | 'B'; consensus: number } | null;
+  currentDrain: { drainAmount: number; healthAfter: number } | null;
 }
 
 /**

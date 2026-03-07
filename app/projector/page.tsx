@@ -4,8 +4,8 @@ import { useMemo, useState, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
 import { useTriangleCentroid } from '@/hooks/useTriangle';
-import { ConsensusBar } from '@/components/song-building/ConsensusBar';
-import { DoubtMeter } from '@/components/song-building/DoubtMeter';
+import { HealthBar } from '@/components/song-building/HealthBar';
+import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { SlotGrid } from '@/components/finale/SlotGrid';
 import { TriangleSteering } from '@/components/finale/TriangleSteering';
@@ -83,9 +83,21 @@ export default function ProjectorPage() {
 
       const chapter = getChapterIdentity(currentAttempt.chapter);
       const layer = getLayerIdentity(currentLayerConfig.type);
-      const showMeters =
-        currentAttempt.currentLayerPhase === 'voting' ||
-        currentAttempt.currentLayerPhase === 'resolving';
+      const isRevealing = currentAttempt.currentLayerPhase === 'revealing';
+
+      // During revealing phase: compute vote result from votes + latest drain from health history
+      const latestDrain = isRevealing
+        ? currentAttempt.healthBar.history[currentAttempt.healthBar.history.length - 1] ?? null
+        : null;
+      const revealVoteResult = isRevealing && liveVotes
+        ? {
+            winner: liveVotes.winner,
+            consensus: liveVotes.consensus ?? 0.5,
+            votesA: liveVotes.votesA,
+            votesB: liveVotes.votesB,
+            totalVotes: liveVotes.total,
+          }
+        : null;
 
       return (
         <main
@@ -112,39 +124,36 @@ export default function ProjectorPage() {
             userCount={userCount}
           />
 
-          {/* Current layer card */}
-          <ProjectorLayerCard
-            layerSymbol={layer.symbol}
-            layerLabel={layer.label}
-            layerColor={layer.color}
-            layerPhase={currentAttempt.currentLayerPhase}
-            labelA={currentLayerConfig.labelA}
-            labelB={currentLayerConfig.labelB}
-            winner={currentAttempt.layerResults[currentAttempt.currentLayerIndex]?.chosenOption ?? null}
+          {/* Health bar — prominent, always visible */}
+          <HealthBar
+            health={currentAttempt.healthBar.current}
+            drainShadow={isRevealing && latestDrain ? latestDrain.drainAmount : 0}
+            variant="projector"
           />
+
+          {/* Current layer card OR reveal sequence */}
+          {isRevealing && revealVoteResult && latestDrain ? (
+            <RevealSequence
+              voteResult={revealVoteResult}
+              drain={{ drainAmount: latestDrain.drainAmount, healthAfter: latestDrain.healthAfter }}
+              healthBefore={currentAttempt.healthBar.current + latestDrain.drainAmount}
+              layerConfig={currentLayerConfig}
+              variant="projector"
+            />
+          ) : (
+            <ProjectorLayerCard
+              layerSymbol={layer.symbol}
+              layerLabel={layer.label}
+              layerColor={layer.color}
+              layerPhase={currentAttempt.currentLayerPhase}
+              labelA={currentLayerConfig.labelA}
+              labelB={currentLayerConfig.labelB}
+              winner={currentAttempt.layerResults[currentAttempt.currentLayerIndex]?.chosenOption ?? null}
+            />
+          )}
 
           {/* Stack history */}
           <ProjectorStackHistory results={currentAttempt.layerResults} />
-
-          {/* Meters */}
-          {showMeters && liveVotes && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginTop: 'auto' }}>
-              <ConsensusBar
-                votesA={liveVotes.votesA}
-                votesB={liveVotes.votesB}
-                totalVotes={liveVotes.total}
-                winner={liveVotes.winner}
-                consensus={liveVotes.consensus}
-                layerType={currentLayerConfig.type}
-              />
-              <DoubtMeter
-                consensus={liveVotes.consensus}
-                doubtThreshold={currentLayerConfig.doubtThreshold}
-                isActive={currentAttempt.currentLayerPhase === 'voting'}
-                collapsed={currentAttempt.status === 'collapsed'}
-              />
-            </div>
-          )}
 
           {/* Collapse overlay */}
           {currentAttempt.status === 'collapsed' && (

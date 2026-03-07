@@ -5,7 +5,10 @@ import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { LayerGrid } from '@/components/song-building/LayerGrid';
+import { HealthBar } from '@/components/song-building/HealthBar';
+import { LayerProgress } from '@/components/song-building/LayerProgress';
+import { OptionCards } from '@/components/song-building/OptionCards';
+import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { FragmentSelector } from '@/components/finale/FragmentSelector';
 import { TriangleSteering } from '@/components/finale/TriangleSteering';
 import { StewardSlider } from '@/components/finale/StewardSlider';
@@ -85,13 +88,56 @@ function AudienceContent() {
             overflowY: 'auto',
             paddingTop: '16px',
             paddingBottom: '32px',
+            gap: '12px',
+            padding: '16px',
+            boxSizing: 'border-box',
           }}
         >
           {/* Chapter label */}
           <ChapterLabel chapter={currentAttempt.chapter} attemptIndex={state.currentAttemptIndex} />
 
-          {/* Layer grid */}
-          <LayerGrid attempt={currentAttempt} onVote={handleVote} />
+          {/* Health bar */}
+          <HealthBar
+            health={currentAttempt.healthBar.current}
+            drainShadow={
+              currentAttempt.currentLayerPhase === 'revealing' && currentAttempt.currentDrain
+                ? currentAttempt.currentDrain.drainAmount
+                : 0
+            }
+            variant="audience"
+          />
+
+          {/* Layer progress strip */}
+          <LayerProgress
+            layerResults={currentAttempt.layerResults}
+            currentLayerIndex={currentAttempt.currentLayerIndex}
+            currentLayerPhase={currentAttempt.currentLayerPhase}
+            layerCount={currentAttempt.layerCount}
+            chapter={currentAttempt.chapter}
+          />
+
+          {/* Voting cards OR reveal sequence */}
+          {currentAttempt.currentLayerPhase === 'revealing' &&
+            currentAttempt.currentVoteResult &&
+            currentAttempt.currentDrain &&
+            currentAttempt.currentLayerConfig ? (
+            <RevealSequence
+              voteResult={currentAttempt.currentVoteResult}
+              drain={currentAttempt.currentDrain}
+              healthBefore={currentAttempt.healthBar.current + currentAttempt.currentDrain.drainAmount}
+              layerConfig={currentAttempt.currentLayerConfig}
+              variant="audience"
+            />
+          ) : currentAttempt.currentLayerConfig ? (
+            <OptionCards
+              layerConfig={currentAttempt.currentLayerConfig}
+              myVote={currentAttempt.myVote}
+              disabled={
+                currentAttempt.currentLayerPhase !== 'voting' || currentAttempt.myVote !== null
+              }
+              onVote={handleVote}
+            />
+          ) : null}
 
           {/* Phase hint */}
           <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
