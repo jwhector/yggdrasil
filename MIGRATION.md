@@ -1,263 +1,582 @@
-# MIGRATION.md — Phased Migration Plan
+# Solo Show — Migration Guide: V1 → V2
 
-## How to Use This File
-This file tracks the migration from the old show design to the new one. Each phase is a self-contained unit of work. **Complete phases in order.** After finishing a phase, mark it `[x]` and note any issues.
+## Overview
 
-The operator (you, in Claude Code) should tackle **one phase per session**. At the start of each session, read CLAUDE.md, then check this file to see which phase is next.
+This document provides a step-by-step migration plan for refactoring the Solo Show codebase from the V1 architecture to V2. The changes are significant but modular — each phase can be completed and tested independently.
 
----
+**Read ARCHITECTURE-V2.md (the new architecture) in full before beginning any migration work.**
 
-## Phase 0: Foundation — Types & Schema
-**Goal:** Replace the old type system and database schema with new ones. This is the foundation everything else builds on.
+### Summary of Changes
+- Song-building: Doubt thresholds → Health Bar with blind vote, layer multipliers, and collapse when health reaches zero
+- Song-building: Songs can either collapse (health bar → 0) or complete (performer rejects narratively)
+- Finale: Rotation/stewardship/triangle → Consensus game + performer mixing surface
+- Layer types: 5 types → 7 types (Melody, Drums, Pad, Bass, Harmony, FX1, FX2)
+- Data models: simplified (no chapter assignment, no stewardship, no triangle positions)
 
-**Prerequisites:** ARCHITECTURE.md, DECISIONS.md, and CLAUDE.md are in the repo.
-
-- [x] **0a.** Read the current `conductor/types.ts` (or equivalent). Identify every type that references old concepts (factions, coherence, coups, personal trees, fig tree, 4-option voting). Note them but don't delete yet.
-- [x] **0b.** Create new `conductor/types.ts` with all types from ARCHITECTURE.md § Data Models:
-  - `User`, `UserId`, `SeatId`
-  - `Chapter`, `LayerType`, `LayerPhase`, `LayerConfig`, `LayerResult`, `LayerVote`
-  - `AttemptState`, `AttemptConfig`, `AttemptResult`
-  - `Fragment`, `SafeParameter`, `FragmentSelection`
-  - `FinaleState`, `ActiveSlot`, `QueueEntry`, `TrianglePosition`, `StewardshipEntry`
-  - `ShowState`, `ShowPhase`, `ShowConfig`, `TimingConfig`, `FinaleConfig`
-  - `ConductorCommand` (full union from ARCHITECTURE.md)
-  - `ConductorEvent` (full union from ARCHITECTURE.md)
-  - `VoteResult`, `AudioCue`, `AudioReference`, `AbletonParamRef`
-- [x] **0c.** Update `db/schema.sql` with new schema from ARCHITECTURE.md § Persistence Layer.
-- [x] **0d.** Delete old type definitions that have no equivalent in the new system.
-  - *Note: Old types were replaced in-place (full rewrite of types.ts). Old conductor files (coherence.ts, coup.ts, ties.ts, assignment.ts) still exist — will be removed in Phase 1.*
-- [x] **0e.** Verify: `npx tsc --noEmit` on just the types file should pass (no imports from other files yet — types should be self-contained).
-- [x] **0f.** Update CHANGELOG.md.
-
-**Completion check:** New types file compiles. Old faction/coup/coherence types are gone. Schema matches ARCHITECTURE.md.
+### Migration Order
+The phases are ordered by dependency — earlier phases create the foundation that later phases build on.
 
 ---
 
-## Phase 1: Conductor Core — Show Phases & Song-Building
-**Goal:** Rewrite the Conductor state machine for the new show flow and song-building mechanics. No finale yet.
+## Phase 1: Update Types & Data Models
 
-- [x] **1a.** Gut the old `conductor/conductor.ts`. Keep the structural pattern (class or module that receives commands, validates, mutates state, returns events) but remove ALL old game logic.
-  - *Full rewrite from scratch. Also deleted coherence.ts, coup.ts, ties.ts, assignment.ts and their tests.*
-- [x] **1b.** Implement show phase transitions per ARCHITECTURE.md § Show Phase State Machine:
-  - `lobby → opener → attempt_story → attempt_build → ... → finale_setup → finale_rotating → finale_frozen → ended`
-  - `ADVANCE_PHASE` command walks through the sequence
-  - `JUMP_TO_PHASE` for controller override
-  - `PAUSE` / `RESUME`
-  - Track `currentAttemptIndex` (0, 1, 2)
-- [x] **1c.** Create `conductor/consensus.ts`:
-  - `calculateConsensus(votes)` → `{ consensus, winner, votesA, votesB, totalVotes }`
-  - `resolveVote(votes, threshold)` → full VoteResult with threshold check
-- [x] **1d.** Implement song-building layer flow in conductor:
-  - Layer phase transitions: `locked → auditioning → voting → resolving → locked_in` (or `→ collapsed`)
-  - `SUBMIT_VOTE` command (binary A/B)
-  - `OPEN_VOTING` / `CLOSE_VOTING`
-  - Vote result calculation with doubt check
-  - Collapse handling: mark attempt as collapsed, record `collapsedAtLayer`
-  - Auto-advance to next `attempt_story` on collapse (except attempt 2 → manual per R15)
-  - `FORCE_OPTION`, `FORCE_CONTINUE`, `FORCE_COLLAPSE`, `RERUN_VOTE`, `EXTEND_VOTE_TIMER`
-- [x] **1e.** Create `conductor/fragments.ts`:
-  - `generateFragments(attempts, configs)` → produces fragment list with correct availability
-  - `extractAttemptResult(attempt)` → extracts AttemptResult from AttemptState
-- [x] **1f.** Write tests in `conductor/__tests__/`:
-  - 65 tests total across 3 test files (conductor, consensus, fragments)
-  - Show phase transitions (happy path + error cases)
-  - Song-building: vote → lock-in → next layer
-  - Doubt threshold: consensus above threshold → continue
-  - Doubt threshold: consensus below threshold → collapse
-  - Collapse sets correct `collapsedAtLayer` and `status`
-  - Fragment generation: correct selectable vs locked fragments
-  - Force commands work (force option, force collapse, rerun vote, set threshold)
-  - Auto-advance after collapse (attempts 0, 1) vs manual (attempt 2)
-  - User connection/disconnection/reconnection
-  - Recovery (reset to lobby, force reconnect)
-  - Audio commands (transport, panic)
-- [x] **1g.** Update CHANGELOG.md.
+**Goal:** Establish the new type system as the shared language for all subsequent work.
 
-**Completion check:** All conductor tests pass. `npx tsc --noEmit` passes. No references to factions/coups/coherence in conductor/.
+**Why first:** Every other module depends on types. Changing them first means the compiler will flag every downstream location that needs updating.
 
----
+### Steps
 
-## Phase 2: Conductor — Finale Logic
-**Goal:** Implement finale state machine: chapter assignment, fragment selection, queue, rotation, stewardship, triangle aggregation.
+1.1. **Update `LayerType` enum** in `conductor/types.ts`:
+- Remove: `foundation`, `pulse`, `color`, `space`, `voice`
+- Add: `melody`, `drums`, `pad`, `bass`, `harmony`, `fx1`, `fx2`
 
-- [x] **2a.** Create `conductor/finale.ts`:
-  - `assignChapters(users)` → random even split across 3 chapters
-  - `selectFragment(userId, fragmentId)` → validate fragment is from user's chapter and is selectable, add to queue
-  - Queue scheduling: fairness-first, then chapter weighting by centroid, then diversity nudge
-  - Rotation tick: pick N entries from queue, activate in slots, assign stewards
-  - `computeCentroid(positions)` → weighted average
-  - Stewardship: start when fragment enters slot, end when rotated out
-  - `updateStewardParam(userId, value)` → validate user is active steward, clamp to safe range
-  - *Also added: `initializeFinaleState()`, `getAvailableFragments()`, `performRotationTick()`, `pickSlotTargets()` (internal)*
-  - *Added `triangleActive: boolean` to FinaleState in types.ts for TOGGLE_TRIANGLE tracking*
-- [x] **2b.** Wire finale commands in conductor.ts:
-  - All 12 finale commands replaced from stubs to full handlers
-  - `SETUP_FINALE`, `SELECT_FRAGMENT`, `UPDATE_TRIANGLE`, `UPDATE_STEWARD_PARAM`
-  - `START_ROTATION`, `STOP_ROTATION`, `FREEZE_ROTATION`, `SET_ROTATION_RATE`
-  - `FORCE_ASSIGN_STEWARD`, `FORCE_INSERT_FRAGMENT`, `CLEAR_QUEUE`, `TOGGLE_TRIANGLE`
-- [x] **2c.** Write tests:
-  - 44 tests in `conductor/__tests__/finale.test.ts`
-  - Chapter assignment: even split (±1), disconnected users skipped, edge cases (0, 1 user)
-  - Fragment selection: validates chapter match, selectability, duplicate rejection
-  - Queue scheduling: fairness-first, centroid weighting, diversity nudge, empty queue, already-active filter
-  - Rotation: fills empty slots, stewardship marking, ROTATION_TICK events, no-rotate when inactive/frozen
-  - Stewardship: start/end lifecycle, log entries
-  - Centroid: empty, single, multiple positions, uneven weighting
-  - Parameter clamping: above max, below min, within range, non-steward rejection
-  - Full show flow: lobby → 3 attempts (with collapse) → finale_setup → rotation → freeze → ended
-- [x] **2d.** Update CHANGELOG.md.
-  - *109 total tests pass across 4 suites in ~0.3s. `tsc --noEmit` clean.*
+1.2. **Update `LayerConfig` interface:**
+- Remove: `doubtThreshold` field
+- All other fields remain (index, type, optionA, optionB, labelA, labelB)
 
-**Completion check:** Finale conductor tests pass. Full show flow works: lobby → 3 attempts → finale setup → rotation → freeze → end.
+1.3. **Update `LayerPhase` type:**
+- Rename 'resolving' to 'revealing'
+- Keep 'collapsed'
+- Final set: `locked`, `auditioning`, `voting`, `revealing`, `locked_in`, `collapsed`
 
----
+1.4. **Add `HealthBarState` and `HealthBarDrain` interfaces:**
+```typescript
+interface HealthBarState {
+  current: number;
+  drainFactor: number;
+  layerMultipliers: number[];
+  history: HealthBarDrain[];
+}
+interface HealthBarDrain {
+  layerIndex: number;
+  losingProportion: number;
+  layerMultiplier: number;
+  drainAmount: number;
+  healthAfter: number;
+}
+```
 
-## Phase 3: Server Layer — Socket.IO & Persistence
-**Goal:** Rewire the server to use the new Conductor. Update persistence, socket events, and state sync.
+1.5. **Update `AttemptState` interface:**
+- Keep `collapsedAtLayer`
+- Keep 'collapsed' in status union type (keep: `pending`, `in_progress`, `completed`, `collapsed`)
+- Add: `healthBar: HealthBarState`
 
-- [x] **3a.** Update `server/persistence.ts`:
-  - New schema (from Phase 0) — `saveLayerVote`, `saveFragmentSelection`, `saveUser` with `finaleChapter`
-  - `lib/serialization.ts` fully rewritten: `serializeState`/`deserializeState` handle Maps in ShowState and FinaleState
-  - Same persist-on-every-change pattern
-- [x] **3b.** Update `server/socket.ts`:
-  - Removed: `coup_vote`, `fig_tree_response`, faction rooms, dual-vote `vote` payload
-  - Added: binary `vote`, `select_fragment`, `triangle_update`, `steward_param`, `reconnect`
-  - State filtering: controller (full serialized), projector (public), audience (personalized)
-  - Identity flow: `join` → `USER_CONNECT` → `identity` event → `state_sync`
-- [x] **3c.** Add triangle + metering high-frequency channels:
-  - Triangle: `triangle_update` goes through conductor but skips state_sync/persistence. Centroid throttled at ~4 Hz via `setInterval` → projector `centroid` event.
-  - Metering: `server/metering.ts` created — `createMeteringService(io)` stub ready. OSC wiring in Phase 4.
-- [x] **3d.** Recovery: `server/backup.ts` updated for new state shape. No separate `recovery.ts` — backup/restore lives in `backup.ts` (same as before). `server/index.ts` loads latest show from SQLite on startup.
-  - *Note: `server/recovery.ts` was never created — recovery logic is in `backup.ts` + server startup. No changes needed.*
-- [x] **3e.** `tsc --noEmit` (server tsconfig) clean. Persistence and backup tests rewritten and passing.
-- [x] **3f.** Updated CHANGELOG.md.
+1.6. **Update `LayerResult` interface:**
+- Keep `unreached` status and `status` field
+- `chosenOption` and `consensus` are null when unreached
+- Add: `drainAmount: number | null`
 
-**Completion check:** Server starts clean. Can connect via Socket.IO. Commands process through conductor. State persists and recovers.
+1.7. **Update `ShowPhase` type:**
+- Remove: `finale_setup`, `finale_rotating`, `finale_frozen`
+- Add: `attempt_resolve`, `finale_elegy`, `finale_consensus`, `finale_performer_mix`
+
+1.8. **Replace `FinaleState` interface entirely** with the new version from ARCHITECTURE-V2.md (consensus game state, NPC state, performer mix state).
+
+1.9. **Update `Fragment` interface:**
+- Remove: `safeParameter` field
+- Add: `displayLabel: string`
+
+1.10. **Remove interfaces that no longer exist:**
+- `SafeParameter`
+- `QueueEntry` / `FinaleQueue`
+- `ActiveSlot`
+- `TrianglePosition`
+- `StewardshipEntry`
+- `FragmentSelection`
+
+1.11. **Update `User` interface:**
+- Remove: `finaleChapter` field
+
+1.12. **Add new interfaces:**
+- `PendingChange` (for performer mix)
+- `NpcTriggerConfig` (for NPC auto-triggers)
+
+1.13. **Update `ShowConfig` and sub-configs:**
+- Rename `maxLayersPerAttempt` → `layersPerAttempt` (always 7)
+- Add `drainFactor` to `AttemptConfig`
+- Replace `FinaleConfig` entirely (remove rotation/triangle/stewardship config; add consensus and performer mix config)
+- Update `TimingConfig` (remove collapse duration; add reveal sequence and rejection durations)
+
+### Verification
+- Run TypeScript compiler. It will produce many errors — that's expected and useful. The errors are your map for the remaining migration phases.
+- Do NOT fix the downstream errors yet. Just confirm the types compile cleanly in isolation.
 
 ---
 
-## Phase 4: OSC Bridge & Audio Router
-**Goal:** Update Ableton integration for new track layout and commands.
+## Phase 2: Refactor Conductor — Song-Building
 
-- [x] **4a.** Rewrite `server/audio-router.ts`:
-  - Full rewrite. New track index formula: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`
-  - Maps all 9 `AudioCue` types to OSC: audition_start/stop, lock_in, collapse_gesture (return track enable + delayed mute), slot_activate/deactivate (internal slot→track mapping), steward_param (`/live/device/set/parameter/value`), transport, panic
-  - Arrangement mode only (no session/clip-firing mode). Idempotent mute/unmute helpers.
-  - Handles SHOW_RESET, PAUSED, RESUMED events
-  - Exported `computeTrackIndex()` and `AbletonLayoutConfig` type
-- [x] **4b.** Wire `server/metering.ts` to OSC:
-  - Stub was already complete from Phase 3
-  - Wired in `server/index.ts`: registers `/meter/slot/<N>` OSC handlers for 7 slots → `meteringService.updateSlotLevel()`
-- [x] **4c.** `server/osc.ts` — no changes needed. Clean I/O layer, fully reusable.
-- [x] **4d.** Rewrite `server/timing.ts`:
-  - Full rewrite. Handles `LAYER_PHASE_CHANGED` events: `auditioning` → timer → `OPEN_VOTING`, `voting` → timer → `CLOSE_VOTING`
-  - Finale rotation: OSC beat tracking fires `PERFORM_ROTATION_TICK` every `rotationBars * 4` beats. Fallback: JS interval.
-  - Added `PERFORM_ROTATION_TICK` command to `conductor/types.ts` and handler in `conductor/conductor.ts`
-  - Kept: version-check safety, hybrid OSC/JS-timer approach, factory pattern, lifecycle
-  - Removed: Row, RowPhase, old phases (revealing, coup_window), old TimingConfig fields
-- [x] **4e.** Created `config/ableton-layout.json` with track mapping defaults (maxLayersPerAttempt: 7, attemptCount: 3, collapseReturnTrackIndex: 0, finaleSlotCount: 7).
-- [x] **4f.** Updated `server/tools/osc-mock-ableton.ts`:
-  - Added handlers for `/live/return/set/mute` and `/live/device/set/parameter/value`
-  - Added mock meter data generation (~20 Hz per slot when transport playing)
-  - Updated `num_tracks` response to 42 (3 × 7 × 2)
-- [x] **4g.** Updated CHANGELOG.md.
-  - *198 total tests pass across 9 suites. `tsc --noEmit` clean for server/ and conductor/ files. Old client code (app/, components/) has pre-existing type errors — Phase 5+ targets.*
+**Goal:** Replace Doubt/collapse mechanics with Health Bar and blind vote.
 
-**Completion check:** Audio router maps all new cues correctly. Metering pipeline wired. Timing engine handles new phases and rotation. Mock Ableton responds to new messages.
+### Steps
 
----
+2.1. **Create `conductor/health-bar.ts`:**
+- Implement `createHealthBar(drainFactor: number, layerMultipliers: number[]): HealthBarState`
+- Implement `calculateDrain(votesA: number, votesB: number, drainFactor: number, layerMultiplier: number): HealthBarDrain` — drain = (min(votesA,votesB) / total) * 100 * drainFactor * layerMultiplier
+- Implement `applyDrain(healthBar: HealthBarState, drain: HealthBarDrain): HealthBarState` — subtracts drain, floors at 0, appends to history
+- Implement `isCollapsed(healthBar: HealthBarState): boolean` — returns true if current <= 0
+- Write unit tests:
+  - `test('drain amount equals losing proportion times drain factor times layer multiplier')`
+  - `test('health bar never goes below zero')`
+  - `test('70/30 split with factor 0.5 and multiplier 1.0 drains 15 points')`
+  - `test('same split with multiplier 2.0 drains 30 points')`
+  - `test('layer multiplier 0.5 makes early layers cheap')`
+  - `test('isCollapsed returns true at zero, false above zero')`
 
-## Phase 5: Client — Song-Building UI
-**Goal:** Build the audience and projector UIs for song-building phases.
+2.2. **Rename/refactor `conductor/consensus.ts` → `conductor/voting.ts`:**
+- Keep the `calculateConsensus` function (still needed for determining winner)
+- Remove all per-layer doubt threshold logic
+- Add `calculateVoteResult` that returns the winner plus the health bar drain
+- Write unit tests:
+  - `test('majority wins regardless of margin')`
+  - `test('vote result includes drain calculation with layer multiplier')`
+  - `test('tie defaults to Option A')`
 
-- [x] **5a.** Create `lib/identity.ts` with chapter + layer color/symbol mappings (use placeholders, mark with TODO).
-- [x] **5b.** Create `components/song-building/LayerGrid.tsx`:
-  - Grid of all layers for current attempt as squares
-  - States: locked (future), active (current — both A/B selectable), locked_in (chosen option prominent, losing option dimmed/grayed), collapsed
-- [x] **5c.** Create `components/song-building/OptionCard.tsx`:
-  - A/B option display with layer color + symbol
-  - Solid (A) vs outlined (B) style
-  - Selectable state, selected state, disabled state
-- [x] **5d.** Create `components/song-building/ConsensusBar.tsx` and `DoubtMeter.tsx`:
-  - Consensus bar: leading side + margin
-  - Doubt meter: rising gauge with threshold line
-- [x] **5e.** Update `app/audience/page.tsx`:
-  - Show phase routing: dark screen during story, layer grid during build, finale placeholder
-  - Wire to `useShowState` hook
-- [x] **5f.** Update `app/projector/page.tsx` for song-building:
-  - Chapter title + accent, current layer card, stack history, meters, collapse animation placeholder
-- [x] **5g.** Rewrite `hooks/useShowState.ts`:
-  - Receives state_sync, provides typed state (overloaded by mode)
-  - No client-side transforms — server pre-filters per mode
-  - Derives: currentAttempt, isVotingActive, isDark
-- [x] **5h.** Update CHANGELOG.md.
-  - *Also: Tailwind CSS v4 setup (postcss.config.js, app/globals.css, layout.tsx). Client state types (AudienceClientState, ProjectorClientState) added to conductor/types.ts. 198 tests still passing.*
+2.3. **Update `conductor/conductor.ts` — song-building flow:**
+- Remove `SET_THRESHOLD`, `TOGGLE_DOUBT`, and `FORCE_CONTINUE` command handling
+- Keep `FORCE_COLLAPSE` command (forces immediate collapse regardless of health bar)
+- Add `TRIGGER_REJECTION` command handling (emits `SONG_REJECTED` event + `AUDIO_CUE`)
+- Update `CLOSE_VOTING` handler:
+  - Calculate vote result
+  - Calculate drain using current layer's multiplier from config
+  - Apply drain to health bar
+  - Emit `VOTE_RESULT` (includes drain info) and `HEALTH_BAR_DRAINED`
+  - **If health bar reaches 0**: enter `collapsed` phase, mark all remaining layers as `unreached`, emit `ATTEMPT_COLLAPSED`, auto-advance after collapse animation
+  - **If health bar > 0**: transition layer to `revealing`, then `locked_in`
+  - If all layers are `locked_in`, transition attempt status to `completed`, emit `ATTEMPT_COMPLETED`
+- Add `attempt_resolve` phase handling (waiting for performer to trigger rejection and advance)
+- Write unit tests:
+  - `test('health bar drains after each vote with correct layer multiplier')`
+  - `test('attempt collapses when health bar reaches zero')`
+  - `test('unreached layers are marked correctly after collapse')`
+  - `test('all 7 layers complete when health bar survives')`
+  - `test('completed attempt transitions to attempt_resolve')`
+  - `test('song rejection triggers audio cue')`
+  - `test('FORCE_COLLAPSE works regardless of health bar state')`
 
-**Completion check:** Audience can see layer grid, tap A/B, see result. Projector shows layer progress and meters. Dark screen during story phases.
+2.4. **Remove old doubt-related files/functions:**
+- Delete any standalone doubt threshold module
+- Remove per-layer doubt threshold configuration from show config defaults
 
----
-
-## Phase 6: Client — Finale UI
-**Goal:** Build the finale UIs: fragment selection, triangle steering, stewardship slider, projector slot display.
-
-- [x] **6a.** Create `components/finale/FragmentSelector.tsx`:
-  - Grid of layers for user's assigned chapter
-  - Winning options = selectable, losing + unreached = locked/grayed (25% opacity)
-  - Single selection with white ring glow on selected card
-- [x] **6b.** Create `components/finale/TriangleSteering.tsx`:
-  - Three-corner triangle (Ambition/Love/Avoidance) with chapter color corner labels
-  - Draggable dot (audience), centroid dot (projector)
-  - Throttled sends (~250ms) via useTriangleInput hook
-  - *TODO: Auto-recenter drift when idle (triangleDriftTimeoutMs)*
-  - *TODO: Underrepresented chapter glow on corners*
-- [x] **6c.** Create `hooks/useTriangle.ts`:
-  - `useTriangleInput`: pointer events → barycentric coordinates, throttled emit
-  - `useTriangleCentroid`: socket centroid events → requestAnimationFrame interpolation
-  - Pure math helpers: `pointToBarycentric`, `barycentricToPoint`
-- [x] **6d.** Create `components/finale/StewardSlider.tsx`:
-  - Custom vertical touch slider, chapter color fill
-  - Label from `safeParameter.displayLabel`, throttled at ~50ms
-  - Syncs from server on reconnect via `stewardParameterValue`
-- [x] **6e.** Create `components/finale/SlotGrid.tsx` and `SlotCard.tsx` (projector):
-  - 7 slot cards with chapter color, layer symbol, fragment name, steward badge
-  - Energy glow (boxShadow) driven by `meter` socket events — not state_sync
-- [x] **6f.** Wire finale into `app/audience/page.tsx` and `app/projector/page.tsx`.
-  - Also: added `availableFragments` + `stewardParameterValue` to `AudienceFinaleView` (types.ts + socket.ts)
-- [x] **6g.** Update CHANGELOG.md.
-
-**Completion check:** Full finale flow works: chapter assignment → fragment selection → queue → rotation → stewardship → triangle steering. Projector shows slots with metering glow.
+### Verification
+- All song-building conductor tests pass
+- No references to `doubtThreshold`, `FORCE_CONTINUE`, `SET_THRESHOLD`, `TOGGLE_DOUBT` remain in conductor code
+- Health bar correctly tracks cumulative drain with layer multipliers
+- Collapse triggers correctly when health reaches zero
+- Songs can both collapse and complete depending on audience alignment
 
 ---
 
-## Phase 7: Controller UI
-**Goal:** Build the operator console with all controls from ARCHITECTURE.md.
+## Phase 3: Refactor Conductor — Finale
 
-- [x] **7a.** Create controller components:
-  - `ShowControls.tsx` — phase buttons, jump dropdown
-  - `VotingControls.tsx` — open/close/force/extend/rerun
-  - `DoubtControls.tsx` — threshold slider, toggle, force continue/collapse
-  - `FinaleControls.tsx` — rotation, freeze, queue, steward, triangle toggle
-  - `MetricsPanel.tsx` — connection count, vote counts, consensus, queue status, system health
-- [x] **7b.** Wire to `app/controller/page.tsx` with auth (passcode gate via `NEXT_PUBLIC_CONTROLLER_PASSCODE`).
-- [x] **7c.** Type-check clean; 198 tests pass (no regressions).
-- [x] **7d.** Update CHANGELOG.md.
+**Goal:** Replace rotation/stewardship/triangle with consensus game + performer mix.
 
-**Completion check:** Controller can drive entire show flow. All override buttons work. Metrics display real-time data.
+### Steps
 
-**Note:** FORCE_ASSIGN_STEWARD / FORCE_INSERT_FRAGMENT not wired in UI — server currently replaces `userId` on any command that has it, which breaks force-assign to another user. Needs server-side fix before adding those controls (Phase 8 or separate task).
+3.1. **Delete old finale modules:**
+- Delete `conductor/finale.ts` (rotation, scheduling, stewardship, triangle logic)
+- Delete associated tests
+
+3.2. **Create `conductor/consensus-game.ts`:**
+- Implement `startRound(threshold: number): ConsensusRoundState`
+- Implement `submitVote(votes: Map, userId: string, fragmentId: string): Map` (returns updated votes map)
+- Implement `calculateConvergence(votes: Map): ConvergenceResult` (returns convergence value + leading fragment)
+- Implement `resolveRound(votes: Map, threshold: number, availableFragments: Fragment[]): RoundResult` (success/failure + winning fragment if success)
+- Implement `adjustThreshold(currentThreshold: number, consecutiveFailures: number, config: FinaleConfig): number`
+- Write unit tests:
+  - `test('convergence is highest vote proportion regardless of which fragment')`
+  - `test('round succeeds when convergence >= threshold')`
+  - `test('round fails when convergence < threshold')`
+  - `test('threshold decreases after consecutive failures')`
+  - `test('threshold resets after success')`
+  - `test('threshold never drops below minimum')`
+  - `test('vote change updates convergence correctly')`
+  - `test('game completes when all roles have active fragment')`
+
+3.3. **Create `conductor/performer-mix.ts`:**
+- Implement `queueChange(pending: PendingChange[], layerType: LayerType, fragmentId: string | null): PendingChange[]`
+- Implement `cancelPending(pending: PendingChange[], layerType: LayerType): PendingChange[]`
+- Implement `firePendingChanges(activeLayers: Map, pending: PendingChange[]): { activeLayers: Map, firedChanges: PendingChange[] }`
+- Implement `loadSnapshot(snapshot: Map): PendingChange[]` (converts snapshot to pending changes)
+- Write unit tests:
+  - `test('queuing a fragment adds to pending changes')`
+  - `test('queuing null mutes the layer')`
+  - `test('cancel removes pending change for layer')`
+  - `test('fire applies all pending changes and clears queue')`
+  - `test('only one fragment per layer after firing')`
+  - `test('snapshot loads all layers as pending changes')`
+
+3.4. **Create `conductor/npc.ts`:**
+- Implement `evaluateAutoTriggers(gameState: ConsensusGameState, config: NpcTriggerConfig[]): string | null`
+- Define trigger conditions: consecutive failures, same-song streak, near-miss, first success, last fragment, etc.
+- Write unit tests:
+  - `test('triggers exasperation on same-song convergence streak')`
+  - `test('triggers encouragement on near-miss')`
+  - `test('does not trigger on every round')`
+
+3.5. **Update `conductor/conductor.ts` — finale flow:**
+- Add `SETUP_FINALE` handler: compute available/locked fragments from attempt results
+- Add consensus game command handlers: `START_CONSENSUS_ROUND`, `SUBMIT_CONSENSUS_VOTE`, `END_CONSENSUS_ROUND`, `SET_CONSENSUS_THRESHOLD`, `SEND_NPC_MESSAGE`
+- Add performer mix command handlers: `START_PERFORMER_MIX`, `QUEUE_FRAGMENT`, `CANCEL_PENDING`, `FIRE_PENDING_CHANGES`, `LOAD_SNAPSHOT`, `TOGGLE_LIVE_TRACK`
+- Remove old finale command handlers: `SELECT_FRAGMENT`, `UPDATE_TRIANGLE`, `UPDATE_STEWARD_PARAM`, `START_ROTATION`, `STOP_ROTATION`, `FREEZE_ROTATION`, `SET_ROTATION_RATE`, `FORCE_ASSIGN_STEWARD`, `FORCE_INSERT_FRAGMENT`, `CLEAR_QUEUE`, `TOGGLE_TRIANGLE`
+
+3.6. **Update `conductor/fragments.ts`:**
+- Simplify: all layers are always completed, so fragment generation is straightforward
+- Winning option → available fragment
+- Losing option → locked fragment
+- No need to handle `unreached` status
+
+### Verification
+- All finale conductor tests pass
+- No references to rotation, stewardship, triangle, centroid, queue scheduling remain
+- Consensus game round lifecycle works correctly
+- Performer mix pending changes queue works correctly
 
 ---
 
-## Phase 8: Cleanup & Polish
-**Goal:** Remove all old code, verify everything works end-to-end, prepare for rehearsal.
+## Phase 4: Update Server Layer
 
-- [ ] **8a.** Search entire codebase for old keywords (faction, coherence, coup, figTree, songTree, personalTree, dualPath, popularPath). Remove any remaining references.
-- [ ] **8b.** Delete old component files that have no equivalent (FactionReveal, TiebreakerAnimation, CoupMeter, SongTree, FigTreeInput, FinaleTimeline, VoteInterface).
-- [ ] **8c.** Delete old conductor files (coherence.ts, coup.ts, assignment.ts) if they still exist.
-- [ ] **8d.** Run full test suite. Fix any failures.
-- [ ] **8e.** Run `npx tsc --noEmit`. Fix any type errors.
-- [ ] **8f.** End-to-end smoke test: start server, connect audience + projector + controller, run full show flow.
-- [ ] **8h.** Remove the "⚠️ MIGRATION IN PROGRESS" section from CLAUDE.md. Update it to be the steady-state agent context.
-- [ ] **8i.** Final CHANGELOG.md entry.
+**Goal:** Update Socket.IO handlers, timing engine, and OSC routing for new mechanics.
 
-**Completion check:** No old code remains. All tests pass. Full show flow works end-to-end. CLAUDE.md is clean.
+### Steps
+
+4.1. **Update `server/socket.ts`:**
+- Remove event handlers: `select_fragment`, `triangle_update`, `steward_param`
+- Add event handler: `consensus_vote` (routes to conductor's `SUBMIT_CONSENSUS_VOTE`)
+- Update `vote` handler to match blind vote mechanics (no change in vote during window)
+- Add high-frequency `convergence_update` broadcast during consensus rounds (~4-5 Hz)
+- Add `npc_message` broadcast event
+- Remove `meter` broadcast event (audio metering removed)
+
+4.2. **Update `server/timing.ts`:**
+- Update loop boundary detection to support pending changes firing
+- Add hook: on loop boundary, call conductor's `FIRE_PENDING_CHANGES` during performer mix phase
+- Add consensus round timer management (start timer on round start, fire `END_CONSENSUS_ROUND` on expiry)
+- Remove rotation tick logic
+
+4.3. **Update `server/audio-router.ts`:**
+- Add collapse cue routing (trigger return track effects via OSC when health bar reaches 0)
+- Add song rejection cue routing (trigger distinct return track effects via OSC for completed songs)
+- Add consensus game activation routing (unmute track on successful consensus)
+- Add performer mix routing (batch mute/unmute commands at loop boundary)
+- Remove stewardship parameter routing
+- Remove rotation slot activation/deactivation routing
+
+4.4. **Remove `server/metering.ts`** (audio metering for slot energy — removed in V2)
+
+4.5. **Update `server/persistence.ts`:**
+- Update schema: remove `fragment_selections` table, remove `finale_chapter` from users
+- Add `consensus_rounds` table
+- Update JSON serialization for new state shape
+
+### Verification
+- Server starts without errors
+- WebSocket events match the new protocol
+- Timing engine correctly fires pending changes at loop boundaries
+- OSC commands correctly route for all new mechanics
+
+---
+
+## Phase 5: Update Client — Song-Building UI
+
+**Goal:** Replace doubt meter with health bar, implement blind vote + reveal sequence.
+
+### Steps
+
+5.1. **Create `components/song-building/HealthBar.tsx`:**
+- Visual health bar component (configurable orientation, animated drain)
+- Receives current health value and animates transitions
+- Shows drain shadow during reveal sequence
+- Visible on both audience phones and projector
+
+5.2. **Create `components/song-building/RevealSequence.tsx`:**
+- Orchestrates the 4-beat reveal: tension → split reveal → health drain → lock-in
+- Receives vote result data and health bar drain
+- Animates option cards (winner grows, loser shrinks)
+- Triggers health bar drain animation
+
+5.3. **Update `components/song-building/OptionCards.tsx`** (renamed from OptionCard):
+- Two large tappable cards, side by side
+- No live vote count or consensus bar during voting window (blind vote)
+- Cards become non-interactive after vote is submitted (no vote changing)
+- Transition to reveal state when voting closes
+
+5.4. **Delete old components:**
+- Delete `ConsensusBar.tsx`
+- Delete `DoubtMeter.tsx`
+- Delete `LayerGrid.tsx` and `LayerSquare.tsx` (replaced by simpler layer progress indicator)
+
+5.5. **Create `components/song-building/LayerProgress.tsx`:**
+- Shows completed layers (with chapter color of winning option) and upcoming layers
+- Simpler than old grid — just a progress strip showing layer icons
+
+5.6. **Update audience page (`app/audience/page.tsx`):**
+- Song-building view: OptionCards + HealthBar + LayerProgress
+- Reveal sequence plays after each vote
+- No doubt-related UI elements
+
+5.7. **Update projector page (`app/projector/page.tsx`):**
+- Song-building view: large health bar, current layer card, reveal animation, stack history
+
+### Verification
+- Audience can vote A/B with no live split feedback
+- Reveal sequence plays correctly after each vote
+- Health bar animates drain correctly
+- Layer progress tracks completed layers
+
+---
+
+## Phase 6: Update Client — Finale UI
+
+**Goal:** Build consensus game board, convergence meter, NPC display, and performer mixing surface.
+
+### Steps
+
+6.1. **Create `components/finale/ElegyGrid.tsx`:**
+- Full fragment display organized by role
+- Winners glow, losers dimmed/cracked
+- Non-interactive, observational only
+
+6.2. **Create `components/finale/ConsensusBoard.tsx`:**
+- Clean game board showing only available fragments
+- Role rows with tappable fragment tiles
+- Chapter color backgrounds on tiles, emotional labels
+- Personal history dots (subtle indicator if user voted for this during song-building)
+- Locked role compression animation
+- Vote highlighting (your current selection is prominent)
+
+6.3. **Create `components/finale/ConvergenceMeter.tsx`:**
+- Real-time animated meter pinned to top of screen
+- Threshold zone visible (glow shift when convergence enters zone)
+- Spring/easing animation between received values (~4-5 Hz updates)
+- Round timer integrated or adjacent
+- No numeric values, no fragment-level breakdown
+
+6.4. **Create `hooks/useConvergence.ts`:**
+- Listens to `convergence_update` socket events
+- Smooths between values with spring animation
+- Provides current animated value to ConvergenceMeter component
+
+6.5. **Create `components/finale/NpcDisplay.tsx`:**
+- Terminal-style typeface
+- Appears below convergence meter when message active
+- Typing animation for text entry
+- Fades out after display duration
+
+6.6. **Create `components/finale/MixingSurface.tsx`:**
+- 7×6 grid for controller
+- Tap to queue, tap again to cancel
+- Active fragment highlighting, pending change pulsing
+- Loop position indicator
+- Mute toggle per row
+- Snapshot preset buttons
+
+6.7. **Create `components/finale/MixingMirror.tsx`:**
+- Simplified projector view of mixing state
+- 7 rows showing active layer type + chapter color of active fragment
+- Pending changes pulsing
+- Loop position indicator
+
+6.8. **Create `components/finale/LoopIndicator.tsx`:**
+- Progress bar or radial timer showing position in 8-bar loop
+- Used by both MixingSurface and MixingMirror
+
+6.9. **Delete old finale components:**
+- Delete `FragmentSelector.tsx`
+- Delete `TriangleSteering.tsx`
+- Delete `StewardSlider.tsx`
+- Delete `SlotCard.tsx`
+- Delete `SlotGrid.tsx`
+
+6.10. **Delete `hooks/useTriangle.ts`**
+
+6.11. **Update audience page — finale views:**
+- Elegy phase: ElegyGrid
+- Consensus phase: ConsensusBoard + ConvergenceMeter + NpcDisplay
+- Performer mix phase: TBD (see Open Questions)
+
+6.12. **Update projector page — finale views:**
+- Elegy phase: richer version of ElegyGrid
+- Consensus phase: convergence visualization, celebration animations, NPC text
+- Performer mix phase: MixingMirror
+
+6.13. **Update controller page — finale views:**
+- Consensus phase: ConsensusControls + NpcControls + convergence data (including which fragment is leading)
+- Performer mix phase: MixingSurface + SnapshotPresets
+
+### Verification
+- Consensus game full round lifecycle works end-to-end (vote → meter → timer → resolve)
+- Convergence meter updates smoothly in real time
+- Role locking and grid compression work correctly
+- NPC messages display and clear correctly
+- Performer mixing surface queues and fires changes at loop boundaries
+- Projector mirrors mix state correctly
+
+---
+
+## Phase 7: Update Controller UI
+
+**Goal:** Replace old controller panels with new mechanics controls.
+
+### Steps
+
+7.1. **Delete `components/controller/DoubtControls.tsx`**
+
+7.2. **Rename/refactor `components/controller/FinaleControls.tsx`:**
+- Remove rotation, queue, stewardship, triangle controls
+- Replace with consensus game controls and performer mix controls
+
+7.3. **Create `components/controller/HealthBarControls.tsx`:**
+- Drain factor adjustment (slider or presets)
+- Current health display
+- Manual health override
+
+7.4. **Create `components/controller/ConsensusControls.tsx`:**
+- Start/stop consensus rounds
+- Current convergence value + which fragment is leading (controller-only data)
+- Round number, consecutive failures count
+- Threshold adjustment
+- Force-lock a fragment (emergency override)
+
+7.5. **Create `components/controller/NpcControls.tsx`:**
+- Bank of pre-written NPC lines (categorized by situation)
+- Free-text input for improvised lines
+- Fire button to send NPC message
+- Toggle for auto-triggers on/off
+
+7.6. **Create `components/controller/SnapshotPresets.tsx`:**
+- Configurable snapshot buttons
+- Each button labels what mix state it loads
+- Visual indicator of which preset is closest to current state
+
+7.7. **Update `MetricsPanel.tsx`:**
+- Remove: triangle weights, steward tracking, queue lengths
+- Add: health bar status per attempt, consensus game metrics, performer mix state
+
+### Verification
+- Controller has all necessary controls for every show phase
+- No references to old mechanics (doubt, rotation, stewardship, triangle) in controller UI
+
+---
+
+## Phase 8: Update Configuration Files
+
+**Goal:** Update show config defaults and Ableton layout for new layer types and structure.
+
+### Steps
+
+8.1. **Update `config/default-show.json`:**
+- Update layer types in all attempt configs
+- Add staggered layer ordering per song
+- Add `drainFactor` per attempt
+- Remove doubt thresholds
+- Add finale config (consensus game parameters, NPC triggers)
+- Remove rotation/stewardship/triangle config
+
+8.2. **Update `config/ableton-layout.json`:**
+- Update track index mappings for 7 layer types × 3 songs × 2 options = 42 tracks
+- Add rejection effect return track mapping
+- Remove stewardship parameter mappings
+- Add live performance track mappings
+
+8.3. **Create `config/npc-triggers.json`:**
+- Define auto-trigger conditions and corresponding NPC lines
+- Categories: failure reactions, success reactions, pattern detection, pacing messages
+
+8.4. **Update `db/schema.sql`:**
+- Remove `finale_chapter` from users table
+- Remove `fragment_selections` table
+- Add `consensus_rounds` table
+
+### Verification
+- Default config loads without errors
+- Track index calculations match expected Ableton layout
+- Schema migrations apply cleanly
+
+---
+
+## Phase 9: Integration Testing
+
+**Goal:** End-to-end verification of the complete show flow.
+
+### Steps
+
+9.1. **Test complete show flow without Ableton (fallback mode):**
+- Lobby → Opener → 3 song-building cycles → Finale
+- Verify all phase transitions
+- Verify health bar tracks with layer multipliers across all layers in all attempts
+- Test both outcomes: collapse (health bar reaches 0) and completion (performer rejects)
+- Verify unreached layers are correctly marked after collapse
+- Verify consensus game round lifecycle
+- Verify performer mix pending changes
+
+9.2. **Test with mock Ableton (osc-mock-ableton):**
+- Verify OSC commands fire correctly for each mechanic:
+  - Layer lock-in: correct track unmuted
+  - Collapse: return track effects triggered, active tracks muted
+  - Song rejection: distinct return track effect triggered (different from collapse)
+  - Consensus game: correct track unmuted on success
+  - Performer mix: batch mute/unmute at loop boundary
+- Verify timing engine loop boundary detection
+
+9.3. **Test multi-client scenarios:**
+- Connect 5+ audience clients
+- Verify blind vote mechanics (no premature split exposure)
+- Verify consensus game convergence calculation with real vote distribution
+- Verify convergence meter updates at ~4-5 Hz to all audience clients
+- Verify NPC messages display on all clients simultaneously
+
+9.4. **Test edge cases:**
+- Unanimous vote (100/0 split) → zero drain
+- Perfect tie (50/50) → maximum drain (may collapse depending on health and multiplier)
+- Health bar reaches exactly 0 → collapse triggers
+- High layer multiplier on layer 6–7 causes collapse even with moderate alignment
+- Song completes with health barely above 0 → transitions to attempt_resolve, not collapse
+- FORCE_COLLAPSE with full health bar → immediate collapse
+- Consensus game with sparse fragments (due to early collapses) → still playable
+- Consensus game with only one available fragment per role → trivial convergence
+- Performer queues changes then cancels before boundary
+- Client disconnect and reconnect during consensus round
+
+### Verification
+- Complete show can run from lobby to ended without errors
+- All mechanics work as specified in ARCHITECTURE-V2.md
+- State persists and recovers correctly across server restarts
+
+---
+
+## Phase 10: Cleanup
+
+**Goal:** Remove all dead code and update documentation.
+
+### Steps
+
+10.1. Remove any remaining references to removed systems (per-layer doubt thresholds, stewardship, triangle, centroid, chapter assignment, rotation queue)
+- Search for: `stewardship`, `steward`, `triangle`, `centroid`, `rotation`, `doubtThreshold`, `finaleChapter`, `SafeParameter`, `QueueEntry`, `ActiveSlot`, `TrianglePosition`, `StewardshipEntry`, `FragmentSelection`, `select_fragment`, `triangle_update`, `steward_param`, `FORCE_CONTINUE`, `SET_THRESHOLD`, `TOGGLE_DOUBT`
+- NOTE: `collapsed`, `FORCE_COLLAPSE`, `ATTEMPT_COLLAPSED`, `unreached`, `collapsedAtLayer` are VALID terms in V2 — do NOT remove these
+
+10.2. Replace ARCHITECTURE.md with ARCHITECTURE-V2.md (rename V2 to become the canonical document)
+
+10.3. Update README.md with any new setup steps
+
+10.4. Update CLAUDE.md with new context for AI agents
+
+10.5. Add CHANGELOG.md entry:
+```markdown
+## V2 — Architecture Redesign
+**Context:** Complete redesign of song-building and finale mechanics based on
+narrative and gameplay exploration.
+**Changes:**
+- Song-building: Doubt/collapse → Health Bar + blind vote + performer rejection
+- Finale: Rotation/stewardship/triangle → Consensus game + performer mix
+- Layer types updated to 7 (Melody, Drums, Pad, Bass, Harmony, FX1, FX2)
+- Data models simplified significantly
+**Implications:** All client UIs rebuilt. Conductor logic substantially rewritten.
+OSC routing updated. Ableton session needs redesign for new layer types.
+```
+
+10.6. Update DECISIONS.md with resolved decisions and remaining open questions from ARCHITECTURE-V2.md
+
+### Verification
+- No dead imports or unused files remain
+- `grep` for removed terms (stewardship, triangle, centroid, rotation, doubtThreshold, collapsed) returns zero results in source code
+- All documentation is consistent with V2 architecture

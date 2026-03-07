@@ -292,6 +292,11 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     }
   }
 
+  if (nextPhase === 'finale_setup') {
+    console.log('Transitioning to finale_setup');
+    handleSetupFinale(state);
+  }
+
   events.push({
     type: 'SHOW_PHASE_CHANGED',
     phase: nextPhase,

@@ -1,10 +1,10 @@
 /**
- * Solo Show — Core Type Definitions (NEW SYSTEM)
+ * Solo Show — Core Type Definitions (V2)
  *
  * This file defines the shared language for the entire system.
  * Changes here affect conductor, server, and client packages.
  *
- * See ARCHITECTURE.md for detailed documentation of each type.
+ * See ARCHITECTURE-V2.md for detailed documentation of each type.
  *
  * Self-contained: no imports from other project files.
  */
@@ -27,15 +27,16 @@ export type Chapter = 'ambition' | 'love' | 'avoidance';
 
 /**
  * Layer types represent the musical role of each layer in a song.
- * Core types are defined; custom strings are allowed for extensibility.
+ * 7 fixed types — one per layer slot per attempt.
  */
 export type LayerType =
-  | 'foundation'   // The bed / the ground
-  | 'pulse'        // Heartbeat / drive
-  | 'color'        // Warmth / sharpness
-  | 'space'        // Intimate / distant
-  | 'voice'        // Clear / masked
-  | string;        // Extensible for custom types
+  | 'melody'
+  | 'drums'
+  | 'pad'
+  | 'bass'
+  | 'harmony'
+  | 'fx1'
+  | 'fx2';
 
 // ============================================================================
 // Layer Phases & Config
@@ -44,18 +45,18 @@ export type LayerType =
 /**
  * Phase of a single layer within an attempt_build phase.
  *
- * locked → auditioning → voting → resolving → locked_in
+ * locked → auditioning → voting → revealing → locked_in
  *                                     │
- *                                     ▼ (if consensus < doubt threshold)
+ *                                     ▼ (if health bar reaches zero)
  *                                 collapsed (attempt ends)
  */
 export type LayerPhase =
   | 'locked'        // Not yet reached; displayed as unexplored square
   | 'auditioning'   // Playing A and B previews
-  | 'voting'        // Vote window open, audience selecting A or B
-  | 'resolving'     // Vote closed, calculating result, displaying outcome
+  | 'voting'        // Vote window open, audience selecting A or B (blind — no live split)
+  | 'revealing'     // Vote closed, showing split + health drain + winner lock-in
   | 'locked_in'     // Option chosen, layer committed to song stack
-  | 'collapsed';    // Attempt failed at this layer (doubt exceeded consensus)
+  | 'collapsed';    // Attempt failed at this layer (health bar reached zero)
 
 /** Configuration for a single layer within an attempt. */
 export interface LayerConfig {
@@ -65,17 +66,16 @@ export interface LayerConfig {
   optionB: AudioReference;              // Ableton clip reference
   labelA: string;                       // Short emotional tagline for A
   labelB: string;                       // Short emotional tagline for B
-  doubtThreshold: number | null;        // null = no threshold (simple majority wins)
-  // TODO: See DECISIONS.md O2 — exact threshold schedule TBD
 }
 
 /** Result of a resolved layer. */
 export interface LayerResult {
   layerIndex: number;
   type: LayerType;
-  status: 'locked_in' | 'unreached';    // unreached = never got to vote on this layer
-  chosenOption: 'A' | 'B' | null;       // null if unreached
-  consensus: number | null;             // null if unreached
+  status: 'locked_in' | 'unreached';   // unreached = never got to vote on this layer
+  chosenOption: 'A' | 'B' | null;      // null if unreached
+  consensus: number | null;            // null if unreached
+  drainAmount: number | null;          // health bar drain from this layer; null if unreached
 }
 
 /** A single audience member's vote on a layer. */
@@ -88,6 +88,27 @@ export interface LayerVote {
 }
 
 // ============================================================================
+// Health Bar
+// ============================================================================
+
+/** Cumulative health bar state for a song-building attempt. */
+export interface HealthBarState {
+  current: number;                      // 0 = collapsed, 100 = full
+  drainFactor: number;                  // Base multiplier for this attempt
+  layerMultipliers: number[];           // Per-layer scaling (length 7, e.g. [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0])
+  history: HealthBarDrain[];            // One entry per resolved layer
+}
+
+/** A single drain event applied to the health bar after a vote resolves. */
+export interface HealthBarDrain {
+  layerIndex: number;
+  losingProportion: number;             // min(votesA, votesB) / total (0.0–0.5)
+  layerMultiplier: number;              // From layerMultipliers[layerIndex]
+  drainAmount: number;                  // losingProportion * 100 * drainFactor * layerMultiplier
+  healthAfter: number;                  // Health bar value after applying drain (floor 0)
+}
+
+// ============================================================================
 // Vote Result
 // ============================================================================
 
@@ -97,8 +118,6 @@ export interface VoteResult {
   votesA: number;
   votesB: number;
   totalVotes: number;
-  thresholdMet: boolean;                // True if consensus >= doubt threshold (or no threshold)
-  doubtThreshold: number | null;
 }
 
 // ============================================================================
@@ -116,16 +135,18 @@ export interface AttemptState {
   votes: LayerVote[];                   // All votes for this attempt
   status: 'pending' | 'in_progress' | 'completed' | 'collapsed';
   collapsedAtLayer: number | null;
-  currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing (null when not auditioning)
-  auditionLoopIndex: number;                  // 0-based count of loops completed so far
+  currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing
+  auditionLoopIndex: number;                  // 0-based count of loops completed
+  healthBar: HealthBarState;
 }
 
 /** Static configuration for a single attempt. */
 export interface AttemptConfig {
   chapter: Chapter;
   title: string;                        // Display name (e.g., "Ambition")
-  layers: LayerConfig[];                // 5–7 layers per attempt
-  // TODO: See DECISIONS.md O1 — exact layer count TBD
+  layers: LayerConfig[];                // 7 layers per attempt
+  drainFactor: number;                  // Health bar base drain multiplier for this attempt
+  layerMultipliers: number[];           // Per-layer scaling factors (length 7)
 }
 
 /** Recorded result of a completed/collapsed attempt, used for fragment generation. */
@@ -138,10 +159,14 @@ export interface AttemptResult {
 }
 
 // ============================================================================
-// Fragment & Safe Parameter
+// Fragment
 // ============================================================================
 
-/** A fragment is a selectable musical element for the finale, derived from attempt results. */
+/**
+ * A fragment is a musical element from the song-building phase available in the finale.
+ * Available fragments = winning options from voted-on layers.
+ * Locked fragments = losing options + both options from unreached layers.
+ */
 export interface Fragment {
   id: string;                           // Unique identifier
   attemptIndex: number;
@@ -149,46 +174,45 @@ export interface Fragment {
   option: 'A' | 'B';
   chapter: Chapter;
   layerType: LayerType;
-  displayName: string;                  // Human-readable name for UI
-  // TODO: See DECISIONS.md O5 — display name generation strategy TBD
+  displayLabel: string;                 // Emotional tagline (e.g., "Distant Pulse")
   audioRef: AudioReference;
-  safeParameter: SafeParameter;
-}
-
-/** The parameter that stewards control when their fragment is active. */
-export interface SafeParameter {
-  name: string;                         // Internal parameter name
-  displayLabel: string;                 // What the user sees (e.g., "Intensity")
-  abletonMapping: AbletonParamRef;      // Track index + device index + param index
-  min: number;                          // Clamped minimum (0.0–1.0)
-  max: number;                          // Clamped maximum (0.0–1.0)
-  defaultValue: number;                 // Neutral position
-  smoothingMs: number;                  // Parameter change smoothing (prevent zipper noise)
-}
-
-/** A user's fragment selection for the finale queue. */
-export interface FragmentSelection {
-  userId: UserId;
-  attemptIndex: number;
-  layerIndex: number;
-  option: 'A' | 'B';
-  chapter: Chapter;
 }
 
 // ============================================================================
-// Audio References (placeholders — to be fleshed out with Ableton layout)
+// Pending Change (Performer Mix)
 // ============================================================================
 
-// TODO: See DECISIONS.md O8 — Ableton session template TBD
-/** Reference to an audio clip/track in Ableton. Placeholder shape. */
+/** A queued fragment activation or mute for the performer mixing surface. */
+export interface PendingChange {
+  layerType: LayerType;
+  fragmentId: string | null;           // null = mute this layer
+  queuedAt: number;
+}
+
+// ============================================================================
+// NPC
+// ============================================================================
+
+/** Configuration for an NPC auto-trigger condition. */
+export interface NpcTriggerConfig {
+  condition: string;                   // Condition identifier (e.g., 'consecutive_failures', 'near_miss')
+  threshold?: number;                  // Numeric threshold for the condition, if applicable
+  message: string;                     // NPC line to display
+}
+
+// ============================================================================
+// Audio References
+// ============================================================================
+
+/** Reference to an audio clip/track in Ableton. */
 export interface AudioReference {
   trackIndex: number;                   // Computed from track layout formula
   clipSlot?: number;
-  effectIndices?: number[];             // Device indices to enable/disable for this option (additive with track mute/unmute)
+  effectIndices?: number[];             // Device indices to enable/disable for this option
   label?: string;                       // Human-readable reference
 }
 
-/** Reference to an Ableton device parameter. Placeholder shape. */
+/** Reference to an Ableton device parameter. */
 export interface AbletonParamRef {
   trackIndex: number;
   deviceIndex: number;
@@ -200,47 +224,39 @@ export interface AbletonParamRef {
 // ============================================================================
 
 export interface FinaleState {
-  chapterAssignments: Map<UserId, Chapter>;
-  queue: QueueEntry[];
-  activeSlots: (ActiveSlot | null)[];   // Length 7; null = empty slot
-  trianglePositions: Map<UserId, TrianglePosition>;
-  centroid: TrianglePosition;           // Computed weighted average
-  rotationActive: boolean;
-  rotationRate: 1 | 2;                  // Slots per 8-bar cycle
-  frozen: boolean;
-  stewardshipLog: StewardshipEntry[];
-  triangleActive: boolean;
-}
+  phase: 'elegy' | 'consensus_game' | 'performer_mix';
 
-export interface ActiveSlot {
-  slotIndex: number;                    // 0–6
-  fragment: Fragment;
-  stewardUserId: UserId;
-  parameterValue: number;              // Current safe parameter value
-  activatedAtBeat: number;
-  energyLevel: number;                 // From audio metering (0.0–1.0)
-}
+  // Fragment availability (computed from song-building results)
+  availableFragments: Fragment[];       // Winners only (for consensus game)
+  allFragments: Fragment[];             // All 42 (for performer mixing surface)
+  lockedFragments: Fragment[];          // Losers + unreached (for elegy display)
 
-export interface QueueEntry {
-  userId: UserId;
-  fragment: Fragment;
-  chapter: Chapter;
-  enqueuedAt: Timestamp;
-  hasBeenSteward: boolean;             // Tracks whether this user has had a turn
-}
+  // Consensus game state
+  consensusGame: {
+    active: boolean;
+    currentRound: number;
+    roundTimeRemaining: number;         // ms
+    votes: Map<UserId, string>;         // userId → fragmentId
+    convergenceValue: number;           // 0.0 to 1.0
+    threshold: number;                  // Current threshold (may decrease after failures)
+    consecutiveFailures: number;
+    lockedRoles: Map<LayerType, string>;  // layerType → fragmentId (activated fragments)
+  };
 
-export interface TrianglePosition {
-  wAmbition: number;                   // 0.0–1.0, all three sum to 1.0
-  wLove: number;
-  wAvoidance: number;
-}
+  // NPC state
+  npc: {
+    currentMessage: string | null;
+    autoTriggersEnabled: boolean;
+  };
 
-export interface StewardshipEntry {
-  userId: UserId;
-  slotIndex: number;
-  fragment: Fragment;
-  startBeat: number;
-  endBeat: number | null;              // null if still active
+  // Performer mix state
+  performerMix: {
+    activeLayers: Map<LayerType, string | null>;  // layerType → fragmentId or null (muted)
+    pendingChanges: PendingChange[];
+    loopPosition: number;               // 0.0 to 1.0 within current 8-bar loop
+    loopCount: number;                  // Total loops since finale started
+    liveTracksActive: string[];         // IDs of active live performance tracks
+  };
 }
 
 // ============================================================================
@@ -252,7 +268,6 @@ export interface User {
   seatId: SeatId | null;               // From QR code scan; null if joined without QR
   connected: boolean;
   joinedAt: Timestamp;
-  finaleChapter: Chapter | null;        // Assigned at finale_setup; null before then
 }
 
 // ============================================================================
@@ -261,18 +276,19 @@ export interface User {
 
 /**
  * Show phase progression:
- * lobby → opener → attempt_story → attempt_build → ... (×3) →
- * finale_setup → finale_rotating → finale_frozen → ended
+ * lobby → opener → attempt_story → attempt_build → attempt_resolve → ... (×3) →
+ * finale_elegy → finale_consensus → finale_performer_mix → ended
  */
 export type ShowPhase =
-  | 'lobby'               // Audience joining, waiting
-  | 'opener'              // Performance opening (phones dark)
-  | 'attempt_story'       // Story segment before song-building (phones dark)
-  | 'attempt_build'       // Active song-building with audience voting
-  | 'finale_setup'        // Chapter assignment + fragment selection
-  | 'finale_rotating'     // Active slot rotation with stewardship
-  | 'finale_frozen'       // Rotation frozen, final mix locked
-  | 'ended';              // Show complete
+  | 'lobby'                   // Audience joining, waiting
+  | 'opener'                  // Performance opening (phones dark)
+  | 'attempt_story'           // Story segment before song-building (phones dark)
+  | 'attempt_build'           // Active song-building with audience voting
+  | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
+  | 'finale_elegy'            // Elegy display of all fragments (available and locked)
+  | 'finale_consensus'        // Audience consensus game to activate fragments
+  | 'finale_performer_mix'    // Performer live-mixes the activated fragments
+  | 'ended';                  // Show complete
 
 // ============================================================================
 // Show State
@@ -284,7 +300,7 @@ export interface ShowState {
   currentAttemptIndex: number;          // 0, 1, 2
   attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: FinaleState | null;      // Populated at finale_setup
+  finaleState: FinaleState | null;      // Populated at finale_elegy
   config: ShowConfig;
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
@@ -296,7 +312,7 @@ export interface ShowState {
 // ============================================================================
 
 export interface ShowConfig {
-  maxLayersPerAttempt: number;          // Used for track index calculation (default: 7)
+  layersPerAttempt: number;             // Always 7; used for track index calculation
   attempts: AttemptConfig[];            // Length 3
   finale: FinaleConfig;
   timing: TimingConfig;
@@ -307,22 +323,21 @@ export interface ShowConfig {
 }
 
 export interface FinaleConfig {
-  slotCount: number;                    // Default: 7
-  rotationBars: number;                 // Default: 8
-  defaultRotationRate: 1 | 2;           // Slots per cycle
-  triangleDriftTimeoutMs: number;       // How long before idle dots drift to center
-  triangleDriftSpeedMs: number;         // How fast drift occurs
-  fragments: Fragment[];                // Pre-configured fragment library
+  consensusRoundDurationMs: number;
+  firstRoundDurationMs: number;
+  initialThreshold: number;
+  thresholdDecayPerFailure: number;
+  minThreshold: number;
+  interRoundDelayMs: number;
+  successCelebrationMs: number;
+  npcAutoTriggers: NpcTriggerConfig[];
 }
 
 export interface TimingConfig {
-  beatsPerLoop: number;                 // Beats per audition loop (32 = 8 bars); used with OSC beat sync
-  auditionsPerLayer: number;            // Times each option is heard (2 = A-B-A-B); total loops = auditionsPerLayer * 2
-  auditionDurationMs: number;           // Fallback: used when beatsPerLoop is 0 or OSC unavailable
+  auditionDurationMs: number;           // Fallback when OSC beat sync unavailable
   votingWindowMs: number;               // How long voting stays open
-  resolveAnimationMs: number;           // Result display duration
-  collapseAnimationMs: number;          // Collapse gesture duration before auto-advance
-  autoAdvanceToStoryMs: number;         // Delay after collapse before transitioning
+  revealSequenceDurationMs: number;     // Duration of post-vote reveal animation
+  rejectionEffectDurationMs: number;    // Duration of song rejection effect
 }
 
 // ============================================================================
@@ -334,9 +349,9 @@ export type AudioCue =
   | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
   | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
   | { type: 'collapse_gesture'; attemptIndex: number }
-  | { type: 'slot_activate'; slotIndex: number; fragment: Fragment }
-  | { type: 'slot_deactivate'; slotIndex: number }
-  | { type: 'steward_param'; slotIndex: number; value: number }
+  | { type: 'rejection_gesture'; attemptIndex: number }
+  | { type: 'consensus_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
+  | { type: 'mix_update'; changes: PendingChange[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' };                  // Hard mute all
 
@@ -353,42 +368,40 @@ export type ConductorCommand =
 
   // Song-building
   | { type: 'START_AUDITION' }
-  | { type: 'TOGGLE_AUDITION' }
   | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
   | { type: 'RERUN_VOTE' }
-  | { type: 'RESET_LAYER' }
-  | { type: 'FORCE_CONTINUE' }
+
+  // Health Bar
+  | { type: 'SET_DRAIN_FACTOR'; factor: number }
+  | { type: 'SET_HEALTH'; value: number }
   | { type: 'FORCE_COLLAPSE' }
 
-  // Doubt
-  | { type: 'SET_THRESHOLD'; layerIndex: number; threshold: number | null }
-  | { type: 'TOGGLE_DOUBT'; active: boolean }
+  // Song Rejection
+  | { type: 'TRIGGER_REJECTION' }
 
-  // Finale
+  // Finale — Consensus Game
   | { type: 'SETUP_FINALE' }
-  | { type: 'SELECT_FRAGMENT'; userId: UserId; fragmentId: string }
-  | { type: 'UPDATE_TRIANGLE'; userId: UserId; position: TrianglePosition }
-  | { type: 'UPDATE_STEWARD_PARAM'; userId: UserId; value: number }
-  | { type: 'START_ROTATION' }
-  | { type: 'STOP_ROTATION' }
-  | { type: 'FREEZE_ROTATION' }
-  | { type: 'SET_ROTATION_RATE'; rate: 1 | 2 }
-  | { type: 'FORCE_ASSIGN_STEWARD'; userId: UserId; slotIndex: number }
-  | { type: 'FORCE_INSERT_FRAGMENT'; fragmentId: string; slotIndex: number }
-  | { type: 'CLEAR_QUEUE' }
-  | { type: 'TOGGLE_TRIANGLE'; active: boolean }
+  | { type: 'START_CONSENSUS_ROUND' }
+  | { type: 'SUBMIT_CONSENSUS_VOTE'; userId: UserId; fragmentId: string }
+  | { type: 'END_CONSENSUS_ROUND' }
+  | { type: 'SET_CONSENSUS_THRESHOLD'; threshold: number }
+  | { type: 'SEND_NPC_MESSAGE'; message: string }
 
-  // Rotation
-  | { type: 'PERFORM_ROTATION_TICK'; beat: number }
+  // Finale — Performer Mix
+  | { type: 'START_PERFORMER_MIX' }
+  | { type: 'QUEUE_FRAGMENT'; layerType: LayerType; fragmentId: string | null }
+  | { type: 'CANCEL_PENDING'; layerType: LayerType }
+  | { type: 'FIRE_PENDING_CHANGES' }
+  | { type: 'LOAD_SNAPSHOT'; snapshot: Map<LayerType, string | null> }
+  | { type: 'TOGGLE_LIVE_TRACK'; trackId: string }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
   | { type: 'AUDIO_PANIC' }
-  | { type: 'TRIGGER_COLLAPSE_GESTURE' }
 
   // Connection
   | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
@@ -417,22 +430,25 @@ export type ConductorEvent =
   | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
-  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; consensus: number; threshold: number }
+  | { type: 'HEALTH_BAR_DRAINED'; attemptIndex: number; layerIndex: number; drain: HealthBarDrain }
+  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; healthBar: HealthBarState }
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
+  | { type: 'SONG_REJECTED'; attemptIndex: number }
 
   // Finale
-  | { type: 'FINALE_SETUP_COMPLETE'; chapterAssignments: Map<UserId, Chapter>; availableFragments: Fragment[] }
-  | { type: 'FRAGMENT_QUEUED'; userId: UserId; fragment: Fragment }
-  | { type: 'SLOT_ACTIVATED'; slotIndex: number; fragment: Fragment; stewardUserId: UserId }
-  | { type: 'SLOT_DEACTIVATED'; slotIndex: number }
-  | { type: 'STEWARDSHIP_STARTED'; userId: UserId; slotIndex: number }
-  | { type: 'STEWARDSHIP_ENDED'; userId: UserId; slotIndex: number }
-  | { type: 'CENTROID_UPDATED'; centroid: TrianglePosition }
-  | { type: 'ROTATION_TICK'; newSlots: ActiveSlot[]; removedSlots: number[] }
+  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: Fragment[]; lockedFragments: Fragment[] }
+  | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
+  | { type: 'CONSENSUS_VOTE_UPDATED'; convergenceValue: number }
+  | { type: 'CONSENSUS_ROUND_SUCCESS'; fragmentId: string; layerType: LayerType; convergence: number }
+  | { type: 'CONSENSUS_ROUND_FAILURE'; highestConvergence: number }
+  | { type: 'CONSENSUS_GAME_COMPLETE' }
+  | { type: 'NPC_MESSAGE'; message: string }
+  | { type: 'PERFORMER_MIX_STARTED' }
+  | { type: 'PENDING_CHANGES_FIRED'; changes: PendingChange[] }
+  | { type: 'MIX_STATE_UPDATED'; activeLayers: Map<LayerType, string | null> }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
-  | { type: 'METER_UPDATE'; slots: { slotIndex: number; energy: number }[] }
 
   // State
   | { type: 'STATE_UPDATED'; version: number }
@@ -476,23 +492,27 @@ export interface AudienceAttemptView {
   currentAuditionOption: 'A' | 'B' | null;
   auditionLoopIndex: number;
   auditionTotalLoops: number;
+  healthBar: HealthBarState;
 }
 
 /**
- * Finale view sent to audience clients.
- * Personalized: their chapter, stewardship status, triangle position, queued fragment.
+ * Finale view sent to audience clients during the consensus game phase.
+ * Personalized: includes their current vote, convergence value, and available fragments.
  */
 export interface AudienceFinaleView {
-  myChapter: Chapter | null;
-  isSteward: boolean;
-  stewardSlotIndex: number | null;
-  stewardFragment: Fragment | null;
-  stewardParameterLabel: string | null;
-  stewardParameterValue: number | null;  // Current slider position (for reconnection recovery)
-  myTrianglePosition: TrianglePosition | null;
-  myFragment: Fragment | null;
-  triangleActive: boolean;
-  availableFragments: Array<{ fragment: Fragment; selectable: boolean }>;
+  finalePhase: FinaleState['phase'];
+  // Consensus game
+  availableFragments: Array<{ fragment: Fragment; locked: boolean }>;
+  myVote: string | null;                // fragmentId they voted for this round
+  convergenceValue: number;             // 0.0 to 1.0 (updated at ~4-5 Hz)
+  threshold: number;
+  roundTimeRemaining: number;
+  currentRound: number;
+  lockedRoles: Array<{ layerType: LayerType; fragmentId: string }>;
+  // NPC
+  npcMessage: string | null;
+  // Performer mix (audience observation only)
+  mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
 }
 
 /**
@@ -505,7 +525,6 @@ export interface AudienceClientState {
   phase: ShowPhase;
   paused: boolean;
   version: number;
-  finaleChapter: Chapter | null;
   currentAttemptIndex: number;
   currentAttempt: AudienceAttemptView | null;
   myFinale: AudienceFinaleView | null;
@@ -518,14 +537,18 @@ export interface AudienceClientState {
  * Finale state sent to projector (public — no per-user data).
  */
 export interface ProjectorFinaleView {
-  queue: QueueEntry[];
-  activeSlots: (ActiveSlot | null)[];
-  centroid: TrianglePosition;
-  rotationActive: boolean;
-  rotationRate: 1 | 2;
-  frozen: boolean;
-  triangleActive: boolean;
-  stewardshipLog: StewardshipEntry[];
+  finalePhase: FinaleState['phase'];
+  availableFragments: Fragment[];
+  lockedFragments: Fragment[];
+  convergenceValue: number;
+  threshold: number;
+  roundTimeRemaining: number;
+  currentRound: number;
+  lockedRoles: Array<{ layerType: LayerType; fragmentId: string }>;
+  npcMessage: string | null;
+  mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
+  mixPendingChanges: PendingChange[];
+  loopPosition: number;
 }
 
 /**
