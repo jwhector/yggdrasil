@@ -14,23 +14,12 @@ export * from './types';
 // Export conductor functions
 export { createInitialState, processCommand } from './conductor';
 
-// Export consensus functions
-export { calculateConsensus, resolveVote } from './consensus';
+// Export voting functions
+export { calculateConsensus, calculateVoteResult } from './voting';
+
+// Export health bar functions
+export { createHealthBar, calculateDrain, applyDrain, isCollapsed } from './health-bar';
 
 // Export fragment functions
 export { generateFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
-
-// Export finale functions
-export {
-  assignChapters,
-  initializeFinaleState,
-  getAvailableFragments,
-  selectFragment,
-  computeCentroid,
-  scheduleRotation,
-  performRotationTick,
-  startStewardship,
-  endStewardship,
-  updateStewardParam,
-} from './finale';

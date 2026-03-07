@@ -4,6 +4,7 @@
 
 import { describe, test, expect } from '@jest/globals';
 import { generateFragments, extractAttemptResult } from '../fragments';
+import { createHealthBar } from '../health-bar';
 import type { AttemptState, AttemptConfig, LayerConfig, AudioReference } from '../types';
 
 function makeAudioRef(index: number): AudioReference {
@@ -27,6 +28,8 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCoun
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
     layers: Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i)),
+    drainFactor: 0.5,
+    layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
   };
 }
 
@@ -44,12 +47,14 @@ function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
       status: 'locked_in' as const,
       chosenOption: i % 2 === 0 ? 'A' as const : 'B' as const,
       consensus: 0.8,
+      drainAmount: 15,
     })),
     votes: [],
     status: 'completed',
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
+    healthBar: createHealthBar(0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]),
   };
 }
 
@@ -69,6 +74,7 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
         status: 'locked_in' as const,
         chosenOption: 'A' as const,
         consensus: 0.8,
+        drainAmount: 15,
       })),
       // Collapsed layer and beyond are unreached
       ...Array.from({ length: layerCount - collapseAt }, (_, i) => ({
@@ -77,6 +83,7 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
         status: 'unreached' as const,
         chosenOption: null,
         consensus: null,
+        drainAmount: null,
       })),
     ],
     votes: [],
@@ -84,6 +91,7 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
+    healthBar: createHealthBar(0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]),
   };
 }
 
@@ -169,6 +177,7 @@ describe('generateFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
+      healthBar: createHealthBar(0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]),
     };
     const configs = [makeAttemptConfig('avoidance', 1)];
     const fragments = generateFragments([pending], configs);

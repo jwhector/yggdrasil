@@ -1,12 +1,20 @@
 /**
- * Conductor State Machine Tests (NEW SYSTEM)
+ * Conductor State Machine Tests (V2)
  *
  * Test names are specifications — complete sentences describing behavior.
  */
 
 import { describe, test, expect } from '@jest/globals';
 import { createInitialState, processCommand } from '../conductor';
-import type { ShowState, ShowConfig, AttemptConfig, LayerConfig, ConductorEvent, AudioReference } from '../types';
+import type {
+  ShowState,
+  ShowConfig,
+  AttemptConfig,
+  LayerConfig,
+  ConductorEvent,
+  AudioReference,
+  LayerType,
+} from '../types';
 
 // ============================================================================
 // Test Helpers
@@ -16,57 +24,75 @@ function makeAudioRef(index: number): AudioReference {
   return { trackIndex: index };
 }
 
-function makeLayerConfig(index: number, threshold: number | null = null): LayerConfig {
+const LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+
+function makeLayerConfig(index: number): LayerConfig {
   return {
     index,
-    type: index === 0 ? 'foundation' : index === 1 ? 'pulse' : 'color',
+    type: LAYER_TYPES[index % LAYER_TYPES.length],
     optionA: makeAudioRef(index * 2),
     optionB: makeAudioRef(index * 2 + 1),
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
-    doubtThreshold: threshold,
   };
 }
 
 function makeAttemptConfig(
   chapter: 'ambition' | 'love' | 'avoidance',
-  thresholds: (number | null)[] = [null, null, 0.65],
+  layerCount = 3,
+  drainFactor = 0.5,
+  layerMultipliers?: number[],
 ): AttemptConfig {
+  const multipliers = layerMultipliers ?? Array(layerCount).fill(1.0);
   return {
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
-    layers: thresholds.map((t, i) => makeLayerConfig(i, t)),
+    layers: Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i)),
+    drainFactor,
+    layerMultipliers: multipliers,
   };
 }
 
-function createTestConfig(layerThresholds: (number | null)[] = [null, null, 0.65]): ShowConfig {
+function createTestConfig(
+  layerCount = 3,
+  drainFactor = 0.5,
+  layerMultipliers?: number[],
+): ShowConfig {
+  const multipliers = layerMultipliers ?? Array(layerCount).fill(1.0);
   return {
-    maxLayersPerAttempt: 7,
+    layersPerAttempt: layerCount,
     attempts: [
-      makeAttemptConfig('ambition', layerThresholds),
-      makeAttemptConfig('love', layerThresholds),
-      makeAttemptConfig('avoidance', layerThresholds),
+      makeAttemptConfig('ambition', layerCount, drainFactor, multipliers),
+      makeAttemptConfig('love', layerCount, drainFactor, multipliers),
+      makeAttemptConfig('avoidance', layerCount, drainFactor, multipliers),
     ],
     finale: {
-      slotCount: 7,
-      rotationBars: 8,
-      defaultRotationRate: 2,
-      triangleDriftTimeoutMs: 10000,
-      triangleDriftSpeedMs: 3000,
-      fragments: [],
+      consensusRoundDurationMs: 15000,
+      firstRoundDurationMs: 20000,
+      initialThreshold: 0.4,
+      thresholdDecayPerFailure: 0.05,
+      minThreshold: 0.25,
+      interRoundDelayMs: 3000,
+      successCelebrationMs: 6000,
+      npcAutoTriggers: [],
     },
     timing: {
       auditionDurationMs: 4000,
       votingWindowMs: 30000,
-      resolveAnimationMs: 5000,
-      collapseAnimationMs: 3000,
-      autoAdvanceToStoryMs: 2000,
-      beatsPerLoop: 0,
-      auditionsPerLayer: 0,
+      revealSequenceDurationMs: 5000,
+      rejectionEffectDurationMs: 3000,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1', 'seat-2'],
   };
+}
+
+/**
+ * Config where a 50/50 split immediately collapses the health bar.
+ * Uses drainFactor=2.0 so 0.5 * 100 * 2.0 * 1.0 = 100 → full drain on first split vote.
+ */
+function createCollapseConfig(layerCount = 1): ShowConfig {
+  return createTestConfig(layerCount, 2.0, Array(layerCount).fill(1.0));
 }
 
 function createTestState(config?: ShowConfig): ShowState {
@@ -85,7 +111,7 @@ function connectUser(state: ShowState, userId: string): void {
   processCommand(state, { type: 'USER_CONNECT', userId });
 }
 
-/** Run through the full layer cycle: audition → vote → close (resolve). */
+/** Run through the full layer cycle: audition → vote → close. */
 function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | 'B' = 'A'): ConductorEvent[] {
   processCommand(state, { type: 'START_AUDITION' });
   processCommand(state, { type: 'OPEN_VOTING' });
@@ -93,6 +119,13 @@ function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | '
     processCommand(state, { type: 'SUBMIT_VOTE', userId, choice });
   }
   return processCommand(state, { type: 'CLOSE_VOTING' });
+}
+
+/** Run through N layers with unanimous votes (no drain). */
+function completeNLayers(state: ShowState, n: number, voters: string[], choice: 'A' | 'B' = 'A'): void {
+  for (let i = 0; i < n; i++) {
+    completeSingleLayer(state, voters, choice);
+  }
 }
 
 function findEvent(events: ConductorEvent[], type: string): ConductorEvent | undefined {
@@ -121,12 +154,11 @@ describe('Show Phase Transitions', () => {
     expect(findEvent(events, 'SHOW_PHASE_CHANGED')).toBeDefined();
   });
 
-  test('ADVANCE_PHASE walks through the full phase sequence', () => {
+  test('ADVANCE_PHASE walks through the full phase sequence including attempt_resolve', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    // Walk through all phases
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 14; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -134,15 +166,18 @@ describe('Show Phase Transitions', () => {
     expect(phases).toEqual([
       'lobby',
       'opener',
-      'attempt_story', // attempt 0
-      'attempt_build', // attempt 0
-      'attempt_story', // attempt 1
-      'attempt_build', // attempt 1
-      'attempt_story', // attempt 2
-      'attempt_build', // attempt 2
-      'finale_setup',
-      'finale_rotating',
-      'finale_frozen',
+      'attempt_story',       // attempt 0
+      'attempt_build',       // attempt 0
+      'attempt_resolve',     // attempt 0
+      'attempt_story',       // attempt 1
+      'attempt_build',       // attempt 1
+      'attempt_resolve',     // attempt 1
+      'attempt_story',       // attempt 2
+      'attempt_build',       // attempt 2
+      'attempt_resolve',     // attempt 2
+      'finale_elegy',
+      'finale_consensus',
+      'finale_performer_mix',
       'ended',
     ]);
   });
@@ -157,10 +192,16 @@ describe('Show Phase Transitions', () => {
     processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build 0
     expect(state.currentAttemptIndex).toBe(0);
 
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_resolve 0
+    expect(state.currentAttemptIndex).toBe(0);
+
     processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story 1
     expect(state.currentAttemptIndex).toBe(1);
 
     processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build 1
+    expect(state.currentAttemptIndex).toBe(1);
+
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_resolve 1
     expect(state.currentAttemptIndex).toBe(1);
 
     processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story 2
@@ -169,8 +210,7 @@ describe('Show Phase Transitions', () => {
 
   test('ADVANCE_PHASE returns error when already at ended', () => {
     const state = createTestState();
-    // Walk to ended
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 14; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
     }
     expect(state.phase).toBe('ended');
@@ -290,7 +330,6 @@ describe('Song-Building Layer Flow', () => {
   test('OPEN_VOTING returns error when not in auditioning phase', () => {
     const state = createTestState();
     advanceToBuild(state);
-    // Layer is in 'locked' — should fail
     const events = processCommand(state, { type: 'OPEN_VOTING' });
     expect(findEvent(events, 'ERROR')).toBeDefined();
   });
@@ -344,6 +383,114 @@ describe('Song-Building Layer Flow', () => {
     const events = processCommand(state, { type: 'CLOSE_VOTING' });
     expect(findEvent(events, 'VOTE_RESULT')).toBeDefined();
   });
+
+  test('CLOSE_VOTING transitions layer to revealing and emits HEALTH_BAR_DRAINED', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+
+    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    expect(findEvent(events, 'HEALTH_BAR_DRAINED')).toBeDefined();
+  });
+});
+
+// ============================================================================
+// Health Bar: Drain Mechanics
+// ============================================================================
+
+describe('Health Bar Drain Mechanics', () => {
+  test('unanimous vote causes zero drain on health bar', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    connectUser(state, 'u3');
+    advanceToBuild(state);
+
+    completeSingleLayer(state, ['u1', 'u2', 'u3'], 'A'); // unanimous → 0 drain
+
+    expect(state.attempts[0].healthBar.current).toBe(100);
+  });
+
+  test('health bar drains correctly with 70/30 split (factor=0.5, multiplier=1.0)', () => {
+    // losingProportion = 3/10 = 0.3 → drain = 0.3 * 100 * 0.5 * 1.0 = 15
+    const config = createTestConfig(1, 0.5, [1.0]);
+    const state = createTestState(config);
+    for (let i = 1; i <= 10; i++) connectUser(state, `u${i}`);
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    for (let i = 1; i <= 7; i++) processCommand(state, { type: 'SUBMIT_VOTE', userId: `u${i}`, choice: 'A' });
+    for (let i = 8; i <= 10; i++) processCommand(state, { type: 'SUBMIT_VOTE', userId: `u${i}`, choice: 'B' });
+
+    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.attempts[0].healthBar.current).toBeCloseTo(85);
+    const drainEvent = events.find(e => e.type === 'HEALTH_BAR_DRAINED') as any;
+    expect(drainEvent.drain.drainAmount).toBeCloseTo(15);
+    expect(drainEvent.drain.losingProportion).toBeCloseTo(0.3);
+  });
+
+  test('later layers cost more than early layers with default multipliers', () => {
+    // 2 layers: multiplier[0]=0.5, multiplier[1]=2.0 with same 50/50 split
+    const config = createTestConfig(2, 0.5, [0.5, 2.0]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+
+    // Layer 0: 50/50 split → drain = 0.5 * 100 * 0.5 * 0.5 = 12.5
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    const layer0Events = processCommand(state, { type: 'CLOSE_VOTING' });
+
+    // Layer 1: 50/50 split → drain = 0.5 * 100 * 0.5 * 2.0 = 50
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    const layer1Events = processCommand(state, { type: 'CLOSE_VOTING' });
+
+    const drain0 = (layer0Events.find(e => e.type === 'HEALTH_BAR_DRAINED') as any).drain.drainAmount;
+    const drain1 = (layer1Events.find(e => e.type === 'HEALTH_BAR_DRAINED') as any).drain.drainAmount;
+    expect(drain1).toBeGreaterThan(drain0);
+    expect(drain0).toBeCloseTo(12.5);
+    expect(drain1).toBeCloseTo(50);
+  });
+
+  test('default multipliers [0.5,0.6,0.8,1.0,1.3,1.6,2.0] produce escalating drain', () => {
+    const defaultMultipliers = [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0];
+    const config = createTestConfig(7, 0.5, defaultMultipliers);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+
+    const drains: number[] = [];
+    for (let layer = 0; layer < 7; layer++) {
+      processCommand(state, { type: 'START_AUDITION' });
+      processCommand(state, { type: 'OPEN_VOTING' });
+      // 50/50 split → losingProportion = 0.5
+      processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+      processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+      const events = processCommand(state, { type: 'CLOSE_VOTING' });
+
+      // If attempt didn't collapse, record drain; if it did, we're done
+      const drainEvent = events.find(e => e.type === 'HEALTH_BAR_DRAINED') as any;
+      if (drainEvent) drains.push(drainEvent.drain.drainAmount);
+      if (state.attempts[0].status === 'collapsed') break;
+    }
+
+    // Each drain should be larger than the previous
+    for (let i = 1; i < drains.length; i++) {
+      expect(drains[i]).toBeGreaterThan(drains[i - 1]);
+    }
+  });
 });
 
 // ============================================================================
@@ -351,19 +498,36 @@ describe('Song-Building Layer Flow', () => {
 // ============================================================================
 
 describe('Vote Resolution and Lock-in', () => {
-  test('layer locks in when consensus meets or exceeds threshold', () => {
+  test('layer locks in when health bar survives the vote', () => {
     const state = createTestState();
     connectUser(state, 'user-1');
     connectUser(state, 'user-2');
     connectUser(state, 'user-3');
     advanceToBuild(state);
 
-    // Layer 0 has no threshold (null), so any majority wins
+    // Unanimous vote → zero drain → health survives
     const events = completeSingleLayer(state, ['user-1', 'user-2', 'user-3'], 'A');
 
     expect(findEvent(events, 'LAYER_LOCKED_IN')).toBeDefined();
     expect(state.attempts[0].layerResults[0].status).toBe('locked_in');
     expect(state.attempts[0].layerResults[0].chosenOption).toBe('A');
+  });
+
+  test('layer result includes drainAmount after lock-in', () => {
+    const config = createTestConfig(1, 0.5, [1.0]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+
+    // 1A, 1B: losingProportion = 0.5, drain = 25
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.attempts[0].layerResults[0].drainAmount).toBeCloseTo(25);
   });
 
   test('layer advances to next layer after lock-in', () => {
@@ -377,9 +541,8 @@ describe('Vote Resolution and Lock-in', () => {
     expect(state.attempts[0].currentLayerPhase).toBe('locked');
   });
 
-  test('attempt is completed when all layers are locked in', () => {
-    // Config with 2 layers, both no threshold
-    const config = createTestConfig([null, null]);
+  test('attempt is completed and transitions to attempt_resolve when all layers locked in', () => {
+    const config = createTestConfig(2);
     const state = createTestState(config);
     connectUser(state, 'user-1');
     advanceToBuild(state);
@@ -389,6 +552,7 @@ describe('Vote Resolution and Lock-in', () => {
 
     expect(state.attempts[0].status).toBe('completed');
     expect(findEvent(events, 'ATTEMPT_COMPLETED')).toBeDefined();
+    expect(state.phase).toBe('attempt_resolve');
     expect(state.attempts[0].layerResults).toHaveLength(2);
     expect(state.attempts[0].layerResults[0].chosenOption).toBe('A');
     expect(state.attempts[0].layerResults[1].chosenOption).toBe('B');
@@ -410,46 +574,67 @@ describe('Vote Resolution and Lock-in', () => {
 });
 
 // ============================================================================
-// Doubt Threshold and Collapse
+// Health Bar Collapse
 // ============================================================================
 
-describe('Doubt Threshold and Collapse', () => {
-  test('attempt collapses when consensus is below doubt threshold', () => {
-    // Layer 0 has 65% threshold
-    const config = createTestConfig([0.65]);
+describe('Health Bar Collapse', () => {
+  test('attempt collapses when health bar reaches zero', () => {
+    // drainFactor=2.0, 50/50 split (1A,1B) → drain = 100 → immediate collapse
+    const config = createCollapseConfig(1);
     const state = createTestState(config);
-    // Need 4 voters to get 50% consensus (2:2 split)
     connectUser(state, 'u1');
     connectUser(state, 'u2');
-    connectUser(state, 'u3');
-    connectUser(state, 'u4');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
     processCommand(state, { type: 'OPEN_VOTING' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
-    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'A' });
-    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u3', choice: 'B' });
-    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u4', choice: 'B' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
     const events = processCommand(state, { type: 'CLOSE_VOTING' });
 
     expect(state.attempts[0].status).toBe('collapsed');
     expect(state.attempts[0].collapsedAtLayer).toBe(0);
+    expect(state.attempts[0].healthBar.current).toBe(0);
     expect(findEvent(events, 'ATTEMPT_COLLAPSED')).toBeDefined();
+    expect(findEvent(events, 'HEALTH_BAR_DRAINED')).toBeDefined();
+  });
+
+  test('ATTEMPT_COLLAPSED event includes healthBar state', () => {
+    const config = createCollapseConfig(1);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+
+    const events = processCommand(state, { type: 'CLOSE_VOTING' });
+    const collapsed = findEvent(events, 'ATTEMPT_COLLAPSED') as any;
+
+    expect(collapsed).toBeDefined();
+    expect(collapsed.healthBar).toBeDefined();
+    expect(collapsed.healthBar.current).toBe(0);
   });
 
   test('collapse records the correct collapsedAtLayer', () => {
-    // 2 layers: layer 0 no threshold, layer 1 has 90% threshold
-    const config = createTestConfig([null, 0.9]);
+    // 2 layers: layer 0 passes (unanimous), layer 1 collapses (50/50, drainFactor=2.0)
+    const config = createTestConfig(2, 2.0, [0.0, 1.0]); // multiplier 0 = no drain on layer 0
     const state = createTestState(config);
     connectUser(state, 'u1');
     connectUser(state, 'u2');
     advanceToBuild(state);
 
-    // Layer 0: all vote A, no threshold → passes
-    completeSingleLayer(state, ['u1', 'u2'], 'A');
+    // Layer 0: 50/50 but multiplier=0 → zero drain → passes
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    expect(state.attempts[0].status).toBe('in_progress');
 
-    // Layer 1: split vote 1:1 = 50%, threshold 90% → collapses
+    // Layer 1: 50/50, multiplier=1.0, drainFactor=2.0 → drain=100 → collapse
     processCommand(state, { type: 'START_AUDITION' });
     processCommand(state, { type: 'OPEN_VOTING' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
@@ -458,12 +643,11 @@ describe('Doubt Threshold and Collapse', () => {
 
     expect(state.attempts[0].status).toBe('collapsed');
     expect(state.attempts[0].collapsedAtLayer).toBe(1);
-    // Layer 0 should be in results as locked_in
     expect(state.attempts[0].layerResults.find(r => r.layerIndex === 0)?.status).toBe('locked_in');
   });
 
   test('collapse emits AUDIO_CUE with collapse_gesture', () => {
-    const config = createTestConfig([0.9]);
+    const config = createCollapseConfig(1);
     const state = createTestState(config);
     connectUser(state, 'u1');
     connectUser(state, 'u2');
@@ -481,7 +665,7 @@ describe('Doubt Threshold and Collapse', () => {
   });
 
   test('collapse of attempt 0 auto-advances to attempt_story for attempt 1', () => {
-    const config = createTestConfig([0.9]);
+    const config = createCollapseConfig(1);
     const state = createTestState(config);
     connectUser(state, 'u1');
     connectUser(state, 'u2');
@@ -498,7 +682,7 @@ describe('Doubt Threshold and Collapse', () => {
   });
 
   test('collapse of attempt 1 auto-advances to attempt_story for attempt 2', () => {
-    const config = createTestConfig([0.9]);
+    const config = createCollapseConfig(1);
     const state = createTestState(config);
     connectUser(state, 'u1');
     connectUser(state, 'u2');
@@ -525,38 +709,40 @@ describe('Doubt Threshold and Collapse', () => {
   });
 
   test('collapse of attempt 2 (Song 3) does NOT auto-advance — manual transition required', () => {
-    const config = createTestConfig([0.9]);
+    const config = createCollapseConfig(1);
     const state = createTestState(config);
     connectUser(state, 'u1');
     connectUser(state, 'u2');
 
-    // Jump straight to attempt_build for attempt 2
     processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'attempt_build', attemptIndex: 2 });
-
     processCommand(state, { type: 'START_AUDITION' });
     processCommand(state, { type: 'OPEN_VOTING' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
 
-    // Should stay in attempt_build (not auto-advance to finale_setup)
+    // Should stay in attempt_build (not auto-advance to finale)
     expect(state.phase).toBe('attempt_build');
     expect(state.currentAttemptIndex).toBe(2);
     expect(state.attempts[2].status).toBe('collapsed');
   });
 
   test('unreached layers are marked in results after collapse', () => {
-    // 3 layers, collapse on layer 1
-    const config = createTestConfig([null, 0.9, 0.9]);
+    // 3 layers: layer 0 passes (zero drain), layers 1,2 become unreached after collapse on layer 1
+    const config = createTestConfig(3, 2.0, [0.0, 1.0, 1.0]); // layer 0 no drain, layer 1 full drain
     const state = createTestState(config);
     connectUser(state, 'u1');
     connectUser(state, 'u2');
     advanceToBuild(state);
 
-    // Layer 0: passes
-    completeSingleLayer(state, ['u1', 'u2'], 'A');
+    // Layer 0: passes (multiplier=0 → no drain)
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'OPEN_VOTING' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
 
-    // Layer 1: collapses
+    // Layer 1: collapses (drainFactor=2.0, multiplier=1.0, 50/50 → drain=100)
     processCommand(state, { type: 'START_AUDITION' });
     processCommand(state, { type: 'OPEN_VOTING' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
@@ -567,6 +753,105 @@ describe('Doubt Threshold and Collapse', () => {
     expect(results.find(r => r.layerIndex === 0)?.status).toBe('locked_in');
     expect(results.find(r => r.layerIndex === 1)?.status).toBe('unreached');
     expect(results.find(r => r.layerIndex === 2)?.status).toBe('unreached');
+    // Unreached layers have null drainAmount
+    expect(results.find(r => r.layerIndex === 1)?.drainAmount).toBeNull();
+    expect(results.find(r => r.layerIndex === 2)?.drainAmount).toBeNull();
+  });
+
+  test('health bar history records all drain events', () => {
+    // 2 layers, both survive (unanimous vote → 0 drain each)
+    const config = createTestConfig(2, 0.5, [1.0, 1.0]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    connectUser(state, 'u3');
+    advanceToBuild(state);
+
+    completeSingleLayer(state, ['u1', 'u2', 'u3'], 'A'); // layer 0: 3A, 0B → 0 drain
+    completeSingleLayer(state, ['u1', 'u2'], 'A');        // layer 2: 2A, 0B → 0 drain (u3 didn't vote)
+
+    expect(state.attempts[0].healthBar.history).toHaveLength(2);
+  });
+});
+
+// ============================================================================
+// Song Completion and attempt_resolve
+// ============================================================================
+
+describe('Song Completion and attempt_resolve', () => {
+  test('all 7 layers complete when health bar survives the full song', () => {
+    const config = createTestConfig(7, 0.5, [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+
+    // Unanimous votes → zero drain throughout
+    for (let i = 0; i < 7; i++) {
+      completeSingleLayer(state, ['u1'], 'A');
+    }
+
+    expect(state.attempts[0].status).toBe('completed');
+    expect(state.attempts[0].layerResults).toHaveLength(7);
+    expect(state.attempts[0].layerResults.every(r => r.status === 'locked_in')).toBe(true);
+    expect(state.attempts[0].healthBar.current).toBe(100); // No drain (unanimous)
+  });
+
+  test('completed attempt auto-transitions to attempt_resolve (not collapse)', () => {
+    const config = createTestConfig(2);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+
+    completeSingleLayer(state, ['u1'], 'A');
+    const events = completeSingleLayer(state, ['u1'], 'B');
+
+    expect(state.phase).toBe('attempt_resolve');
+    expect(state.currentAttemptIndex).toBe(0);
+    expect(findEvent(events, 'SHOW_PHASE_CHANGED')).toBeDefined();
+    const phaseChanged = findEvent(events, 'SHOW_PHASE_CHANGED') as any;
+    expect(phaseChanged.phase).toBe('attempt_resolve');
+  });
+
+  test('TRIGGER_REJECTION emits SONG_REJECTED and rejection audio cue during attempt_resolve', () => {
+    const config = createTestConfig(2);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+    completeSingleLayer(state, ['u1'], 'A');
+    completeSingleLayer(state, ['u1'], 'B');
+
+    expect(state.phase).toBe('attempt_resolve');
+
+    const events = processCommand(state, { type: 'TRIGGER_REJECTION' });
+
+    expect(findEvent(events, 'SONG_REJECTED')).toBeDefined();
+    const rejectionAudio = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'rejection_gesture'
+    );
+    expect(rejectionAudio).toBeDefined();
+    const songRejected = findEvent(events, 'SONG_REJECTED') as any;
+    expect(songRejected.attemptIndex).toBe(0);
+  });
+
+  test('TRIGGER_REJECTION returns error when not in attempt_resolve', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'TRIGGER_REJECTION' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('completed attempt health bar remains above zero', () => {
+    const config = createTestConfig(3, 0.5, [1.0, 1.0, 1.0]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+
+    // Unanimous → zero drain
+    completeNLayers(state, 3, ['u1'], 'A');
+
+    expect(state.attempts[0].healthBar.current).toBe(100);
+    expect(state.attempts[0].status).toBe('completed');
   });
 });
 
@@ -580,7 +865,6 @@ describe('Force Commands', () => {
     connectUser(state, 'u1');
     advanceToBuild(state);
 
-    // Don't vote, just force
     const events = processCommand(state, { type: 'FORCE_OPTION', choice: 'B' });
 
     expect(state.attempts[0].layerResults[0].chosenOption).toBe('B');
@@ -588,21 +872,41 @@ describe('Force Commands', () => {
     expect(findEvent(events, 'LAYER_LOCKED_IN')).toBeDefined();
   });
 
-  test('FORCE_COLLAPSE collapses the current attempt immediately', () => {
+  test('FORCE_OPTION lock-in has null drainAmount (bypasses health bar)', () => {
     const state = createTestState();
     advanceToBuild(state);
 
+    processCommand(state, { type: 'FORCE_OPTION', choice: 'A' });
+
+    expect(state.attempts[0].layerResults[0].drainAmount).toBeNull();
+  });
+
+  test('FORCE_COLLAPSE collapses the current attempt immediately regardless of health bar state', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    expect(state.attempts[0].healthBar.current).toBe(100);
+
+    const events = processCommand(state, { type: 'FORCE_COLLAPSE' });
+
+    expect(state.attempts[0].status).toBe('collapsed');
+    expect(state.attempts[0].healthBar.current).toBe(0);
+    expect(findEvent(events, 'ATTEMPT_COLLAPSED')).toBeDefined();
+  });
+
+  test('FORCE_COLLAPSE works even with full health bar', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+    // Health is still 100, no votes taken
     const events = processCommand(state, { type: 'FORCE_COLLAPSE' });
 
     expect(state.attempts[0].status).toBe('collapsed');
     expect(findEvent(events, 'ATTEMPT_COLLAPSED')).toBeDefined();
   });
 
-  test('FORCE_CONTINUE returns error when not in resolving phase', () => {
+  test('FORCE_COLLAPSE returns error when not in attempt_build', () => {
     const state = createTestState();
-    advanceToBuild(state);
-
-    const events = processCommand(state, { type: 'FORCE_CONTINUE' });
+    const events = processCommand(state, { type: 'FORCE_COLLAPSE' });
     expect(findEvent(events, 'ERROR')).toBeDefined();
   });
 
@@ -622,112 +926,6 @@ describe('Force Commands', () => {
     expect(state.attempts[0].currentLayerPhase).toBe('auditioning');
     expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
   });
-
-  test('RESET_LAYER from auditioning resets to locked and clears audition state', () => {
-    const state = createTestState();
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-
-    expect(state.attempts[0].currentLayerPhase).toBe('auditioning');
-
-    const events = processCommand(state, { type: 'RESET_LAYER' });
-
-    expect(state.attempts[0].currentLayerPhase).toBe('locked');
-    expect(state.attempts[0].currentAuditionOption).toBeNull();
-    expect(state.attempts[0].auditionLoopIndex).toBe(0);
-    const phaseEvent = findEvent(events, 'LAYER_PHASE_CHANGED') as any;
-    expect(phaseEvent).toBeDefined();
-    expect(phaseEvent.phase).toBe('locked');
-    expect(findEvent(events, 'AUDIO_CUE')).toBeDefined();
-  });
-
-  test('RESET_LAYER from voting clears votes and resets to locked', () => {
-    const state = createTestState();
-    connectUser(state, 'u1');
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
-    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
-
-    expect(state.attempts[0].votes).toHaveLength(1);
-
-    processCommand(state, { type: 'RESET_LAYER' });
-
-    expect(state.attempts[0].currentLayerPhase).toBe('locked');
-    expect(state.attempts[0].votes).toHaveLength(0);
-  });
-
-  test('RESET_LAYER from locked_in removes layerResult (defensive)', () => {
-    const state = createTestState();
-    advanceToBuild(state);
-
-    // Manually simulate locked_in state (normally unreachable via standard flow
-    // since lockInLayer immediately advances to next layer)
-    const attempt = state.attempts[0];
-    attempt.currentLayerPhase = 'locked_in';
-    attempt.layerResults.push({
-      layerIndex: 0,
-      type: 'foundation',
-      status: 'locked_in',
-      chosenOption: 'A',
-      consensus: 1.0,
-    });
-
-    const events = processCommand(state, { type: 'RESET_LAYER' });
-
-    expect(attempt.currentLayerPhase).toBe('locked');
-    expect(attempt.layerResults).toHaveLength(0);
-    expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
-  });
-
-  test('RESET_LAYER is a no-op when layer is already locked', () => {
-    const state = createTestState();
-    advanceToBuild(state);
-
-    expect(state.attempts[0].currentLayerPhase).toBe('locked');
-
-    const events = processCommand(state, { type: 'RESET_LAYER' });
-
-    expect(events).toHaveLength(0);
-  });
-
-  test('RESET_LAYER returns error when not in attempt_build', () => {
-    const state = createTestState();
-
-    const events = processCommand(state, { type: 'RESET_LAYER' });
-
-    expect(findEvent(events, 'ERROR')).toBeDefined();
-  });
-
-  test('RESET_LAYER does not change currentLayerIndex', () => {
-    const state = createTestState();
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-
-    const layerBefore = state.attempts[0].currentLayerIndex;
-    processCommand(state, { type: 'RESET_LAYER' });
-
-    expect(state.attempts[0].currentLayerIndex).toBe(layerBefore);
-  });
-
-  test('SET_THRESHOLD updates the doubt threshold for a specific layer', () => {
-    const state = createTestState();
-    advanceToBuild(state);
-
-    processCommand(state, { type: 'SET_THRESHOLD', layerIndex: 0, threshold: 0.8 });
-
-    expect(state.attempts[0].layerPlan[0].doubtThreshold).toBe(0.8);
-  });
-
-  test('SET_THRESHOLD can set threshold to null (disable doubt)', () => {
-    const config = createTestConfig([0.9]);
-    const state = createTestState(config);
-    advanceToBuild(state);
-
-    processCommand(state, { type: 'SET_THRESHOLD', layerIndex: 0, threshold: null });
-
-    expect(state.attempts[0].layerPlan[0].doubtThreshold).toBeNull();
-  });
 });
 
 // ============================================================================
@@ -743,7 +941,6 @@ describe('User Connection', () => {
     const user = state.users.get('user-1')!;
     expect(user.seatId).toBe('seat-1');
     expect(user.connected).toBe(true);
-    expect(user.finaleChapter).toBeNull();
   });
 
   test('USER_CONNECT reconnects an existing user', () => {
@@ -755,7 +952,6 @@ describe('User Connection', () => {
 
     processCommand(state, { type: 'USER_CONNECT', userId: 'user-1' });
     expect(state.users.get('user-1')!.connected).toBe(true);
-    // Should not create a duplicate
     expect(state.users.size).toBe(1);
   });
 
@@ -785,6 +981,19 @@ describe('Recovery', () => {
     expect(state.users.has('user-1')).toBe(true);
     expect(state.attempts[0].status).toBe('pending');
     expect(state.paused).toBe(false);
+  });
+
+  test('RESET_TO_LOBBY resets health bars on all attempts', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+    // Partially drain health bar
+    processCommand(state, { type: 'SET_HEALTH', value: 42 });
+    expect(state.attempts[0].healthBar.current).toBe(42);
+
+    processCommand(state, { type: 'RESET_TO_LOBBY', preserveUsers: true });
+
+    expect(state.attempts[0].healthBar.current).toBe(100);
   });
 
   test('RESET_TO_LOBBY clears users when preserveUsers is false', () => {
@@ -831,157 +1040,60 @@ describe('Audio Commands', () => {
 });
 
 // ============================================================================
-// Beat-Synced Audition (TOGGLE_AUDITION)
+// Health Bar Controls
 // ============================================================================
 
-function createAuditionConfig(auditionsPerLayer = 2): ShowConfig {
-  const base = createTestConfig();
-  return {
-    ...base,
-    timing: {
-      ...base.timing,
-      beatsPerLoop: 32,
-      auditionsPerLayer,
-    },
-  };
-}
-
-describe('Beat-Synced Audition (TOGGLE_AUDITION)', () => {
-  test('START_AUDITION initializes currentAuditionOption to A and auditionLoopIndex to 0', () => {
-    const state = createTestState(createAuditionConfig());
+describe('Health Bar Controls', () => {
+  test('SET_DRAIN_FACTOR updates drain factor for current attempt', () => {
+    const state = createTestState();
     advanceToBuild(state);
 
-    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SET_DRAIN_FACTOR', factor: 0.75 });
 
-    const attempt = state.attempts[0];
-    expect(attempt.currentAuditionOption).toBe('A');
-    expect(attempt.auditionLoopIndex).toBe(0);
+    expect(state.attempts[0].healthBar.drainFactor).toBe(0.75);
   });
 
-  test('START_AUDITION emits AUDITION_OPTION_CHANGED with option A and loopIndex 0', () => {
-    const state = createTestState(createAuditionConfig());
+  test('SET_HEALTH sets health bar to specified value', () => {
+    const state = createTestState();
     advanceToBuild(state);
 
-    const events = processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SET_HEALTH', value: 50 });
 
-    const ev = findEvent(events, 'AUDITION_OPTION_CHANGED') as any;
-    expect(ev).toBeDefined();
-    expect(ev.option).toBe('A');
-    expect(ev.loopIndex).toBe(0);
-    expect(ev.totalLoops).toBe(4); // auditionsPerLayer(2) * 2
+    expect(state.attempts[0].healthBar.current).toBe(50);
   });
 
-  test('TOGGLE_AUDITION flips option from A to B and increments loopIndex', () => {
-    const state = createTestState(createAuditionConfig());
+  test('SET_HEALTH clamps value to 0–100 range', () => {
+    const state = createTestState();
     advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
 
-    processCommand(state, { type: 'TOGGLE_AUDITION' });
+    processCommand(state, { type: 'SET_HEALTH', value: 150 });
+    expect(state.attempts[0].healthBar.current).toBe(100);
 
-    const attempt = state.attempts[0];
-    expect(attempt.currentAuditionOption).toBe('B');
-    expect(attempt.auditionLoopIndex).toBe(1);
+    processCommand(state, { type: 'SET_HEALTH', value: -10 });
+    expect(state.attempts[0].healthBar.current).toBe(0);
+  });
+});
+
+// ============================================================================
+// Initial State
+// ============================================================================
+
+describe('Initial State', () => {
+  test('each attempt starts with a fresh health bar at 100', () => {
+    const state = createTestState();
+
+    for (const attempt of state.attempts) {
+      expect(attempt.healthBar.current).toBe(100);
+      expect(attempt.healthBar.history).toHaveLength(0);
+    }
   });
 
-  test('TOGGLE_AUDITION flips option from B back to A on second call', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'TOGGLE_AUDITION' });
+  test('health bar stores attempt drainFactor from config', () => {
+    const config = createTestConfig(3, 0.75);
+    const state = createTestState(config);
 
-    processCommand(state, { type: 'TOGGLE_AUDITION' });
-
-    const attempt = state.attempts[0];
-    expect(attempt.currentAuditionOption).toBe('A');
-    expect(attempt.auditionLoopIndex).toBe(2);
-  });
-
-  test('TOGGLE_AUDITION emits audition_stop for old option and audition_start for new option', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-
-    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
-
-    const cues = events.filter(e => e.type === 'AUDIO_CUE') as any[];
-    const stopCue = cues.find(e => e.cue.type === 'audition_stop');
-    const startCue = cues.find(e => e.cue.type === 'audition_start');
-
-    expect(stopCue).toBeDefined();
-    expect(stopCue.cue.option).toBe('A');
-    expect(startCue).toBeDefined();
-    expect(startCue.cue.option).toBe('B');
-  });
-
-  test('TOGGLE_AUDITION emits AUDITION_OPTION_CHANGED with updated progress', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-
-    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
-
-    const ev = findEvent(events, 'AUDITION_OPTION_CHANGED') as any;
-    expect(ev).toBeDefined();
-    expect(ev.option).toBe('B');
-    expect(ev.loopIndex).toBe(1);
-    expect(ev.totalLoops).toBe(4);
-  });
-
-  test('TOGGLE_AUDITION returns error when not in attempt_build', () => {
-    const state = createTestState(createAuditionConfig());
-    // Still in lobby — attempt_build not started
-
-    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
-
-    expect(findEvent(events, 'ERROR')).toBeDefined();
-  });
-
-  test('TOGGLE_AUDITION returns error when layer not in auditioning phase', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    // Layer is 'locked' — audition not started
-
-    const events = processCommand(state, { type: 'TOGGLE_AUDITION' });
-
-    expect(findEvent(events, 'ERROR')).toBeDefined();
-  });
-
-  test('RERUN_VOTE resets currentAuditionOption to A and auditionLoopIndex to 0', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'TOGGLE_AUDITION' }); // now B, loopIndex 1
-    processCommand(state, { type: 'OPEN_VOTING' });
-
-    processCommand(state, { type: 'RERUN_VOTE' });
-
-    const attempt = state.attempts[0];
-    expect(attempt.currentAuditionOption).toBe('A');
-    expect(attempt.auditionLoopIndex).toBe(0);
-  });
-
-  test('RERUN_VOTE emits AUDITION_OPTION_CHANGED with option A reset', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'TOGGLE_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
-
-    const events = processCommand(state, { type: 'RERUN_VOTE' });
-
-    const ev = findEvent(events, 'AUDITION_OPTION_CHANGED') as any;
-    expect(ev).toBeDefined();
-    expect(ev.option).toBe('A');
-    expect(ev.loopIndex).toBe(0);
-  });
-
-  test('OPEN_VOTING clears currentAuditionOption', () => {
-    const state = createTestState(createAuditionConfig());
-    advanceToBuild(state);
-    processCommand(state, { type: 'START_AUDITION' });
-
-    processCommand(state, { type: 'OPEN_VOTING' });
-
-    expect(state.attempts[0].currentAuditionOption).toBeNull();
+    for (const attempt of state.attempts) {
+      expect(attempt.healthBar.drainFactor).toBe(0.75);
+    }
   });
 });

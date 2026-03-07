@@ -1,5 +1,5 @@
 /**
- * Conductor — Pure State Machine (NEW SYSTEM)
+ * Conductor — Pure State Machine (V2)
  *
  * The conductor is the heart of the system. It receives commands, validates them,
  * updates state, and emits events. It has no I/O — all side effects are handled
@@ -8,11 +8,16 @@
  * Architecture: (state, command) => (newState, events)
  *
  * Show flow:
- *   lobby → opener → (attempt_story → attempt_build) ×3 →
- *   finale_setup → finale_rotating → finale_frozen → ended
+ *   lobby → opener → (attempt_story → attempt_build → attempt_resolve) ×3 →
+ *   finale_elegy → finale_consensus → finale_performer_mix → ended
  *
  * Song-building layer flow:
- *   locked → auditioning → voting → resolving → locked_in | collapsed
+ *   locked → auditioning → voting → revealing → locked_in | collapsed
+ *
+ * Two song outcomes:
+ *   - Collapse: health bar reaches 0 → auto-advance to next attempt_story
+ *   - Completion: all layers locked in, health bar > 0 → auto-advance to attempt_resolve
+ *     In attempt_resolve the performer triggers TRIGGER_REJECTION to narratively reject the song.
  */
 
 import type {
@@ -28,21 +33,13 @@ import type {
   UserId,
   SeatId,
   User,
-  TrianglePosition,
   AudioReference,
 } from './types';
-import { calculateConsensus, resolveVote } from './consensus';
-import {
-  assignChapters,
-  initializeFinaleState,
-  getAvailableFragments,
-  selectFragment,
-  computeCentroid,
-  performRotationTick,
-  updateStewardParam,
-  startStewardship,
-  endStewardship,
-} from './finale';
+import { calculateConsensus, calculateVoteResult } from './voting';
+import { createHealthBar, applyDrain, isCollapsed } from './health-bar';
+// V1 interim imports — Phase 3 will replace with V2 finale logic
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import { assignChapters, initializeFinaleState as v1InitFinale } from './finale';
 
 // ============================================================================
 // State Initialization
@@ -64,6 +61,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
+    healthBar: createHealthBar(attemptConfig.drainFactor, attemptConfig.layerMultipliers),
   }));
 
   return {
@@ -106,8 +104,6 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Song-building
     case 'START_AUDITION':
       return handleStartAudition(state);
-    case 'TOGGLE_AUDITION':
-      return handleToggleAudition(state);
     case 'OPEN_VOTING':
       return handleOpenVoting(state);
     case 'CLOSE_VOTING':
@@ -121,61 +117,40 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [];
     case 'RERUN_VOTE':
       return handleRerunVote(state);
-    case 'RESET_LAYER':
-      return handleResetLayer(state);
-    case 'FORCE_CONTINUE':
-      return handleForceContinue(state);
+
+    // Health Bar
+    case 'SET_DRAIN_FACTOR':
+      return handleSetDrainFactor(state, command.factor);
+    case 'SET_HEALTH':
+      return handleSetHealth(state, command.value);
     case 'FORCE_COLLAPSE':
       return handleForceCollapse(state);
 
-    // Doubt
-    case 'SET_THRESHOLD':
-      return handleSetThreshold(state, command.layerIndex, command.threshold);
-    case 'TOGGLE_DOUBT':
-      // Doubt toggle is a UI concern; thresholds are per-layer in config.
-      // This could toggle all thresholds to null or restore them. For now, no-op.
-      return [];
+    // Song Rejection
+    case 'TRIGGER_REJECTION':
+      return handleTriggerRejection(state);
 
-    // Finale
+    // Finale — stubs (Phase 3)
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
-    case 'SELECT_FRAGMENT':
-      return handleSelectFragment(state, command.userId, command.fragmentId);
-    case 'UPDATE_TRIANGLE':
-      return handleUpdateTriangle(state, command.userId, command.position);
-    case 'UPDATE_STEWARD_PARAM':
-      return handleUpdateStewardParam(state, command.userId, command.value);
-    case 'START_ROTATION':
-      return handleStartRotation(state);
-    case 'STOP_ROTATION':
-      return handleStopRotation(state);
-    case 'FREEZE_ROTATION':
-      return handleFreezeRotation(state);
-    case 'SET_ROTATION_RATE':
-      return handleSetRotationRate(state, command.rate);
-    case 'FORCE_ASSIGN_STEWARD':
-      return handleForceAssignSteward(state, command.userId, command.slotIndex);
-    case 'FORCE_INSERT_FRAGMENT':
-      return handleForceInsertFragment(state, command.fragmentId, command.slotIndex);
-    case 'CLEAR_QUEUE':
-      return handleClearQueue(state);
-    case 'TOGGLE_TRIANGLE':
-      return handleToggleTriangle(state, command.active);
-
-    // Rotation
-    case 'PERFORM_ROTATION_TICK':
-      return performRotationTick(state, command.beat);
+    case 'START_CONSENSUS_ROUND':
+    case 'SUBMIT_CONSENSUS_VOTE':
+    case 'END_CONSENSUS_ROUND':
+    case 'SET_CONSENSUS_THRESHOLD':
+    case 'SEND_NPC_MESSAGE':
+    case 'START_PERFORMER_MIX':
+    case 'QUEUE_FRAGMENT':
+    case 'CANCEL_PENDING':
+    case 'FIRE_PENDING_CHANGES':
+    case 'LOAD_SNAPSHOT':
+    case 'TOGGLE_LIVE_TRACK':
+      return [{ type: 'ERROR', message: `${command.type} not yet implemented (Phase 3)`, command }];
 
     // Audio
     case 'AUDIO_TRANSPORT':
       return [{ type: 'AUDIO_CUE', cue: { type: 'transport', action: command.action } }];
     case 'AUDIO_PANIC':
       return [{ type: 'AUDIO_CUE', cue: { type: 'panic' } }];
-    case 'TRIGGER_COLLAPSE_GESTURE': {
-      const attempt = currentAttempt(state);
-      if (!attempt) return [{ type: 'ERROR', message: 'No active attempt' }];
-      return [{ type: 'AUDIO_CUE', cue: { type: 'collapse_gesture', attemptIndex: attempt.index } }];
-    }
 
     // Connection
     case 'USER_CONNECT':
@@ -193,6 +168,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [{ type: 'FORCE_RECONNECT', reason: 'Manual reconnect triggered' }];
     case 'RESET_TO_LOBBY':
       return handleResetToLobby(state, command.preserveUsers);
+    case 'NEW_SHOW':
+      return handleResetToLobby(state, false);
 
     default:
       return [{ type: 'ERROR', message: `Unknown command type: ${(command as any).type}`, command }];
@@ -205,20 +182,25 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
 
 /**
  * Show phase sequence. ADVANCE_PHASE walks forward through this.
- * attempt_story and attempt_build repeat 3 times (indexed by currentAttemptIndex).
+ * attempt_story, attempt_build, and attempt_resolve repeat 3 times.
+ * Note: attempt_resolve is also entered automatically when a song completes.
+ * Collapsed songs skip attempt_resolve and auto-advance to the next attempt_story.
  */
 const PHASE_SEQUENCE: ShowPhase[] = [
   'lobby',
   'opener',
-  'attempt_story',   // attempt 0
-  'attempt_build',   // attempt 0
-  'attempt_story',   // attempt 1
-  'attempt_build',   // attempt 1
-  'attempt_story',   // attempt 2
-  'attempt_build',   // attempt 2
-  'finale_setup',
-  'finale_rotating',
-  'finale_frozen',
+  'attempt_story',       // attempt 0
+  'attempt_build',       // attempt 0
+  'attempt_resolve',     // attempt 0
+  'attempt_story',       // attempt 1
+  'attempt_build',       // attempt 1
+  'attempt_resolve',     // attempt 1
+  'attempt_story',       // attempt 2
+  'attempt_build',       // attempt 2
+  'attempt_resolve',     // attempt 2
+  'finale_elegy',
+  'finale_consensus',
+  'finale_performer_mix',
   'ended',
 ];
 
@@ -228,8 +210,6 @@ function handleAdvancePhase(state: ShowState): ConductorEvent[] {
   }
 
   const currentPhase = state.phase;
-
-  // Find current position in the sequence
   const currentSeqIndex = findPhaseSequenceIndex(currentPhase, state.currentAttemptIndex);
   if (currentSeqIndex === -1 || currentSeqIndex >= PHASE_SEQUENCE.length - 1) {
     return [{ type: 'ERROR', message: `Cannot advance from phase: ${currentPhase}` }];
@@ -253,30 +233,36 @@ function handleJumpToPhase(state: ShowState, phase: ShowPhase, attemptIndex?: nu
 
 /**
  * Find the index into PHASE_SEQUENCE for the given phase and attempt index.
+ * attempt_story/build/resolve are in triples: (2,3,4), (5,6,7), (8,9,10).
  */
 function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number {
   switch (phase) {
     case 'lobby': return 0;
     case 'opener': return 1;
-    case 'attempt_story': return 2 + attemptIndex * 2;
-    case 'attempt_build': return 3 + attemptIndex * 2;
-    case 'finale_setup': return 8;
-    case 'finale_rotating': return 9;
-    case 'finale_frozen': return 10;
-    case 'ended': return 11;
+    case 'attempt_story': return 2 + attemptIndex * 3;
+    case 'attempt_build': return 3 + attemptIndex * 3;
+    case 'attempt_resolve': return 4 + attemptIndex * 3;
+    case 'finale_elegy': return 11;
+    case 'finale_consensus': return 12;
+    case 'finale_performer_mix': return 13;
+    case 'ended': return 14;
     default: return -1;
   }
 }
 
 /**
- * Transition to a new phase, handling side effects (attempt index updates, attempt activation).
+ * Transition to a new phase, handling side effects.
  */
 function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: number): ConductorEvent[] {
   const events: ConductorEvent[] = [];
 
-  // Calculate attempt index from sequence position
-  if (nextPhase === 'attempt_story' || nextPhase === 'attempt_build') {
-    const attemptIndex = Math.floor((seqIndex - 2) / 2);
+  // Calculate attempt index from sequence position for attempt phases
+  if (
+    nextPhase === 'attempt_story' ||
+    nextPhase === 'attempt_build' ||
+    nextPhase === 'attempt_resolve'
+  ) {
+    const attemptIndex = Math.floor((seqIndex - 2) / 3);
     state.currentAttemptIndex = attemptIndex;
   }
 
@@ -292,9 +278,9 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     }
   }
 
-  if (nextPhase === 'finale_setup') {
-    console.log('Transitioning to finale_setup');
-    handleSetupFinale(state);
+  if (nextPhase === 'finale_elegy') {
+    // TODO Phase 3: initialize finale state (consensus game + performer mix)
+    console.log('Transitioning to finale_elegy — finale init pending Phase 3');
   }
 
   events.push({
@@ -307,12 +293,12 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
 }
 
 /**
- * Auto-advance after collapse: go to next attempt_story, or stay if Song 3
- * (Song 3 → finale transition is manual per R15).
+ * Auto-advance after collapse:
+ * - Attempts 0/1: advance to next attempt_story
+ * - Attempt 2: stay in attempt_build (manual transition to finale)
  */
 function autoAdvanceAfterCollapse(state: ShowState): ConductorEvent[] {
   if (state.currentAttemptIndex < 2) {
-    // Attempts 0, 1: auto-advance to next attempt_story
     const nextAttemptIndex = state.currentAttemptIndex + 1;
     state.currentAttemptIndex = nextAttemptIndex;
     state.phase = 'attempt_story';
@@ -325,8 +311,6 @@ function autoAdvanceAfterCollapse(state: ShowState): ConductorEvent[] {
   }
 
   // Attempt 2 (Song 3): stay in attempt_build, manual transition to finale
-  // The phase stays as attempt_build but the attempt is collapsed.
-  // Controller must manually ADVANCE_PHASE or JUMP_TO_PHASE to proceed.
   return [];
 }
 
@@ -352,9 +336,7 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
   attempt.currentAuditionOption = 'A';
   attempt.auditionLoopIndex = 0;
 
-  const totalLoops = state.config.timing.auditionsPerLayer * 2;
-
-  const events: ConductorEvent[] = [
+  return [
     {
       type: 'LAYER_PHASE_CHANGED',
       attemptIndex: attempt.index,
@@ -378,64 +360,7 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
       layerIndex: attempt.currentLayerIndex,
       option: 'A',
       loopIndex: 0,
-      totalLoops,
-    },
-  ];
-
-  return events;
-}
-
-function handleToggleAudition(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'attempt_build') {
-    return [{ type: 'ERROR', message: 'Can only toggle audition during attempt_build' }];
-  }
-
-  const attempt = currentAttempt(state);
-  if (!attempt || attempt.status !== 'in_progress') {
-    return [{ type: 'ERROR', message: 'No active attempt' }];
-  }
-
-  if (attempt.currentLayerPhase !== 'auditioning') {
-    return [{ type: 'ERROR', message: `Cannot toggle audition from layer phase: ${attempt.currentLayerPhase}` }];
-  }
-
-  const oldOption = attempt.currentAuditionOption ?? 'A';
-  const newOption: 'A' | 'B' = oldOption === 'A' ? 'B' : 'A';
-  const newLoopIndex = attempt.auditionLoopIndex + 1;
-  const totalLoops = state.config.timing.auditionsPerLayer * 2;
-
-  attempt.currentAuditionOption = newOption;
-  attempt.auditionLoopIndex = newLoopIndex;
-
-  return [
-    {
-      type: 'AUDIO_CUE',
-      cue: {
-        type: 'audition_stop',
-        attemptIndex: attempt.index,
-        layerIndex: attempt.currentLayerIndex,
-        option: oldOption,
-        audioRef: getLayerAudioRef(attempt, oldOption),
-      },
-    },
-    {
-      type: 'AUDIO_CUE',
-      cue: {
-        type: 'audition_start',
-        attemptIndex: attempt.index,
-        layerIndex: attempt.currentLayerIndex,
-        option: newOption,
-        audioRef: getLayerAudioRef(attempt, newOption),
-        otherAudioRef: getLayerAudioRef(attempt, oldOption),
-      },
-    },
-    {
-      type: 'AUDITION_OPTION_CHANGED',
-      attemptIndex: attempt.index,
-      layerIndex: attempt.currentLayerIndex,
-      option: newOption,
-      loopIndex: newLoopIndex,
-      totalLoops,
+      totalLoops: 0, // Managed by timing engine
     },
   ];
 }
@@ -512,7 +437,7 @@ function handleSubmitVote(state: ShowState, userId: UserId, choice: 'A' | 'B'): 
     return [{ type: 'ERROR', message: `User not found: ${userId}` }];
   }
 
-  // Remove any existing vote from this user for this layer
+  // Remove any existing vote from this user for this layer (allow vote change)
   attempt.votes = attempt.votes.filter(v =>
     !(v.userId === userId && v.layerIndex === attempt.currentLayerIndex)
   );
@@ -545,8 +470,8 @@ function handleForceOption(state: ShowState, choice: 'A' | 'B'): ConductorEvent[
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  // Force locks in the layer with the chosen option, bypassing vote/threshold
-  return lockInLayer(state, attempt, choice, true);
+  // Force locks in the layer with the chosen option, bypassing health bar drain
+  return lockInLayer(state, attempt, choice, null);
 }
 
 function handleRerunVote(state: ShowState): ConductorEvent[] {
@@ -566,8 +491,6 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
   attempt.currentLayerPhase = 'auditioning';
   attempt.currentAuditionOption = 'A';
   attempt.auditionLoopIndex = 0;
-
-  const totalLoops = state.config.timing.auditionsPerLayer * 2;
 
   return [
     {
@@ -593,82 +516,33 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
       layerIndex: attempt.currentLayerIndex,
       option: 'A',
       loopIndex: 0,
-      totalLoops,
+      totalLoops: 0, // Managed by timing engine
     },
   ];
 }
 
-function handleResetLayer(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'attempt_build') {
-    return [{ type: 'ERROR', message: 'Can only reset layer during attempt_build' }];
-  }
+// ============================================================================
+// Health Bar Commands
+// ============================================================================
 
+function handleSetDrainFactor(state: ShowState, factor: number): ConductorEvent[] {
   const attempt = currentAttempt(state);
-  if (!attempt || attempt.status !== 'in_progress') {
+  if (!attempt) {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  if (attempt.currentLayerPhase === 'locked') {
-    return []; // Already at initial state, no-op
-  }
-
-  const events: ConductorEvent[] = [];
-  const layerIndex = attempt.currentLayerIndex;
-
-  // If locked_in, remove the layer result so it can be re-auditioned
-  if (attempt.currentLayerPhase === 'locked_in') {
-    attempt.layerResults = attempt.layerResults.filter(r => r.layerIndex !== layerIndex);
-  }
-
-  // Stop any playing audio
-  events.push({
-    type: 'AUDIO_CUE',
-    cue: {
-      type: 'audition_stop',
-      attemptIndex: attempt.index,
-      layerIndex,
-      option: null,
-    },
-  });
-
-  // Clear votes for this layer
-  attempt.votes = attempt.votes.filter(v => v.layerIndex !== layerIndex);
-
-  // Reset audition state
-  attempt.currentLayerPhase = 'locked';
-  attempt.currentAuditionOption = null;
-  attempt.auditionLoopIndex = 0;
-
-  // Emit phase change — timing engine reacts to stop timers and audition tracking
-  events.push({
-    type: 'LAYER_PHASE_CHANGED',
-    attemptIndex: attempt.index,
-    layerIndex,
-    phase: 'locked',
-  });
-
-  return events;
+  attempt.healthBar.drainFactor = factor;
+  return [{ type: 'STATE_UPDATED', version: state.version }];
 }
 
-function handleForceContinue(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'attempt_build') {
-    return [{ type: 'ERROR', message: 'Can only force continue during attempt_build' }];
-  }
-
+function handleSetHealth(state: ShowState, value: number): ConductorEvent[] {
   const attempt = currentAttempt(state);
-  if (!attempt || attempt.status !== 'in_progress') {
+  if (!attempt) {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  if (attempt.currentLayerPhase !== 'resolving') {
-    return [{ type: 'ERROR', message: 'Can only force continue from resolving phase' }];
-  }
-
-  // Get the vote result to determine winner, then lock in bypassing threshold
-  const layerVotes = attempt.votes.filter(v => v.layerIndex === attempt.currentLayerIndex);
-  const { winner } = calculateConsensus(layerVotes);
-
-  return lockInLayer(state, attempt, winner, true);
+  attempt.healthBar.current = Math.max(0, Math.min(100, value));
+  return [{ type: 'STATE_UPDATED', version: state.version }];
 }
 
 function handleForceCollapse(state: ShowState): ConductorEvent[] {
@@ -681,26 +555,30 @@ function handleForceCollapse(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  return collapseAttempt(state, attempt, 0, 0);
+  // Force health bar to zero regardless of current value
+  attempt.healthBar.current = 0;
+
+  return collapseAttempt(state, attempt);
 }
 
 // ============================================================================
-// Doubt Threshold
+// Song Rejection (attempt_resolve)
 // ============================================================================
 
-function handleSetThreshold(state: ShowState, layerIndex: number, threshold: number | null): ConductorEvent[] {
+function handleTriggerRejection(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_resolve') {
+    return [{ type: 'ERROR', message: 'Can only trigger rejection during attempt_resolve' }];
+  }
+
   const attempt = currentAttempt(state);
   if (!attempt) {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  const layer = attempt.layerPlan[layerIndex];
-  if (!layer) {
-    return [{ type: 'ERROR', message: `Layer ${layerIndex} not found in current attempt` }];
-  }
-
-  layer.doubtThreshold = threshold;
-  return [];
+  return [
+    { type: 'SONG_REJECTED', attemptIndex: attempt.index },
+    { type: 'AUDIO_CUE', cue: { type: 'rejection_gesture', attemptIndex: attempt.index } },
+  ];
 }
 
 // ============================================================================
@@ -708,26 +586,36 @@ function handleSetThreshold(state: ShowState, layerIndex: number, threshold: num
 // ============================================================================
 
 /**
- * Resolve the current layer: calculate vote result, check threshold, lock in or collapse.
+ * Resolve the current layer: calculate vote result, apply health bar drain,
+ * then either collapse or lock in.
  */
 function resolveCurrentLayer(state: ShowState, attempt: AttemptState): ConductorEvent[] {
   const events: ConductorEvent[] = [];
   const layerIndex = attempt.currentLayerIndex;
-  const layerConfig = attempt.layerPlan[layerIndex];
+  const layerMultiplier = attempt.healthBar.layerMultipliers[layerIndex] ?? 1.0;
 
-  attempt.currentLayerPhase = 'resolving';
+  // 1. Calculate vote result and drain
+  const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
+  const { voteResult, drain } = calculateVoteResult(
+    layerVotes,
+    attempt.healthBar.drainFactor,
+    layerMultiplier,
+    layerIndex,
+  );
 
+  // 2. Apply drain to health bar (also sets drain.healthAfter)
+  applyDrain(attempt.healthBar, drain);
+
+  // 3. Transition to revealing
+  attempt.currentLayerPhase = 'revealing';
   events.push({
     type: 'LAYER_PHASE_CHANGED',
     attemptIndex: attempt.index,
     layerIndex,
-    phase: 'resolving',
+    phase: 'revealing',
   });
 
-  // Calculate vote result
-  const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
-  const voteResult = resolveVote(layerVotes, layerConfig?.doubtThreshold ?? null);
-
+  // 4. Emit VOTE_RESULT
   events.push({
     type: 'VOTE_RESULT',
     attemptIndex: attempt.index,
@@ -735,12 +623,19 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
     result: voteResult,
   });
 
-  if (voteResult.thresholdMet) {
-    // Consensus met — lock in
-    events.push(...lockInLayer(state, attempt, voteResult.winner, false));
+  // 5. Emit HEALTH_BAR_DRAINED (drain.healthAfter now set)
+  events.push({
+    type: 'HEALTH_BAR_DRAINED',
+    attemptIndex: attempt.index,
+    layerIndex,
+    drain,
+  });
+
+  // 6. Check health bar outcome
+  if (isCollapsed(attempt.healthBar)) {
+    events.push(...collapseAttempt(state, attempt));
   } else {
-    // Consensus below threshold — collapse
-    events.push(...collapseAttempt(state, attempt, voteResult.consensus, voteResult.doubtThreshold!));
+    events.push(...lockInLayer(state, attempt, voteResult.winner, drain.drainAmount));
   }
 
   return events;
@@ -748,12 +643,13 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
 
 /**
  * Lock in the current layer with the winning option and advance to next layer.
+ * drainAmount is null for forced lock-ins (FORCE_OPTION).
  */
 function lockInLayer(
-  _state: ShowState,
+  state: ShowState,
   attempt: AttemptState,
   winner: 'A' | 'B',
-  _forced: boolean,
+  drainAmount: number | null,
 ): ConductorEvent[] {
   const events: ConductorEvent[] = [];
   const layerIndex = attempt.currentLayerIndex;
@@ -765,10 +661,11 @@ function lockInLayer(
 
   const layerResult: LayerResult = {
     layerIndex,
-    type: layerConfig?.type ?? 'foundation',
+    type: layerConfig?.type ?? 'melody',
     status: 'locked_in',
     chosenOption: winner,
     consensus,
+    drainAmount,
   };
   attempt.layerResults.push(layerResult);
 
@@ -803,32 +700,33 @@ function lockInLayer(
     },
   });
 
-  // Check if there are more layers
   if (layerIndex < attempt.layerPlan.length - 1) {
     // Advance to next layer
     attempt.currentLayerIndex = layerIndex + 1;
     attempt.currentLayerPhase = 'locked';
   } else {
-    // All layers complete — attempt completed successfully
+    // All layers complete — song survived! Transition to attempt_resolve.
     attempt.status = 'completed';
-    // Mark any remaining unreached layers (shouldn't be any if we got here)
     markUnreachedLayers(attempt);
 
     events.push({ type: 'ATTEMPT_COMPLETED', attemptIndex: attempt.index });
+
+    // Auto-transition to attempt_resolve
+    state.phase = 'attempt_resolve';
+    events.push({
+      type: 'SHOW_PHASE_CHANGED',
+      phase: 'attempt_resolve',
+      attemptIndex: state.currentAttemptIndex,
+    });
   }
 
   return events;
 }
 
 /**
- * Collapse the current attempt. Mark unreached layers, then auto-advance.
+ * Collapse the current attempt. Mark unreached layers, emit events, auto-advance.
  */
-function collapseAttempt(
-  state: ShowState,
-  attempt: AttemptState,
-  consensus: number,
-  threshold: number,
-): ConductorEvent[] {
+function collapseAttempt(state: ShowState, attempt: AttemptState): ConductorEvent[] {
   const events: ConductorEvent[] = [];
 
   attempt.status = 'collapsed';
@@ -840,10 +738,11 @@ function collapseAttempt(
   if (!existingResult) {
     attempt.layerResults.push({
       layerIndex: attempt.currentLayerIndex,
-      type: attempt.layerPlan[attempt.currentLayerIndex]?.type ?? 'foundation',
+      type: attempt.layerPlan[attempt.currentLayerIndex]?.type ?? 'melody',
       status: 'unreached',
       chosenOption: null,
       consensus: null,
+      drainAmount: null,
     });
   }
 
@@ -861,8 +760,7 @@ function collapseAttempt(
     type: 'ATTEMPT_COLLAPSED',
     attemptIndex: attempt.index,
     atLayer: attempt.currentLayerIndex,
-    consensus,
-    threshold,
+    healthBar: attempt.healthBar,
   });
 
   events.push({
@@ -889,6 +787,7 @@ function markUnreachedLayers(attempt: AttemptState): void {
         status: 'unreached',
         chosenOption: null,
         consensus: null,
+        drainAmount: null,
       });
     }
   }
@@ -930,7 +829,6 @@ function handleUserConnect(state: ShowState, userId: UserId, seatId?: SeatId): C
     seatId: seatId || null,
     connected: true,
     joinedAt: Date.now(),
-    finaleChapter: null,
   };
   state.users.set(userId, user);
 
@@ -952,11 +850,6 @@ function handleUserDisconnect(state: ShowState, userId: UserId): ConductorEvent[
 function handleResetToLobby(state: ShowState, preserveUsers: boolean): ConductorEvent[] {
   if (!preserveUsers) {
     state.users.clear();
-  } else {
-    // Keep users but reset finale chapter
-    state.users.forEach(user => {
-      user.finaleChapter = null;
-    });
   }
 
   state.phase = 'lobby';
@@ -964,7 +857,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
   state.finaleState = null;
   state.paused = false;
 
-  // Re-initialize attempts
+  // Re-initialize attempts with fresh health bars
   state.attempts = state.config.attempts.map((attemptConfig, i) => ({
     index: i,
     chapter: attemptConfig.chapter,
@@ -977,6 +870,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
+    healthBar: createHealthBar(attemptConfig.drainFactor, attemptConfig.layerMultipliers),
   }));
 
   return [
@@ -991,239 +885,15 @@ function handleImportState(state: ShowState, importedState: ShowState): Conducto
 }
 
 // ============================================================================
-// Finale Handlers
+// Finale Handlers (stubs — Phase 3)
 // ============================================================================
 
 function handleSetupFinale(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'finale_setup') {
-    return [{ type: 'ERROR', message: 'Can only setup finale during finale_setup phase' }];
-  }
-
-  // Assign chapters
-  const assignments = assignChapters(state.users);
-
-  // Update user objects
-  assignments.forEach((chapter, userId) => {
-    const user = state.users.get(userId);
-    if (user) user.finaleChapter = chapter;
-  });
-
-  // Initialize finale state
-  state.finaleState = initializeFinaleState(state.config.finale, assignments);
-
-  // Generate available fragments for the event
-  const allFragments = getAvailableFragments(state);
-  const selectableFragments = allFragments
-    .filter(f => f.selectable)
-    .map(f => f.fragment);
-
-  return [{
-    type: 'FINALE_SETUP_COMPLETE',
-    chapterAssignments: assignments,
-    availableFragments: selectableFragments,
-  }];
-}
-
-function handleSelectFragment(state: ShowState, userId: UserId, fragmentId: string): ConductorEvent[] {
-  if (state.phase !== 'finale_setup' && state.phase !== 'finale_rotating') {
-    return [{ type: 'ERROR', message: 'Can only select fragments during finale_setup or finale_rotating' }];
-  }
-
-  const result = selectFragment(userId, fragmentId, state);
-  if (result.error) {
-    return [{ type: 'ERROR', message: result.error }];
-  }
-
-  return result.events;
-}
-
-function handleUpdateTriangle(state: ShowState, userId: UserId, position: TrianglePosition): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  if (!finaleState.triangleActive) {
-    return []; // Silently ignore when triangle is disabled
-  }
-
-  finaleState.trianglePositions.set(userId, position);
-  finaleState.centroid = computeCentroid(finaleState.trianglePositions);
-
-  return [{ type: 'CENTROID_UPDATED', centroid: finaleState.centroid }];
-}
-
-function handleUpdateStewardParam(state: ShowState, userId: UserId, value: number): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  const result = updateStewardParam(userId, value, finaleState);
-  if (!result) {
-    return [{ type: 'ERROR', message: `User is not an active steward: ${userId}` }];
-  }
-
-  return [{
-    type: 'AUDIO_CUE',
-    cue: {
-      type: 'steward_param',
-      slotIndex: result.slotIndex,
-      value: result.clampedValue,
-    },
-  }];
-}
-
-function handleStartRotation(state: ShowState): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  if (state.phase !== 'finale_rotating') {
-    return [{ type: 'ERROR', message: 'Can only start rotation during finale_rotating' }];
-  }
-
-  finaleState.rotationActive = true;
-
-  // Do an initial fill of empty slots
-  return performRotationTick(state, 0);
-}
-
-function handleStopRotation(state: ShowState): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  finaleState.rotationActive = false;
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
-function handleFreezeRotation(state: ShowState): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  finaleState.rotationActive = false;
-  finaleState.frozen = true;
-
-  // Transition to finale_frozen
-  state.phase = 'finale_frozen';
-
-  return [{ type: 'SHOW_PHASE_CHANGED', phase: 'finale_frozen' }];
-}
-
-function handleSetRotationRate(state: ShowState, rate: 1 | 2): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  finaleState.rotationRate = rate;
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
-function handleForceAssignSteward(state: ShowState, userId: UserId, slotIndex: number): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  const slot = finaleState.activeSlots[slotIndex];
-  if (!slot) {
-    return [{ type: 'ERROR', message: `Slot ${slotIndex} is empty` }];
-  }
-
-  const user = state.users.get(userId);
-  if (!user) {
-    return [{ type: 'ERROR', message: `User not found: ${userId}` }];
-  }
-
-  const events: ConductorEvent[] = [];
-
-  // End current stewardship
-  const previousSteward = slot.stewardUserId;
-  endStewardship(finaleState, slotIndex, Date.now());
-  events.push({ type: 'STEWARDSHIP_ENDED', userId: previousSteward, slotIndex });
-
-  // Assign new steward
-  slot.stewardUserId = userId;
-  startStewardship(finaleState, slotIndex, slot.fragment, userId, Date.now());
-  events.push({ type: 'STEWARDSHIP_STARTED', userId, slotIndex });
-
-  return events;
-}
-
-function handleForceInsertFragment(state: ShowState, fragmentId: string, slotIndex: number): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  // Find fragment
-  const allFragments = getAvailableFragments(state);
-  const fragmentAvail = allFragments.find(f => f.fragment.id === fragmentId);
-  if (!fragmentAvail) {
-    return [{ type: 'ERROR', message: `Fragment not found: ${fragmentId}` }];
-  }
-
-  const events: ConductorEvent[] = [];
-
-  // Deactivate existing slot if occupied
-  const existingSlot = finaleState.activeSlots[slotIndex];
-  if (existingSlot) {
-    endStewardship(finaleState, slotIndex, Date.now());
-    events.push({ type: 'STEWARDSHIP_ENDED', userId: existingSlot.stewardUserId, slotIndex });
-    events.push({ type: 'SLOT_DEACTIVATED', slotIndex });
-    events.push({ type: 'AUDIO_CUE', cue: { type: 'slot_deactivate', slotIndex } });
-  }
-
-  // Activate fragment in slot (no steward for forced inserts)
-  const newSlot = {
-    slotIndex,
-    fragment: fragmentAvail.fragment,
-    stewardUserId: '' as UserId,
-    parameterValue: fragmentAvail.fragment.safeParameter.defaultValue,
-    activatedAtBeat: 0,
-    energyLevel: 0,
-  };
-
-  finaleState.activeSlots[slotIndex] = newSlot;
-
-  events.push({
-    type: 'SLOT_ACTIVATED',
-    slotIndex,
-    fragment: fragmentAvail.fragment,
-    stewardUserId: '' as UserId,
-  });
-  events.push({
-    type: 'AUDIO_CUE',
-    cue: { type: 'slot_activate', slotIndex, fragment: fragmentAvail.fragment },
-  });
-
-  return events;
-}
-
-function handleClearQueue(state: ShowState): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  finaleState.queue = [];
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
-function handleToggleTriangle(state: ShowState, active: boolean): ConductorEvent[] {
-  const finaleState = state.finaleState;
-  if (!finaleState) {
-    return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  }
-
-  finaleState.triangleActive = active;
-  return [{ type: 'STATE_UPDATED', version: state.version }];
+  // V1 interim — Phase 3 will replace with V2 consensus game + performer mix initialization
+  const chapterAssignments = assignChapters(state.users);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  state.finaleState = v1InitFinale(state.config.finale as any, chapterAssignments) as any;
+  return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments: [], lockedFragments: [] }];
 }
 
 // ============================================================================

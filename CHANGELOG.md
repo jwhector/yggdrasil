@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## 2026-03-06 — V2 Migration Phase 2: Health Bar System
+
+**Context:** MIGRATION.md Phase 2. Replaces per-layer Doubt thresholds with a cumulative Health Bar that drains after each vote based on the losing minority proportion. Songs either collapse (health → 0) or complete all layers and enter `attempt_resolve` where the performer narratively rejects them.
+
+**New files:**
+- `conductor/health-bar.ts` — Pure health bar functions: `createHealthBar`, `calculateDrain` (drain = min(A,B)/total × 100 × drainFactor × layerMultiplier), `applyDrain` (mutates, floors at 0, appends to history), `isCollapsed`
+- `conductor/voting.ts` — Replaces `consensus.ts` for song-building: `calculateConsensus` (unchanged), `calculateVoteResult` (new — combines consensus + drain calculation), removed `resolveVote`
+- `conductor/__tests__/health-bar.test.ts` — Health bar unit tests
+- `conductor/__tests__/voting.test.ts` — Voting unit tests
+
+**Modified files:**
+- `conductor/conductor.ts` — Major rewrite: removed `SET_THRESHOLD`/`TOGGLE_DOUBT`/`FORCE_CONTINUE` handlers; added `TRIGGER_REJECTION`/`SET_DRAIN_FACTOR`/`SET_HEALTH`; `CLOSE_VOTING` now drains health bar and checks collapse; `lockInLayer` auto-transitions to `attempt_resolve` on song completion; phase sequence updated to 15 phases (×3 attempt_resolve); `SETUP_FINALE` uses V1 interim until Phase 3
+- `conductor/__tests__/conductor.test.ts` — Rewritten: V1 doubt tests removed, V2 health bar/collapse/attempt_resolve tests added
+- `conductor/index.ts` — Exports `voting` and `health-bar` modules; removed old `consensus`/finale exports
+- `conductor/__tests__/finale.test.ts` — Added `drainFactor`/`layerMultipliers` to test config; removed V1 conductor command suites (pending Phase 3 rewrite)
+- `conductor/__tests__/fragments.test.ts` — Added `drainFactor`/`layerMultipliers`/`healthBar`/`drainAmount` to test fixtures
+
+**Default layer multipliers:** `[0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0]` — later layers cost progressively more.
+
+**Tests:** 147 passing across 6 conductor suites.
+
+---
+
 ## 2026-03-01 — RESET_LAYER Command
 
 **Context:** Operators needed a way to abort a layer mid-flow and start it over from scratch — for example, if audition or voting started at the wrong moment. This adds a `RESET_LAYER` emergency control that returns the current layer to its initial `locked` state from any in-progress phase.
