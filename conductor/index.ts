@@ -23,3 +23,13 @@ export { createHealthBar, calculateDrain, applyDrain, isCollapsed } from './heal
 // Export fragment functions
 export { generateFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
+
+// Export consensus game functions
+export { calculateConvergence, resolveRound, adjustThreshold } from './consensus-game';
+
+// Export performer mix functions
+export { queueChange, cancelPending, firePendingChanges } from './performer-mix';
+
+// Export NPC functions
+export { evaluateAutoTriggers } from './npc';
+export type { NpcGameState } from './npc';

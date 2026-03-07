@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## 2026-03-06 — V2 Migration Phase 3: Finale — Consensus Game + Performer Mix
+
+**Context:** MIGRATION.md Phase 3. Replaces the V1 rotation/stewardship/triangle finale system with the V2 design: a consensus game where the audience collectively activates fragments by achieving convergence above a threshold, followed by a performer mixing surface where changes queue and fire at loop boundaries.
+
+**Deleted files:**
+- `conductor/finale.ts` — V1 rotation/queue/stewardship/triangle logic (all V1 types removed)
+- `conductor/__tests__/finale.test.ts` — V1 finale tests
+
+**New files:**
+- `conductor/consensus-game.ts` — Pure consensus game functions: `calculateConvergence` (max vote share / total), `resolveRound` (checks convergence ≥ threshold and winning role is unlocked), `adjustThreshold` (decays per consecutive failure, floors at minimum)
+- `conductor/performer-mix.ts` — Pure performer mix queue functions: `queueChange` (add/replace pending), `cancelPending` (remove pending for layer), `firePendingChanges` (apply all pending → new Map + firedChanges list)
+- `conductor/npc.ts` — NPC auto-trigger evaluation: `evaluateAutoTriggers` checks conditions in order (consecutive_failures, same_song_streak, near_miss, first_success, final_fragment, single_option_role); returns first matching message or null
+- `conductor/__tests__/consensus-game.test.ts` — Unit tests: convergence calculation, round success/failure, threshold decay/floor/reset
+- `conductor/__tests__/performer-mix.test.ts` — Unit tests: queue, cancel, fire, mute, replace
+- `conductor/__tests__/npc.test.ts` — Unit tests: all 6 trigger conditions
+- `conductor/__tests__/finale-integration.test.ts` — Integration tests through `processCommand`: SETUP_FINALE → consensus rounds → performer mix
+
+**Modified files:**
+- `conductor/fragments.ts` — Fixed V2 type alignment: `displayName` → `displayLabel`, removed `safeParameter` field and `placeholderSafeParameter()` helper, removed `SafeParameter`/`AbletonParamRef` imports
+- `conductor/conductor.ts` — Removed V1 interim imports (`assignChapters`, `v1InitFinale`); implemented all 11 finale command handlers (`SETUP_FINALE`, `START_CONSENSUS_ROUND`, `SUBMIT_CONSENSUS_VOTE`, `END_CONSENSUS_ROUND`, `SET_CONSENSUS_THRESHOLD`, `SEND_NPC_MESSAGE`, `START_PERFORMER_MIX`, `QUEUE_FRAGMENT`, `CANCEL_PENDING`, `FIRE_PENDING_CHANGES`, `LOAD_SNAPSHOT`, `TOGGLE_LIVE_TRACK`); removed stale `finale_elegy` console.log
+- `conductor/index.ts` — Added exports for `consensus-game`, `performer-mix`, `npc` modules
+
+**Key implementation decisions:**
+- `resolveRound` checks that winning fragment's `layerType` is not already in `lockedRoles`
+- `adjustThreshold` is stateless — caller passes `consecutiveFailures=0` on success to get initial threshold back
+- `START_PERFORMER_MIX` seeds `activeLayers` from `consensusGame.lockedRoles` (consensus results become starting mix)
+- NPC auto-triggers evaluate after every `END_CONSENSUS_ROUND` (if `autoTriggersEnabled`)
+- `near_miss` condition uses `threshold - 0.05 - 1e-10` floor to handle floating-point imprecision
+
+**Tests:** 185 passing across 9 conductor suites (+38 new tests).
+
+---
+
 ## 2026-03-06 — V2 Migration Phase 2: Health Bar System
 
 **Context:** MIGRATION.md Phase 2. Replaces per-layer Doubt thresholds with a cumulative Health Bar that drains after each vote based on the losing minority proportion. Songs either collapse (health → 0) or complete all layers and enter `attempt_resolve` where the performer narratively rejects them.

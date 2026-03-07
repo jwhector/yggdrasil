@@ -166,7 +166,7 @@ interface HealthBarDrain {
 
 ---
 
-## Phase 3: Refactor Conductor — Finale
+## Phase 3: Refactor Conductor — Finale ✅ COMPLETE (2026-03-06)
 
 **Goal:** Replace rotation/stewardship/triangle with consensus game + performer mix.
 
@@ -226,10 +226,17 @@ interface HealthBarDrain {
 - No need to handle `unreached` status
 
 ### Verification
-- All finale conductor tests pass
-- No references to rotation, stewardship, triangle, centroid, queue scheduling remain
-- Consensus game round lifecycle works correctly
-- Performer mix pending changes queue works correctly
+- All finale conductor tests pass ✅
+- No references to rotation, stewardship, triangle, centroid, queue scheduling remain ✅
+- Consensus game round lifecycle works correctly ✅
+- Performer mix pending changes queue works correctly ✅
+
+**Actual implementation notes (vs original spec):**
+- `calculateConvergence` signature: takes `Map<UserId, FragmentId>`, returns `{ convergence, leadingFragment, distribution }`
+- `resolveRound` takes `lockedRoles` param to verify winning fragment's layerType isn't already locked
+- `adjustThreshold` is stateless — caller manages `consecutiveFailures` counter, passes 0 on success
+- `fragments.ts` updated: `displayName` → `displayLabel`, `safeParameter` removed (V2 Fragment type alignment)
+- 185 tests passing across 9 conductor suites
 
 ---
 

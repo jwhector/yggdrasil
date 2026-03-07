@@ -17,8 +17,6 @@ import type {
   LayerResult,
   Fragment,
   AudioReference,
-  SafeParameter,
-  AbletonParamRef,
   Chapter,
   LayerType,
 } from './types';
@@ -134,8 +132,8 @@ function buildFragment(
   layerType: LayerType,
   audioRef: AudioReference,
 ): Fragment {
-  // TODO: See DECISIONS.md O5 — display name generation strategy TBD
-  const displayName = `${capitalize(chapter)}: ${capitalize(layerType)} ${option}`;
+  // TODO: See DECISIONS.md O5 — display label generation strategy TBD
+  const displayLabel = `${capitalize(chapter)}: ${capitalize(layerType)} ${option}`;
 
   return {
     id: `${attemptIndex}-${layerIndex}-${option}`,
@@ -144,22 +142,8 @@ function buildFragment(
     option,
     chapter,
     layerType,
-    displayName,
+    displayLabel,
     audioRef,
-    safeParameter: placeholderSafeParameter(attemptIndex, layerIndex),
-  };
-}
-
-/** Placeholder safe parameter until Ableton layout is finalized. */
-function placeholderSafeParameter(attemptIndex: number, layerIndex: number): SafeParameter {
-  return {
-    name: `param-${attemptIndex}-${layerIndex}`,
-    displayLabel: 'Intensity',
-    abletonMapping: { trackIndex: 0, deviceIndex: 0, paramIndex: 0 } as AbletonParamRef,
-    min: 0.0,
-    max: 1.0,
-    defaultValue: 0.5,
-    smoothingMs: 50,
   };
 }
 

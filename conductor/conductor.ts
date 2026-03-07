@@ -34,12 +34,15 @@ import type {
   SeatId,
   User,
   AudioReference,
+  LayerType,
+  FinaleState,
 } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { createHealthBar, applyDrain, isCollapsed } from './health-bar';
-// V1 interim imports — Phase 3 will replace with V2 finale logic
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-import { assignChapters, initializeFinaleState as v1InitFinale } from './finale';
+import { generateFragments } from './fragments';
+import { calculateConvergence, resolveRound, adjustThreshold } from './consensus-game';
+import { queueChange, cancelPending, firePendingChanges } from './performer-mix';
+import { evaluateAutoTriggers } from './npc';
 
 // ============================================================================
 // State Initialization
@@ -130,21 +133,31 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     case 'TRIGGER_REJECTION':
       return handleTriggerRejection(state);
 
-    // Finale — stubs (Phase 3)
+    // Finale
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
     case 'START_CONSENSUS_ROUND':
+      return handleStartConsensusRound(state);
     case 'SUBMIT_CONSENSUS_VOTE':
+      return handleSubmitConsensusVote(state, command.userId, command.fragmentId);
     case 'END_CONSENSUS_ROUND':
+      return handleEndConsensusRound(state);
     case 'SET_CONSENSUS_THRESHOLD':
+      return handleSetConsensusThreshold(state, command.threshold);
     case 'SEND_NPC_MESSAGE':
+      return handleSendNpcMessage(state, command.message);
     case 'START_PERFORMER_MIX':
+      return handleStartPerformerMix(state);
     case 'QUEUE_FRAGMENT':
+      return handleQueueFragment(state, command.layerType, command.fragmentId);
     case 'CANCEL_PENDING':
+      return handleCancelPending(state, command.layerType);
     case 'FIRE_PENDING_CHANGES':
+      return handleFirePendingChanges(state);
     case 'LOAD_SNAPSHOT':
+      return handleLoadSnapshot(state, command.snapshot);
     case 'TOGGLE_LIVE_TRACK':
-      return [{ type: 'ERROR', message: `${command.type} not yet implemented (Phase 3)`, command }];
+      return handleToggleLiveTrack(state, command.trackId);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -278,10 +291,6 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     }
   }
 
-  if (nextPhase === 'finale_elegy') {
-    // TODO Phase 3: initialize finale state (consensus game + performer mix)
-    console.log('Transitioning to finale_elegy — finale init pending Phase 3');
-  }
 
   events.push({
     type: 'SHOW_PHASE_CHANGED',
@@ -885,15 +894,227 @@ function handleImportState(state: ShowState, importedState: ShowState): Conducto
 }
 
 // ============================================================================
-// Finale Handlers (stubs — Phase 3)
+// Finale Handlers
 // ============================================================================
 
 function handleSetupFinale(state: ShowState): ConductorEvent[] {
-  // V1 interim — Phase 3 will replace with V2 consensus game + performer mix initialization
-  const chapterAssignments = assignChapters(state.users);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  state.finaleState = v1InitFinale(state.config.finale as any, chapterAssignments) as any;
-  return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments: [], lockedFragments: [] }];
+  const allFragmentAvailability = generateFragments(state.attempts, state.config.attempts);
+  const availableFragments = allFragmentAvailability.filter(fa => fa.selectable).map(fa => fa.fragment);
+  const lockedFragments = allFragmentAvailability.filter(fa => !fa.selectable).map(fa => fa.fragment);
+  const allFragments = allFragmentAvailability.map(fa => fa.fragment);
+
+  state.finaleState = {
+    phase: 'elegy',
+    availableFragments,
+    allFragments,
+    lockedFragments,
+    consensusGame: {
+      active: false,
+      currentRound: 0,
+      roundTimeRemaining: 0,
+      votes: new Map(),
+      convergenceValue: 0,
+      threshold: state.config.finale.initialThreshold,
+      consecutiveFailures: 0,
+      lockedRoles: new Map(),
+    },
+    npc: {
+      currentMessage: null,
+      autoTriggersEnabled: true,
+    },
+    performerMix: {
+      activeLayers: new Map(),
+      pendingChanges: [],
+      loopPosition: 0,
+      loopCount: 0,
+      liveTracksActive: [],
+    },
+  };
+
+  return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments, lockedFragments }];
+}
+
+function handleStartConsensusRound(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const { consensusGame } = state.finaleState;
+  const { finale } = state.config;
+
+  consensusGame.active = true;
+  consensusGame.currentRound++;
+  consensusGame.votes = new Map();
+  consensusGame.convergenceValue = 0;
+  consensusGame.threshold = adjustThreshold(
+    finale.initialThreshold,
+    consensusGame.consecutiveFailures,
+    finale.thresholdDecayPerFailure,
+    finale.minThreshold,
+  );
+  consensusGame.roundTimeRemaining =
+    consensusGame.currentRound === 1 ? finale.firstRoundDurationMs : finale.consensusRoundDurationMs;
+
+  return [{ type: 'CONSENSUS_ROUND_STARTED', roundNumber: consensusGame.currentRound, threshold: consensusGame.threshold }];
+}
+
+function handleSubmitConsensusVote(state: ShowState, userId: UserId, fragmentId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const { consensusGame } = state.finaleState;
+  if (!consensusGame.active) return [{ type: 'ERROR', message: 'No active consensus round' }];
+
+  consensusGame.votes.set(userId, fragmentId);
+  const { convergence } = calculateConvergence(consensusGame.votes);
+  consensusGame.convergenceValue = convergence;
+
+  return [{ type: 'CONSENSUS_VOTE_UPDATED', convergenceValue: convergence }];
+}
+
+function handleEndConsensusRound(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const { consensusGame, availableFragments, npc } = state.finaleState;
+  const { finale } = state.config;
+  const events: ConductorEvent[] = [];
+
+  const result = resolveRound(
+    consensusGame.votes,
+    consensusGame.threshold,
+    availableFragments,
+    consensusGame.lockedRoles,
+  );
+
+  consensusGame.active = false;
+  consensusGame.votes = new Map();
+
+  if (result.success && result.winningFragment) {
+    const { winningFragment } = result;
+    consensusGame.lockedRoles.set(winningFragment.layerType, winningFragment.id);
+    consensusGame.consecutiveFailures = 0;
+
+    events.push({
+      type: 'CONSENSUS_ROUND_SUCCESS',
+      fragmentId: winningFragment.id,
+      layerType: winningFragment.layerType,
+      convergence: result.convergence,
+    });
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: { type: 'consensus_activate', layerType: winningFragment.layerType, fragmentId: winningFragment.id, audioRef: winningFragment.audioRef },
+    });
+
+    if (consensusGame.lockedRoles.size === 7) {
+      events.push({ type: 'CONSENSUS_GAME_COMPLETE' });
+    }
+  } else {
+    consensusGame.consecutiveFailures++;
+    events.push({ type: 'CONSENSUS_ROUND_FAILURE', highestConvergence: result.convergence });
+  }
+
+  // NPC auto-trigger evaluation
+  if (npc.autoTriggersEnabled && finale.npcAutoTriggers.length > 0) {
+    const npcMessage = evaluateAutoTriggers(
+      {
+        consecutiveFailures: consensusGame.consecutiveFailures,
+        lastConvergence: result.convergence,
+        threshold: consensusGame.threshold,
+        lockedRoles: consensusGame.lockedRoles,
+        availableFragments,
+        recentLockHistory: [...consensusGame.lockedRoles.entries()].map(([, fragmentId]) => {
+          const f = availableFragments.find(fr => fr.id === fragmentId);
+          return { attemptIndex: f?.attemptIndex ?? 0 };
+        }),
+      },
+      finale.npcAutoTriggers,
+    );
+    if (npcMessage) {
+      npc.currentMessage = npcMessage;
+      events.push({ type: 'NPC_MESSAGE', message: npcMessage });
+    }
+  }
+
+  return events;
+}
+
+function handleSetConsensusThreshold(state: ShowState, threshold: number): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  state.finaleState.consensusGame.threshold = threshold;
+  return [];
+}
+
+function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  state.finaleState.npc.currentMessage = message;
+  return [{ type: 'NPC_MESSAGE', message }];
+}
+
+function handleStartPerformerMix(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const { finaleState } = state;
+  finaleState.phase = 'performer_mix';
+
+  // Seed activeLayers from consensus game results
+  const activeLayers = new Map<LayerType, string | null>();
+  for (const [layerType, fragmentId] of finaleState.consensusGame.lockedRoles) {
+    activeLayers.set(layerType, fragmentId);
+  }
+  finaleState.performerMix.activeLayers = activeLayers;
+
+  return [{ type: 'PERFORMER_MIX_STARTED' }];
+}
+
+function handleQueueFragment(state: ShowState, layerType: LayerType, fragmentId: string | null): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  state.finaleState.performerMix.pendingChanges = queueChange(
+    state.finaleState.performerMix.pendingChanges,
+    layerType,
+    fragmentId,
+  );
+  return [];
+}
+
+function handleCancelPending(state: ShowState, layerType: LayerType): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  state.finaleState.performerMix.pendingChanges = cancelPending(
+    state.finaleState.performerMix.pendingChanges,
+    layerType,
+  );
+  return [];
+}
+
+function handleFirePendingChanges(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const { performerMix } = state.finaleState;
+  const { activeLayers, firedChanges } = firePendingChanges(
+    performerMix.activeLayers,
+    performerMix.pendingChanges,
+  );
+  performerMix.activeLayers = activeLayers;
+  performerMix.pendingChanges = [];
+
+  return [
+    { type: 'PENDING_CHANGES_FIRED', changes: firedChanges },
+    { type: 'AUDIO_CUE', cue: { type: 'mix_update', changes: firedChanges } },
+    { type: 'MIX_STATE_UPDATED', activeLayers },
+  ];
+}
+
+function handleLoadSnapshot(state: ShowState, snapshot: Map<LayerType, string | null>): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  let pending = state.finaleState.performerMix.pendingChanges;
+  for (const [layerType, fragmentId] of snapshot) {
+    pending = queueChange(pending, layerType, fragmentId);
+  }
+  state.finaleState.performerMix.pendingChanges = pending;
+  return [];
+}
+
+function handleToggleLiveTrack(state: ShowState, trackId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const { liveTracksActive } = state.finaleState.performerMix;
+  const idx = liveTracksActive.indexOf(trackId);
+  if (idx === -1) {
+    liveTracksActive.push(trackId);
+  } else {
+    liveTracksActive.splice(idx, 1);
+  }
+  return [];
 }
 
 // ============================================================================
