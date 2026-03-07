@@ -296,6 +296,27 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     }
   }
 
+  if (nextPhase === 'finale_elegy' && !state.finaleState) {
+    // Auto-setup finale state (generate fragments from attempt results)
+    events.push(...handleSetupFinale(state));
+  }
+
+  if (nextPhase === 'finale_consensus' && state.finaleState) {
+    state.finaleState.phase = 'consensus_game';
+  }
+
+  if (nextPhase === 'finale_performer_mix' && state.finaleState) {
+    if (state.finaleState.phase !== 'performer_mix') {
+      // Seed activeLayers from consensus game results
+      state.finaleState.phase = 'performer_mix';
+      const activeLayers = new Map<LayerType, string | null>();
+      for (const [layerType, fragmentId] of state.finaleState.consensusGame.lockedRoles) {
+        activeLayers.set(layerType, fragmentId);
+      }
+      state.finaleState.performerMix.activeLayers = activeLayers;
+      events.push({ type: 'PERFORMER_MIX_STARTED' });
+    }
+  }
 
   events.push({
     type: 'SHOW_PHASE_CHANGED',

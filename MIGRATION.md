@@ -332,7 +332,7 @@ interface HealthBarDrain {
 
 ---
 
-## Phase 6: Update Client — Finale UI
+## Phase 6: Update Client — Finale UI ✅ COMPLETE (2026-03-07)
 
 **Goal:** Build consensus game board, convergence meter, NPC display, and performer mixing surface.
 
@@ -411,12 +411,29 @@ interface HealthBarDrain {
 - Performer mix phase: MixingSurface + SnapshotPresets
 
 ### Verification
-- Consensus game full round lifecycle works end-to-end (vote → meter → timer → resolve)
-- Convergence meter updates smoothly in real time
-- Role locking and grid compression work correctly
-- NPC messages display and clear correctly
-- Performer mixing surface queues and fires changes at loop boundaries
-- Projector mirrors mix state correctly
+- ✅ Consensus game full round lifecycle works end-to-end (vote → meter → timer → resolve)
+- ✅ Convergence meter updates smoothly in real time
+- ✅ Role locking and grid compression work correctly
+- ✅ NPC messages display and clear correctly
+- ✅ Performer mixing surface queues and fires changes at loop boundaries
+- ✅ Projector mirrors mix state correctly
+
+### Delivered
+- New: `hooks/useConvergence.ts` — RAF spring interpolation for `convergence_update` socket events
+- New: `components/finale/ElegyGrid.tsx` — single component with `variant="audience"|"projector"`
+- New: `components/finale/ConvergenceMeter.tsx` — animated fill bar with threshold zone + timer
+- New: `components/finale/ConsensusBoard.tsx` — tappable role/fragment grid with vote highlight + shake animation
+- New: `components/finale/NpcDisplay.tsx` — typewriter reveal, auto-fade, direct socket subscription
+- New: `components/finale/LoopIndicator.tsx` — loop position bar, amber pulse near boundary when pending
+- New: `components/finale/MixingMirror.tsx` — projector-only read-only mix state view
+- New: `components/finale/ProjectorConvergenceView.tsx` — SVG semi-circle arc meter with spring animation
+- New: `components/finale/MixingSurface.tsx` — 7×6 controller grid, queue/cancel/fire logic
+- New: `components/controller/ConsensusControls.tsx` — round management, threshold slider, force-lock, vote distribution
+- New: `components/controller/NpcControls.tsx` — line bank, free-text input, auto-trigger toggle
+- Fixed: `server/socket.ts` `filterStateForClient` — audience + projector shapes now match V2 type interfaces
+- Updated: `app/audience/page.tsx`, `app/projector/page.tsx`, `app/controller/page.tsx` — V2 phase routing
+- Updated: `MetricsPanel.tsx`, `ShowControls.tsx` — V2 phase names and stats
+- Deleted: `FragmentSelector.tsx`, `TriangleSteering.tsx`, `StewardSlider.tsx`, `SlotCard.tsx`, `SlotGrid.tsx`, `hooks/useTriangle.ts`, `FinaleControls.tsx`
 
 ---
 

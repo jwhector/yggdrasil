@@ -510,24 +510,24 @@ export function filterStateForClient(
         userCount: state.users.size,
         attempts: state.attempts,
         finaleState: fs ? {
-          phase: fs.phase,
+          finalePhase: fs.phase,
           availableFragments: fs.availableFragments,
           lockedFragments: fs.lockedFragments,
-          consensusGame: {
-            active: fs.consensusGame.active,
-            currentRound: fs.consensusGame.currentRound,
-            convergenceValue: fs.consensusGame.convergenceValue,
-            threshold: fs.consensusGame.threshold,
-            consecutiveFailures: fs.consensusGame.consecutiveFailures,
-            lockedRoles: Array.from(fs.consensusGame.lockedRoles.entries()),
-          },
-          npc: fs.npc,
-          performerMix: {
-            activeLayers: Array.from(fs.performerMix.activeLayers.entries()),
-            pendingChanges: fs.performerMix.pendingChanges,
-            loopPosition: fs.performerMix.loopPosition,
-            loopCount: fs.performerMix.loopCount,
-          },
+          convergenceValue: fs.consensusGame.convergenceValue,
+          threshold: fs.consensusGame.threshold,
+          roundTimeRemaining: fs.consensusGame.roundTimeRemaining,
+          currentRound: fs.consensusGame.currentRound,
+          lockedRoles: Array.from(fs.consensusGame.lockedRoles.entries()).map(([layerType, fragmentId]) => ({
+            layerType,
+            fragmentId,
+          })),
+          npcMessage: fs.npc.currentMessage,
+          mixActiveLayers: Array.from(fs.performerMix.activeLayers.entries()).map(([layerType, fragmentId]) => ({
+            layerType,
+            fragmentId,
+          })),
+          mixPendingChanges: fs.performerMix.pendingChanges,
+          loopPosition: fs.performerMix.loopPosition,
         } : null,
         config: state.config,
       };
@@ -562,18 +562,40 @@ export function filterStateForClient(
       const fs = state.finaleState;
       if (fs) {
         // Find this user's consensus vote (null if not voted this round)
-        const myConsensusVote: string | null = fs.consensusGame.votes.get(userId) ?? null;
+        const myVoteFinale: string | null = fs.consensusGame.votes.get(userId) ?? null;
+
+        // Mark available fragments as locked if their role is already locked
+        const lockedRoleTypes = new Set(fs.consensusGame.lockedRoles.keys());
+        const availableWithLocked = fs.availableFragments.map(fragment => ({
+          fragment,
+          locked: lockedRoleTypes.has(fragment.layerType),
+        }));
+
+        // Flatten lockedRoles map to array for JSON transport
+        const lockedRoles: Array<{ layerType: string; fragmentId: string }> =
+          Array.from(fs.consensusGame.lockedRoles.entries()).map(([layerType, fragmentId]) => ({
+            layerType,
+            fragmentId,
+          }));
+
+        // Flatten performerMix activeLayers for JSON transport
+        const mixActiveLayers: Array<{ layerType: string; fragmentId: string | null }> =
+          Array.from(fs.performerMix.activeLayers.entries()).map(([layerType, fragmentId]) => ({
+            layerType,
+            fragmentId,
+          }));
 
         myFinale = {
           finalePhase: fs.phase,
-          myConsensusVote,
+          availableFragments: availableWithLocked,
+          myVote: myVoteFinale,
           convergenceValue: fs.consensusGame.convergenceValue,
           threshold: fs.consensusGame.threshold,
-          roundActive: fs.consensusGame.active,
+          roundTimeRemaining: fs.consensusGame.roundTimeRemaining,
           currentRound: fs.consensusGame.currentRound,
-          lockedRoles: Array.from(fs.consensusGame.lockedRoles.entries()),
+          lockedRoles,
           npcMessage: fs.npc.currentMessage,
-          availableFragments: fs.availableFragments,
+          mixActiveLayers,
         };
       }
 

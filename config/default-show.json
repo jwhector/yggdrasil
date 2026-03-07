@@ -1,207 +1,221 @@
 {
-  "$schema": "./show-config.schema.json",
   "name": "Default Show Configuration",
-  "description": "Template configuration for the new show — replace audio references and labels with actual content",
+  "description": "Template configuration for the V2 show — replace audio references and labels with actual content",
 
-  "maxLayersPerAttempt": 7,
+  "layersPerAttempt": 7,
 
   "attempts": [
     {
       "chapter": "ambition",
       "title": "Ambition",
+      "drainFactor": 0.5,
+      "layerMultipliers": [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
       "layers": [
         {
           "index": 0,
-          "type": "foundation",
-          "optionA": { "trackIndex": 0, "clipIndex": 0 },
-          "optionB": { "trackIndex": 1, "clipIndex": 0 },
+          "type": "bass",
+          "optionA": { "trackIndex": 0, "clipSlot": 0 },
+          "optionB": { "trackIndex": 1, "clipSlot": 0 },
           "labelA": "Grounded",
-          "labelB": "Restless",
-          "doubtThreshold": null
+          "labelB": "Restless"
         },
         {
           "index": 1,
-          "type": "pulse",
-          "optionA": { "trackIndex": 2, "clipIndex": 0 },
-          "optionB": { "trackIndex": 3, "clipIndex": 0 },
+          "type": "drums",
+          "optionA": { "trackIndex": 2, "clipSlot": 0 },
+          "optionB": { "trackIndex": 3, "clipSlot": 0 },
           "labelA": "Steady",
-          "labelB": "Urgent",
-          "doubtThreshold": null
+          "labelB": "Urgent"
         },
         {
           "index": 2,
-          "type": "color",
-          "optionA": {
-            "trackIndex": 4,
-            "effectIndices": [0, 1],
-            "label": "Warm (reverb + chorus)"
-          },
-          "optionB": {
-            "trackIndex": 4,
-            "effectIndices": [2],
-            "label": "Sharp (delay)"
-          },
+          "type": "pad",
+          "optionA": { "trackIndex": 4, "clipSlot": 0 },
+          "optionB": { "trackIndex": 5, "clipSlot": 0 },
           "labelA": "Warm",
-          "labelB": "Sharp",
-          "doubtThreshold": 0.65
+          "labelB": "Cold"
         },
         {
           "index": 3,
-          "type": "space",
-          "optionA": { "trackIndex": 6, "clipIndex": 0 },
-          "optionB": { "trackIndex": 7, "clipIndex": 0 },
-          "labelA": "Intimate",
-          "labelB": "Vast",
-          "doubtThreshold": 0.75
+          "type": "melody",
+          "optionA": { "trackIndex": 6, "clipSlot": 0 },
+          "optionB": { "trackIndex": 7, "clipSlot": 0 },
+          "labelA": "Rising",
+          "labelB": "Falling"
         },
         {
           "index": 4,
-          "type": "voice",
-          "optionA": { "trackIndex": 8, "clipIndex": 0 },
-          "optionB": { "trackIndex": 9, "clipIndex": 0 },
-          "labelA": "Clear",
-          "labelB": "Veiled",
-          "doubtThreshold": 0.85
+          "type": "harmony",
+          "optionA": { "trackIndex": 8, "clipSlot": 0 },
+          "optionB": { "trackIndex": 9, "clipSlot": 0 },
+          "labelA": "Open",
+          "labelB": "Tight"
         },
         {
           "index": 5,
-          "type": "texture",
-          "optionA": { "trackIndex": 10, "clipIndex": 0 },
-          "optionB": { "trackIndex": 11, "clipIndex": 0 },
+          "type": "fx1",
+          "optionA": { "trackIndex": 10, "clipSlot": 0 },
+          "optionB": { "trackIndex": 11, "clipSlot": 0 },
+          "labelA": "Bright",
+          "labelB": "Dark"
+        },
+        {
+          "index": 6,
+          "type": "fx2",
+          "optionA": { "trackIndex": 12, "clipSlot": 0 },
+          "optionB": { "trackIndex": 13, "clipSlot": 0 },
           "labelA": "Smooth",
-          "labelB": "Fractured",
-          "doubtThreshold": 0.90
+          "labelB": "Fractured"
         }
       ]
     },
     {
       "chapter": "love",
       "title": "Love",
+      "drainFactor": 0.5,
+      "layerMultipliers": [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
       "layers": [
         {
           "index": 0,
-          "type": "foundation",
-          "optionA": { "trackIndex": 14, "clipIndex": 0 },
-          "optionB": { "trackIndex": 15, "clipIndex": 0 },
-          "labelA": "Rooted",
-          "labelB": "Drifting",
-          "doubtThreshold": null
+          "type": "melody",
+          "optionA": { "trackIndex": 14, "clipSlot": 0 },
+          "optionB": { "trackIndex": 15, "clipSlot": 0 },
+          "labelA": "Tender",
+          "labelB": "Electric"
         },
         {
           "index": 1,
-          "type": "pulse",
-          "optionA": { "trackIndex": 16, "clipIndex": 0 },
-          "optionB": { "trackIndex": 17, "clipIndex": 0 },
-          "labelA": "Patient",
-          "labelB": "Aching",
-          "doubtThreshold": null
+          "type": "harmony",
+          "optionA": { "trackIndex": 16, "clipSlot": 0 },
+          "optionB": { "trackIndex": 17, "clipSlot": 0 },
+          "labelA": "Close",
+          "labelB": "Reaching"
         },
         {
           "index": 2,
-          "type": "color",
-          "optionA": { "trackIndex": 18, "clipIndex": 0 },
-          "optionB": { "trackIndex": 19, "clipIndex": 0 },
-          "labelA": "Tender",
-          "labelB": "Electric",
-          "doubtThreshold": 0.65
+          "type": "bass",
+          "optionA": { "trackIndex": 18, "clipSlot": 0 },
+          "optionB": { "trackIndex": 19, "clipSlot": 0 },
+          "labelA": "Rooted",
+          "labelB": "Drifting"
         },
         {
           "index": 3,
-          "type": "space",
-          "optionA": { "trackIndex": 20, "clipIndex": 0 },
-          "optionB": { "trackIndex": 21, "clipIndex": 0 },
-          "labelA": "Close",
-          "labelB": "Reaching",
-          "doubtThreshold": 0.75
+          "type": "drums",
+          "optionA": { "trackIndex": 20, "clipSlot": 0 },
+          "optionB": { "trackIndex": 21, "clipSlot": 0 },
+          "labelA": "Patient",
+          "labelB": "Aching"
         },
         {
           "index": 4,
-          "type": "voice",
-          "optionA": { "trackIndex": 22, "clipIndex": 0 },
-          "optionB": { "trackIndex": 23, "clipIndex": 0 },
-          "labelA": "Open",
-          "labelB": "Guarded",
-          "doubtThreshold": 0.85
+          "type": "pad",
+          "optionA": { "trackIndex": 22, "clipSlot": 0 },
+          "optionB": { "trackIndex": 23, "clipSlot": 0 },
+          "labelA": "Flowing",
+          "labelB": "Tangled"
         },
         {
           "index": 5,
-          "type": "texture",
-          "optionA": { "trackIndex": 24, "clipIndex": 0 },
-          "optionB": { "trackIndex": 25, "clipIndex": 0 },
-          "labelA": "Flowing",
-          "labelB": "Tangled",
-          "doubtThreshold": 0.90
+          "type": "fx1",
+          "optionA": { "trackIndex": 24, "clipSlot": 0 },
+          "optionB": { "trackIndex": 25, "clipSlot": 0 },
+          "labelA": "Open",
+          "labelB": "Guarded"
+        },
+        {
+          "index": 6,
+          "type": "fx2",
+          "optionA": { "trackIndex": 26, "clipSlot": 0 },
+          "optionB": { "trackIndex": 27, "clipSlot": 0 },
+          "labelA": "Clear",
+          "labelB": "Veiled"
         }
       ]
     },
     {
       "chapter": "avoidance",
       "title": "Avoidance",
+      "drainFactor": 0.5,
+      "layerMultipliers": [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
       "layers": [
         {
           "index": 0,
-          "type": "foundation",
-          "optionA": { "trackIndex": 28, "clipIndex": 0 },
-          "optionB": { "trackIndex": 29, "clipIndex": 0 },
+          "type": "pad",
+          "optionA": { "trackIndex": 28, "clipSlot": 0 },
+          "optionB": { "trackIndex": 29, "clipSlot": 0 },
           "labelA": "Numb",
-          "labelB": "Buzzing",
-          "doubtThreshold": null
+          "labelB": "Buzzing"
         },
         {
           "index": 1,
-          "type": "pulse",
-          "optionA": { "trackIndex": 30, "clipIndex": 0 },
-          "optionB": { "trackIndex": 31, "clipIndex": 0 },
+          "type": "fx1",
+          "optionA": { "trackIndex": 30, "clipSlot": 0 },
+          "optionB": { "trackIndex": 31, "clipSlot": 0 },
           "labelA": "Flat",
-          "labelB": "Manic",
-          "doubtThreshold": null
+          "labelB": "Manic"
         },
         {
           "index": 2,
-          "type": "color",
-          "optionA": { "trackIndex": 32, "clipIndex": 0 },
-          "optionB": { "trackIndex": 33, "clipIndex": 0 },
+          "type": "drums",
+          "optionA": { "trackIndex": 32, "clipSlot": 0 },
+          "optionB": { "trackIndex": 33, "clipSlot": 0 },
           "labelA": "Grey",
-          "labelB": "Neon",
-          "doubtThreshold": 0.65
+          "labelB": "Neon"
         },
         {
           "index": 3,
-          "type": "space",
-          "optionA": { "trackIndex": 34, "clipIndex": 0 },
-          "optionB": { "trackIndex": 35, "clipIndex": 0 },
+          "type": "bass",
+          "optionA": { "trackIndex": 34, "clipSlot": 0 },
+          "optionB": { "trackIndex": 35, "clipSlot": 0 },
           "labelA": "Sealed",
-          "labelB": "Spiraling",
-          "doubtThreshold": 0.75
+          "labelB": "Spiraling"
         },
         {
           "index": 4,
-          "type": "voice",
-          "optionA": { "trackIndex": 36, "clipIndex": 0 },
-          "optionB": { "trackIndex": 37, "clipIndex": 0 },
+          "type": "melody",
+          "optionA": { "trackIndex": 36, "clipSlot": 0 },
+          "optionB": { "trackIndex": 37, "clipSlot": 0 },
           "labelA": "Silenced",
-          "labelB": "Screaming",
-          "doubtThreshold": 0.85
+          "labelB": "Screaming"
         },
         {
           "index": 5,
-          "type": "texture",
-          "optionA": { "trackIndex": 38, "clipIndex": 0 },
-          "optionB": { "trackIndex": 39, "clipIndex": 0 },
+          "type": "harmony",
+          "optionA": { "trackIndex": 38, "clipSlot": 0 },
+          "optionB": { "trackIndex": 39, "clipSlot": 0 },
           "labelA": "Dissolving",
-          "labelB": "Shattering",
-          "doubtThreshold": 0.90
+          "labelB": "Shattering"
+        },
+        {
+          "index": 6,
+          "type": "fx2",
+          "optionA": { "trackIndex": 40, "clipSlot": 0 },
+          "optionB": { "trackIndex": 41, "clipSlot": 0 },
+          "labelA": "Fading",
+          "labelB": "Crashing"
         }
       ]
     }
   ],
 
   "finale": {
-    "slotCount": 7,
-    "rotationBars": 8,
-    "defaultRotationRate": 2,
-    "triangleDriftTimeoutMs": 15000,
-    "triangleDriftSpeedMs": 3000
+    "consensusRoundDurationMs": 15000,
+    "firstRoundDurationMs": 20000,
+    "initialThreshold": 0.4,
+    "thresholdDecayPerFailure": 0.05,
+    "minThreshold": 0.25,
+    "interRoundDelayMs": 3000,
+    "successCelebrationMs": 6000,
+    "npcAutoTriggers": [
+      { "condition": "consecutive_failures", "threshold": 2, "message": "scattered... try again" },
+      { "condition": "consecutive_failures", "threshold": 4, "message": "we're falling apart... just like before" },
+      { "condition": "same_song_streak", "threshold": 3, "message": "again? we KNOW that one works. what about the rest?" },
+      { "condition": "near_miss", "threshold": 0.05, "message": "so close... you're almost there" },
+      { "condition": "first_success", "message": "yes! keep going!" },
+      { "condition": "final_fragment", "message": "one more. make it count." },
+      { "condition": "single_option_role", "message": "only one path forward here" }
+    ]
   },
 
   "timing": {
@@ -209,9 +223,8 @@
     "auditionsPerLayer": 2,
     "auditionDurationMs": 8000,
     "votingWindowMs": 10000,
-    "resolveAnimationMs": 3000,
-    "collapseAnimationMs": 5000,
-    "autoAdvanceToStoryMs": 3000
+    "revealSequenceDurationMs": 3000,
+    "rejectionEffectDurationMs": 5000
   },
 
   "lobby": {
@@ -220,15 +233,12 @@
 
   "seatIds": [],
 
-  "collapseReturnTrackIndex": 0,
-
   "_comments": {
-    "trackIndexFormula": "attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset. With maxLayersPerAttempt=7: Attempt 0 = tracks 0-13, Attempt 1 = tracks 14-27, Attempt 2 = tracks 28-41. Option A = even index, Option B = odd index.",
-    "layerCount": "6 layers per attempt is the current working assumption (DECISIONS.md O1). The 7th layer slot (tracks 12-13, 26-27, 40-41) is reserved but unused.",
-    "doubtThresholds": "Current schedule is placeholder (DECISIONS.md O2). Layers 0-1 = null (simple majority), then 65%, 75%, 85%, 90%.",
-    "audioReferences": "trackIndex values follow the formula above. clipIndex is always 0 (one clip per track in session view). Replace with actual Ableton layout.",
+    "trackIndexFormula": "attemptIndex * (layersPerAttempt * 2) + layerIndex * 2 + optionOffset. With layersPerAttempt=7: Attempt 0 = tracks 0-13, Attempt 1 = tracks 14-27, Attempt 2 = tracks 28-41. Option A = even index, Option B = odd index.",
+    "layerOrdering": "Layers are staggered across songs so different types unlock first. Song 1: bass/drums/pad/melody/harmony/fx1/fx2. Song 2: melody/harmony/bass/drums/pad/fx1/fx2. Song 3: pad/fx1/drums/bass/melody/harmony/fx2.",
+    "healthBar": "drainFactor and layerMultipliers control how much the health bar drains per layer. Drain = losingProportion * 100 * drainFactor * layerMultiplier[index]. Collapse when health reaches 0.",
+    "audioReferences": "trackIndex values follow the formula above. clipSlot is 0-indexed. Replace with actual Ableton layout.",
     "optionLabels": "Emotional taglines are placeholders. Replace with labels that match actual musical content.",
-    "safeParameters": "Fragment safe parameters for stewardship are not defined here — they are generated at runtime by conductor/fragments.ts based on a separate parameter config (see config/ableton-layout.json).",
-    "collapseReturnTrackIndex": "The Ableton return track index whose effects are enabled during collapse gestures."
+    "collapseReturnTrackIndex": "The Ableton return track index for collapse effects is configured in config/ableton-layout.json."
   }
 }

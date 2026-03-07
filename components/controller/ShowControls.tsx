@@ -16,8 +16,8 @@ interface ShowControlsProps {
 }
 
 const ALL_PHASES: ShowPhase[] = [
-  'lobby', 'opener', 'attempt_story', 'attempt_build',
-  'finale_setup', 'finale_rotating', 'finale_frozen', 'ended',
+  'lobby', 'opener', 'attempt_story', 'attempt_build', 'attempt_resolve',
+  'finale_elegy', 'finale_consensus', 'finale_performer_mix', 'ended',
 ];
 
 const PHASE_LABELS: Record<ShowPhase, string> = {
@@ -25,9 +25,10 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   opener: 'Opener',
   attempt_story: 'Story (attempt_story)',
   attempt_build: 'Song Building (attempt_build)',
-  finale_setup: 'Finale Setup',
-  finale_rotating: 'Finale Rotating',
-  finale_frozen: 'Finale Frozen',
+  attempt_resolve: 'Resolve (attempt_resolve)',
+  finale_elegy: 'Finale — Elegy',
+  finale_consensus: 'Finale — Consensus',
+  finale_performer_mix: 'Finale — Mix',
   ended: 'Ended',
 };
 
@@ -57,6 +58,10 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
     phase === 'attempt_build' &&
     currentAttempt?.currentLayerPhase === 'locked';
 
+  const canForceCollapse =
+    phase === 'attempt_build' &&
+    currentAttempt?.status === 'in_progress';
+
   return (
     <section style={styles.section}>
       <h2 style={styles.sectionTitle}>Show Controls</h2>
@@ -81,6 +86,16 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
             style={{ ...styles.btn, ...styles.btnPrimary }}
           >
             Start Audition
+          </button>
+        )}
+
+        {canForceCollapse && (
+          <button
+            onClick={() => sendCommand({ type: 'FORCE_COLLAPSE' })}
+            style={{ ...styles.btn, ...styles.btnDanger }}
+            title="End this attempt immediately (health bar → 0)"
+          >
+            Force Collapse
           </button>
         )}
       </div>
@@ -177,5 +192,10 @@ const styles = {
     backgroundColor: '#451a03',
     color: '#fbbf24',
     border: '1px solid #78350f',
+  } as React.CSSProperties,
+  btnDanger: {
+    backgroundColor: '#450a0a',
+    color: '#f87171',
+    border: '1px solid #7f1d1d',
   } as React.CSSProperties,
 };

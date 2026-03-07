@@ -71,6 +71,8 @@ function createFinaleConfig(layerCount = 2): ShowConfig {
       votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 3000,
+      beatsPerLoop: 32,
+      auditionsPerLayer: 2,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: [],

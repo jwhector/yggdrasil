@@ -11,7 +11,7 @@
 
 ## What This System Is
 
-Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting with consensus thresholds, across 3 song attempts that can collapse if doubt rises too high. The finale features fragment selection, a 7-slot rotation queue, triangle steering (audience → centroid), and stewardship (one person per slot controls a safe parameter in real time).
+Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting across 3 song attempts. Each attempt has a **health bar** that drains proportionally to vote splits — collapse is mechanical when health reaches 0. The finale features an **elegy** (display of all built fragments), a **consensus game** (audience votes to activate fragments round by round), and a **performer mixing surface** (live-mix activated layers). An **NPC character** provides auto-triggered and manually triggered narrative text throughout.
 
 **Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
 
@@ -32,7 +32,7 @@ DECISIONS.md has an "Open Decisions" section. If your current task touches one o
 The `conductor/` directory contains pure game logic — no I/O, no Socket.IO, no database calls. All side effects live in `server/`. The conductor receives commands and returns events.
 
 ### 5. High-frequency data bypasses state_sync
-Triangle positions and audio metering use dedicated socket events at high frequency (4–30 Hz). They do NOT go through `state_sync` or persistence.
+Convergence updates and audio metering use dedicated socket events at high frequency (4–30 Hz). They do NOT go through `state_sync` or persistence.
 
 ---
 
@@ -48,8 +48,11 @@ yggdrasil/
 ├── conductor/                   # Pure game logic (no I/O)
 │   ├── index.ts
 │   ├── conductor.ts             # State machine
-│   ├── consensus.ts             # Vote tallying + doubt threshold
-│   ├── finale.ts                # Queue, rotation, stewardship, triangle
+│   ├── voting.ts                # Vote tallying + VoteResult calculation
+│   ├── health-bar.ts            # Health bar drain calculation
+│   ├── consensus-game.ts        # Finale consensus game logic
+│   ├── performer-mix.ts         # Performer mixing surface logic
+│   ├── npc.ts                   # NPC auto-trigger evaluation
 │   ├── fragments.ts             # Fragment generation from attempt results
 │   ├── types.ts                 # Shared types
 │   └── __tests__/
@@ -72,14 +75,14 @@ yggdrasil/
 │
 ├── components/
 │   ├── LobbyDisplay.tsx         # Projector lobby screen
-│   ├── song-building/           # Layer grid, option cards, meters
-│   ├── finale/                  # Fragment selector, triangle, steward slider, slots
+│   ├── song-building/           # Layer grid, option cards, health bar, reveal sequence
+│   ├── finale/                  # ElegyGrid, ConvergenceMeter, ConsensusBoard, MixingSurface, NpcDisplay
 │   └── controller/              # Operator controls
 │
 ├── hooks/
 │   ├── useSocket.ts
 │   ├── useShowState.ts
-│   └── useTriangle.ts
+│   └── useConvergence.ts        # Spring-interpolated convergence meter animation
 │
 ├── lib/
 │   ├── socket-client.ts
@@ -137,20 +140,21 @@ npm run dev:network
 4. Conductor emits events → server broadcasts state_sync
 5. Client receives updated state via `useShowState` hook
 
-### High-frequency data (triangle, metering)
+### High-frequency data (convergence, metering)
 These do NOT go through state_sync (too slow/heavy):
-- **Triangle positions**: Client throttles to ~250ms, server computes centroid, broadcasts to projector at ~3-4 Hz
-- **Audio metering**: M4L sends at ~15-30 Hz per slot, server aggregates, broadcasts to projector at ~10 Hz
+- **Convergence updates**: Server broadcasts `convergence_update` to all clients at ~4-5 Hz during consensus game; `useConvergence` hook applies spring interpolation for analog-feel animation
+- **Audio metering**: M4L sends at ~15-30 Hz per track, server aggregates, broadcasts to projector at ~10 Hz
 - Both use dedicated socket events, not state mutations
 
 ### State filtering by client mode
 - **Controller**: full serialized state (Maps converted to arrays)
 - **Projector**: public state (no per-user data)
-- **Audience**: personalized (user's chapter, vote, stewardship status, available fragments)
+- **Audience**: personalized (user's vote, available fragments for consensus game, convergence value)
 
 ### Audio/OSC track layout
-- Track index: `attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset`
-- 42 total tracks (3 attempts × 7 layers × 2 options)
+- Track index: `attemptIndex * (layersPerAttempt * 2) + layerIndex * 2 + optionOffset`
+- 42 total tracks (3 attempts × 7 layers × 2 options), tracks 0–41
 - Arrangement mode only (mute/unmute, no clip firing)
-- Collapse gesture: return track effects enabled, delayed mute after animation
+- Collapse gesture: return track 0 effects enabled, delayed mute after animation
+- Song rejection gesture: return track 1 effects enabled
 - Config: `config/ableton-layout.json`

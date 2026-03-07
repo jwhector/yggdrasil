@@ -8,7 +8,6 @@
 'use client';
 
 import type { ShowState, ShowPhase } from '@/conductor/types';
-import { getChapterIdentity } from '@/lib/identity';
 
 interface MetricsPanelProps {
   fullState: ShowState;
@@ -21,9 +20,10 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   opener: 'Opener',
   attempt_story: 'Story',
   attempt_build: 'Song Building',
-  finale_setup: 'Finale Setup',
-  finale_rotating: 'Finale Rotating',
-  finale_frozen: 'Finale Frozen',
+  attempt_resolve: 'Resolve',
+  finale_elegy: 'Finale — Elegy',
+  finale_consensus: 'Finale — Consensus',
+  finale_performer_mix: 'Finale — Mix',
   ended: 'Ended',
 };
 
@@ -32,9 +32,10 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   opener: '#1d4ed8',
   attempt_story: '#6d28d9',
   attempt_build: '#d97706',
-  finale_setup: '#0e7490',
-  finale_rotating: '#15803d',
-  finale_frozen: '#1e40af',
+  attempt_resolve: '#92400e',
+  finale_elegy: '#0e7490',
+  finale_consensus: '#15803d',
+  finale_performer_mix: '#5b21b6',
   ended: '#374151',
 };
 
@@ -54,25 +55,12 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
   const totalVotes = votesA + votesB;
   const consensusPct = totalVotes > 0 ? Math.round((Math.max(votesA, votesB) / totalVotes) * 100) : 0;
 
-  // Chapter distribution (finale)
-  const chapterCounts: Record<string, number> = { ambition: 0, love: 0, avoidance: 0 };
-  if (finaleState) {
-    for (const chapter of finaleState.chapterAssignments.values()) {
-      chapterCounts[chapter] = (chapterCounts[chapter] ?? 0) + 1;
-    }
-  }
-
-  // Stewardship progress
-  const stewardsCount = finaleState
-    ? new Set(finaleState.stewardshipLog.map(e => e.userId)).size
-    : 0;
-
   const wsColor =
     connectionState === 'connected' ? '#4ade80'
     : connectionState === 'connecting' || connectionState === 'reconnecting' ? '#fbbf24'
     : '#f87171';
 
-  const isFinalePhase = phase === 'finale_setup' || phase === 'finale_rotating' || phase === 'finale_frozen';
+  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_consensus' || phase === 'finale_performer_mix';
 
   return (
     <div style={styles.panel}>
@@ -120,44 +108,32 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
             color={consensusPct >= 75 ? '#4ade80' : '#fbbf24'}
           />
           <StatCard label="Participation" value={`${totalVotes} / ${connectedUsers}`} />
-          {currentAttempt.layerPlan[currentAttempt.currentLayerIndex]?.doubtThreshold !== undefined && (
-            <StatCard
-              label="Threshold"
-              value={
-                currentAttempt.layerPlan[currentAttempt.currentLayerIndex]?.doubtThreshold != null
-                  ? `${Math.round((currentAttempt.layerPlan[currentAttempt.currentLayerIndex].doubtThreshold as number) * 100)}%`
-                  : 'Off'
-              }
-              dim
-            />
-          )}
         </div>
       )}
 
       {isFinalePhase && finaleState && (
         <div style={styles.row}>
-          <StatCard
-            label="Rotation"
-            value={finaleState.frozen ? 'Frozen' : finaleState.rotationActive ? 'Active' : 'Stopped'}
-            color={finaleState.frozen ? '#60a5fa' : finaleState.rotationActive ? '#4ade80' : '#888'}
-          />
-          <StatCard
-            label="Slots Filled"
-            value={`${finaleState.activeSlots.filter(Boolean).length} / ${finaleState.activeSlots.length}`}
-          />
-          <StatCard label="Queue" value={String(finaleState.queue.length)} />
-          <StatCard label="Stewards" value={`${stewardsCount} / ${connectedUsers}`} />
-          {(['ambition', 'love', 'avoidance'] as const).map(ch => {
-            const id = getChapterIdentity(ch);
-            return (
+          <StatCard label="Finale Phase" value={finaleState.phase} />
+          {finaleState.phase === 'consensus_game' && (
+            <>
               <StatCard
-                key={ch}
-                label={id.label}
-                value={String(chapterCounts[ch])}
-                color={id.color}
+                label="Convergence"
+                value={`${Math.round(finaleState.consensusGame.convergenceValue * 100)}%`}
+                color={finaleState.consensusGame.convergenceValue >= finaleState.consensusGame.threshold ? '#4ade80' : '#fbbf24'}
               />
-            );
-          })}
+              <StatCard label="Round" value={String(finaleState.consensusGame.currentRound)} />
+              <StatCard label="Threshold" value={`${Math.round(finaleState.consensusGame.threshold * 100)}%`} dim />
+              <StatCard label="Votes" value={String(finaleState.consensusGame.votes.size)} />
+              <StatCard
+                label="Locked"
+                value={`${finaleState.consensusGame.lockedRoles.size} / 7`}
+                color={finaleState.consensusGame.lockedRoles.size === 7 ? '#4ade80' : '#888'}
+              />
+            </>
+          )}
+          {finaleState.phase === 'performer_mix' && (
+            <StatCard label="Loop" value={String(finaleState.performerMix.loopCount)} />
+          )}
         </div>
       )}
     </div>

@@ -16,14 +16,15 @@ import { useShowState } from '@/hooks/useShowState';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
-import { DoubtControls } from '@/components/controller/DoubtControls';
-import { FinaleControls } from '@/components/controller/FinaleControls';
+import { ConsensusControls } from '@/components/controller/ConsensusControls';
+import { NpcControls } from '@/components/controller/NpcControls';
+import { MixingSurface } from '@/components/finale/MixingSurface';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
 
 const SHOW_ID = 'default-show';
 const PASSCODE = process.env.NEXT_PUBLIC_CONTROLLER_PASSCODE ?? '';
 
-const FINALE_PHASES = new Set(['finale_setup', 'finale_rotating', 'finale_frozen']);
+const FINALE_PHASES = new Set(['finale_elegy', 'finale_consensus', 'finale_performer_mix']);
 
 // ---------------------------------------------------------------------------
 // Entry point — passcode gate
@@ -84,15 +85,18 @@ function ControllerContent() {
 
       {/* Song-building controls — only during attempt_build */}
       {isAttemptBuild && (
-        <>
-          <VotingControls fullState={fullState} sendCommand={sendCommand} />
-          <DoubtControls fullState={fullState} sendCommand={sendCommand} />
-        </>
+        <VotingControls fullState={fullState} sendCommand={sendCommand} />
       )}
 
       {/* Finale controls — only during finale phases */}
-      {isFinale && (
-        <FinaleControls fullState={fullState} sendCommand={sendCommand} />
+      {isFinale && phase === 'finale_consensus' && (
+        <ConsensusControls fullState={fullState} sendCommand={sendCommand} />
+      )}
+      {isFinale && (phase === 'finale_consensus' || phase === 'finale_performer_mix') && (
+        <NpcControls fullState={fullState} sendCommand={sendCommand} />
+      )}
+      {isFinale && phase === 'finale_performer_mix' && (
+        <MixingSurface fullState={fullState} sendCommand={sendCommand} />
       )}
 
       {/* Emergency + audio — always visible */}

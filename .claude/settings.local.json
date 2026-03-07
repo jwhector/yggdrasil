@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm test -- conductor/)"
+      "Bash(npm test -- conductor/)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm test)"
     ]
   }
 }

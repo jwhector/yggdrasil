@@ -4,7 +4,7 @@
  * This file defines the shared language for the entire system.
  * Changes here affect conductor, server, and client packages.
  *
- * See ARCHITECTURE-V2.md for detailed documentation of each type.
+ * See ARCHITECTURE.md for detailed documentation of each type.
  *
  * Self-contained: no imports from other project files.
  */

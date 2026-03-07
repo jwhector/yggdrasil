@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## 2026-03-07 — V2 Migration Phase 7: Configuration & Cleanup
+
+**Context:** MIGRATION.md Phase 7. Aligns all configuration files with V2 types, deletes dead V1 code, and finalises documentation. This completes the V2 migration codebase cleanup.
+
+**Config changes:**
+- `config/default-show.json`: Complete rewrite to match V2 `ShowConfig` type. Layer types updated from V1 (`foundation`, `pulse`, `color`, `space`, `voice`, `texture`) to V2 (`melody`, `drums`, `pad`, `bass`, `harmony`, `fx1`, `fx2`). Now 7 layers per attempt with staggered ordering across songs. Added `drainFactor` and `layerMultipliers` per attempt. Removed all `doubtThreshold` fields. Replaced V1 finale section (rotation/triangle/slots) with V2 `FinaleConfig` (consensus game params + inlined NPC auto-triggers). Timing fields updated to match `TimingConfig` (`revealSequenceDurationMs`, `rejectionEffectDurationMs`). Top-level key renamed `maxLayersPerAttempt` → `layersPerAttempt`.
+- `config/ableton-layout.json`: Removed `finaleSlotCount`. Added `rejectionReturnTrackIndex`. Added `_comments` documenting track formula and return track purposes.
+
+**Deleted files:**
+- `components/controller/DoubtControls.tsx` — V1 component using removed commands (`SET_THRESHOLD`, `FORCE_CONTINUE`, `TOGGLE_DOUBT`). `FORCE_COLLAPSE` button relocated to `ShowControls.tsx`.
+- `conductor/consensus.ts` — V1 `resolveVote()` with `doubtThreshold` parameter, superseded by `conductor/voting.ts`.
+- `conductor/__tests__/consensus.test.ts` — Tests for deleted `consensus.ts`.
+
+**Modified files:**
+- `app/controller/page.tsx`: Removed `DoubtControls` import and usage.
+- `components/controller/ShowControls.tsx`: Added `Force Collapse` danger button (visible during `attempt_build` while `in_progress`).
+- `components/controller/VotingControls.tsx`: Fixed V1 phase name `'resolving'` → V2 `'revealing'` in three places.
+- `components/controller/EmergencyControls.tsx`: Removed buttons sending invalid V2 commands (`TRIGGER_COLLAPSE_GESTURE`, `RESET_LAYER`).
+- `conductor/types.ts`: Updated doc comment reference from `ARCHITECTURE-V2.md` → `ARCHITECTURE.md`.
+
+**Renamed:**
+- `ARCHITECTURE-V2.md` → `ARCHITECTURE.md` (now the canonical spec)
+
+---
+
+## 2026-03-07 — V2 Migration Phase 6: Finale UI
+
+**Context:** MIGRATION.md Phase 6. Builds all V2 finale UI components and wires them into the three page routes. Replaces the V1 rotation/queue/triangle/stewardship UI (FragmentSelector, TriangleSteering, StewardSlider, SlotCard, SlotGrid) with the V2 elegy → consensus game → performer mix flow. Also fixes `server/socket.ts` `filterStateForClient` to produce shapes that match the V2 `AudienceFinaleView` and `ProjectorFinaleView` types, and updates MetricsPanel/ShowControls to use V2 phase names.
+
+**New files:**
+- `hooks/useConvergence.ts` — Subscribes to `convergence_update` socket events and applies spring interpolation (RAF loop, exponential ease-out, tau ~100ms) for analog-feel meter animation. Returns `animatedValue`, `isAboveThreshold`, `timeRemaining`.
+- `components/finale/ElegyGrid.tsx` — Non-interactive display of all fragments (available + locked) organized by layer type (7 rows). Winners glow with chapter color + boxShadow; losers dim to 0.25 opacity + saturate(0). Supports `variant="audience"` (compact) and `variant="projector"` (large, dramatic). Uses `getChapterIdentity` / `getLayerIdentity`.
+- `components/finale/ConvergenceMeter.tsx` — Full-width bar meter, no numbers. Fill color shifts to green when above threshold; glow boxShadow activates. Threshold zone marked. Subtle round timer below bar (shrinks from right, turns red at <20%). Accepts spring-interpolated values from `useConvergence`.
+- `components/finale/ConsensusBoard.tsx` — Interactive voting board. Groups available fragments into role rows (locked roles compress to glowing badges at top; unlocked rows fill remaining space). Tap to vote/change vote; voted tile gets white border highlight. Round failure: shake animation via translateX cycling. Round success: burst glow on winning tile.
+- `components/finale/NpcDisplay.tsx` — Subscribes directly to `npc_message` socket events (bypasses state_sync). Typewriter animation at ~30ms/char using setInterval. `"Courier New"` monospace, green (#4ade80). Auto-fades (opacity 0) after configurable display duration (default 5s). Block cursor appended.
+- `components/finale/LoopIndicator.tsx` — Horizontal progress bar showing 8-bar loop position (0.0–1.0). Shows loop count. When pending changes exist and position > 85%: fills amber with glow.
+- `components/finale/MixingMirror.tsx` — Read-only projector view of performer mix. 7 rows: layer icon + active fragment label with chapter color. Pending changes rows pulse with dashed border. LoopIndicator at bottom.
+- `components/finale/ProjectorConvergenceView.tsx` — Large-format projector convergence visualization. Semi-circular SVG arc meter (180°→0°): fill arc = convergence, threshold marker line, glow when above threshold. Locked roles shown as chapter-colored badges around the arc. Subscribes to `convergence_update` for spring animation (separate from audience path). NpcDisplay integrated.
+- `components/finale/MixingSurface.tsx` — 7×6 controller grid (7 layer types × 3 songs × 2 options). Tiles: chapter color background, song/option label, emotional label. Active tile: bright border + glow. Pending tile: dashed border + pulse animation via setInterval cycling opacity. Tap routing: available→queue, active→queue mute, pending→cancel. "Fire N changes" button → `FIRE_PENDING_CHANGES`.
+- `components/controller/ConsensusControls.tsx` — Start/End round buttons, convergence value (numeric, controller-only), vote distribution bar chart (controller-only, never shown to audience), leading fragment with chapter color, round number, consecutive failures, threshold range slider → `SET_CONSENSUS_THRESHOLD`, force-lock per unlocked role. Uses `calculateConvergence()` from `conductor/consensus-game.ts`.
+- `components/controller/NpcControls.tsx` — Pre-written line bank in 4 categories (Encouragement, Exasperation, Urgency, Celebration). Tap any line → `SEND_NPC_MESSAGE`. Free-text input + Enter/Send → same. Auto-trigger toggle checkbox. Current active message displayed.
+
+**Deleted files:**
+- `components/finale/FragmentSelector.tsx` — V1 fragment queue selector
+- `components/finale/TriangleSteering.tsx` — V1 barycentric triangle steering
+- `components/finale/StewardSlider.tsx` — V1 steward safe-parameter slider
+- `components/finale/SlotCard.tsx` — V1 rotation slot card
+- `components/finale/SlotGrid.tsx` — V1 7-slot grid
+- `hooks/useTriangle.ts` — V1 triangle input + centroid interpolation hooks
+- `components/controller/FinaleControls.tsx` — V1 rotation/queue/stewardship controller panel
+
+**Modified files:**
+- `server/socket.ts` — Fixed `filterStateForClient` audience case: `myFinale` now matches `AudienceFinaleView` type (`myVote` not `myConsensusVote`; `roundTimeRemaining`; `availableFragments` as `Array<{fragment, locked}>`; `lockedRoles`/`mixActiveLayers` as flat arrays). Fixed projector case: `finaleState` now matches `ProjectorFinaleView` (flat shape, not nested `consensusGame`/`performerMix` sub-objects).
+- `app/audience/page.tsx` — Replaced V1 finale view (fragment selection → triangle → steward slider) with V2: `finale_elegy` → ElegyGrid; `finale_consensus` → ConvergenceMeter + NpcDisplay + ConsensusBoard; `finale_performer_mix` → dark placeholder (TBD per ARCHITECTURE-V2 open question). Phase check updated from V1 names to V2.
+- `app/projector/page.tsx` — Replaced V1 finale block (SlotGrid + TriangleSteering) with V2 sub-phase routing: `finale_elegy` → ElegyGrid (projector variant); `finale_consensus` → ProjectorConvergenceView; `finale_performer_mix` → MixingMirror. Removed `useTriangleCentroid` hook usage and meterLevels state.
+- `app/controller/page.tsx` — Replaced `FinaleControls` with sub-phase-conditional V2 panels: `finale_consensus` → ConsensusControls + NpcControls; `finale_performer_mix` → MixingSurface + NpcControls. Updated `FINALE_PHASES` set to V2 phase names.
+- `components/controller/MetricsPanel.tsx` — Updated `PHASE_LABELS`/`PHASE_COLORS` to V2 phase names (added `attempt_resolve`, `finale_elegy`, `finale_consensus`, `finale_performer_mix`; removed V1 finale phases). Replaced V1 finale metrics (rotation, slots, queue, stewards, chapter counts) with V2 (finale sub-phase, convergence value, round, threshold, votes cast, locked count). Removed references to V1 `FinaleState` properties.
+- `components/controller/ShowControls.tsx` — Updated `ALL_PHASES` array and `PHASE_LABELS` to V2 phase names.
+
+**Tests:** No conductor tests changed. All pre-existing type errors are from earlier migration phases (DoubtControls, EmergencyControls, VotingControls, conductor test fixtures) — not introduced here.
+
+---
+
 ## 2026-03-06 — Song-Building UI: Health Bar System + Reveal Phase Split
 
 **Context:** Replaces the old doubt-based song-building UI (ConsensusBar, DoubtMeter, LayerGrid, OptionCard) with the V2 health bar design. Implements the revealing phase as a true resting state so the 4-beat RevealSequence can play on both audience and projector. All 185 conductor tests passing.

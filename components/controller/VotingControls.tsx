@@ -33,7 +33,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
 
   const isVoting = currentLayerPhase === 'voting';
   const isAuditioning = currentLayerPhase === 'auditioning';
-  const isResolving = currentLayerPhase === 'resolving';
+  const isRevealing = currentLayerPhase === 'revealing';
 
   const send = (cmd: ConductorCommand) => sendCommand(cmd);
 
@@ -51,7 +51,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
       </div>
 
       {/* Vote bar */}
-      {(isVoting || isResolving) && (
+      {(isVoting || isRevealing) && (
         <div style={styles.voteBar}>
           <VoteOption
             label={currentLayer?.labelA ?? 'A'}
@@ -131,8 +131,8 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
 
         <button
           onClick={() => send({ type: 'RERUN_VOTE' })}
-          disabled={!isResolving && !isVoting}
-          style={{ ...btn, ...((!isResolving && !isVoting) ? disabled : btnWarning) }}
+          disabled={!isRevealing && !isVoting}
+          style={{ ...btn, ...((!isRevealing && !isVoting) ? disabled : btnWarning) }}
           title="Rerun the vote from scratch"
         >
           Rerun Vote
@@ -208,7 +208,7 @@ function phaseColor(phase: LayerPhase): string {
   switch (phase) {
     case 'voting': return '#4ade80';
     case 'auditioning': return '#fbbf24';
-    case 'resolving': return '#60a5fa';
+    case 'revealing': return '#60a5fa';
     case 'locked_in': return '#818cf8';
     case 'collapsed': return '#f87171';
     default: return '#555';

@@ -7,7 +7,6 @@
  * Audio controls:
  * - Transport play/stop
  * - Audio panic (hard mute all)
- * - Trigger collapse gesture
  *
  * Recovery controls:
  * - Export state (JSON download)
@@ -101,22 +100,6 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                 title="Stop Ableton transport"
               >
                 Stop
-              </button>
-
-              <button
-                onClick={() => send({ type: 'TRIGGER_COLLAPSE_GESTURE' })}
-                style={{ ...btn, ...btnWarning }}
-                title="Play collapse effect on return tracks"
-              >
-                Collapse Gesture
-              </button>
-
-              <button
-                onClick={() => send({ type: 'RESET_LAYER' })}
-                style={{ ...btn, ...btnWarning }}
-                title="Reset current layer to locked state (clears votes, stops audition)"
-              >
-                Reset Layer
               </button>
 
               <button

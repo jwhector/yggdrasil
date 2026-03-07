@@ -1,43 +1,22 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { useTriangleCentroid } from '@/hooks/useTriangle';
 import { HealthBar } from '@/components/song-building/HealthBar';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
-import { SlotGrid } from '@/components/finale/SlotGrid';
-import { TriangleSteering } from '@/components/finale/TriangleSteering';
+import { ElegyGrid } from '@/components/finale/ElegyGrid';
+import { ProjectorConvergenceView } from '@/components/finale/ProjectorConvergenceView';
+import { MixingMirror } from '@/components/finale/MixingMirror';
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
-import type { LayerResult, ShowPhase } from '@/conductor/types';
+import type { LayerResult, LayerType } from '@/conductor/types';
 
 const SHOW_ID = 'default-show';
 
 export default function ProjectorPage() {
   const { socket, userId } = useSocket({ showId: SHOW_ID, mode: 'projector' });
   const { state, isLoading, currentAttempt } = useShowState(socket, 'projector', userId);
-
-  // --- High-frequency: centroid interpolation (~4 Hz incoming, 60 fps rendered) ---
-  const { centroid } = useTriangleCentroid({ socket });
-
-  // --- High-frequency: meter levels (~10 Hz) ---
-  const [meterLevels, setMeterLevels] = useState<Map<number, number>>(new Map());
-
-  useEffect(() => {
-    if (!socket) return;
-    const handleMeter = (data: { slots: Array<{ slotIndex: number; energy: number }> }) => {
-      setMeterLevels(prev => {
-        const next = new Map(prev);
-        for (const { slotIndex, energy } of data.slots) {
-          next.set(slotIndex, energy);
-        }
-        return next;
-      });
-    };
-    socket.on('meter', handleMeter);
-    return () => { socket.off('meter', handleMeter); };
-  }, [socket]);
 
   // Derive live vote tallies from the current layer's votes
   const liveVotes = useMemo(() => {
@@ -163,47 +142,55 @@ export default function ProjectorPage() {
       );
     }
 
-    case 'finale_setup':
-    case 'finale_rotating':
-    case 'finale_frozen': {
+    case 'finale_elegy': {
       const fs = state.finaleState;
       if (!fs) return <ProjectorDark />;
-
       return (
-        <main
-          style={{
-            minHeight: '100vh',
-            width: '100vw',
-            backgroundColor: '#000',
-            color: '#fff',
-            display: 'flex',
-            flexDirection: 'column',
-            padding: '40px',
-            gap: '32px',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            boxSizing: 'border-box',
-          }}
-        >
-          {/* Phase indicator */}
-          <FinalePhaseIndicator phase={phase} frozen={fs.frozen} />
+        <main style={projectorMainStyle}>
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
+            The Elegy
+          </div>
+          <ElegyGrid
+            availableFragments={fs.availableFragments}
+            lockedFragments={fs.lockedFragments}
+            variant="projector"
+          />
+        </main>
+      );
+    }
 
-          {/* 7 slot cards with energy glow */}
-          <SlotGrid activeSlots={fs.activeSlots} meterLevels={meterLevels} />
+    case 'finale_consensus': {
+      const fs = state.finaleState;
+      if (!fs) return <ProjectorDark />;
+      return (
+        <main style={projectorMainStyle}>
+          <ProjectorConvergenceView
+            convergenceValue={fs.convergenceValue}
+            threshold={fs.threshold}
+            roundTimeRemaining={fs.roundTimeRemaining}
+            roundDurationMs={15000}
+            currentRound={fs.currentRound}
+            lockedRoles={fs.lockedRoles as Array<{ layerType: LayerType; fragmentId: string }>}
+            availableFragments={fs.availableFragments}
+            npcMessage={fs.npcMessage}
+            socket={socket}
+          />
+        </main>
+      );
+    }
 
-          {/* Collective triangle centroid */}
-          {fs.triangleActive && (
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <TriangleSteering
-                centroid={centroid}
-                showCentroid
-                interactive={false}
-                size={320}
-              />
-            </div>
-          )}
-
-          {/* Queue status */}
-          <QueueStatus queueLength={fs.queue.length} />
+    case 'finale_performer_mix': {
+      const fs = state.finaleState;
+      if (!fs) return <ProjectorDark />;
+      return (
+        <main style={projectorMainStyle}>
+          <MixingMirror
+            activeLayers={fs.mixActiveLayers as Array<{ layerType: LayerType; fragmentId: string | null }>}
+            pendingChanges={fs.mixPendingChanges}
+            loopPosition={fs.loopPosition}
+            loopCount={0}
+            allFragments={fs.availableFragments}
+          />
         </main>
       );
     }
@@ -220,50 +207,20 @@ export default function ProjectorPage() {
 // Sub-components
 // ---------------------------------------------------------------------------
 
+const projectorMainStyle: React.CSSProperties = {
+  minHeight: '100vh',
+  width: '100vw',
+  backgroundColor: '#000',
+  color: '#fff',
+  display: 'flex',
+  flexDirection: 'column',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  boxSizing: 'border-box',
+  overflowY: 'auto',
+};
+
 function ProjectorDark() {
   return <div style={{ minHeight: '100vh', width: '100vw', backgroundColor: '#000' }} />;
-}
-
-function FinalePhaseIndicator({ phase, frozen }: { phase: ShowPhase; frozen: boolean }) {
-  const label = frozen
-    ? 'FROZEN'
-    : phase === 'finale_setup'
-    ? 'SETUP'
-    : 'ROTATING';
-
-  const color = frozen ? '#457b9d' : phase === 'finale_setup' ? 'rgba(255,255,255,0.3)' : '#22c55e';
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-      <div
-        style={{
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          backgroundColor: color,
-        }}
-      />
-      <span
-        style={{
-          fontSize: '0.7rem',
-          color,
-          letterSpacing: '0.14em',
-          fontWeight: 600,
-        }}
-      >
-        FINALE — {label}
-      </span>
-    </div>
-  );
-}
-
-function QueueStatus({ queueLength }: { queueLength: number }) {
-  if (queueLength === 0) return null;
-  return (
-    <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.08em' }}>
-      {queueLength} fragment{queueLength !== 1 ? 's' : ''} in queue
-    </div>
-  );
 }
 
 function ProjectorChapterHeader({

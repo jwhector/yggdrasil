@@ -9,11 +9,13 @@ import { HealthBar } from '@/components/song-building/HealthBar';
 import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
-import { FragmentSelector } from '@/components/finale/FragmentSelector';
-import { TriangleSteering } from '@/components/finale/TriangleSteering';
-import { StewardSlider } from '@/components/finale/StewardSlider';
-import { getChapterIdentity } from '@/lib/identity';
-import type { AudienceFinaleView, ShowPhase, TrianglePosition } from '@/conductor/types';
+import { ElegyGrid } from '@/components/finale/ElegyGrid';
+import { ConvergenceMeter } from '@/components/finale/ConvergenceMeter';
+import { ConsensusBoard } from '@/components/finale/ConsensusBoard';
+import { NpcDisplay } from '@/components/finale/NpcDisplay';
+import { useConvergence } from '@/hooks/useConvergence';
+import type { AudienceFinaleView, LayerType } from '@/conductor/types';
+import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
 
@@ -60,6 +62,8 @@ function AudienceContent() {
   }
 
   const { phase, paused, config } = state;
+
+  console.log(state);
 
   return (
     <Screen>
@@ -148,9 +152,9 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {(phase === 'finale_setup' || phase === 'finale_rotating' || phase === 'finale_frozen') && (
+      {(phase === 'finale_elegy' || phase === 'finale_consensus' || phase === 'finale_performer_mix') && (
         state.myFinale
-          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} emit={emit} />
+          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} />
           : <DarkListenScreen />
       )}
 
@@ -162,144 +166,137 @@ function AudienceContent() {
 }
 
 // ---------------------------------------------------------------------------
-// Finale audience view
+// Finale audience view (V2)
 // ---------------------------------------------------------------------------
 
 function FinaleAudienceView({
   myFinale,
   phase,
+  socket,
   emit,
 }: {
   myFinale: AudienceFinaleView;
-  phase: ShowPhase;
+  phase: string;
+  socket: Socket | null;
   emit: (event: string, data: unknown) => void;
 }) {
-  const [selectedFragmentId, setSelectedFragmentId] = useState<string | null>(null);
+  const { animatedValue } = useConvergence({
+    socket,
+    threshold: myFinale.threshold,
+    timeRemaining: myFinale.roundTimeRemaining,
+  });
 
-  const chapterIdentity = myFinale.myChapter
-    ? getChapterIdentity(myFinale.myChapter)
-    : null;
-  const chapterColor = chapterIdentity?.color ?? 'rgba(255,255,255,0.6)';
-  const chapterLabel = chapterIdentity?.label ?? '';
+  console.log(phase);
 
-  const hasSelected = myFinale.myFragment !== null;
-
-  const handleSelectFragment = (fragmentId: string) => {
-    setSelectedFragmentId(fragmentId);
-    emit('select_fragment', { fragmentId });
+  const handleVote = (fragmentId: string) => {
+    emit('consensus_vote', { fragmentId });
   };
 
-  const handleTriangleChange = (pos: TrianglePosition) => {
-    emit('triangle_update', pos);
-  };
-
-  const handleStewardParam = (value: number) => {
-    emit('steward_param', { value });
-  };
-
-  // --- Steward mode: show slider ---
-  if (myFinale.isSteward && myFinale.stewardFragment && myFinale.stewardParameterLabel) {
+  // --- Elegy phase: show all fragments non-interactively ---
+  if (phase === 'finale_elegy') {
+    // Build available (winners) and locked (losers) lists from AudienceFinaleView
+    // AudienceFinaleView only provides availableFragments (winners only, with locked flag)
+    // We show them all in a simplified elegy grid
+    const winners = myFinale.availableFragments
+      .filter(a => !a.locked)
+      .map(a => a.fragment);
+    const locked = myFinale.availableFragments
+      .filter(a => a.locked)
+      .map(a => a.fragment);
     return (
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          width: '100%',
-          minHeight: '100vh',
-          justifyContent: 'center',
-        }}
-      >
-        <StewardSlider
-          label={myFinale.stewardParameterLabel}
-          value={myFinale.stewardParameterValue ?? myFinale.stewardFragment.safeParameter.defaultValue}
-          min={myFinale.stewardFragment.safeParameter.min}
-          max={myFinale.stewardFragment.safeParameter.max}
-          fragmentName={myFinale.stewardFragment.displayName}
-          chapterColor={chapterColor}
-          onChange={handleStewardParam}
-        />
-      </div>
-    );
-  }
-
-  // --- Fragment selection (before user has queued) ---
-  // Allowed during both finale_setup and finale_rotating
-  if (!hasSelected && myFinale.availableFragments.length > 0) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
           width: '100%',
           minHeight: '100vh',
           overflowY: 'auto',
-          paddingTop: '16px',
           paddingBottom: '32px',
-          alignItems: 'center',
         }}
       >
-        <FragmentSelector
-          fragments={myFinale.availableFragments}
-          chapterColor={chapterColor}
-          chapterLabel={chapterLabel}
-          selectedFragmentId={selectedFragmentId}
-          onSelect={handleSelectFragment}
+        <div
+          style={{
+            textAlign: 'center',
+            padding: '24px 16px 8px',
+            fontSize: '0.65rem',
+            color: 'rgba(255,255,255,0.25)',
+            letterSpacing: '0.15em',
+            textTransform: 'uppercase',
+          }}
+        >
+          What remains
+        </div>
+        <ElegyGrid
+          availableFragments={winners}
+          lockedFragments={locked}
+          variant="audience"
         />
       </div>
     );
   }
 
-  // --- Queued and waiting for stewardship — show triangle if active ---
-  if (myFinale.triangleActive) {
+  // --- Consensus game phase ---
+  if (phase === 'finale_consensus') {
+    const roundDurationMs = 15000; // default; ideally passed from config
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          minHeight: '100vh',
+          padding: '16px',
+          boxSizing: 'border-box',
+          gap: '12px',
+        }}
+      >
+        {/* Convergence meter — pinned at top */}
+        <ConvergenceMeter
+          animatedValue={animatedValue}
+          threshold={myFinale.threshold}
+          timeRemaining={myFinale.roundTimeRemaining}
+          roundDurationMs={roundDurationMs}
+          roundActive={myFinale.roundTimeRemaining > 0}
+        />
+
+        {/* NPC display */}
+        <NpcDisplay socket={socket} />
+
+        {/* Consensus board */}
+        <div style={{ flex: 1 }}>
+          <ConsensusBoard
+            availableFragments={myFinale.availableFragments}
+            myVote={myFinale.myVote}
+            lockedRoles={myFinale.lockedRoles as Array<{ layerType: LayerType; fragmentId: string }>}
+            roundActive={myFinale.roundTimeRemaining > 0}
+            onVote={handleVote}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // --- Performer mix phase: passive dark screen (TBD) ---
+  if (phase === 'finale_performer_mix') {
     return (
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
+          justifyContent: 'center',
           width: '100%',
           minHeight: '100vh',
-          justifyContent: 'center',
+          gap: '16px',
         }}
       >
-        {hasSelected && (
-          <div
-            style={{
-              textAlign: 'center',
-              color: chapterColor,
-              fontSize: '0.7rem',
-              letterSpacing: '0.1em',
-              marginBottom: '8px',
-            }}
-          >
-            {myFinale.myFragment?.displayName ?? 'Fragment queued'}
-          </div>
-        )}
-        <TriangleSteering
-          onPositionChange={handleTriangleChange}
-          interactive
-        />
+        <PulsingDot />
+        <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
+          FINALE IN PROGRESS
+        </p>
       </div>
     );
   }
 
-  // --- Waiting (triangle not active or finale_frozen) ---
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '16px',
-      }}
-    >
-      <PulsingDot />
-      <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
-        {phase === 'finale_frozen' ? 'LISTEN' : 'FINALE IN PROGRESS'}
-      </p>
-    </div>
-  );
+  return <DarkListenScreen />;
 }
 
 // ---------------------------------------------------------------------------
