@@ -153,8 +153,8 @@ These do NOT go through state_sync (too slow/heavy):
 
 ### Audio/OSC track layout
 - Track index: `attemptIndex * (layersPerAttempt * 2) + layerIndex * 2 + optionOffset`
-- 42 total tracks (3 attempts × 7 layers × 2 options), tracks 0–41
-- Arrangement mode only (mute/unmute, no clip firing)
+- 42 fragment tracks (3 attempts × 7 layers × 2 options); group (foldable) tracks are intermixed
+- Gain-based control via Utility devices; mute/unmute queries is_foldable to skip group tracks
 - Collapse gesture: return track 0 effects enabled, delayed mute after animation
 - Song rejection gesture: return track 1 effects enabled
 - Config: `config/ableton-layout.json`

@@ -3,6 +3,8 @@
   "attemptCount": 3,
   "collapseReturnTrackIndex": 0,
   "rejectionReturnTrackIndex": 1,
+  "utilityDeviceName": "Utility",
+  "utilityGainParamName": "Gain",
   "_comments": {
     "trackFormula": "attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset",
     "trackLayout": "42 audio tracks (0-41) for fragments: Attempt 0 = tracks 0-13, Attempt 1 = tracks 14-27, Attempt 2 = tracks 28-41. Option A = even index, Option B = odd index.",

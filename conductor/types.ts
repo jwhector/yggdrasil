@@ -335,6 +335,24 @@ export interface FinaleConfig {
   npcAutoTriggers: NpcTriggerConfig[];
 }
 
+/**
+ * Configuration for Utility device gain transitions.
+ *
+ * Internal gains are 0.0–1.0 where 1.0 = unity (0 dB). The audio router
+ * multiplies by `unityGainValue` before sending the normalized OSC parameter
+ * value to Ableton (Utility Gain: 0.0 = -inf dB, ~0.85 = 0 dB, 1.0 = +35 dB).
+ */
+export interface GainConfig {
+  entryGain: number;            // Snap-to gain when bringing a track in (default 0.6)
+  entrySwellBeats: number;      // Beats to ramp from entryGain to 1.0 (default 4 = 1 bar)
+  holdBars: number;             // Bars to hold at full gain (default 7, informational)
+  exitFadeBeats: number;        // Beats to ramp to 0.0 on exit (default 4 = 1 bar)
+  lockInFadeBeats: number;      // Beats to fade out the loser on lock-in (default 4)
+  collapseFadeBeats: number;    // Beats to fade all attempt tracks on collapse (default 8)
+  consensusSwellBeats: number;  // Beats for consensus fragment swell-in (default 4)
+  unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
+}
+
 export interface TimingConfig {
   auditionDurationMs: number;           // Fallback when OSC beat sync unavailable
   votingWindowMs: number;               // How long voting stays open
@@ -342,6 +360,7 @@ export interface TimingConfig {
   rejectionEffectDurationMs: number;    // Duration of song rejection effect
   beatsPerLoop: number;                 // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
   auditionsPerLayer: number;            // Number of A/B cycles per layer before voting opens
+  gain?: GainConfig;                    // Utility device gain transition configuration (uses defaults if absent)
 }
 
 // ============================================================================
@@ -357,7 +376,8 @@ export type AudioCue =
   | { type: 'consensus_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
   | { type: 'mix_update'; changes: PendingChange[] }
   | { type: 'transport'; action: 'play' | 'stop' }
-  | { type: 'panic' };                  // Hard mute all
+  | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
+  | { type: 'reset_utilities' };        // Emergency: set all Utility gains to 0 dB, unmute all tracks
 
 // ============================================================================
 // Conductor Commands (Input)
@@ -408,6 +428,7 @@ export type ConductorCommand =
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
   | { type: 'AUDIO_PANIC' }
+  | { type: 'RESET_UTILITIES' }         // Emergency: reset all Utility gains to 0 dB
 
   // Connection
   | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }

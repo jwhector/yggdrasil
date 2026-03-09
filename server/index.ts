@@ -242,8 +242,12 @@ async function main() {
     console.log('[Server] No ableton-layout.json found, using defaults');
   }
 
-  // Create and register audio router
-  const audioRouter = createAudioRouter(oscBridge, abletonLayoutConfig);
+  // Create and register audio router (pass timing engine for beat-locked fades)
+  const audioRouter = createAudioRouter(
+    oscBridge,
+    abletonLayoutConfig,
+    timingEngine ?? undefined,
+  );
   stateChangeHooks.push((state, events) => {
     audioRouter.handleStateChange(state, events);
   });
@@ -260,6 +264,13 @@ async function main() {
   if (timingEngine) {
     timingEngine.start();
     console.log('[Server] Timing engine started');
+  }
+
+  // Discover Utility devices on all fragment tracks (after OSC is live)
+  if (OSC_ENABLED) {
+    audioRouter.discoverDevices().catch(err => {
+      console.error('[Server] Device discovery failed:', err);
+    });
   }
 
   // Optional: Periodic backup system

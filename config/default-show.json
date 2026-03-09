@@ -224,7 +224,17 @@
     "auditionDurationMs": 8000,
     "votingWindowMs": 10000,
     "revealSequenceDurationMs": 3000,
-    "rejectionEffectDurationMs": 5000
+    "rejectionEffectDurationMs": 5000,
+    "gain": {
+      "entryGain": 0.25,
+      "entrySwellBeats": 4,
+      "holdBars": 6,
+      "exitFadeBeats": 8,
+      "lockInFadeBeats": 8,
+      "collapseFadeBeats": 8,
+      "consensusSwellBeats": 4,
+      "unityGainValue": 0
+    }
   },
 
   "lobby": {

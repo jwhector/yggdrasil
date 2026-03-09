@@ -47,10 +47,29 @@ import { evaluateAutoTriggers } from './npc';
 // State Initialization
 // ============================================================================
 
+/** Default gain configuration used when config.timing.gain is absent. */
+export const DEFAULT_GAIN_CONFIG = {
+  entryGain: 0.6,
+  entrySwellBeats: 4,
+  holdBars: 7,
+  exitFadeBeats: 4,
+  lockInFadeBeats: 4,
+  collapseFadeBeats: 8,
+  consensusSwellBeats: 4,
+  unityGainValue: 0.5,
+} as const;
+
 /**
  * Create initial show state from configuration.
  */
 export function createInitialState(config: ShowConfig, showId: string): ShowState {
+  // Apply gain defaults if missing from config
+  if (!config.timing.gain) {
+    config = {
+      ...config,
+      timing: { ...config.timing, gain: { ...DEFAULT_GAIN_CONFIG } },
+    };
+  }
   const attempts: AttemptState[] = config.attempts.map((attemptConfig, i) => ({
     index: i,
     chapter: attemptConfig.chapter,
@@ -169,6 +188,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [{ type: 'AUDIO_CUE', cue: { type: 'transport', action: command.action } }];
     case 'AUDIO_PANIC':
       return [{ type: 'AUDIO_CUE', cue: { type: 'panic' } }];
+    case 'RESET_UTILITIES':
+      return [{ type: 'AUDIO_CUE', cue: { type: 'reset_utilities' } }];
 
     // Connection
     case 'USER_CONNECT':

@@ -5,6 +5,7 @@
  * - Server JS timers control game logic timing (audition duration, voting window,
  *   consensus round duration)
  * - AbletonOSC beat events drive audition A/B cycling and performer mix loop boundaries
+ * - Per-beat callback scheduler allows audio router to lock gain changes to the musical grid
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
@@ -14,8 +15,14 @@
  * - For consensus rounds: Schedules round duration timer → sends END_CONSENSUS_ROUND
  * - For performer mix: Counts beats/bars → sends FIRE_PENDING_CHANGES at loop boundary
  *
+ * Beat Callback Scheduler:
+ * - scheduleAtBeat / schedulePerBeat register callbacks at specific absolute beat numbers
+ * - handleBeatEvent fires them when their target beat arrives
+ * - Works in both OSC mode (real Ableton beats) and fallback mode (synthetic beats)
+ *
  * Fallback Mode:
  * - When OSC bridge is not available, uses JS timers for all phases
+ * - A synthetic beat ticker generates beats at fallbackBpm for the callback scheduler
  * - Enables testing without Ableton running
  */
 
@@ -43,6 +50,21 @@ export interface TimingEngineConfig {
   fallbackBpm: number;
 }
 
+/** Beat position within the current musical context. */
+export interface BeatPosition {
+  absoluteBeat: number;    // Raw beat number from Ableton (or synthetic)
+  beatInBar: number;       // 0–3 within current bar
+  barInLoop: number;       // 0–7 within current 8-bar loop
+  loopCount: number;       // Total 8-bar loops elapsed since beat tracking started
+}
+
+/** A scheduled per-beat callback. */
+interface BeatCallback {
+  id: string;              // Unique ID; use prefix convention for group cancellation
+  targetBeat: number;      // Absolute beat number to fire on (fires when beat >= targetBeat)
+  callback: () => void;
+}
+
 /**
  * Timing engine interface
  */
@@ -59,6 +81,26 @@ export interface TimingEngine {
   dispose(): void;
   /** Check if engine is running */
   isRunning(): boolean;
+
+  // Beat callback scheduler
+  /** Register a callback to fire at a specific absolute beat number. */
+  scheduleAtBeat(id: string, targetBeat: number, callback: () => void): void;
+  /**
+   * Register a callback to fire on each of N consecutive beats starting at startBeat.
+   * The callback receives (beatIndex: number, totalBeats: number).
+   */
+  schedulePerBeat(
+    idPrefix: string,
+    startBeat: number,
+    beatCount: number,
+    callback: (beatIndex: number, totalBeats: number) => void,
+  ): void;
+  /** Cancel all callbacks whose id starts with the given prefix. */
+  cancelCallbacks(idPrefix: string): void;
+  /** Get the current absolute beat number (0 if no beats received yet). */
+  getCurrentBeat(): number;
+  /** Get the current beat position (null if no beats received yet). */
+  getCurrentBeatPosition(): BeatPosition | null;
 }
 
 /**
@@ -76,7 +118,7 @@ interface TimerState {
  * Audition tracking state (for song-building A/B cycling)
  */
 interface AuditionTrackingState {
-  lastToggleBeat: number;      // Beat number at last option toggle (0 = not yet set)
+  lastToggleBeat: number;      // Beat number at last option toggle (-1 = not yet set)
   beatsPerLoop: number;        // From config
   totalLoops: number;          // auditionsPerLayer * 2
   currentLoopIndex: number;    // 0-based, increments on each toggle
@@ -86,7 +128,7 @@ interface AuditionTrackingState {
  * Loop boundary tracking state (for performer mix pending changes)
  */
 interface LoopTrackingState {
-  lastBoundaryBeat: number;    // Beat number at last loop boundary (0 = not yet set)
+  lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
   loopBeats: number;           // LOOP_BARS * BEATS_PER_BAR
 }
 
@@ -125,6 +167,21 @@ export function createTimingEngine(
   let fallbackAuditionLoopIndex = 0;
   let loopState: LoopTrackingState | null = null;
   let fallbackLoopInterval: NodeJS.Timeout | null = null;
+
+  // Beat callback scheduler state
+  let beatCallbacks: BeatCallback[] = [];
+  let currentBeatPosition: BeatPosition | null = null;
+  let currentAbsoluteBeat: number = 0;
+  let loopStartBeat: number = 0;
+  let totalLoopsElapsed: number = 0;
+
+  // Monotonic beat tracking (handles Ableton beat wrapping at loop boundaries)
+  let previousRawBeat: number = -1;
+  let beatWrapOffset: number = 0;
+
+  // Fallback beat ticker (generates synthetic beats when no OSC bridge)
+  let fallbackBeatInterval: NodeJS.Timeout | null = null;
+  let fallbackBeatCounter: number = 0;
 
   // --------------------------------------------------------------------------
   // Timer Management
@@ -168,6 +225,57 @@ export function createTimingEngine(
     };
 
     console.log(`[Timing] Scheduled timer for ${phase}: ${durationMs}ms`);
+  }
+
+  // --------------------------------------------------------------------------
+  // Beat Callback Scheduler
+  // --------------------------------------------------------------------------
+
+  /**
+   * Register a callback to fire at a specific absolute beat.
+   */
+  function scheduleAtBeat(id: string, targetBeat: number, callback: () => void): void {
+    beatCallbacks.push({ id, targetBeat, callback });
+  }
+
+  /**
+   * Register a callback to fire on each of N consecutive beats starting at startBeat.
+   */
+  function schedulePerBeat(
+    idPrefix: string,
+    startBeat: number,
+    beatCount: number,
+    callback: (beatIndex: number, totalBeats: number) => void,
+  ): void {
+    for (let i = 0; i < beatCount; i++) {
+      const beatIndex = i;
+      scheduleAtBeat(
+        `${idPrefix}-${i}`,
+        startBeat + i,
+        () => callback(beatIndex, beatCount),
+      );
+    }
+  }
+
+  /**
+   * Cancel all callbacks whose id starts with the given prefix.
+   */
+  function cancelCallbacks(idPrefix: string): void {
+    beatCallbacks = beatCallbacks.filter(cb => !cb.id.startsWith(idPrefix));
+  }
+
+  /**
+   * Get the current absolute beat number.
+   */
+  function getCurrentBeat(): number {
+    return currentAbsoluteBeat;
+  }
+
+  /**
+   * Get the current beat position.
+   */
+  function getCurrentBeatPosition(): BeatPosition | null {
+    return currentBeatPosition;
   }
 
   // --------------------------------------------------------------------------
@@ -223,7 +331,7 @@ export function createTimingEngine(
     if (beatsPerLoop > 0 && engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats; first beat sets the baseline in handleBeatEvent
       auditionState = {
-        lastToggleBeat: 0,
+        lastToggleBeat: -1,
         beatsPerLoop,
         totalLoops,
         currentLoopIndex: 0,
@@ -305,7 +413,7 @@ export function createTimingEngine(
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats
       loopState = {
-        lastBoundaryBeat: 0,
+        lastBoundaryBeat: -1,
         loopBeats,
       };
       console.log(`[Timing] Loop boundary tracking started (OSC, every ${LOOP_BARS} bars / ${loopBeats} beats)`);
@@ -341,31 +449,111 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
+  // Fallback Beat Ticker
+  // --------------------------------------------------------------------------
+
+  /**
+   * Start the fallback beat ticker. Generates synthetic beats from fallbackBpm
+   * so the beat callback scheduler works even without an OSC bridge.
+   */
+  function startFallbackBeatTicker(): void {
+    if (fallbackBeatInterval) return;
+    const msPerBeat = 60000 / engineConfig.fallbackBpm;
+    fallbackBeatCounter = 0;
+
+    fallbackBeatInterval = setInterval(() => {
+      if (!running) return;
+      fallbackBeatCounter++;
+      handleBeatCallbacks(fallbackBeatCounter);
+    }, msPerBeat);
+
+    console.log(`[Timing] Fallback beat ticker started (${engineConfig.fallbackBpm} BPM, ${msPerBeat.toFixed(0)}ms/beat)`);
+  }
+
+  /**
+   * Stop the fallback beat ticker.
+   */
+  function stopFallbackBeatTicker(): void {
+    if (fallbackBeatInterval) {
+      clearInterval(fallbackBeatInterval);
+      fallbackBeatInterval = null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // Beat Event Handling
   // --------------------------------------------------------------------------
 
   /**
-   * Handle beat event from AbletonOSC.
-   * Drives audition A/B cycling and performer mix loop boundaries.
+   * Convert a raw Ableton beat number (which wraps at loop boundaries, e.g. 0–31)
+   * to a monotonically increasing beat number. Detects wraps by comparing with
+   * the previous raw beat. Only used in OSC mode — fallback ticker is already monotonic.
    */
-  function handleBeatEvent(beatNumber: number): void {
+  function rawToMonotonic(rawBeat: number): number {
+    if (previousRawBeat >= 0 && rawBeat < previousRawBeat) {
+      beatWrapOffset += previousRawBeat + 1;
+    }
+    previousRawBeat = rawBeat;
+    return rawBeat + beatWrapOffset;
+  }
+
+  /**
+   * Process scheduled beat callbacks for the given beat number.
+   * Called from both handleBeatEvent (OSC) and the fallback beat ticker.
+   */
+  function handleBeatCallbacks(beatNumber: number): void {
+    currentAbsoluteBeat = beatNumber;
+
+    // Update beat position
+    const beatsSinceLoopStart = beatNumber - loopStartBeat;
+    const loopBeats = LOOP_BARS * BEATS_PER_BAR; // 32
+    totalLoopsElapsed = Math.floor(beatsSinceLoopStart / loopBeats);
+
+    currentBeatPosition = {
+      absoluteBeat: beatNumber,
+      beatInBar: beatNumber % BEATS_PER_BAR,
+      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % LOOP_BARS,
+      loopCount: totalLoopsElapsed,
+    };
+
+    // Fire any scheduled callbacks for this beat
+    const toFire = beatCallbacks.filter(cb => cb.targetBeat <= beatNumber);
+    beatCallbacks = beatCallbacks.filter(cb => cb.targetBeat > beatNumber);
+    for (const cb of toFire) {
+      try {
+        cb.callback();
+      } catch (err) {
+        console.error(`[Timing] Beat callback error (${cb.id}):`, err);
+      }
+    }
+  }
+
+  /**
+   * Handle beat event from AbletonOSC.
+   * Drives audition A/B cycling, performer mix loop boundaries, and beat callbacks.
+   */
+  function handleBeatEvent(rawBeatNumber: number): void {
     if (!running) return;
 
+    // Convert wrapping Ableton beats (e.g. 0–31, 0–31, ...) to monotonic
+    const monotonicBeat = rawToMonotonic(rawBeatNumber);
     const state = getState();
+
+    // Fire scheduled beat callbacks (uses monotonic for scheduling)
+    handleBeatCallbacks(monotonicBeat);
 
     // --- Audition beat tracking (song-building) ---
     if (auditionState && state.phase === 'attempt_build') {
       const attempt = state.attempts[state.currentAttemptIndex];
       if (attempt?.currentLayerPhase === 'auditioning') {
         // Initialize baseline on first beat received
-        if (auditionState.lastToggleBeat === 0) {
-          auditionState.lastToggleBeat = beatNumber;
+        if (auditionState.lastToggleBeat < 0) {
+          auditionState.lastToggleBeat = monotonicBeat;
         }
 
-        const beatsSinceLastToggle = beatNumber - auditionState.lastToggleBeat;
-        // if (beatsSinceLastToggle >= auditionState.beatsPerLoop) {
-        if (beatNumber % auditionState.beatsPerLoop === 0 && beatNumber !== 0) {
-          auditionState.lastToggleBeat = beatNumber;
+        const beatsSinceLastToggle = monotonicBeat - auditionState.lastToggleBeat;
+        if (beatsSinceLastToggle >= auditionState.beatsPerLoop) {
+          auditionState.lastToggleBeat = monotonicBeat;
           auditionState.currentLoopIndex++;
 
           if (auditionState.currentLoopIndex >= auditionState.totalLoops) {
@@ -375,7 +563,7 @@ export function createTimingEngine(
             sendCommand({ type: 'TOGGLE_AUDITION' });
           }
         }
-        // Audition tracking handled — do not fall through
+        // Audition tracking handled — do not fall through to loop boundary
         return;
       }
     }
@@ -385,14 +573,14 @@ export function createTimingEngine(
     if (state.phase !== 'finale_performer_mix') return;
 
     // Initialize baseline on first beat
-    if (loopState.lastBoundaryBeat === 0) {
-      loopState.lastBoundaryBeat = beatNumber;
+    if (loopState.lastBoundaryBeat < 0) {
+      loopState.lastBoundaryBeat = monotonicBeat;
     }
 
-    const beatsSinceBoundary = beatNumber - loopState.lastBoundaryBeat;
+    const beatsSinceBoundary = monotonicBeat - loopState.lastBoundaryBeat;
     if (beatsSinceBoundary >= loopState.loopBeats) {
-      loopState.lastBoundaryBeat = beatNumber;
-      console.log(`[Timing] Loop boundary at beat ${beatNumber} → FIRE_PENDING_CHANGES`);
+      loopState.lastBoundaryBeat = monotonicBeat;
+      console.log(`[Timing] Loop boundary at monotonic beat ${monotonicBeat} → FIRE_PENDING_CHANGES`);
       sendCommand({ type: 'FIRE_PENDING_CHANGES' });
     }
   }
@@ -537,6 +725,9 @@ export function createTimingEngine(
 
       // Subscribe to beat events from AbletonOSC
       engineConfig.oscBridge.send('/live/song/start_listen/beat');
+    } else {
+      // Start synthetic beat ticker for beat callback scheduling in fallback mode
+      startFallbackBeatTicker();
     }
 
     console.log('[Timing] Engine started');
@@ -574,6 +765,12 @@ export function createTimingEngine(
     clearConsensusRoundTimer();
     stopAuditionTracking();
     stopLoopTracking();
+    stopFallbackBeatTicker();
+    beatCallbacks = [];
+    previousRawBeat = -1;
+    beatWrapOffset = 0;
+    currentAbsoluteBeat = 0;
+    currentBeatPosition = null;
 
     // Unsubscribe from beat events
     if (engineConfig.oscBridge) {
@@ -605,5 +802,10 @@ export function createTimingEngine(
     onOSCMessage,
     dispose,
     isRunning,
+    scheduleAtBeat,
+    schedulePerBeat,
+    cancelCallbacks,
+    getCurrentBeat,
+    getCurrentBeatPosition,
   };
 }
