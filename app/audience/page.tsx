@@ -137,7 +137,7 @@ function AudienceContent() {
               layerConfig={currentAttempt.currentLayerConfig}
               myVote={currentAttempt.myVote}
               disabled={
-                currentAttempt.currentLayerPhase !== 'voting' || currentAttempt.myVote !== null
+                (currentAttempt.currentLayerPhase !== 'auditioning' && currentAttempt.currentLayerPhase !== 'voting')
               }
               onVote={handleVote}
             />

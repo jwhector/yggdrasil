@@ -382,6 +382,13 @@ export function createAudioRouter(
         }
       }
 
+      if (event.type === 'ATTEMPT_COMPLETED') {
+        muteAllTracks();
+        stopPlayback();
+        clearCollapseTimers();
+        clearRejectionTimers();
+      }
+
       if (event.type === 'SHOW_RESET') {
         muteAllTracks();
         stopPlayback();

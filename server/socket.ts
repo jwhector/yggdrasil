@@ -274,16 +274,16 @@ export function setupSocketHandlers(
       const state = getState();
 
       // Reject if user already voted this layer (enforce blind vote / no-change)
-      const attempt = state.attempts[state.currentAttemptIndex];
-      const alreadyVoted = attempt?.votes.some(
-        v => v.userId === userId &&
-             v.attemptIndex === state.currentAttemptIndex &&
-             v.layerIndex === attempt.currentLayerIndex
-      );
-      if (alreadyVoted) {
-        console.warn(`[Socket] Vote rejected: ${userId} already voted this layer`);
-        return;
-      }
+      // const attempt = state.attempts[state.currentAttemptIndex];
+      // const alreadyVoted = attempt?.votes.some(
+      //   v => v.userId === userId &&
+      //        v.attemptIndex === state.currentAttemptIndex &&
+      //        v.layerIndex === attempt.currentLayerIndex
+      // );
+      // if (alreadyVoted) {
+      //   console.warn(`[Socket] Vote rejected: ${userId} already voted this layer`);
+      //   return;
+      // }
 
       const events = processCommand(state, {
         type: 'SUBMIT_VOTE',

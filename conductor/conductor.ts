@@ -498,7 +498,7 @@ function handleCloseVoting(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  if (attempt.currentLayerPhase !== 'voting') {
+  if (attempt.currentLayerPhase !== 'voting' && attempt.currentLayerPhase !== 'auditioning') {
     return [{ type: 'ERROR', message: `Cannot close voting from layer phase: ${attempt.currentLayerPhase}` }];
   }
 
@@ -515,7 +515,7 @@ function handleSubmitVote(state: ShowState, userId: UserId, choice: 'A' | 'B'): 
     return [];
   }
 
-  if (attempt.currentLayerPhase !== 'voting') {
+  if (attempt.currentLayerPhase !== 'voting' && attempt.currentLayerPhase !== 'auditioning') {
     return []; // Silently ignore votes outside voting window
   }
 
