@@ -123,10 +123,13 @@ export function createAudioRouter(
   // --------------------------------------------------------------------------
 
   function ensureTransportStarted(): void {
-    if (!routerState.transportStarted) {
-      oscBridge.send('/live/song/start_playing');
+    oscBridge.once('/live/song/get/is_playing', (playing: boolean) => {
+      if (!playing || !routerState.transportStarted) {
+        oscBridge.send('/live/song/start_playing');
+      }
       routerState.transportStarted = true;
-    }
+    });
+    oscBridge.send('/live/song/get/is_playing');
   }
 
   function muteTrack(trackIndex: number): void {
@@ -144,10 +147,22 @@ export function createAudioRouter(
   }
 
   function muteAllTracks(): void {
-    const totalTracks = layout.attemptCount * layout.maxLayersPerAttempt * 2;
-    for (let i = 0; i < totalTracks; i++) {
-      oscBridge.send('/live/track/set/mute', i, 1);
-    }
+    let totalTracks = 0;
+    oscBridge.once('/live/song/get/num_tracks', (count: number) => {
+      totalTracks = count;
+      oscBridge.send(`/live/song/get/track_data`, 0, totalTracks, 'track.is_foldable');
+    });
+    oscBridge.once('/live/song/get/track_data', (...trackArgs: any[]) => {
+      console.log("Handling track data", trackArgs);
+      for (let i = 0; i < trackArgs.length; i++) {
+        console.log("Track", i, "is foldable", trackArgs[i]);
+        if (!trackArgs[i]) {
+          oscBridge.send('/live/track/set/mute', i, 1);
+        }
+      }
+    });
+    oscBridge.send('/live/song/get/num_tracks');
+    oscBridge.send('/live/song/stop_playing');
     routerState.unmutedTracks.clear();
     routerState.activeLayerTracks.clear();
   }
@@ -191,10 +206,11 @@ export function createAudioRouter(
   // AudioCue Handlers
   // --------------------------------------------------------------------------
 
-  function handleAuditionStart(cue: Extract<AudioCue, { type: 'audition_start' }>): void {
+  function handleAuditionStart(cue: Extract<AudioCue, { type: 'audition_start' }>, state: ShowState): void {
     ensureTransportStarted();
 
-    const { audioRef, otherAudioRef } = cue;
+    const { audioRef, otherAudioRef, attemptIndex, layerIndex } = cue;
+    const layer = state.attempts[attemptIndex].layerPlan[layerIndex];
 
     // Disable the other option's effects first
     disableEffects(otherAudioRef);
@@ -242,10 +258,9 @@ export function createAudioRouter(
     // Schedule cleanup: mute all attempt tracks + re-mute return after animation
     const collapseMs = state.config.timing.revealSequenceDurationMs;
     const timer = setTimeout(() => {
-      const baseTrack = cue.attemptIndex * (layout.maxLayersPerAttempt * 2);
-      const trackCount = layout.maxLayersPerAttempt * 2;
-      for (let i = 0; i < trackCount; i++) {
-        muteTrack(baseTrack + i);
+      for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
+        muteTrack(layer.optionA.trackIndex);
+        muteTrack(layer.optionB.trackIndex);
       }
       // Re-mute return track effects
       oscBridge.send('/live/return/set/mute', layout.collapseReturnTrackIndex, 1);
@@ -265,10 +280,9 @@ export function createAudioRouter(
     // Schedule cleanup: mute all attempt tracks + re-mute return after effect
     const rejectionMs = state.config.timing.rejectionEffectDurationMs;
     const timer = setTimeout(() => {
-      const baseTrack = cue.attemptIndex * (layout.maxLayersPerAttempt * 2);
-      const trackCount = layout.maxLayersPerAttempt * 2;
-      for (let i = 0; i < trackCount; i++) {
-        muteTrack(baseTrack + i);
+      for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
+        muteTrack(layer.optionA.trackIndex);
+        muteTrack(layer.optionB.trackIndex);
       }
       oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 1);
       routerState.rejectionTimers.delete(cue.attemptIndex);
@@ -339,7 +353,7 @@ export function createAudioRouter(
         const cue = event.cue;
         switch (cue.type) {
           case 'audition_start':
-            handleAuditionStart(cue);
+            handleAuditionStart(cue, state);
             break;
           case 'audition_stop':
             handleAuditionStop(cue);

@@ -363,7 +363,8 @@ export function createTimingEngine(
         }
 
         const beatsSinceLastToggle = beatNumber - auditionState.lastToggleBeat;
-        if (beatsSinceLastToggle >= auditionState.beatsPerLoop) {
+        // if (beatsSinceLastToggle >= auditionState.beatsPerLoop) {
+        if (beatNumber % auditionState.beatsPerLoop === 0 && beatNumber !== 0) {
           auditionState.lastToggleBeat = beatNumber;
           auditionState.currentLoopIndex++;
 
