@@ -140,6 +140,7 @@ function AudienceContent() {
                 (currentAttempt.currentLayerPhase !== 'auditioning' && currentAttempt.currentLayerPhase !== 'voting')
               }
               onVote={handleVote}
+              currentAuditionOption={currentAttempt.currentAuditionOption}
             />
           ) : null}
 

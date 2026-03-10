@@ -128,6 +128,7 @@ export default function ProjectorPage() {
               labelA={currentLayerConfig.labelA}
               labelB={currentLayerConfig.labelB}
               winner={currentAttempt.layerResults[currentAttempt.currentLayerIndex]?.chosenOption ?? null}
+              currentAuditionOption={currentAttempt.currentAuditionOption}
             />
           )}
 
@@ -272,6 +273,7 @@ function ProjectorLayerCard({
   labelA,
   labelB,
   winner,
+  currentAuditionOption,
 }: {
   layerSymbol: string;
   layerLabel: string;
@@ -280,6 +282,7 @@ function ProjectorLayerCard({
   labelA: string;
   labelB: string;
   winner: 'A' | 'B' | null;
+  currentAuditionOption?: 'A' | 'B' | null;
 }) {
   const isResolved = layerPhase === 'locked_in';
   const isCollapsed = layerPhase === 'collapsed';
@@ -315,6 +318,7 @@ function ProjectorLayerCard({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '16px', width: '100%', alignItems: 'center' }}>
         {/* Option A */}
         <div
+          className={currentAuditionOption === 'A' ? 'audition-glow' : undefined}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -326,6 +330,7 @@ function ProjectorLayerCard({
             opacity: isResolved && winner !== 'A' ? 0.25 : 1,
             transform: isResolved && winner === 'A' ? 'scale(1.03)' : 'scale(1)',
             transition: 'opacity 0.4s ease, transform 0.3s ease',
+            ...(currentAuditionOption === 'A' ? { '--glow-color': layerColor + '99' } as React.CSSProperties : {}),
           }}
         >
           <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#000', letterSpacing: '0.1em' }}>A</span>
@@ -340,6 +345,7 @@ function ProjectorLayerCard({
 
         {/* Option B */}
         <div
+          className={currentAuditionOption === 'B' ? 'audition-glow' : undefined}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -352,6 +358,7 @@ function ProjectorLayerCard({
             opacity: isResolved && winner !== 'B' ? 0.25 : 1,
             transform: isResolved && winner === 'B' ? 'scale(1.03)' : 'scale(1)',
             transition: 'opacity 0.4s ease, transform 0.3s ease',
+            ...(currentAuditionOption === 'B' ? { '--glow-color': layerColor + '99' } as React.CSSProperties : {}),
           }}
         >
           <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em' }}>B</span>

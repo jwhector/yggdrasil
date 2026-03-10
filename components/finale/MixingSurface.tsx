@@ -214,7 +214,7 @@ function FragmentTile({
           letterSpacing: '0.04em',
         }}
       >
-        S{fragment.attemptIndex + 1}{fragment.option}
+        {isActive ? '▶ ' : ''}S{fragment.attemptIndex + 1}{fragment.option}
       </span>
       <span
         style={{

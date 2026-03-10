@@ -23,3 +23,11 @@ body {
   color: #fff;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+@keyframes audition-pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--glow-color, rgba(255,255,255,0.3)); }
+  50% { box-shadow: 0 0 20px var(--glow-color, rgba(255,255,255,0.6)); }
+}
+.audition-glow {
+  animation: audition-pulse 1.5s ease-in-out infinite;
+}

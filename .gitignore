@@ -17,6 +17,7 @@ build/
 .env
 .env.local
 .env.*.local
+.mcp.json
 
 # SQLite database and backups
 *.db

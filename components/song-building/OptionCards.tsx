@@ -20,9 +20,10 @@ export interface OptionCardsProps {
   myVote: 'A' | 'B' | null;
   disabled: boolean;
   onVote: (choice: 'A' | 'B') => void;
+  currentAuditionOption?: 'A' | 'B' | null;
 }
 
-export function OptionCards({ layerConfig, myVote, disabled, onVote }: OptionCardsProps) {
+export function OptionCards({ layerConfig, myVote, disabled, onVote, currentAuditionOption }: OptionCardsProps) {
   const identity = getLayerIdentity(layerConfig.type);
 
   return (
@@ -41,6 +42,7 @@ export function OptionCards({ layerConfig, myVote, disabled, onVote }: OptionCar
         myVote={myVote}
         disabled={disabled}
         onVote={onVote}
+        currentAuditionOption={currentAuditionOption}
       />
       <OptionButton
         option="B"
@@ -49,6 +51,7 @@ export function OptionCards({ layerConfig, myVote, disabled, onVote }: OptionCar
         myVote={myVote}
         disabled={disabled}
         onVote={onVote}
+        currentAuditionOption={currentAuditionOption}
       />
     </div>
   );
@@ -61,9 +64,10 @@ interface OptionButtonProps {
   myVote: 'A' | 'B' | null;
   disabled: boolean;
   onVote: (choice: 'A' | 'B') => void;
+  currentAuditionOption?: 'A' | 'B' | null;
 }
 
-function OptionButton({ option, label, identity, myVote, disabled, onVote }: OptionButtonProps) {
+function OptionButton({ option, label, identity, myVote, disabled, onVote, currentAuditionOption }: OptionButtonProps) {
   const isSelected = myVote === option;
   const hasVoted = myVote !== null;
   const isA = option === 'A';
@@ -113,17 +117,21 @@ function OptionButton({ option, label, identity, myVote, disabled, onVote }: Opt
     ? { boxShadow: `0 0 0 2px #fff, 0 0 0 4px ${identity.color}` }
     : {};
 
+  const isAuditioning = currentAuditionOption === option;
+
   return (
     <button
       onClick={() => { if (!disabled) onVote(option); }}
       disabled={disabled}
       aria-pressed={isSelected}
       aria-label={`Option ${option}: ${label}`}
+      className={isAuditioning ? 'audition-glow' : undefined}
       style={{
         ...baseStyle,
         ...colorStyle,
         ...votedOtherStyle,
         ...selectedStyle,
+        ...(isAuditioning ? { '--glow-color': identity.color + '88' } as React.CSSProperties : {}),
       }}
     >
       {/* Layer symbol */}

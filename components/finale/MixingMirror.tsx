@@ -60,6 +60,7 @@ export function MixingMirror({
         return (
           <div
             key={layerType}
+            className={fragment && !isPending ? 'audition-glow' : undefined}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -76,6 +77,7 @@ export function MixingMirror({
               boxShadow: isPending
                 ? `0 0 12px ${pendingChapter?.color ?? '#888'}33`
                 : 'none',
+              ...(fragment && !isPending && chapter ? { '--glow-color': chapter.color + '66' } as React.CSSProperties : {}),
             }}
           >
             {/* Layer icon */}

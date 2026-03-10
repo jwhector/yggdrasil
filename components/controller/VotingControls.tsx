@@ -20,7 +20,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
   const attempt = attempts[currentAttemptIndex];
   if (!attempt) return null;
 
-  const { currentLayerIndex, currentLayerPhase, layerPlan, votes } = attempt;
+  const { currentLayerIndex, currentLayerPhase, layerPlan, votes, currentAuditionOption } = attempt;
   const currentLayer = layerPlan[currentLayerIndex];
   const layerIdentity = currentLayer ? getLayerIdentity(currentLayer.type) : null;
 
@@ -41,13 +41,25 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
     <section style={styles.section}>
       <div style={styles.header}>
         <h2 style={styles.sectionTitle}>Voting Controls</h2>
-        <LayerBadge
-          index={currentLayerIndex}
-          total={layerPlan.length}
-          phase={currentLayerPhase}
-          type={currentLayer?.type}
-          color={layerIdentity?.color}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <LayerBadge
+            index={currentLayerIndex}
+            total={layerPlan.length}
+            phase={currentLayerPhase}
+            type={currentLayer?.type}
+            color={layerIdentity?.color}
+          />
+          {isAuditioning && currentAuditionOption && (
+            <span style={{
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              color: currentAuditionOption === 'A' ? '#4ade80' : '#60a5fa',
+              letterSpacing: '0.05em',
+            }}>
+              ▶ {currentAuditionOption}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Vote bar */}
