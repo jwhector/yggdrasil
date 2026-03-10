@@ -109,6 +109,14 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
               >
                 AUDIO PANIC
               </button>
+
+              <button
+                onClick={() => send({ type: 'RESET_UTILITIES' })}
+                style={{ ...btn, ...btnWarning }}
+                title="Reset all Utility gains to 0 dB and unmute all tracks"
+              >
+                RESET UTILITIES
+              </button>
             </div>
           </div>
 

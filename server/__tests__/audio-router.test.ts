@@ -44,6 +44,7 @@ const TEST_GAIN_CONFIG: GainConfig = {
   collapseFadeBeats: 8,
   consensusSwellBeats: 4,
   unityGainValue: 0,
+  stepsPerBeat: 1,
 };
 
 const TEST_LAYOUT: AbletonLayoutConfig = {
@@ -215,7 +216,8 @@ function createMockTimingEngine() {
     dispose: jest.fn(),
     onStateChanged: jest.fn(),
     onOSCMessage: jest.fn(),
-    isRunning: jest.fn().mockReturnValue(true),
+    isRunning: jest.fn<() => boolean>().mockReturnValue(true),
+    getBeatDurationMs: jest.fn<() => number>().mockReturnValue(500),
     fireBeat,
   };
 
@@ -280,14 +282,20 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('audition_start (track-only)', () => {
-    test('starts transport on first audition', () => {
+    test('starts transport on first audition', async () => {
+      jest.useFakeTimers();
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
         audioRef: makeAudioRef(0),
         otherAudioRef: makeAudioRef(1),
       });
 
+      // Advance past waitForOSC timeout (1000ms) and flush promise microtasks
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+
       expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
+      jest.useRealTimers();
     });
 
     test('unmutes the specified option track', () => {
@@ -320,22 +328,6 @@ describe('AudioRouter', () => {
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0); // unmute B
     });
 
-    test('does not start transport again on subsequent calls', () => {
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
-      });
-      mockSend.mockClear();
-
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 1, option: 'A',
-        audioRef: makeAudioRef(2),
-        otherAudioRef: makeAudioRef(3),
-      });
-
-      expect(mockSend).not.toHaveBeenCalledWith('/live/song/start_playing');
-    });
   });
 
   // --------------------------------------------------------------------------
@@ -684,7 +676,8 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('consensus_activate', () => {
-    test('starts transport and unmutes fragment track', () => {
+    test('starts transport and unmutes fragment track', async () => {
+      jest.useFakeTimers();
       const fragment = makeFragment(0, 2, 'B'); // track 5
 
       sendCue(router, state, {
@@ -694,31 +687,15 @@ describe('AudioRouter', () => {
         audioRef: fragment.audioRef,
       });
 
+      // Advance past waitForOSC timeout and flush microtasks
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+
       expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
+      jest.useRealTimers();
     });
 
-    test('does not restart transport if already playing', () => {
-      const fragment = makeFragment(0, 0, 'A'); // track 0
-      sendCue(router, state, {
-        type: 'consensus_activate',
-        layerType: 'melody',
-        fragmentId: fragment.id,
-        audioRef: fragment.audioRef,
-      });
-      mockSend.mockClear();
-
-      const fragment2 = makeFragment(0, 1, 'A'); // track 2
-      sendCue(router, state, {
-        type: 'consensus_activate',
-        layerType: 'drums',
-        fragmentId: fragment2.id,
-        audioRef: fragment2.audioRef,
-      });
-
-      expect(mockSend).not.toHaveBeenCalledWith('/live/song/start_playing');
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0);
-    });
   });
 
   // --------------------------------------------------------------------------

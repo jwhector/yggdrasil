@@ -351,6 +351,7 @@ export interface GainConfig {
   collapseFadeBeats: number;    // Beats to fade all attempt tracks on collapse (default 8)
   consensusSwellBeats: number;  // Beats for consensus fragment swell-in (default 4)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
+  stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
 }
 
 export interface TimingConfig {

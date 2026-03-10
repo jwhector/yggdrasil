@@ -233,7 +233,8 @@
       "lockInFadeBeats": 8,
       "collapseFadeBeats": 8,
       "consensusSwellBeats": 4,
-      "unityGainValue": 0
+      "unityGainValue": 0,
+      "stepsPerBeat": 3
     }
   },
 

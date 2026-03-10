@@ -21,8 +21,6 @@
  * - Tracks without a cached Utility device fall back to mute/unmute only.
  *
  * === Track Layout ===
- * trackIndex = attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset
- *   optionOffset: 0 = Option A, 1 = Option B
  *   42 fragment tracks (3 attempts × 7 layers × 2 options)
  *   Group (foldable) tracks are intermixed with fragment tracks in Ableton.
  *   Mute operations query is_foldable to avoid muting group tracks.
@@ -70,6 +68,7 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   collapseFadeBeats: 8,
   consensusSwellBeats: 4,
   unityGainValue: 0,
+  stepsPerBeat: 2,
 };
 
 // ============================================================================
@@ -112,6 +111,7 @@ export interface AudioRouter {
 interface TrackGainState {
   currentGain: number;          // 0.0 to 1.0 (musical gain, before unityGainValue scaling)
   activeFadeId: string | null;  // ID prefix of in-flight fade, for cancellation
+  subBeatTimers: NodeJS.Timeout[];  // Pending sub-beat interpolation timers
 }
 
 /** Cached Utility device and parameter info for a track. */
@@ -185,7 +185,7 @@ export function createAudioRouter(
   function getOrCreateTrackGainState(trackIndex: number): TrackGainState {
     let gs = routerState.trackGains.get(trackIndex);
     if (!gs) {
-      gs = { currentGain: 0, activeFadeId: null };
+      gs = { currentGain: 0, activeFadeId: null, subBeatTimers: [] };
       routerState.trackGains.set(trackIndex, gs);
     }
     return gs;
@@ -276,6 +276,8 @@ export function createAudioRouter(
       timingEngine?.cancelCallbacks(gs.activeFadeId);
       gs.activeFadeId = null;
     }
+    for (const timer of gs.subBeatTimers) clearTimeout(timer);
+    gs.subBeatTimers = [];
 
     routerState.fadeCounter++;
     const fadeId = `fade-${routerState.fadeCounter}-t${trackIndex}`;
@@ -301,9 +303,27 @@ export function createAudioRouter(
       fromBeat,
       durationBeats,
       (beatIndex: number, totalBeats: number) => {
+        // On-beat step
         const progress = (beatIndex + 1) / totalBeats;
         const newGain = startGain + (targetGain - startGain) * progress;
         setGain(trackIndex, Math.max(0, Math.min(1, newGain)));
+
+        // Sub-beat steps between this beat and the next
+        const stepsPerBeat = currentGainConfig.stepsPerBeat ?? 1;
+        if (stepsPerBeat > 1 && beatIndex < totalBeats - 1) {
+          const nextProgress = (beatIndex + 2) / totalBeats;
+          const beatMs = timingEngine!.getBeatDurationMs();
+          for (let s = 1; s < stepsPerBeat; s++) {
+            const frac = s / stepsPerBeat;
+            const subProgress = progress + (nextProgress - progress) * frac;
+            const subGain = startGain + (targetGain - startGain) * subProgress;
+            const timer = setTimeout(() => {
+              setGain(trackIndex, Math.max(0, Math.min(1, subGain)));
+            }, beatMs * frac);
+            const currentGs = routerState.trackGains.get(trackIndex);
+            if (currentGs) currentGs.subBeatTimers.push(timer);
+          }
+        }
 
         // Clear activeFadeId after final step
         if (beatIndex === totalBeats - 1) {
@@ -351,12 +371,14 @@ export function createAudioRouter(
    * The muting step is async (waits for Ableton response).
    */
   function silenceAllTracks(): void {
-    // Cancel all in-flight fades
+    // Cancel all in-flight fades and sub-beat timers
     for (const gs of routerState.trackGains.values()) {
       if (gs.activeFadeId) {
         timingEngine?.cancelCallbacks(gs.activeFadeId);
         gs.activeFadeId = null;
       }
+      for (const timer of gs.subBeatTimers) clearTimeout(timer);
+      gs.subBeatTimers = [];
     }
 
     // Zero all Utility device gains synchronously
@@ -421,13 +443,14 @@ export function createAudioRouter(
 
   function ensureTransportStarted(): void {
     waitForOSC('/live/song/get/is_playing').then((isPlaying: any) => {
-      if (!isPlaying || !routerState.transportStarted) {
+      if (!isPlaying[0]) {
         oscBridge.send('/live/song/start_playing');
-        routerState.transportStarted = true;
       }
+      routerState.transportStarted = true;
     }).catch((error: any) => {
       console.error('Error checking if transport is started', error);
     });
+    oscBridge.send('/live/song/get/is_playing');
   }
 
   function stopPlayback(): void {
@@ -679,12 +702,14 @@ export function createAudioRouter(
    * Allows the performer to take over from Ableton's mixer.
    */
   function handleResetUtilities(): void {
-    // Cancel all in-flight fades
+    // Cancel all in-flight fades and sub-beat timers
     for (const gs of routerState.trackGains.values()) {
       if (gs.activeFadeId) {
         timingEngine?.cancelCallbacks(gs.activeFadeId);
         gs.activeFadeId = null;
       }
+      for (const timer of gs.subBeatTimers) clearTimeout(timer);
+      gs.subBeatTimers = [];
     }
 
     for (let i = 0; i < totalTracks; i++) {
@@ -700,8 +725,8 @@ export function createAudioRouter(
         );
       }
       // Unmute regardless of whether a Utility device was found
-      oscBridge.send('/live/track/set/mute', i, 0);
-      routerState.unmutedTracks.add(i);
+      // oscBridge.send('/live/track/set/mute', i, 0);
+      // routerState.unmutedTracks.add(i);
 
       const gs = getOrCreateTrackGainState(i);
       gs.currentGain = 1.0;
@@ -787,12 +812,13 @@ export function createAudioRouter(
   // --------------------------------------------------------------------------
 
   function dispose(): void {
-    // Cancel all in-flight fades
+    // Cancel all in-flight fades and sub-beat timers
     for (const gs of routerState.trackGains.values()) {
       if (gs.activeFadeId) {
         timingEngine?.cancelCallbacks(gs.activeFadeId);
         gs.activeFadeId = null;
       }
+      for (const timer of gs.subBeatTimers) clearTimeout(timer);
     }
     routerState.trackGains.clear();
     routerState.unmutedTracks.clear();

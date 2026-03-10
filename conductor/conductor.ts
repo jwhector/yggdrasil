@@ -49,14 +49,15 @@ import { evaluateAutoTriggers } from './npc';
 
 /** Default gain configuration used when config.timing.gain is absent. */
 export const DEFAULT_GAIN_CONFIG = {
-  entryGain: 0.6,
+  entryGain: 0.25,
   entrySwellBeats: 4,
-  holdBars: 7,
-  exitFadeBeats: 4,
-  lockInFadeBeats: 4,
+  holdBars: 6,
+  exitFadeBeats: 8,
+  lockInFadeBeats: 8,
   collapseFadeBeats: 8,
   consensusSwellBeats: 4,
   unityGainValue: 0.5,
+  stepsPerBeat: 2,
 } as const;
 
 /**

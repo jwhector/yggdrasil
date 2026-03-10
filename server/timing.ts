@@ -101,6 +101,9 @@ export interface TimingEngine {
   getCurrentBeat(): number;
   /** Get the current beat position (null if no beats received yet). */
   getCurrentBeatPosition(): BeatPosition | null;
+  /** Get the duration of one beat in milliseconds. Uses Ableton's BPM via
+   *  /live/song/get/tempo when available; falls back to 60000 / fallbackBpm. */
+  getBeatDurationMs(): number;
 }
 
 /**
@@ -182,6 +185,9 @@ export function createTimingEngine(
   // Fallback beat ticker (generates synthetic beats when no OSC bridge)
   let fallbackBeatInterval: NodeJS.Timeout | null = null;
   let fallbackBeatCounter: number = 0;
+
+  // BPM from Ableton (for sub-beat interpolation in audio router)
+  let currentBpm: number = engineConfig.fallbackBpm;
 
   // --------------------------------------------------------------------------
   // Timer Management
@@ -501,6 +507,10 @@ export function createTimingEngine(
    * Process scheduled beat callbacks for the given beat number.
    * Called from both handleBeatEvent (OSC) and the fallback beat ticker.
    */
+  function getBeatDurationMs(): number {
+    return 60000 / currentBpm;
+  }
+
   function handleBeatCallbacks(beatNumber: number): void {
     currentAbsoluteBeat = beatNumber;
 
@@ -725,6 +735,14 @@ export function createTimingEngine(
 
       // Subscribe to beat events from AbletonOSC
       engineConfig.oscBridge.send('/live/song/start_listen/beat');
+
+      // Subscribe to tempo changes from Ableton
+      engineConfig.oscBridge.on('/live/song/get/tempo', (...args: any[]) => {
+        const bpm = args[0] as number;
+        if (bpm > 0) currentBpm = bpm;
+      });
+      engineConfig.oscBridge.send('/live/song/start_listen/tempo');
+      engineConfig.oscBridge.send('/live/song/get/tempo');
     } else {
       // Start synthetic beat ticker for beat callback scheduling in fallback mode
       startFallbackBeatTicker();
@@ -771,10 +789,12 @@ export function createTimingEngine(
     beatWrapOffset = 0;
     currentAbsoluteBeat = 0;
     currentBeatPosition = null;
+    currentBpm = engineConfig.fallbackBpm;
 
-    // Unsubscribe from beat events
+    // Unsubscribe from beat and tempo events
     if (engineConfig.oscBridge) {
       engineConfig.oscBridge.send('/live/song/stop_listen/beat');
+      engineConfig.oscBridge.send('/live/song/stop_listen/tempo');
     }
 
     console.log('[Timing] Engine stopped');
@@ -807,5 +827,6 @@ export function createTimingEngine(
     cancelCallbacks,
     getCurrentBeat,
     getCurrentBeatPosition,
+    getBeatDurationMs,
   };
 }
