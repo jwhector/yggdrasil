@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 2026-03-09 — Audio Router Polish: Gain Control, Sub-Beat Interpolation, OSC Source of Truth
+
+**Context:** Refines the audio router's gain-based control model for production use with Ableton. Fixes gain mapping formula, adds sub-beat interpolation for smoother fades, and makes Ableton the single source of truth for transport state and BPM.
+
+**Gain mapping fix:**
+- Fixed formula mapping internal gain (0–1) to Ableton Utility parameter range (-1 = muted, 0 = 0 dB). Old formula sent 0 dB when gain was 0 (silence). New formula: `oscValue = -1 + gain * (unityGainValue + 1)`.
+- Updated `DEFAULT_GAIN_CONFIG.unityGainValue` from 0.5 to 0 (targets 0 dB).
+
+**Sub-beat interpolation:**
+- `fadeGain` now schedules intermediate gain updates between beats via `setTimeout` for smoother fades.
+- Added `stepsPerBeat` to `GainConfig` (default: 2). Set to 1 in tests to disable sub-beat timers.
+- Added `getBeatDurationMs()` to `TimingEngine` interface — returns beat duration for scheduling sub-beat midpoints.
+- Sub-beat timers are cancelled on fade cancellation, silence-all, reset-utilities, and dispose.
+
+**Ableton as source of truth — transport:**
+- `ensureTransportStarted()` now queries Ableton's transport state via `/live/song/get/is_playing` before sending `start_playing`. No fast-path guard — always queries Ableton (handles external pause/stop).
+- Removed 2 "does not restart transport" tests (only meaningful with real Ableton responses; NullOSCBridge always times out).
+
+**Ableton as source of truth — BPM:**
+- Timing engine subscribes to `/live/song/start_listen/tempo` and queries `/live/song/get/tempo` on start.
+- `getBeatDurationMs()` now returns `60000 / currentBpm` using Ableton's reported BPM.
+- Removed timestamp-based beat duration measurement (`lastBeatTimestamp`, `measuredBeatDurationMs`).
+
+**Controller UI:**
+- Added "RESET UTILITIES" button to `EmergencyControls.tsx` Audio group. Sets all Utility gains to 0 dB for free Ableton use without the app interfering.
+
+**Files modified:**
+- `server/audio-router.ts` — gain formula, sub-beat interpolation, ensureTransportStarted async
+- `server/timing.ts` — BPM from Ableton, getBeatDurationMs
+- `server/__tests__/audio-router.test.ts` — async transport tests, sub-beat config
+- `conductor/types.ts` — `stepsPerBeat` in GainConfig
+- `config/default-show.json` — unityGainValue, stepsPerBeat
+- `components/controller/EmergencyControls.tsx` — Reset Utilities button
+- `ARCHITECTURE.md` — GainConfig type, RESET_UTILITIES command, tempo/transport OSC addresses
+
+**Tests:** 316 passing across 13 suites.
+
+---
+
 ## 2026-03-07 — V2 Migration Phase 7: Configuration & Cleanup
 
 **Context:** MIGRATION.md Phase 7. Aligns all configuration files with V2 types, deletes dead V1 code, and finalises documentation. This completes the V2 migration codebase cleanup.

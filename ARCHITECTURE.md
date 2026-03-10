@@ -185,7 +185,7 @@ Unchanged from V1. Cloud-hosted server with local Ableton bridge.
 | **Song-Building** | Open Vote, Close Vote, Force Option A/B, Extend Timer, Rerun Vote |
 | **Health Bar** | Adjust drain factor per attempt, Adjust layer multipliers, View current health, Override health value, Force Collapse |
 | **Song Rejection** | Trigger rejection effect (OSC command to Ableton) — only for completed songs |
-| **Audio** | Transport Play/Stop, Hard Mute/Panic, Per-layer force on/off |
+| **Audio** | Transport Play/Stop, Hard Mute/Panic, Reset Utilities (all gains to 0 dB), Per-layer force on/off |
 | **Finale — Consensus** | Start/stop consensus rounds, Adjust threshold, View convergence data (which fragment leading, by how much), Fire NPC lines manually |
 | **Finale — Performer Mix** | 7×6 mixing grid (7 layers × 6 fragments: 3 songs × 2 options), Queue/dequeue fragment changes, Mute/unmute layers, Snapshot presets, Loop position display |
 | **Live Performance** | Toggle live input tracks (vocal, synth, etc.) |
@@ -729,6 +729,10 @@ Uses the **AbletonOSC** plugin (by ideoforms). All addresses follow the `/live/*
 | `/live/test` | - | Connectivity test |
 | `/live/song/start_listen/beat` | - | Subscribe to beat events |
 | `/live/song/stop_listen/beat` | - | Unsubscribe from beat events |
+| `/live/song/start_listen/tempo` | - | Subscribe to tempo changes |
+| `/live/song/stop_listen/tempo` | - | Unsubscribe from tempo changes |
+| `/live/song/get/tempo` | - | Query current tempo |
+| `/live/song/get/is_playing` | - | Query transport state |
 | `/live/song/start_playing` | - | Start global transport |
 | `/live/song/stop_playing` | - | Stop global transport |
 | `/live/song/continue_playing` | - | Resume from current position |
@@ -744,6 +748,8 @@ Uses the **AbletonOSC** plugin (by ideoforms). All addresses follow the `/live/*
 |---------|-----------|-------------|
 | `/live/test` | `response` | Connectivity test response |
 | `/live/song/get/beat` | `beatNumber` | Beat event (when subscribed) |
+| `/live/song/get/tempo` | `bpm` | Current tempo (on query or change) |
+| `/live/song/get/is_playing` | `isPlaying` | Transport state (1 = playing, 0 = stopped) |
 
 ### Fallback Mode (No Ableton)
 
@@ -870,6 +876,19 @@ interface TimingConfig {
   rejectionEffectDurationMs: number;
   beatsPerLoop: number;        // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
   auditionsPerLayer: number;   // Number of A/B cycles per layer before voting opens
+  gain: GainConfig;
+}
+
+interface GainConfig {
+  entryGain: number;           // Initial gain when a track starts playing (0.0–1.0)
+  entrySwellBeats: number;     // Beats to swell from entryGain to 1.0
+  holdBars: number;            // Bars to hold at full gain (informational)
+  exitFadeBeats: number;       // Beats to fade out when stopping audition
+  lockInFadeBeats: number;     // Beats to fade out the losing option on lock-in
+  collapseFadeBeats: number;   // Beats to fade out all tracks on collapse
+  consensusSwellBeats: number; // Beats to swell consensus-activated fragments
+  unityGainValue: number;      // Ableton Utility param value for 0 dB (default: 0)
+  stepsPerBeat: number;        // Sub-steps per beat for gain interpolation (1 = no sub-beats)
 }
 
 interface Fragment {
@@ -936,6 +955,7 @@ type ConductorCommand =
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
   | { type: 'AUDIO_PANIC' }
+  | { type: 'RESET_UTILITIES' }
 
   // Connection
   | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
