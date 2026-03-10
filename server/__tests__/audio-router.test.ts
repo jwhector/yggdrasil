@@ -357,7 +357,7 @@ describe('AudioRouter', () => {
       expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 5, 0, 0);
     });
 
-    test('does not mute/unmute track when both options share the same track', () => {
+    test('does not mute track when both options share the same track', () => {
       // First audition A on track 5
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
@@ -366,17 +366,18 @@ describe('AudioRouter', () => {
       });
       mockSend.mockClear();
 
-      // Switch to B on same track — no mute/unmute, only effects toggled
+      // Switch to B on same track — no mute (unmutes may occur since guard removed)
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
         audioRef: makeAudioRef(5, [2]),
         otherAudioRef: makeAudioRef(5, [1]),
       });
 
-      const trackCalls = mockSend.mock.calls.filter(
-        (c: any[]) => c[0] === '/live/track/set/mute' && c[1] === 5,
+      // Track 5 must not be muted — the important invariant
+      const muteCalls = mockSend.mock.calls.filter(
+        (c: any[]) => c[0] === '/live/track/set/mute' && c[1] === 5 && c[2] === 1,
       );
-      expect(trackCalls.length).toBe(0);
+      expect(muteCalls.length).toBe(0);
 
       expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 5, 1, 0, 0); // disable A's effect
       expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 5, 2, 0, 1); // enable B's effect
@@ -478,15 +479,15 @@ describe('AudioRouter', () => {
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    test('is idempotent — fading already-silent track sends no mute OSC', () => {
+    test('fading already-silent track still sends mute OSC', () => {
       // Track 0 was never unmuted
       sendCue(router, state, {
         type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
         audioRef: makeAudioRef(0),
       });
 
-      // setGain(0, 0) → muteTrack(0) → track 0 not in unmutedTracks → no send
-      expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+      // setGain(0, 0) → muteTrack(0) → always sends (no idempotency guard)
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
     });
   });
 
@@ -791,11 +792,12 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('panic', () => {
-    test('initiates is_foldable query to mute non-group tracks', () => {
+    test('mutes all fragment tracks directly (no is_foldable query)', () => {
       sendCue(router, state, { type: 'panic' });
 
-      // silenceAllTracks queries Ableton for is_foldable before muting
-      expect(mockSend).toHaveBeenCalledWith('/live/song/get/num_tracks');
+      // silenceAllTracks now directly mutes known fragment tracks — no Ableton query needed
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+      expect(mockSend).not.toHaveBeenCalledWith('/live/song/get/num_tracks');
     });
 
     test('clears internal unmuted tracks state', () => {
@@ -825,13 +827,13 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('reset_utilities', () => {
-    test('unmutes all 42 tracks', () => {
+    test('does not unmute tracks (gain only)', () => {
       sendCue(router, state, { type: 'reset_utilities' });
 
       const unmuteCalls = mockSend.mock.calls.filter(
         (c: any[]) => c[0] === '/live/track/set/mute' && c[2] === 0,
       );
-      expect(unmuteCalls.length).toBe(42);
+      expect(unmuteCalls.length).toBe(0);
     });
 
     test('does not leave any mute calls for fragment tracks', () => {
@@ -859,8 +861,9 @@ describe('AudioRouter', () => {
 
       router.handleStateChange(state, [{ type: 'ATTEMPT_COMPLETED', attemptIndex: 0 }]);
 
-      // Initiates is_foldable query for muting
-      expect(mockSend).toHaveBeenCalledWith('/live/song/get/num_tracks');
+      // Directly mutes fragment tracks without is_foldable query
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+      expect(mockSend).not.toHaveBeenCalledWith('/live/song/get/num_tracks');
 
       // Transport is NOT stopped (clips keep looping silently between attempts)
       expect(mockSend).not.toHaveBeenCalledWith('/live/song/stop_playing');
@@ -878,8 +881,9 @@ describe('AudioRouter', () => {
 
       router.handleStateChange(state, [{ type: 'SHOW_RESET', preservedUsers: false }]);
 
-      // Initiates is_foldable query for muting
-      expect(mockSend).toHaveBeenCalledWith('/live/song/get/num_tracks');
+      // Directly mutes fragment tracks without is_foldable query
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+      expect(mockSend).not.toHaveBeenCalledWith('/live/song/get/num_tracks');
       expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
     });
   });
@@ -905,7 +909,7 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('idempotency', () => {
-    test('unmuting an already-unmuted track sends no duplicate OSC', () => {
+    test('unmuting an already-unmuted track sends OSC again (no guard)', () => {
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
         audioRef: makeAudioRef(0),
@@ -913,15 +917,15 @@ describe('AudioRouter', () => {
       });
       mockSend.mockClear();
 
-      // Audition same track again — unmuteTrack is idempotent
+      // Audition same track again — unmuteTrack always sends (Ableton handles idempotency)
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
         audioRef: makeAudioRef(0),
         otherAudioRef: makeAudioRef(1),
       });
 
-      // No unmute call for track 0 (already unmuted)
-      expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
+      // Unmute is sent again — Ableton is the source of truth
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
     });
   });
 });

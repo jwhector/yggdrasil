@@ -8,7 +8,8 @@
       "Bash(npm test -- server/__tests__/timing.test.ts)",
       "Bash(npm test -- server/__tests__/audio-router.test.ts)",
       "Bash(grep -o '\"\"trackIndex\"\": [0-9]*' config/default-show.json)",
-      "Bash(sort -t: -k2 -n)"
+      "Bash(sort -t: -k2 -n)",
+      "Bash(npm test -- server/)"
     ]
   }
 }

@@ -79,6 +79,11 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
  * Compute Ableton track index from attempt, layer, and option.
  *
  * Formula: attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset
+ *
+ * NOTE: This assumes a contiguous layout with no group tracks intermixed.
+ * The real Ableton layout (default-show.json) has group tracks at indices 0, 3-7, 13,
+ * so AudioReference.trackIndex values come from the show config, not this formula.
+ * This function is only valid for test fixtures that use a flat layout.
  */
 export function computeTrackIndex(
   attemptIndex: number,
@@ -97,8 +102,8 @@ export function computeTrackIndex(
 export interface AudioRouter {
   /** Process conductor events, routing audio cues to OSC */
   handleStateChange(state: ShowState, events: ConductorEvent[]): void;
-  /** Discover Utility devices on all fragment tracks. Call once after OSC bridge starts. */
-  discoverDevices(): Promise<void>;
+  /** Discover Utility devices on fragment tracks. Pass ShowState to target only known tracks. */
+  discoverDevices(state?: ShowState): Promise<void>;
   /** Clean up resources */
   dispose(): void;
 }
@@ -139,6 +144,8 @@ interface AudioRouterState {
   rejectionTimers: Map<number, NodeJS.Timeout>;
   /** Active layer type → track index for performer mix */
   activeLayerTracks: Map<LayerType, number>;
+  /** Authoritative set of fragment track indices, built from ShowState */
+  fragmentTrackIndices: Set<number>;
 }
 
 // ============================================================================
@@ -170,13 +177,11 @@ export function createAudioRouter(
     collapseTimers: new Map(),
     rejectionTimers: new Map(),
     activeLayerTracks: new Map(),
+    fragmentTrackIndices: new Set(),
   };
 
   // Last-seen gain config, updated at the top of handleStateChange
   let currentGainConfig: GainConfig = { ...DEFAULT_GAIN_CONFIG };
-
-  // Total number of fragment tracks
-  const totalTracks = layout.maxLayersPerAttempt * layout.attemptCount * 2;
 
   // --------------------------------------------------------------------------
   // Internal Helpers
@@ -191,20 +196,16 @@ export function createAudioRouter(
     return gs;
   }
 
-  /** Low-level Ableton track mute (for session view legibility). Idempotent. */
+  /** Low-level Ableton track mute (for session view legibility). Always sends OSC. */
   function muteTrack(trackIndex: number): void {
-    if (routerState.unmutedTracks.has(trackIndex)) {
-      oscBridge.send('/live/track/set/mute', trackIndex, 1);
-      routerState.unmutedTracks.delete(trackIndex);
-    }
+    oscBridge.send('/live/track/set/mute', trackIndex, 1);
+    routerState.unmutedTracks.delete(trackIndex);
   }
 
-  /** Low-level Ableton track unmute (for session view legibility). Idempotent. */
+  /** Low-level Ableton track unmute (for session view legibility). Always sends OSC. */
   function unmuteTrack(trackIndex: number): void {
-    if (!routerState.unmutedTracks.has(trackIndex)) {
-      oscBridge.send('/live/track/set/mute', trackIndex, 0);
-      routerState.unmutedTracks.add(trackIndex);
-    }
+    oscBridge.send('/live/track/set/mute', trackIndex, 0);
+    routerState.unmutedTracks.add(trackIndex);
   }
 
   /**
@@ -339,21 +340,9 @@ export function createAudioRouter(
   }
 
   function muteAllTracks(): void {
-    let totalTracks = 0;
-    oscBridge.once('/live/song/get/num_tracks', (count: number) => {
-      totalTracks = count;
-      oscBridge.send(`/live/song/get/track_data`, 0, totalTracks, 'track.is_foldable');
-    });
-    oscBridge.once('/live/song/get/track_data', (...trackArgs: any[]) => {
-      console.log("Handling track data", trackArgs);
-      for (let i = 0; i < trackArgs.length; i++) {
-        console.log("Track", i, "is foldable", trackArgs[i]);
-        if (!trackArgs[i]) {
-          oscBridge.send('/live/track/set/mute', i, 1);
-        }
-      }
-    });
-    oscBridge.send('/live/song/get/num_tracks');
+    for (const i of routerState.fragmentTrackIndices) {
+      oscBridge.send('/live/track/set/mute', i, 1);
+    }
     oscBridge.send('/live/song/stop_playing');
     routerState.unmutedTracks.clear();
     routerState.activeLayerTracks.clear();
@@ -361,14 +350,10 @@ export function createAudioRouter(
 
 
   /**
-   * Immediately silence all tracks:
+   * Immediately silence all fragment tracks:
    * - Cancels all in-flight fades
    * - Sets all Utility device gains to 0 (if device is cached)
-   * - Queries Ableton for is_foldable, then mutes all non-group tracks
-   *
-   * Note: Group (foldable) tracks are intermixed with fragment tracks,
-   * so we must query is_foldable to avoid muting group tracks.
-   * The muting step is async (waits for Ableton response).
+   * - Mutes all fragment tracks directly (using fragmentTrackIndices — no group tracks)
    */
   function silenceAllTracks(): void {
     // Cancel all in-flight fades and sub-beat timers
@@ -381,8 +366,8 @@ export function createAudioRouter(
       gs.subBeatTimers = [];
     }
 
-    // Zero all Utility device gains synchronously
-    for (let i = 0; i < totalTracks; i++) {
+    // Zero all Utility device gains and mute all known fragment tracks
+    for (const i of routerState.fragmentTrackIndices) {
       const gs = getOrCreateTrackGainState(i);
       gs.currentGain = 0;
 
@@ -396,23 +381,12 @@ export function createAudioRouter(
           -1,
         );
       }
+
+      oscBridge.send('/live/track/set/mute', i, 1);
     }
 
     routerState.unmutedTracks.clear();
     routerState.activeLayerTracks.clear();
-
-    // Query is_foldable to mute only non-group tracks (async)
-    oscBridge.once('/live/song/get/num_tracks', (count: number) => {
-      oscBridge.send('/live/song/get/track_data', 0, count, 'track.is_foldable');
-    });
-    oscBridge.once('/live/song/get/track_data', (...trackArgs: any[]) => {
-      for (let i = 0; i < trackArgs.length; i++) {
-        if (!trackArgs[i]) {
-          oscBridge.send('/live/track/set/mute', i, 1);
-        }
-      }
-    });
-    oscBridge.send('/live/song/get/num_tracks');
   }
 
   function enableEffects(audioRef: AudioReference): void {
@@ -443,7 +417,7 @@ export function createAudioRouter(
 
   function ensureTransportStarted(): void {
     waitForOSC('/live/song/get/is_playing').then((isPlaying: any) => {
-      if (!isPlaying[0]) {
+      if (!isPlaying || !isPlaying[0]) {
         oscBridge.send('/live/song/start_playing');
       }
       routerState.transportStarted = true;
@@ -456,6 +430,29 @@ export function createAudioRouter(
   function stopPlayback(): void {
     oscBridge.send('/live/song/stop_playing');
     routerState.transportStarted = false;
+  }
+
+  // --------------------------------------------------------------------------
+  // Fragment Track Set
+  // --------------------------------------------------------------------------
+
+  /**
+   * Build the authoritative set of fragment track indices from ShowState.
+   * Replaces the computed `totalTracks` constant — treats the show config as source of truth.
+   */
+  function updateFragmentTrackSet(state: ShowState): void {
+    routerState.fragmentTrackIndices.clear();
+    for (const attempt of state.attempts) {
+      for (const layer of attempt.layerPlan) {
+        routerState.fragmentTrackIndices.add(layer.optionA.trackIndex);
+        routerState.fragmentTrackIndices.add(layer.optionB.trackIndex);
+      }
+    }
+    if (state.finaleState) {
+      for (const fragment of state.finaleState.allFragments) {
+        routerState.fragmentTrackIndices.add(fragment.audioRef.trackIndex);
+      }
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -524,18 +521,39 @@ export function createAudioRouter(
   }
 
   /**
-   * Discover Utility devices on all 42 fragment tracks.
+   * Discover Utility devices on fragment tracks.
    * Call once after the OSC bridge starts.
+   *
+   * If state is provided, only discovers tracks in the show config (skips group tracks).
+   * Otherwise falls back to querying Ableton for total track count.
    */
-  async function discoverDevices(): Promise<void> {
-    console.log(`[AudioRouter] Starting device discovery for ${totalTracks} tracks...`);
+  async function discoverDevices(state?: ShowState): Promise<void> {
+    if (state) {
+      updateFragmentTrackSet(state);
+    }
 
-    for (let trackIndex = 0; trackIndex < totalTracks; trackIndex++) {
-      await discoverTrackDevice(trackIndex);
+    const trackList = routerState.fragmentTrackIndices.size > 0
+      ? Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b)
+      : null;
+
+    if (trackList) {
+      console.log(`[AudioRouter] Starting device discovery for ${trackList.length} fragment tracks...`);
+      for (const trackIndex of trackList) {
+        await discoverTrackDevice(trackIndex);
+      }
+    } else {
+      // Fallback: query Ableton for total track count
+      oscBridge.send('/live/song/get/num_tracks');
+      const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+      const numTracks = numTracksResp?.[0] ?? 42;
+      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (fallback)...`);
+      for (let trackIndex = 0; trackIndex < numTracks; trackIndex++) {
+        await discoverTrackDevice(trackIndex);
+      }
     }
 
     routerState.discoveryComplete = true;
-    console.log(`[AudioRouter] Device discovery complete. ${routerState.deviceCache.size}/${totalTracks} tracks have Utility devices.`);
+    console.log(`[AudioRouter] Device discovery complete. ${routerState.deviceCache.size} tracks have Utility devices.`);
   }
 
   // --------------------------------------------------------------------------
@@ -698,8 +716,9 @@ export function createAudioRouter(
   }
 
   /**
-   * Emergency reset: set all Utility gains to 0 dB and unmute all tracks.
+   * Emergency reset: set all Utility gains to 0 dB on fragment tracks.
    * Allows the performer to take over from Ableton's mixer.
+   * Note: tracks are not unmuted — performers can adjust manually in Ableton.
    */
   function handleResetUtilities(): void {
     // Cancel all in-flight fades and sub-beat timers
@@ -712,7 +731,7 @@ export function createAudioRouter(
       gs.subBeatTimers = [];
     }
 
-    for (let i = 0; i < totalTracks; i++) {
+    for (const i of routerState.fragmentTrackIndices) {
       const deviceInfo = routerState.deviceCache.get(i);
       if (deviceInfo) {
         // Set to unity gain (0 dB in Ableton's normalized scale)
@@ -724,9 +743,6 @@ export function createAudioRouter(
           currentGainConfig.unityGainValue,
         );
       }
-      // Unmute regardless of whether a Utility device was found
-      // oscBridge.send('/live/track/set/mute', i, 0);
-      // routerState.unmutedTracks.add(i);
 
       const gs = getOrCreateTrackGainState(i);
       gs.currentGain = 1.0;
@@ -734,7 +750,7 @@ export function createAudioRouter(
     }
 
     routerState.activeLayerTracks.clear();
-    console.log('[AudioRouter] reset_utilities: all Utility gains set to 0 dB, all tracks unmuted');
+    console.log('[AudioRouter] reset_utilities: all Utility gains set to 0 dB');
   }
 
   // --------------------------------------------------------------------------
@@ -744,6 +760,8 @@ export function createAudioRouter(
   function handleStateChange(state: ShowState, events: ConductorEvent[]): void {
     // Keep gain config in sync with show config
     currentGainConfig = state.config.timing.gain ?? DEFAULT_GAIN_CONFIG;
+    // Rebuild fragment track set from state (Ableton layout as source of truth)
+    updateFragmentTrackSet(state);
 
     for (const event of events) {
       if (event.type === 'AUDIO_CUE') {

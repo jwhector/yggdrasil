@@ -268,7 +268,7 @@ async function main() {
 
   // Discover Utility devices on all fragment tracks (after OSC is live)
   if (OSC_ENABLED) {
-    audioRouter.discoverDevices().catch(err => {
+    audioRouter.discoverDevices(getState()).catch(err => {
       console.error('[Server] Device discovery failed:', err);
     });
   }
