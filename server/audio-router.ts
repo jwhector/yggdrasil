@@ -354,24 +354,15 @@ export function createAudioRouter(
     return fadeId;
   }
 
-  function muteAllTracks(): void {
-    for (const i of routerState.fragmentTrackIndices) {
-      oscBridge.send('/live/track/set/mute', i, 1);
-    }
-    oscBridge.send('/live/song/stop_playing');
-    routerState.unmutedTracks.clear();
-    routerState.activeLayerTracks.clear();
-  }
-
-
   /**
-   * Immediately silence all tracks:
+   * Immediately silence all known fragment tracks:
    * - Cancels all in-flight fades (synchronous)
-   * - Queries Ableton for the full track list, skipping foldable (group) tracks
-   * - Sets Utility device gains to 0 on non-foldable tracks (if device is cached)
-   * - Mutes all non-foldable tracks
+   * - Mutes every track in fragmentTrackIndices (built from ShowState — no Ableton query needed)
+   * - Sets Utility device gains to -1 on tracks with a cached device
+   *
+   * Does NOT stop transport — callers that need that should call stopPlayback() separately.
    */
-  async function silenceAllTracks(): Promise<void> {
+  function silenceAllTracks(): void {
     // Cancel all in-flight fades and sub-beat timers immediately
     for (const gs of routerState.trackGains.values()) {
       if (gs.activeFadeId) {
@@ -384,30 +375,7 @@ export function createAudioRouter(
     routerState.unmutedTracks.clear();
     routerState.activeLayerTracks.clear();
 
-    // Query total track count
-    oscBridge.send('/live/song/get/num_tracks');
-    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
-    if (!numTracksResp) {
-      console.warn('[AudioRouter] silenceAllTracks: no response for num_tracks');
-      return;
-    }
-    const numTracks = numTracksResp[0] as number;
-
-    // Bulk-query is_foldable for all tracks in one round-trip
-    oscBridge.send('/live/song/get/track_data', 0, numTracks, 'track.is_foldable');
-    const trackDataResp = await waitForOSC('/live/song/get/track_data', 3000);
-    if (!trackDataResp) {
-      console.warn('[AudioRouter] silenceAllTracks: no response for track_data');
-      return;
-    }
-
-    // Response is a flat array: [is_foldable_0, is_foldable_1, ...]
-    for (let i = 0; i < numTracks; i++) {
-      if (trackDataResp[i] === true) continue; // skip group tracks
-
-      const gs = getOrCreateTrackGainState(i);
-      gs.currentGain = 0;
-
+    for (const i of routerState.fragmentTrackIndices) {
       const deviceInfo = routerState.deviceCache.get(i);
       if (deviceInfo) {
         oscBridge.send(
@@ -418,7 +386,8 @@ export function createAudioRouter(
           -1,
         );
       }
-
+      const gs = getOrCreateTrackGainState(i);
+      gs.currentGain = 0;
       oscBridge.send('/live/track/set/mute', i, 1);
     }
   }

@@ -609,15 +609,14 @@ describe('AudioRouter', () => {
       jest.useRealTimers();
     });
 
-    test('enables return track effects immediately', () => {
-      sendCue(router, state, {
-        type: 'collapse_gesture', attemptIndex: 0,
-      });
+    test('enables master delay device immediately', () => {
+      sendCue(router, state, { type: 'collapse_gesture', attemptIndex: 0 });
 
-      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
+      // V3: enables Master track delay device (not return track)
+      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 'master', 0, 0, 1);
     });
 
-    test('immediately fades all attempt tracks to 0 (no timing engine = instant mute)', () => {
+    test('fades all attempt tracks to 0 over wall-clock gain ramp', () => {
       // Unmute track 0 first
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
@@ -628,19 +627,26 @@ describe('AudioRouter', () => {
 
       sendCue(router, state, { type: 'collapse_gesture', attemptIndex: 0 });
 
-      // Return track immediately unmuted
-      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 0);
-      // Track 0 (which was unmuted) immediately muted via instant fade
+      // Advance through wall-clock gain ramp (COLLAPSE_TEMPO_RAMP_DURATION_MS = 2000ms)
+      jest.advanceTimersByTime(2000);
+
+      // Final ramp step hard-mutes all collapse tracks including track 0
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
     });
 
-    test('re-mutes return track after revealSequenceDurationMs', () => {
+    test('stops transport after revealSequenceDurationMs', async () => {
       sendCue(router, state, { type: 'collapse_gesture', attemptIndex: 0 });
+
+      // Advance past OSC tempo query timeout (1000ms) then flush microtasks
+      // so the async handleCollapseGesture can resume and schedule the cleanup timer
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+
       mockSend.mockClear();
+      // Cleanup timer fires at revealSequenceDurationMs (3000ms) after it was scheduled
+      jest.advanceTimersByTime(3000);
 
-      jest.advanceTimersByTime(3000); // revealSequenceDurationMs
-
-      expect(mockSend).toHaveBeenCalledWith('/live/return/set/mute', 0, 1);
+      expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
     });
   });
 
