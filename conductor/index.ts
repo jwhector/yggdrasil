@@ -24,11 +24,33 @@ export { createHealthBar, calculateDrain, applyDrain, isCollapsed } from './heal
 export { generateFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
 
-// Export consensus game functions
-export { calculateConvergence, resolveRound, adjustThreshold } from './consensus-game';
-
 // Export performer mix functions
 export { queueChange, cancelPending, firePendingChanges } from './performer-mix';
+
+// Export assembly functions
+export { initializeAssembly, joinGroup, assignUndecided, getGroupSizes, getEmptyGroups } from './assembly';
+
+// Export deliberation functions
+export {
+  initializeDeliberation,
+  submitGroupVote,
+  getGroupVoteCounts,
+  resolveDeliberation,
+  volunteerAsAmbassador,
+  resolveAmbassadors,
+  getAvailableFragmentsForLayer,
+} from './deliberation';
+
+// Export ceremony functions
+export {
+  initializeCeremony,
+  callNextAmbassador,
+  processAltarLockIn,
+  isCeremonyComplete,
+  forceLockIn,
+  forfeitLayer,
+  skipToLayer,
+} from './ceremony';
 
 // Export NPC functions
 export { getNpcMessage } from './npc';

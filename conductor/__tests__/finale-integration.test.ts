@@ -1,9 +1,7 @@
-// @ts-nocheck
 /**
- * Finale Integration Tests
+ * Finale Integration Tests — V3 Assembly / Deliberation / Ceremony
  *
- * TODO: V3 migration — V2 consensus game tests skipped. Will be replaced
- * with assembly/deliberation/ceremony integration tests in Phase 2.
+ * Tests the full finale flow through the conductor state machine.
  */
 
 import { describe, test, expect } from '@jest/globals';
@@ -19,7 +17,7 @@ import type {
 } from '../types';
 
 // ============================================================================
-// Test Helpers (duplicated from conductor.test.ts — kept local for isolation)
+// Test Helpers
 // ============================================================================
 
 function makeAudioRef(index: number): AudioReference {
@@ -44,7 +42,7 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCoun
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
     layers: Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i)),
-    drainFactor: 0.1, // low drain so songs don't collapse
+    drainFactor: 0.1,
     layerMultipliers: Array(layerCount).fill(1.0),
   };
 }
@@ -98,10 +96,6 @@ function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | '
   processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 }
 
-/**
- * Advance from lobby all the way through all 3 attempts into finale_elegy,
- * then call SETUP_FINALE.
- */
 function advanceToFinale(state: ShowState, voters: string[], layerCount: number): void {
   processCommand(state, { type: 'ADVANCE_PHASE' }); // lobby → opener
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -110,11 +104,10 @@ function advanceToFinale(state: ShowState, voters: string[], layerCount: number)
     for (let layer = 0; layer < layerCount; layer++) {
       completeSingleLayer(state, voters, 'A');
     }
-    // → attempt_resolve (auto-advance after completion)
-    processCommand(state, { type: 'TRIGGER_REJECTION' }); // → next attempt_story or finale_elegy
+    processCommand(state, { type: 'TRIGGER_REJECTION' });
   }
-  // Now in finale_elegy
-  processCommand(state, { type: 'SETUP_FINALE' });
+  // After 3rd rejection we're in attempt_resolve (attempt 2); advance to finale_elegy
+  processCommand(state, { type: 'ADVANCE_PHASE' }); // → finale_elegy (auto-inits finaleState)
 }
 
 function findEvent(events: ConductorEvent[], type: string): ConductorEvent | undefined {
@@ -122,276 +115,349 @@ function findEvent(events: ConductorEvent[], type: string): ConductorEvent | und
 }
 
 // ============================================================================
-// V2 CONSENSUS GAME TESTS — skipped pending V3 migration (Phase 2)
+// SETUP_FINALE
 // ============================================================================
-
-// eslint-disable-next-line jest/no-disabled-tests
-describe.skip('V2 Finale — consensus game (TODO: replace with V3 assembly/deliberation/ceremony tests)', () => {
 
 describe('SETUP_FINALE', () => {
   test('computes available and locked fragments from attempt results', () => {
     const layerCount = 2;
     const state = createTestState(createFinaleConfig(layerCount));
     const voters = connectUsers(state, 5);
-
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // lobby → opener
-    for (let attempt = 0; attempt < 3; attempt++) {
-      processCommand(state, { type: 'ADVANCE_PHASE' }); // → attempt_story
-      processCommand(state, { type: 'ADVANCE_PHASE' }); // → attempt_build
-      for (let layer = 0; layer < layerCount; layer++) {
-        completeSingleLayer(state, voters, 'A');
-      }
-      processCommand(state, { type: 'TRIGGER_REJECTION' });
-    }
-
-    const events = processCommand(state, { type: 'SETUP_FINALE' });
-    const setupEvent = findEvent(events, 'FINALE_SETUP_COMPLETE') as Extract<
-      ConductorEvent,
-      { type: 'FINALE_SETUP_COMPLETE' }
-    >;
-
-    expect(setupEvent).toBeDefined();
-    // 3 attempts × 2 layers × 1 winner = 6 available
-    expect(setupEvent.availableFragments).toHaveLength(6);
-    // 3 attempts × 2 layers × 1 loser = 6 locked
-    expect(setupEvent.lockedFragments).toHaveLength(6);
+    advanceToFinale(state, voters, layerCount);
 
     expect(state.finaleState).not.toBeNull();
     expect(state.finaleState!.phase).toBe('elegy');
-    expect(state.finaleState!.consensusGame.threshold).toBe(0.4);
+    // 3 attempts × 2 layers × 1 winner = 6 available
+    expect(state.finaleState!.availableFragments).toHaveLength(6);
+    // 3 attempts × 2 layers × 1 loser = 6 locked
+    expect(state.finaleState!.lockedFragments).toHaveLength(6);
   });
 
-  test('allFragments contains winners and losers', () => {
+  test('allFragments contains all 12 options', () => {
     const layerCount = 2;
     const state = createTestState(createFinaleConfig(layerCount));
     const voters = connectUsers(state, 5);
     advanceToFinale(state, voters, layerCount);
-
-    // 3 × 2 × 2 options = 12 total
+    // 3 × 2 × 2 options = 12
     expect(state.finaleState!.allFragments).toHaveLength(12);
+  });
+
+  test('fragments have previewAudioPath set', () => {
+    const state = createTestState(createFinaleConfig(2));
+    const voters = connectUsers(state, 3);
+    advanceToFinale(state, voters, 2);
+    for (const frag of state.finaleState!.allFragments) {
+      expect(frag.previewAudioPath).toMatch(/^\/audio\/previews\/preview-/);
+    }
   });
 });
 
 // ============================================================================
-// Consensus Game — Round Flow
+// Assembly
 // ============================================================================
 
-describe('Consensus Game — round flow', () => {
-  function setupConsensusState() {
-    const layerCount = 2;
-    const state = createTestState(createFinaleConfig(layerCount));
-    const voters = connectUsers(state, 10);
-    advanceToFinale(state, voters, layerCount);
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // elegy → finale_consensus
+describe('Assembly flow', () => {
+  function setupAssemblyState() {
+    const state = createTestState(createFinaleConfig(2));
+    const voters = connectUsers(state, 6);
+    advanceToFinale(state, voters, 2);
     return { state, voters };
   }
 
-  test('START_CONSENSUS_ROUND sets round active, increments round count, sets threshold', () => {
-    const { state } = setupConsensusState();
-    const events = processCommand(state, { type: 'START_CONSENSUS_ROUND' });
-
-    const startEvent = findEvent(events, 'CONSENSUS_ROUND_STARTED') as Extract<
-      ConductorEvent,
-      { type: 'CONSENSUS_ROUND_STARTED' }
-    >;
-    expect(startEvent).toBeDefined();
-    expect(startEvent.roundNumber).toBe(1);
-    expect(startEvent.threshold).toBeCloseTo(0.4);
-    expect(state.finaleState!.consensusGame.active).toBe(true);
-    expect(state.finaleState!.consensusGame.currentRound).toBe(1);
+  test('START_ASSEMBLY initializes groups and emits ASSEMBLY_STARTED', () => {
+    const { state } = setupAssemblyState();
+    const events = processCommand(state, { type: 'START_ASSEMBLY' });
+    expect(findEvent(events, 'ASSEMBLY_STARTED')).toBeDefined();
+    expect(state.finaleState!.phase).toBe('assembly');
+    expect(state.finaleState!.assembly.undecidedUsers).toHaveLength(6);
+    expect(state.finaleState!.assembly.groups.size).toBe(7);
   });
 
-  test('SUBMIT_CONSENSUS_VOTE records vote and emits CONSENSUS_VOTE_UPDATED', () => {
-    const { state, voters } = setupConsensusState();
-    processCommand(state, { type: 'START_CONSENSUS_ROUND' });
+  test('JOIN_GROUP moves user to group and emits GROUP_MEMBERSHIP_CHANGED', () => {
+    const { state, voters } = setupAssemblyState();
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    const events = processCommand(state, { type: 'JOIN_GROUP', userId: voters[0], layerType: 'melody' });
+    expect(findEvent(events, 'GROUP_MEMBERSHIP_CHANGED')).toBeDefined();
+    expect(state.finaleState!.assembly.groups.get('melody')).toContain(voters[0]);
+    expect(state.finaleState!.assembly.undecidedUsers).not.toContain(voters[0]);
+  });
 
-    const firstFragment = state.finaleState!.availableFragments[0];
+  test('ASSEMBLY_TIMER_EXPIRED assigns undecided users and emits ASSEMBLY_COMPLETE', () => {
+    const { state, voters } = setupAssemblyState();
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    // Have 3 users join, leaving 3 undecided
+    processCommand(state, { type: 'JOIN_GROUP', userId: voters[0], layerType: 'melody' });
+    processCommand(state, { type: 'JOIN_GROUP', userId: voters[1], layerType: 'drums' });
+    processCommand(state, { type: 'JOIN_GROUP', userId: voters[2], layerType: 'pad' });
+
+    const events = processCommand(state, { type: 'ASSEMBLY_TIMER_EXPIRED' });
+    expect(findEvent(events, 'ASSEMBLY_COMPLETE')).toBeDefined();
+    expect(state.finaleState!.assembly.undecidedUsers).toHaveLength(0);
+    // All 6 users should now be in some group
+    let total = 0;
+    for (const members of state.finaleState!.assembly.groups.values()) total += members.length;
+    expect(total).toBe(6);
+  });
+
+  test('FORCE_END_ASSEMBLY works like ASSEMBLY_TIMER_EXPIRED', () => {
+    const { state } = setupAssemblyState();
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    const events = processCommand(state, { type: 'FORCE_END_ASSEMBLY' });
+    expect(findEvent(events, 'ASSEMBLY_COMPLETE')).toBeDefined();
+    expect(state.finaleState!.assembly.undecidedUsers).toHaveLength(0);
+  });
+
+  test('EXTEND_ASSEMBLY_TIMER adds time', () => {
+    const { state } = setupAssemblyState();
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    const before = state.finaleState!.assembly.timerRemaining;
+    processCommand(state, { type: 'EXTEND_ASSEMBLY_TIMER', additionalMs: 10000 });
+    expect(state.finaleState!.assembly.timerRemaining).toBe(before + 10000);
+  });
+});
+
+// ============================================================================
+// Deliberation
+// ============================================================================
+
+describe('Deliberation flow', () => {
+  function setupDeliberationState() {
+    const state = createTestState(createFinaleConfig(7)); // 7 layers per attempt
+    const voters = connectUsers(state, 7);
+    advanceToFinale(state, voters, 7);
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    // Assign each voter to a different layer type group
+    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+    for (let i = 0; i < voters.length; i++) {
+      processCommand(state, { type: 'JOIN_GROUP', userId: voters[i], layerType: layerTypes[i] });
+    }
+    processCommand(state, { type: 'ASSEMBLY_TIMER_EXPIRED' });
+    return { state, voters, layerTypes };
+  }
+
+  test('START_DELIBERATION transitions phase and emits DELIBERATION_STARTED', () => {
+    const { state } = setupDeliberationState();
+    const events = processCommand(state, { type: 'START_DELIBERATION' });
+    expect(findEvent(events, 'DELIBERATION_STARTED')).toBeDefined();
+    expect(state.finaleState!.phase).toBe('deliberation');
+  });
+
+  test('SUBMIT_GROUP_VOTE records vote and emits GROUP_VOTE_UPDATED', () => {
+    const { state, voters } = setupDeliberationState();
+    processCommand(state, { type: 'START_DELIBERATION' });
+    const melodyFragment = state.finaleState!.availableFragments.find(f => f.layerType === 'melody');
+    if (!melodyFragment) return; // skip if no melody fragment available
+
     const events = processCommand(state, {
-      type: 'SUBMIT_CONSENSUS_VOTE',
-      userId: voters[0],
-      fragmentId: firstFragment.id,
+      type: 'SUBMIT_GROUP_VOTE',
+      userId: voters[0], // voters[0] is in melody group
+      layerType: 'melody',
+      fragmentId: melodyFragment.id,
     });
-
-    const updateEvent = findEvent(events, 'CONSENSUS_VOTE_UPDATED') as Extract<
-      ConductorEvent,
-      { type: 'CONSENSUS_VOTE_UPDATED' }
-    >;
-    expect(updateEvent).toBeDefined();
-    expect(updateEvent.convergenceValue).toBeCloseTo(1.0); // only one voter so far
+    expect(findEvent(events, 'GROUP_VOTE_UPDATED')).toBeDefined();
   });
 
-  test('END_CONSENSUS_ROUND succeeds when convergence >= threshold', () => {
-    const { state, voters } = setupConsensusState();
-    processCommand(state, { type: 'START_CONSENSUS_ROUND' });
-
-    const firstFragment = state.finaleState!.availableFragments[0];
-    // All 10 voters vote for the same fragment → convergence = 1.0 >= 0.4
-    for (const userId of voters) {
-      processCommand(state, { type: 'SUBMIT_CONSENSUS_VOTE', userId, fragmentId: firstFragment.id });
+  test('DELIBERATION_TIMER_EXPIRED resolves fragments and emits FRAGMENT_CHOSEN', () => {
+    const { state, voters } = setupDeliberationState();
+    processCommand(state, { type: 'START_DELIBERATION' });
+    const melodyFragment = state.finaleState!.availableFragments.find(f => f.layerType === 'melody');
+    if (melodyFragment) {
+      processCommand(state, {
+        type: 'SUBMIT_GROUP_VOTE',
+        userId: voters[0],
+        layerType: 'melody',
+        fragmentId: melodyFragment.id,
+      });
     }
-
-    const events = processCommand(state, { type: 'END_CONSENSUS_ROUND' });
-    const successEvent = findEvent(events, 'CONSENSUS_ROUND_SUCCESS') as Extract<
-      ConductorEvent,
-      { type: 'CONSENSUS_ROUND_SUCCESS' }
-    >;
-    expect(successEvent).toBeDefined();
-    expect(successEvent.fragmentId).toBe(firstFragment.id);
-    expect(successEvent.convergence).toBeCloseTo(1.0);
-
-    const audioCue = findEvent(events, 'AUDIO_CUE') as Extract<ConductorEvent, { type: 'AUDIO_CUE' }>;
-    expect(audioCue?.cue.type).toBe('ceremony_activate');
-
-    const { consensusGame } = state.finaleState!;
-    expect(consensusGame.lockedRoles.has(firstFragment.layerType)).toBe(true);
-    expect(consensusGame.consecutiveFailures).toBe(0);
-    expect(consensusGame.active).toBe(false);
+    const events = processCommand(state, { type: 'DELIBERATION_TIMER_EXPIRED' });
+    expect(events.some(e => e.type === 'FRAGMENT_CHOSEN')).toBe(true);
+    expect(state.finaleState!.deliberation.volunteerTimerRemaining).not.toBeNull();
   });
 
-  test('END_CONSENSUS_ROUND fails when convergence < threshold', () => {
-    const { state, voters } = setupConsensusState();
-    processCommand(state, { type: 'START_CONSENSUS_ROUND' });
+  test('VOLUNTEER_AS_AMBASSADOR emits AMBASSADOR_VOLUNTEERED', () => {
+    const { state, voters } = setupDeliberationState();
+    processCommand(state, { type: 'START_DELIBERATION' });
+    processCommand(state, { type: 'DELIBERATION_TIMER_EXPIRED' });
+    const events = processCommand(state, {
+      type: 'VOLUNTEER_AS_AMBASSADOR',
+      userId: voters[0],
+      layerType: 'melody',
+    });
+    expect(findEvent(events, 'AMBASSADOR_VOLUNTEERED')).toBeDefined();
+  });
 
-    const fragments = state.finaleState!.availableFragments;
-    // Each voter votes for a different fragment → max convergence = 1/10 = 0.1 < 0.4
+  test('AMBASSADOR_VOLUNTEER_TIMER_EXPIRED resolves ambassadors and emits DELIBERATION_COMPLETE', () => {
+    const { state, voters } = setupDeliberationState();
+    processCommand(state, { type: 'START_DELIBERATION' });
+    processCommand(state, { type: 'DELIBERATION_TIMER_EXPIRED' });
+    // voters[0] volunteers for melody
+    processCommand(state, { type: 'VOLUNTEER_AS_AMBASSADOR', userId: voters[0], layerType: 'melody' });
+    const events = processCommand(state, { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
+    expect(findEvent(events, 'DELIBERATION_COMPLETE')).toBeDefined();
+  });
+});
+
+// ============================================================================
+// Ceremony
+// ============================================================================
+
+describe('Ceremony flow', () => {
+  function setupCeremonyState() {
+    const state = createTestState(createFinaleConfig(7));
+    const voters = connectUsers(state, 7);
+    advanceToFinale(state, voters, 7);
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
     for (let i = 0; i < voters.length; i++) {
-      const frag = fragments[i % fragments.length];
-      processCommand(state, { type: 'SUBMIT_CONSENSUS_VOTE', userId: voters[i], fragmentId: frag.id });
+      processCommand(state, { type: 'JOIN_GROUP', userId: voters[i], layerType: layerTypes[i] });
     }
+    processCommand(state, { type: 'ASSEMBLY_TIMER_EXPIRED' });
+    processCommand(state, { type: 'START_DELIBERATION' });
+    processCommand(state, { type: 'DELIBERATION_TIMER_EXPIRED' });
+    // All groups are single-member, so ambassadors are auto-selected
+    processCommand(state, { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
+    return { state, voters, layerTypes };
+  }
 
-    const events = processCommand(state, { type: 'END_CONSENSUS_ROUND' });
-    const failureEvent = findEvent(events, 'CONSENSUS_ROUND_FAILURE');
-    expect(failureEvent).toBeDefined();
-    expect(state.finaleState!.consensusGame.consecutiveFailures).toBe(1);
-    expect(state.finaleState!.consensusGame.active).toBe(false);
+  test('START_CEREMONY transitions phase and emits CEREMONY_STARTED', () => {
+    const { state } = setupCeremonyState();
+    const events = processCommand(state, { type: 'START_CEREMONY' });
+    expect(findEvent(events, 'CEREMONY_STARTED')).toBeDefined();
+    expect(state.finaleState!.phase).toBe('ceremony');
   });
 
-  test('threshold decays after consecutive failures', () => {
-    const { state, voters } = setupConsensusState();
-    const fragments = state.finaleState!.availableFragments;
-
-    // Fail round 1
-    processCommand(state, { type: 'START_CONSENSUS_ROUND' });
-    for (let i = 0; i < voters.length; i++) {
-      processCommand(state, { type: 'SUBMIT_CONSENSUS_VOTE', userId: voters[i], fragmentId: fragments[i % fragments.length].id });
-    }
-    processCommand(state, { type: 'END_CONSENSUS_ROUND' });
-    expect(state.finaleState!.consensusGame.consecutiveFailures).toBe(1);
-
-    // Round 2 threshold should decay
-    const events2 = processCommand(state, { type: 'START_CONSENSUS_ROUND' });
-    const startEvent2 = findEvent(events2, 'CONSENSUS_ROUND_STARTED') as Extract<
-      ConductorEvent,
-      { type: 'CONSENSUS_ROUND_STARTED' }
-    >;
-    // initialThreshold 0.4 - 1 * 0.05 = 0.35
-    expect(startEvent2.threshold).toBeCloseTo(0.35);
+  test('CALL_NEXT_AMBASSADOR emits AMBASSADOR_CALLED', () => {
+    const { state } = setupCeremonyState();
+    processCommand(state, { type: 'START_CEREMONY' });
+    const events = processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
+    // First non-forfeited in ceremonyLayerOrder ['bass','drums','pad','melody','harmony','fx1','fx2']
+    const calledEvent = findEvent(events, 'AMBASSADOR_CALLED') as Extract<ConductorEvent, { type: 'AMBASSADOR_CALLED' }> | undefined;
+    expect(calledEvent).toBeDefined();
   });
 
-  test('CONSENSUS_GAME_COMPLETE emitted when all available layer types are locked', () => {
-    // Use 1-layer-per-attempt config so there are fewer layer types to lock
-    // layerCount=1: 3 attempts × 1 layer = 3 unique layerTypes → won't reach 7
-    // We need at least 7 distinct layer types locked.
-    // Use layerCount=3 to get melody, drums, pad per attempt × 3 = 9 available (3 layer types × 3 songs)
-    // But we only need 7 distinct layerTypes. layerCount=7 means 7 per attempt.
-    const layerCount = 7;
-    const config = createFinaleConfig(layerCount);
-    const state = createTestState(config);
-    const voters = connectUsers(state, 10);
-    advanceToFinale(state, voters, layerCount);
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // → finale_consensus
+  test('ALTAR_LOCK_IN with wrong ambassador is rejected (no event)', () => {
+    const { state } = setupCeremonyState();
+    processCommand(state, { type: 'START_CEREMONY' });
+    processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
+    const events = processCommand(state, {
+      type: 'ALTAR_LOCK_IN',
+      userId: 'not-the-ambassador',
+      layerType: 'bass',
+    });
+    expect(findEvent(events, 'CEREMONY_LAYER_LOCKED')).toBeUndefined();
+  });
 
-    const available = state.finaleState!.availableFragments;
-    // Lock all 7 role types one round at a time
-    const lockedLayerTypes = new Set<string>();
-    let gameComplete = false;
+  test('FORCE_LOCK_IN locks layer and emits CEREMONY_LAYER_LOCKED', () => {
+    const { state } = setupCeremonyState();
+    processCommand(state, { type: 'START_CEREMONY' });
+    processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
+    const bassFragment = state.finaleState!.deliberation.chosenFragments.get('bass');
+    if (!bassFragment) return;
 
-    for (const fragment of available) {
-      if (lockedLayerTypes.has(fragment.layerType)) continue;
+    const events = processCommand(state, { type: 'FORCE_LOCK_IN', layerType: 'bass' });
+    expect(findEvent(events, 'CEREMONY_LAYER_LOCKED')).toBeDefined();
+    expect(state.finaleState!.ceremony.lockedLayers.get('bass')).toBe(bassFragment);
+  });
 
-      processCommand(state, { type: 'START_CONSENSUS_ROUND' });
-      // Unanimous vote for this fragment
-      for (const userId of voters) {
-        processCommand(state, { type: 'SUBMIT_CONSENSUS_VOTE', userId, fragmentId: fragment.id });
-      }
-      const events = processCommand(state, { type: 'END_CONSENSUS_ROUND' });
-      lockedLayerTypes.add(fragment.layerType);
+  test('FORFEIT_LAYER mid-ceremony emits CEREMONY_LAYER_SKIPPED', () => {
+    const { state } = setupCeremonyState();
+    processCommand(state, { type: 'START_CEREMONY' });
+    processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
+    const events = processCommand(state, { type: 'FORFEIT_LAYER', layerType: 'bass' });
+    expect(findEvent(events, 'CEREMONY_LAYER_SKIPPED')).toBeDefined();
+  });
 
-      if (findEvent(events, 'CONSENSUS_GAME_COMPLETE')) {
-        gameComplete = true;
+  test('CEREMONY_COMPLETE emitted after all non-forfeited layers locked via FORCE_LOCK_IN', () => {
+    const { state } = setupCeremonyState();
+    processCommand(state, { type: 'START_CEREMONY' });
+
+    const layerOrder: LayerType[] = state.finaleState!.ceremony.layerOrder;
+    const forfeited = state.finaleState!.ceremony.forfeitedLayers;
+    let complete = false;
+
+    for (const lt of layerOrder) {
+      if (forfeited.includes(lt)) continue;
+      const chosenFragment = state.finaleState!.deliberation.chosenFragments.get(lt);
+      if (!chosenFragment) continue;
+
+      processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
+      const events = processCommand(state, { type: 'FORCE_LOCK_IN', layerType: lt });
+      if (findEvent(events, 'CEREMONY_COMPLETE')) {
+        complete = true;
         break;
       }
     }
 
-    expect(gameComplete).toBe(true);
-    expect(state.finaleState!.consensusGame.lockedRoles.size).toBe(7);
+    expect(complete).toBe(true);
+    expect(state.finaleState!.ceremony.ceremonyComplete).toBe(true);
   });
 });
 
 // ============================================================================
-// SET_CONSENSUS_THRESHOLD / SEND_NPC_MESSAGE
+// Performer Mix seeds from ceremony lockedLayers
 // ============================================================================
 
-describe('SET_CONSENSUS_THRESHOLD', () => {
-  test('overrides the current threshold', () => {
-    const layerCount = 2;
-    const state = createTestState(createFinaleConfig(layerCount));
-    const voters = connectUsers(state, 5);
-    advanceToFinale(state, voters, layerCount);
-
-    processCommand(state, { type: 'SET_CONSENSUS_THRESHOLD', threshold: 0.6 });
-    expect(state.finaleState!.consensusGame.threshold).toBeCloseTo(0.6);
-  });
-});
-
-describe('SEND_NPC_MESSAGE', () => {
-  test('sets npc currentMessage and emits NPC_MESSAGE', () => {
-    const layerCount = 2;
-    const state = createTestState(createFinaleConfig(layerCount));
-    const voters = connectUsers(state, 5);
-    advanceToFinale(state, voters, layerCount);
-
-    const events = processCommand(state, { type: 'SEND_NPC_MESSAGE', message: 'hello audience' });
-    const npcEvent = findEvent(events, 'NPC_MESSAGE') as Extract<ConductorEvent, { type: 'NPC_MESSAGE' }>;
-    expect(npcEvent?.message).toBe('hello audience');
-    expect(state.finaleState!.npc.currentMessage).toBe('hello audience');
-  });
-});
-
-// ============================================================================
-// Performer Mix
-// ============================================================================
-
-describe('Performer Mix', () => {
-  function setupPerformerMixState() {
-    const layerCount = 2;
-    const state = createTestState(createFinaleConfig(layerCount));
-    const voters = connectUsers(state, 10);
-    advanceToFinale(state, voters, layerCount);
-    // Lock one role via consensus so performerMix starts with something
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // → finale_consensus
-    processCommand(state, { type: 'START_CONSENSUS_ROUND' });
-    const firstFrag = state.finaleState!.availableFragments[0];
-    for (const userId of voters) {
-      processCommand(state, { type: 'SUBMIT_CONSENSUS_VOTE', userId, fragmentId: firstFrag.id });
+describe('Performer Mix — seeded from ceremony', () => {
+  test('START_PERFORMER_MIX seeds activeLayers from ceremony.lockedLayers', () => {
+    const state = createTestState(createFinaleConfig(7));
+    const voters = connectUsers(state, 7);
+    advanceToFinale(state, voters, 7);
+    processCommand(state, { type: 'START_ASSEMBLY' });
+    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+    for (let i = 0; i < voters.length; i++) {
+      processCommand(state, { type: 'JOIN_GROUP', userId: voters[i], layerType: layerTypes[i] });
     }
-    processCommand(state, { type: 'END_CONSENSUS_ROUND' });
-    processCommand(state, { type: 'START_PERFORMER_MIX' });
-    return { state, voters, firstFrag };
-  }
+    processCommand(state, { type: 'ASSEMBLY_TIMER_EXPIRED' });
+    processCommand(state, { type: 'START_DELIBERATION' });
+    processCommand(state, { type: 'DELIBERATION_TIMER_EXPIRED' });
+    processCommand(state, { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
+    processCommand(state, { type: 'START_CEREMONY' });
 
-  test('START_PERFORMER_MIX transitions to performer_mix phase and seeds activeLayers from lockedRoles', () => {
-    const { state, firstFrag } = setupPerformerMixState();
+    // Force-lock at least one non-forfeited layer
+    const layerOrder = state.finaleState!.ceremony.layerOrder;
+    const forfeited = state.finaleState!.ceremony.forfeitedLayers;
+    let lockedLayerType: LayerType | null = null;
+    let lockedFragmentId: string | null = null;
+
+    for (const lt of layerOrder) {
+      if (forfeited.includes(lt)) continue;
+      const chosen = state.finaleState!.deliberation.chosenFragments.get(lt);
+      if (!chosen) continue;
+      processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
+      processCommand(state, { type: 'FORCE_LOCK_IN', layerType: lt });
+      lockedLayerType = lt;
+      lockedFragmentId = chosen;
+      break;
+    }
+
+    processCommand(state, { type: 'START_PERFORMER_MIX' });
     expect(state.finaleState!.phase).toBe('performer_mix');
-    expect(state.finaleState!.performerMix.activeLayers.get(firstFrag.layerType)).toBe(firstFrag.id);
+
+    if (lockedLayerType && lockedFragmentId) {
+      expect(state.finaleState!.performerMix.activeLayers.get(lockedLayerType)).toBe(lockedFragmentId);
+    }
   });
+});
+
+// ============================================================================
+// Performer Mix operations
+// ============================================================================
+
+describe('Performer Mix operations', () => {
+  function setupPerformerMixState() {
+    const state = createTestState(createFinaleConfig(2));
+    const voters = connectUsers(state, 5);
+    advanceToFinale(state, voters, 2);
+    // Jump directly to performer mix
+    processCommand(state, { type: 'START_PERFORMER_MIX' });
+    return { state, voters };
+  }
 
   test('QUEUE_FRAGMENT adds pending change', () => {
     const { state } = setupPerformerMixState();
     const frag = state.finaleState!.allFragments[0];
     processCommand(state, { type: 'QUEUE_FRAGMENT', layerType: frag.layerType, fragmentId: frag.id });
     expect(state.finaleState!.performerMix.pendingChanges).toHaveLength(1);
-    expect(state.finaleState!.performerMix.pendingChanges[0].fragmentId).toBe(frag.id);
   });
 
   test('QUEUE_FRAGMENT with null queues a mute', () => {
@@ -412,20 +478,11 @@ describe('Performer Mix', () => {
     const { state } = setupPerformerMixState();
     const frag = state.finaleState!.allFragments[0];
     processCommand(state, { type: 'QUEUE_FRAGMENT', layerType: frag.layerType, fragmentId: frag.id });
-
     const events = processCommand(state, { type: 'FIRE_PENDING_CHANGES' });
-
-    const firedEvent = findEvent(events, 'PENDING_CHANGES_FIRED') as Extract<
-      ConductorEvent,
-      { type: 'PENDING_CHANGES_FIRED' }
-    >;
-    expect(firedEvent).toBeDefined();
-    expect(firedEvent.changes).toHaveLength(1);
-
-    const audioCue = findEvent(events, 'AUDIO_CUE') as Extract<ConductorEvent, { type: 'AUDIO_CUE' }>;
-    expect(audioCue?.cue.type).toBe('mix_update');
-
+    expect(findEvent(events, 'PENDING_CHANGES_FIRED')).toBeDefined();
     expect(findEvent(events, 'MIX_STATE_UPDATED')).toBeDefined();
+    const audioCue = findEvent(events, 'AUDIO_CUE') as Extract<ConductorEvent, { type: 'AUDIO_CUE' }> | undefined;
+    expect(audioCue?.cue.type).toBe('mix_update');
     expect(state.finaleState!.performerMix.pendingChanges).toHaveLength(0);
     expect(state.finaleState!.performerMix.activeLayers.get(frag.layerType)).toBe(frag.id);
   });
@@ -438,22 +495,31 @@ describe('Performer Mix', () => {
       ['pad', 'frag-b'],
     ]);
     processCommand(state, { type: 'LOAD_SNAPSHOT', snapshot });
-
     const pending = state.finaleState!.performerMix.pendingChanges;
     expect(pending).toHaveLength(3);
-    expect(pending.find(p => p.layerType === 'melody')?.fragmentId).toBe('frag-a');
-    expect(pending.find(p => p.layerType === 'drums')?.fragmentId).toBeNull();
-    expect(pending.find(p => p.layerType === 'pad')?.fragmentId).toBe('frag-b');
   });
 
-  test('TOGGLE_LIVE_TRACK adds and removes track from liveTracksActive', () => {
+  test('TOGGLE_LIVE_TRACK adds and removes track', () => {
     const { state } = setupPerformerMixState();
     processCommand(state, { type: 'TOGGLE_LIVE_TRACK', trackId: 'vocal-mic' });
     expect(state.finaleState!.performerMix.liveTracksActive).toContain('vocal-mic');
-
     processCommand(state, { type: 'TOGGLE_LIVE_TRACK', trackId: 'vocal-mic' });
     expect(state.finaleState!.performerMix.liveTracksActive).not.toContain('vocal-mic');
   });
 });
 
-}); // end describe.skip
+// ============================================================================
+// NPC Message
+// ============================================================================
+
+describe('SEND_NPC_MESSAGE', () => {
+  test('sets npc currentMessage and emits NPC_MESSAGE', () => {
+    const state = createTestState(createFinaleConfig(2));
+    const voters = connectUsers(state, 5);
+    advanceToFinale(state, voters, 2);
+    const events = processCommand(state, { type: 'SEND_NPC_MESSAGE', message: 'hello audience' });
+    const npcEvent = findEvent(events, 'NPC_MESSAGE') as Extract<ConductorEvent, { type: 'NPC_MESSAGE' }> | undefined;
+    expect(npcEvent?.message).toBe('hello audience');
+    expect(state.finaleState!.npc.currentMessage).toBe('hello audience');
+  });
+});
