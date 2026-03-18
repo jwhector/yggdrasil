@@ -81,6 +81,8 @@ export interface TimingEngine {
   dispose(): void;
   /** Check if engine is running */
   isRunning(): boolean;
+  /** Recover and restart finale timers after a server restart. */
+  recoverTimers(state: ShowState): void;
 
   // Beat callback scheduler
   /** Register a callback to fire at a specific absolute beat number. */
@@ -164,7 +166,9 @@ export function createTimingEngine(
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let consensusRoundTimer: NodeJS.Timeout | null = null;
+  let assemblyTimer: NodeJS.Timeout | null = null;
+  let deliberationTimer: NodeJS.Timeout | null = null;
+  let ambassadorVolunteerTimer: NodeJS.Timeout | null = null;
   let auditionState: AuditionTrackingState | null = null;
   let fallbackAuditionInterval: NodeJS.Timeout | null = null;
   let fallbackAuditionLoopIndex = 0;
@@ -285,35 +289,77 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
-  // Consensus Round Timer
+  // Finale Timers (Assembly, Deliberation, Ambassador Volunteer)
   // --------------------------------------------------------------------------
 
-  /**
-   * Start consensus round timer. Fires END_CONSENSUS_ROUND when duration expires.
-   */
-  function startConsensusRoundTimer(durationMs: number): void {
-    clearConsensusRoundTimer();
-
-    console.log(`[Timing] Consensus round timer: ${durationMs}ms`);
-    consensusRoundTimer = setTimeout(() => {
+  function startAssemblyTimer(durationMs: number): void {
+    clearAssemblyTimer();
+    console.log(`[Timing] Assembly timer: ${durationMs}ms`);
+    assemblyTimer = setTimeout(() => {
       if (!running) return;
       const state = getState();
-      if (state.phase === 'finale_consensus' && state.finaleState?.consensusGame.active) {
-        console.log('[Timing] Consensus round timer expired → END_CONSENSUS_ROUND');
-        sendCommand({ type: 'END_CONSENSUS_ROUND' });
+      if (state.phase === 'finale_assembly') {
+        console.log('[Timing] Assembly timer expired → ASSEMBLY_TIMER_EXPIRED');
+        sendCommand({ type: 'ASSEMBLY_TIMER_EXPIRED' });
       }
-      consensusRoundTimer = null;
+      assemblyTimer = null;
     }, durationMs);
   }
 
-  /**
-   * Clear the consensus round timer (round ended by other means).
-   */
-  function clearConsensusRoundTimer(): void {
-    if (consensusRoundTimer) {
-      clearTimeout(consensusRoundTimer);
-      consensusRoundTimer = null;
+  function clearAssemblyTimer(): void {
+    if (assemblyTimer) {
+      clearTimeout(assemblyTimer);
+      assemblyTimer = null;
     }
+  }
+
+  function startDeliberationTimer(durationMs: number): void {
+    clearDeliberationTimer();
+    console.log(`[Timing] Deliberation timer: ${durationMs}ms`);
+    deliberationTimer = setTimeout(() => {
+      if (!running) return;
+      const state = getState();
+      if (state.phase === 'finale_deliberation') {
+        console.log('[Timing] Deliberation timer expired → DELIBERATION_TIMER_EXPIRED');
+        sendCommand({ type: 'DELIBERATION_TIMER_EXPIRED' });
+      }
+      deliberationTimer = null;
+    }, durationMs);
+  }
+
+  function clearDeliberationTimer(): void {
+    if (deliberationTimer) {
+      clearTimeout(deliberationTimer);
+      deliberationTimer = null;
+    }
+  }
+
+  function startAmbassadorVolunteerTimer(durationMs: number): void {
+    clearAmbassadorVolunteerTimer();
+    console.log(`[Timing] Ambassador volunteer timer: ${durationMs}ms`);
+    ambassadorVolunteerTimer = setTimeout(() => {
+      if (!running) return;
+      const state = getState();
+      if (state.phase === 'finale_deliberation') {
+        console.log('[Timing] Ambassador volunteer timer expired → AMBASSADOR_VOLUNTEER_TIMER_EXPIRED');
+        // Conductor resolves all groups in one pass when this fires
+        sendCommand({ type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
+      }
+      ambassadorVolunteerTimer = null;
+    }, durationMs);
+  }
+
+  function clearAmbassadorVolunteerTimer(): void {
+    if (ambassadorVolunteerTimer) {
+      clearTimeout(ambassadorVolunteerTimer);
+      ambassadorVolunteerTimer = null;
+    }
+  }
+
+  function clearAllFinaleTimers(): void {
+    clearAssemblyTimer();
+    clearDeliberationTimer();
+    clearAmbassadorVolunteerTimer();
   }
 
   // --------------------------------------------------------------------------
@@ -629,7 +675,7 @@ export function createTimingEngine(
     // Don't schedule if paused
     if (state.paused) {
       cancelCurrentTimer();
-      clearConsensusRoundTimer();
+      clearAllFinaleTimers();
       return;
     }
 
@@ -682,28 +728,47 @@ export function createTimingEngine(
     if (showPhaseEvent) {
       cancelCurrentTimer();
       stopLoopTracking();
-      clearConsensusRoundTimer();
+      clearAllFinaleTimers();
 
       if (showPhaseEvent.phase === 'finale_performer_mix') {
         startLoopTracking();
       }
     }
 
-    // Consensus round started — set round timer
-    const roundStartedEvent = events.find(e => e.type === 'CONSENSUS_ROUND_STARTED') as
-      | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
+    // Assembly started → start assembly timer
+    const assemblyStartedEvent = events.find(e => e.type === 'ASSEMBLY_STARTED') as
+      | { type: 'ASSEMBLY_STARTED'; timerDuration: number }
       | undefined;
-
-    if (roundStartedEvent && state.finaleState) {
-      startConsensusRoundTimer(state.finaleState.consensusGame.roundTimeRemaining);
+    if (assemblyStartedEvent) {
+      startAssemblyTimer(assemblyStartedEvent.timerDuration);
     }
 
-    // Consensus round ended (success or failure) — clear timer
-    const roundEndedEvent = events.find(
-      e => e.type === 'CONSENSUS_ROUND_SUCCESS' || e.type === 'CONSENSUS_ROUND_FAILURE'
-    );
-    if (roundEndedEvent) {
-      clearConsensusRoundTimer();
+    // Assembly complete → clear assembly timer
+    if (events.some(e => e.type === 'ASSEMBLY_COMPLETE')) {
+      clearAssemblyTimer();
+    }
+
+    // Deliberation started → start deliberation timer
+    const deliberationStartedEvent = events.find(e => e.type === 'DELIBERATION_STARTED') as
+      | { type: 'DELIBERATION_STARTED'; timerDuration: number }
+      | undefined;
+    if (deliberationStartedEvent) {
+      startDeliberationTimer(deliberationStartedEvent.timerDuration);
+    }
+
+    // Deliberation timer resolved → clear main timer, start volunteer timer if set
+    if (events.some(e => e.type === 'FRAGMENT_CHOSEN')) {
+      clearDeliberationTimer();
+      const volunteerMs = state.finaleState?.deliberation.volunteerTimerRemaining;
+      if (volunteerMs && volunteerMs > 0) {
+        startAmbassadorVolunteerTimer(volunteerMs);
+      }
+    }
+
+    // Deliberation complete → clear all deliberation timers
+    if (events.some(e => e.type === 'DELIBERATION_COMPLETE')) {
+      clearDeliberationTimer();
+      clearAmbassadorVolunteerTimer();
     }
   }
 
@@ -767,8 +832,6 @@ export function createTimingEngine(
       }
     } else if (state.phase === 'finale_performer_mix') {
       startLoopTracking();
-    } else if (state.phase === 'finale_consensus' && state.finaleState?.consensusGame.active) {
-      startConsensusRoundTimer(state.finaleState.consensusGame.roundTimeRemaining);
     }
   }
 
@@ -780,7 +843,7 @@ export function createTimingEngine(
 
     running = false;
     cancelCurrentTimer();
-    clearConsensusRoundTimer();
+    clearAllFinaleTimers();
     stopAuditionTracking();
     stopLoopTracking();
     stopFallbackBeatTicker();
@@ -815,6 +878,49 @@ export function createTimingEngine(
     return running;
   }
 
+  /**
+   * Recover and restart finale timers after a server restart.
+   * Uses state.lastUpdated as an approximation of when the timer was last active.
+   */
+  function recoverTimers(state: ShowState): void {
+    if (!state.finaleState) return;
+
+    const elapsed = Date.now() - state.lastUpdated;
+
+    if (state.phase === 'finale_assembly') {
+      const remaining = state.finaleState.assembly.timerRemaining - elapsed;
+      if (remaining > 0) {
+        console.log(`[Timing] Recovering assembly timer: ${remaining}ms remaining`);
+        startAssemblyTimer(remaining);
+      } else {
+        console.log('[Timing] Assembly timer already expired on recovery → firing ASSEMBLY_TIMER_EXPIRED');
+        sendCommand({ type: 'ASSEMBLY_TIMER_EXPIRED' });
+      }
+    } else if (state.phase === 'finale_deliberation') {
+      const volunteerMs = state.finaleState.deliberation.volunteerTimerRemaining;
+      if (volunteerMs !== null) {
+        // Volunteer timer was active
+        const remaining = volunteerMs - elapsed;
+        if (remaining > 0) {
+          console.log(`[Timing] Recovering ambassador volunteer timer: ${remaining}ms remaining`);
+          startAmbassadorVolunteerTimer(remaining);
+        } else {
+          console.log('[Timing] Volunteer timer already expired on recovery → firing AMBASSADOR_VOLUNTEER_TIMER_EXPIRED');
+          sendCommand({ type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
+        }
+      } else {
+        const remaining = state.finaleState.deliberation.timerRemaining - elapsed;
+        if (remaining > 0) {
+          console.log(`[Timing] Recovering deliberation timer: ${remaining}ms remaining`);
+          startDeliberationTimer(remaining);
+        } else {
+          console.log('[Timing] Deliberation timer already expired on recovery → firing DELIBERATION_TIMER_EXPIRED');
+          sendCommand({ type: 'DELIBERATION_TIMER_EXPIRED' });
+        }
+      }
+    }
+  }
+
   return {
     start,
     stop,
@@ -822,6 +928,7 @@ export function createTimingEngine(
     onOSCMessage,
     dispose,
     isRunning,
+    recoverTimers,
     scheduleAtBeat,
     schedulePerBeat,
     cancelCallbacks,

@@ -346,40 +346,86 @@ describe('User persistence', () => {
   });
 });
 
-describe('Consensus round persistence', () => {
-  test('saves a successful consensus round', () => {
+describe('Finale persistence (V3)', () => {
+  test('saves a group assignment', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
+    // Need a user record first
+    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
+
     expect(() =>
-      db.saveConsensusRound('show-1', 1, 'frag-0-0-A', 0.8, 0.4, true)
+      db.saveGroupAssignment('show-1', 'user-1', 'melody', false)
     ).not.toThrow();
 
     db.close();
   });
 
-  test('saves a failed round with null fragmentId', () => {
+  test('saves an auto-assigned group assignment', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
+
+    expect(() =>
+      db.saveGroupAssignment('show-1', 'user-1', 'drums', true)
+    ).not.toThrow();
+
+    const assignments = db.getGroupAssignments('show-1');
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].autoAssigned).toBe(true);
+
+    db.close();
+  });
+
+  test('saves a group vote', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
+
+    expect(() =>
+      db.saveGroupVote('show-1', 'user-1', 'melody', 'frag-0-0-A')
+    ).not.toThrow();
+
+    const votes = db.getGroupVotes('show-1');
+    expect(votes).toHaveLength(1);
+    expect(votes[0].fragmentId).toBe('frag-0-0-A');
+
+    db.close();
+  });
+
+  test('saves a ceremony lock event', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
     expect(() =>
-      db.saveConsensusRound('show-1', 1, null, 0.3, 0.4, false)
+      db.saveCeremonyEvent('show-1', 'melody', 'user-1', 'frag-0-0-A', 'locked')
     ).not.toThrow();
+
+    const events = db.getCeremonyEvents('show-1');
+    expect(events).toHaveLength(1);
+    expect(events[0].eventType).toBe('locked');
 
     db.close();
   });
 
-  test('saves multiple rounds for same show', () => {
+  test('saves a ceremony forfeit event', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
-    db.saveConsensusRound('show-1', 1, null, 0.2, 0.4, false);
-    db.saveConsensusRound('show-1', 2, 'frag-0-0-A', 0.7, 0.35, true);
+    expect(() =>
+      db.saveCeremonyEvent('show-1', 'drums', null, null, 'forfeited')
+    ).not.toThrow();
 
-    db.close(); // No error = pass
+    const events = db.getCeremonyEvents('show-1');
+    expect(events[0].ambassadorUserId).toBeNull();
+    expect(events[0].fragmentId).toBeNull();
+
+    db.close();
   });
 });
 

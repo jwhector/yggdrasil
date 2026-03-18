@@ -59,14 +59,12 @@ const _DEFAULT_DRAIN_FACTOR = parseFloat(process.env.DEFAULT_DRAIN_FACTOR || '0.
 const _DEFAULT_LAYER_MULTIPLIERS = (process.env.DEFAULT_LAYER_MULTIPLIERS || '0.5,0.6,0.8,1.0,1.3,1.6,2.0')
   .split(',').map(Number);
 
-// Consensus Game timing (used as config overrides when not specified in show config)
-const _CONSENSUS_ROUND_DURATION_MS = parseInt(process.env.CONSENSUS_ROUND_DURATION_MS || '15000', 10);
-const _CONSENSUS_FIRST_ROUND_DURATION_MS = parseInt(process.env.CONSENSUS_FIRST_ROUND_DURATION_MS || '20000', 10);
-const _CONSENSUS_INITIAL_THRESHOLD = parseFloat(process.env.CONSENSUS_INITIAL_THRESHOLD || '0.4');
-const _CONSENSUS_FAILURE_THRESHOLD_DECAY = parseFloat(process.env.CONSENSUS_FAILURE_THRESHOLD_DECAY || '0.05');
-const _CONSENSUS_MIN_THRESHOLD = parseFloat(process.env.CONSENSUS_MIN_THRESHOLD || '0.25');
-const _CONSENSUS_INTER_ROUND_DELAY_MS = parseInt(process.env.CONSENSUS_INTER_ROUND_DELAY_MS || '3000', 10);
-const _CONSENSUS_SUCCESS_CELEBRATION_MS = parseInt(process.env.CONSENSUS_SUCCESS_CELEBRATION_MS || '6000', 10);
+// Finale timing overrides (env vars; defaults are drawn from show config)
+const _ASSEMBLY_TIMER_MS = parseInt(process.env.ASSEMBLY_TIMER_MS || '120000', 10);
+const _DELIBERATION_TIMER_MS = parseInt(process.env.DELIBERATION_TIMER_MS || '180000', 10);
+const _AMBASSADOR_VOLUNTEER_TIMER_MS = parseInt(process.env.AMBASSADOR_VOLUNTEER_TIMER_MS || '30000', 10);
+// Suppress unused variable warnings — these are available as env-var overrides
+void _ASSEMBLY_TIMER_MS; void _DELIBERATION_TIMER_MS; void _AMBASSADOR_VOLUNTEER_TIMER_MS;
 
 async function main() {
   // Initialize Next.js
@@ -264,6 +262,11 @@ async function main() {
   if (timingEngine) {
     timingEngine.start();
     console.log('[Server] Timing engine started');
+
+    // Recover any in-progress finale timers (assembly/deliberation) after restart
+    if (currentState.finaleState) {
+      timingEngine.recoverTimers(currentState);
+    }
   }
 
   // Discover Utility devices on all fragment tracks (after OSC is live)
@@ -283,7 +286,7 @@ async function main() {
       const state = getState();
 
       // Only backup during active show phases
-      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_consensus', 'finale_performer_mix'];
+      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assembly', 'finale_deliberation', 'finale_ceremony', 'finale_performer_mix'];
       if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);

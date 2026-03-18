@@ -62,14 +62,14 @@ function createTestConfig(): ShowConfig {
       makeAttemptConfig('avoidance'),
     ],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assemblyTimerMs: 120000,
+      assemblyGracePeriodMs: 15000,
+      deliberationTimerMs: 180000,
+      ambassadorVolunteerTimerMs: 30000,
+      ceremonyLayerOrder: ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'],
+      audioPreviewPath: '/audio/previews',
+      layerLabels: new Map(),
+      npcMessages: [],
     },
     timing: {
       auditionDurationMs: 4000,
@@ -95,23 +95,37 @@ function advanceToBuild(state: ShowState): void {
   processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
 }
 
-function makeMinimalFinaleState(roundTimeRemaining = 15000): FinaleState {
+function makeMinimalFinaleState(timerRemaining = 60000): FinaleState {
+  const layerTypes = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'] as const;
   return {
-    phase: 'consensus_game',
+    phase: 'assembly',
     availableFragments: [],
     allFragments: [],
     lockedFragments: [],
-    consensusGame: {
-      active: true,
-      currentRound: 1,
-      roundTimeRemaining,
-      votes: new Map(),
-      convergenceValue: 0,
-      threshold: 0.4,
-      consecutiveFailures: 0,
-      lockedRoles: new Map(),
+    assembly: {
+      groups: new Map(layerTypes.map(lt => [lt, []])),
+      undecidedUsers: [],
+      timerRemaining,
+      timerDuration: timerRemaining,
     },
-    npc: { currentMessage: null, autoTriggersEnabled: false },
+    deliberation: {
+      groupVotes: new Map(layerTypes.map(lt => [lt, new Map()])),
+      chosenFragments: new Map(layerTypes.map(lt => [lt, null])),
+      ambassadorVolunteers: new Map(layerTypes.map(lt => [lt, []])),
+      ambassadors: new Map(layerTypes.map(lt => [lt, null])),
+      timerRemaining: 120000,
+      volunteerTimerRemaining: null,
+    },
+    ceremony: {
+      layerOrder: [...layerTypes],
+      currentIndex: -1,
+      currentAmbassador: null,
+      altarReady: false,
+      lockedLayers: new Map(),
+      forfeitedLayers: [],
+      ceremonyComplete: false,
+    },
+    npc: { currentMessage: null },
     performerMix: {
       activeLayers: new Map(),
       pendingChanges: [],
@@ -580,10 +594,10 @@ describe('TimingEngine', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Consensus Round Timer
+  // Assembly Timer
   // --------------------------------------------------------------------------
 
-  describe('consensus round timer', () => {
+  describe('assembly timer', () => {
     beforeEach(() => {
       timingEngine = createTimingEngine(
         sendCommand,
@@ -593,81 +607,103 @@ describe('TimingEngine', () => {
       timingEngine.start();
     });
 
-    test('fires END_CONSENSUS_ROUND when round timer expires', () => {
-      state.phase = 'finale_consensus';
-      state.finaleState = makeMinimalFinaleState(15000);
+    test('fires ASSEMBLY_TIMER_EXPIRED when assembly timer expires', () => {
+      state.phase = 'finale_assembly';
+      state.finaleState = makeMinimalFinaleState(30000);
 
       timingEngine.onStateChanged(state, [{
-        type: 'CONSENSUS_ROUND_STARTED',
-        roundNumber: 1,
-        threshold: 0.4,
+        type: 'ASSEMBLY_STARTED',
+        timerDuration: 30000,
       }]);
 
       expect(sendCommand).not.toHaveBeenCalled();
 
-      jest.advanceTimersByTime(15000);
+      jest.advanceTimersByTime(30000);
 
-      expect(sendCommand).toHaveBeenCalledWith({ type: 'END_CONSENSUS_ROUND' });
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'ASSEMBLY_TIMER_EXPIRED' });
     });
 
-    test('does not fire if phase or active state changed before timer fires', () => {
-      state.phase = 'finale_consensus';
+    test('does not fire if phase changed before timer fires', () => {
+      state.phase = 'finale_assembly';
       state.finaleState = makeMinimalFinaleState(5000);
 
       timingEngine.onStateChanged(state, [{
-        type: 'CONSENSUS_ROUND_STARTED',
-        roundNumber: 1,
-        threshold: 0.4,
+        type: 'ASSEMBLY_STARTED',
+        timerDuration: 5000,
       }]);
 
-      // Deactivate consensus before timer fires
-      state.finaleState.consensusGame.active = false;
-      state.phase = 'finale_performer_mix';
+      // Phase advances before timer fires
+      state.phase = 'finale_deliberation';
 
       jest.advanceTimersByTime(10000);
 
-      expect(sendCommand).not.toHaveBeenCalledWith({ type: 'END_CONSENSUS_ROUND' });
+      expect(sendCommand).not.toHaveBeenCalledWith({ type: 'ASSEMBLY_TIMER_EXPIRED' });
     });
 
-    test('timer cleared on CONSENSUS_ROUND_SUCCESS', () => {
-      state.phase = 'finale_consensus';
-      state.finaleState = makeMinimalFinaleState(15000);
+    test('timer cleared on ASSEMBLY_COMPLETE', () => {
+      state.phase = 'finale_assembly';
+      state.finaleState = makeMinimalFinaleState(30000);
 
       timingEngine.onStateChanged(state, [{
-        type: 'CONSENSUS_ROUND_STARTED',
-        roundNumber: 1,
-        threshold: 0.4,
+        type: 'ASSEMBLY_STARTED',
+        timerDuration: 30000,
       }]);
 
-      // Round succeeded before timer fired
+      // Assembly ended early (force end)
       timingEngine.onStateChanged(state, [{
-        type: 'CONSENSUS_ROUND_SUCCESS',
-        fragmentId: 'frag-0-0-A',
-        layerType: 'melody',
-        convergence: 0.8,
+        type: 'ASSEMBLY_COMPLETE',
+        groups: new Map(),
+        emptyGroups: [],
       }]);
 
-      jest.advanceTimersByTime(15000);
+      jest.advanceTimersByTime(30000);
 
       expect(sendCommand).not.toHaveBeenCalled();
     });
+  });
 
-    test('timer cleared on CONSENSUS_ROUND_FAILURE', () => {
-      state.phase = 'finale_consensus';
-      state.finaleState = makeMinimalFinaleState(15000);
+  // --------------------------------------------------------------------------
+  // Deliberation Timer
+  // --------------------------------------------------------------------------
+
+  describe('deliberation timer', () => {
+    beforeEach(() => {
+      timingEngine = createTimingEngine(
+        sendCommand,
+        () => state,
+        { enabled: true, oscBridge: null },
+      );
+      timingEngine.start();
+    });
+
+    test('fires DELIBERATION_TIMER_EXPIRED when deliberation timer expires', () => {
+      state.phase = 'finale_deliberation';
+      state.finaleState = makeMinimalFinaleState(60000);
 
       timingEngine.onStateChanged(state, [{
-        type: 'CONSENSUS_ROUND_STARTED',
-        roundNumber: 1,
-        threshold: 0.4,
+        type: 'DELIBERATION_STARTED',
+        timerDuration: 60000,
       }]);
+
+      expect(sendCommand).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(60000);
+
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'DELIBERATION_TIMER_EXPIRED' });
+    });
+
+    test('timer cleared on DELIBERATION_COMPLETE', () => {
+      state.phase = 'finale_deliberation';
+      state.finaleState = makeMinimalFinaleState(60000);
 
       timingEngine.onStateChanged(state, [{
-        type: 'CONSENSUS_ROUND_FAILURE',
-        highestConvergence: 0.2,
+        type: 'DELIBERATION_STARTED',
+        timerDuration: 60000,
       }]);
 
-      jest.advanceTimersByTime(15000);
+      timingEngine.onStateChanged(state, [{ type: 'DELIBERATION_COMPLETE' }]);
+
+      jest.advanceTimersByTime(60000);
 
       expect(sendCommand).not.toHaveBeenCalled();
     });

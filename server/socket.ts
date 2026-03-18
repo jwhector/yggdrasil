@@ -21,6 +21,7 @@ import type {
   UserId,
   AttemptState,
   LayerConfig,
+  LayerType,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
 import type { PersistenceLayer } from './persistence';
@@ -46,7 +47,7 @@ interface ClientHeartbeat {
 const HEARTBEAT_INTERVAL_MS = 15000;            // Ping every 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 seconds
 const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
-const CONVERGENCE_BROADCAST_INTERVAL_MS = 200;  // ~5 Hz
+const GROUP_UPDATE_BROADCAST_INTERVAL_MS = 500; // ~2 Hz during assembly
 
 // ============================================================================
 // Setup
@@ -102,20 +103,19 @@ export function setupSocketHandlers(
   }, HEARTBEAT_INTERVAL_MS);
 
   // ============================================================================
-  // Convergence broadcast (throttled ~5 Hz during active consensus rounds)
+  // Group update broadcast (throttled ~2 Hz during assembly phase)
   // ============================================================================
 
-  const convergenceInterval = setInterval(() => {
+  const groupUpdateInterval = setInterval(() => {
     const state = getState();
-    if (
-      state.phase === 'finale_consensus' &&
-      state.finaleState?.consensusGame.active
-    ) {
-      const value = state.finaleState.consensusGame.convergenceValue;
-      io.to('audience').emit('convergence_update', { value });
-      io.to('projector').emit('convergence_update', { value });
+    if (state.phase === 'finale_assembly' && state.finaleState?.phase === 'assembly') {
+      const groupSizes = Array.from(state.finaleState.assembly.groups.entries())
+        .map(([layerType, members]) => ({ layerType, count: members.length }));
+      const undecidedCount = state.finaleState.assembly.undecidedUsers.length;
+      io.to('audience').emit('group_update', { groupSizes, undecidedCount });
+      io.to('projector').emit('group_update', { groupSizes, undecidedCount });
     }
-  }, CONVERGENCE_BROADCAST_INTERVAL_MS);
+  }, GROUP_UPDATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
   // Cleanup
@@ -123,7 +123,7 @@ export function setupSocketHandlers(
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
-    clearInterval(convergenceInterval);
+    clearInterval(groupUpdateInterval);
   });
 
   // ============================================================================
@@ -309,36 +309,111 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // consensus_vote — audience votes for a fragment during finale consensus
+    // join_group — audience selects a layer-type group during assembly
     //
-    // Payload: { fragmentId: string }
-    // Votes are ephemeral within a round — not persisted to DB.
-    // userId taken from socket session (not payload) for security.
+    // Payload: { layerType: LayerType }
     // ------------------------------------------------------------------
-    socket.on('consensus_vote', async (data: { fragmentId: string }) => {
+    socket.on('join_group', async (data: { layerType: LayerType }) => {
       const userId = (socket as any).userId as UserId;
       if (!userId) {
-        console.warn('[Socket] consensus_vote rejected: no userId on socket');
+        console.warn('[Socket] join_group rejected: no userId on socket');
         return;
       }
 
-      if (typeof data.fragmentId !== 'string' || !data.fragmentId) {
-        console.warn(`[Socket] consensus_vote rejected: invalid fragmentId from ${userId}`);
-        return;
-      }
-
-      console.log(`[Socket] Consensus vote from ${userId}: ${data.fragmentId}`);
+      console.log(`[Socket] join_group from ${userId}: ${data.layerType}`);
 
       const state = getState();
+      const events = processCommand(state, { type: 'JOIN_GROUP', userId, layerType: data.layerType });
+      setState(state, events);
+      persistence.saveState(state);
+      persistence.saveGroupAssignment(state.id, userId, data.layerType, false);
 
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // group_vote — audience votes for a fragment within their group
+    //
+    // Payload: { layerType: LayerType; fragmentId: string }
+    // ------------------------------------------------------------------
+    socket.on('group_vote', async (data: { layerType: LayerType; fragmentId: string }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] group_vote rejected: no userId on socket');
+        return;
+      }
+
+      console.log(`[Socket] group_vote from ${userId}: ${data.layerType} → ${data.fragmentId}`);
+
+      const state = getState();
       const events = processCommand(state, {
-        type: 'SUBMIT_CONSENSUS_VOTE',
+        type: 'SUBMIT_GROUP_VOTE',
         userId,
+        layerType: data.layerType,
         fragmentId: data.fragmentId,
       });
-
       setState(state, events);
-      // No persistence — consensus votes are ephemeral within a round
+      persistence.saveState(state);
+      persistence.saveGroupVote(state.id, userId, data.layerType, data.fragmentId);
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // volunteer_ambassador — audience volunteers as ambassador
+    //
+    // Payload: { layerType: LayerType }
+    // ------------------------------------------------------------------
+    socket.on('volunteer_ambassador', async (data: { layerType: LayerType }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] volunteer_ambassador rejected: no userId on socket');
+        return;
+      }
+
+      console.log(`[Socket] volunteer_ambassador from ${userId}: ${data.layerType}`);
+
+      const state = getState();
+      const events = processCommand(state, {
+        type: 'VOLUNTEER_AS_AMBASSADOR',
+        userId,
+        layerType: data.layerType,
+      });
+      setState(state, events);
+      persistence.saveState(state);
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // altar_lock_in — ambassador confirms lock-in at the altar
+    //
+    // Payload: { layerType: LayerType }
+    // ------------------------------------------------------------------
+    socket.on('altar_lock_in', async (data: { layerType: LayerType }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] altar_lock_in rejected: no userId on socket');
+        return;
+      }
+
+      console.log(`[Socket] altar_lock_in from ${userId}: ${data.layerType}`);
+
+      const state = getState();
+      const events = processCommand(state, {
+        type: 'ALTAR_LOCK_IN',
+        userId,
+        layerType: data.layerType,
+      });
+      setState(state, events);
+      persistence.saveState(state);
+
+      const lockEvent = events.find(e => e.type === 'CEREMONY_LAYER_LOCKED') as
+        | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
+        | undefined;
+      if (lockEvent) {
+        persistence.saveCeremonyEvent(state.id, data.layerType, userId, lockEvent.fragmentId, 'locked');
+      }
 
       await broadcastEvents(io, events, state);
     });
@@ -380,23 +455,37 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      // Persist consensus round results when a round ends
-      if (processedCommand.type === 'END_CONSENSUS_ROUND') {
-        const successEvent = events.find(e => e.type === 'CONSENSUS_ROUND_SUCCESS') as
-          | { type: 'CONSENSUS_ROUND_SUCCESS'; fragmentId: string; convergence: number }
+      // Persist auto-assigned group members when assembly ends via timer or force
+      if (processedCommand.type === 'ASSEMBLY_TIMER_EXPIRED' || processedCommand.type === 'FORCE_END_ASSEMBLY') {
+        const assemblyComplete = events.find(e => e.type === 'ASSEMBLY_COMPLETE') as
+          | { type: 'ASSEMBLY_COMPLETE'; groups: Map<LayerType, UserId[]>; emptyGroups: LayerType[] }
           | undefined;
-        const failureEvent = events.find(e => e.type === 'CONSENSUS_ROUND_FAILURE') as
-          | { type: 'CONSENSUS_ROUND_FAILURE'; highestConvergence: number }
-          | undefined;
-        const finaleState = state.finaleState;
-        if (finaleState) {
-          const roundNumber = finaleState.consensusGame.currentRound;
-          const threshold = finaleState.consensusGame.threshold;
-          if (successEvent) {
-            persistence.saveConsensusRound(state.id, roundNumber, successEvent.fragmentId, successEvent.convergence, threshold, true);
-          } else if (failureEvent) {
-            persistence.saveConsensusRound(state.id, roundNumber, null, failureEvent.highestConvergence, threshold, false);
+        if (assemblyComplete) {
+          for (const [layerType, members] of assemblyComplete.groups) {
+            for (const memberId of members) {
+              persistence.saveGroupAssignment(state.id, memberId, layerType, true);
+            }
           }
+        }
+      }
+
+      // Persist ceremony lock-in for controller-driven FORCE_LOCK_IN
+      if (processedCommand.type === 'FORCE_LOCK_IN') {
+        const lockEvent = events.find(e => e.type === 'CEREMONY_LAYER_LOCKED') as
+          | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
+          | undefined;
+        if (lockEvent) {
+          persistence.saveCeremonyEvent(state.id, lockEvent.layerType, null, lockEvent.fragmentId, 'locked');
+        }
+      }
+
+      // Persist ceremony forfeit for controller-driven FORFEIT_LAYER
+      if (processedCommand.type === 'FORFEIT_LAYER') {
+        const forfeitEvent = events.find(e => e.type === 'CEREMONY_LAYER_SKIPPED') as
+          | { type: 'CEREMONY_LAYER_SKIPPED'; layerType: LayerType }
+          | undefined;
+        if (forfeitEvent) {
+          persistence.saveCeremonyEvent(state.id, forfeitEvent.layerType, null, null, 'forfeited');
         }
       }
 
@@ -467,6 +556,26 @@ export async function broadcastEvents(
         io.to('projector').emit('npc_message', { message: event.message });
         break;
 
+      case 'AMBASSADOR_CALLED': {
+        // Emit altar_ready only to the called ambassador's socket
+        const calledSockets = await io.in('audience').fetchSockets();
+        for (const s of calledSockets) {
+          if ((s as any).userId === event.userId) {
+            s.emit('altar_ready', { layerType: event.layerType });
+            break;
+          }
+        }
+        // Notify all about who was called (for projector + audience awareness)
+        io.to('projector').emit('ambassador_called', { layerType: event.layerType, userId: event.userId });
+        io.to('audience').emit('ambassador_called', { layerType: event.layerType, userId: event.userId });
+        break;
+      }
+
+      case 'CEREMONY_LAYER_LOCKED':
+        io.to('audience').emit('altar_confirmed', { layerType: event.layerType, fragmentId: event.fragmentId });
+        io.to('projector').emit('altar_confirmed', { layerType: event.layerType, fragmentId: event.fragmentId });
+        break;
+
       case 'ERROR':
         io.to('controller').emit('error', event);
         console.error('[Conductor Error]:', event.message, (event as any).command?.type);
@@ -513,19 +622,40 @@ export function filterStateForClient(
           finalePhase: fs.phase,
           availableFragments: fs.availableFragments,
           lockedFragments: fs.lockedFragments,
-          convergenceValue: fs.consensusGame.convergenceValue,
-          threshold: fs.consensusGame.threshold,
-          roundTimeRemaining: fs.consensusGame.roundTimeRemaining,
-          currentRound: fs.consensusGame.currentRound,
-          lockedRoles: Array.from(fs.consensusGame.lockedRoles.entries()).map(([layerType, fragmentId]) => ({
-            layerType,
-            fragmentId,
-          })),
+          // Assembly
+          groupSizes: Array.from(fs.assembly.groups.entries())
+            .map(([layerType, members]) => ({ layerType, count: members.length })),
+          undecidedCount: fs.assembly.undecidedUsers.length,
+          assemblyTimerRemaining: fs.assembly.timerRemaining,
+          // Deliberation
+          groupVoteDistributions: Array.from(fs.deliberation.groupVotes.entries()).map(([layerType, votes]) => {
+            const counts = new Map<string, number>();
+            for (const fId of votes.values()) counts.set(fId, (counts.get(fId) ?? 0) + 1);
+            return {
+              layerType,
+              votes: Array.from(counts.entries()).map(([fragmentId, count]) => ({ fragmentId, count })),
+            };
+          }),
+          chosenFragments: Array.from(fs.deliberation.chosenFragments.entries())
+            .map(([layerType, fragmentId]) => ({ layerType, fragmentId })),
+          ambassadors: Array.from(fs.deliberation.ambassadors.entries())
+            .map(([layerType, userId]) => ({ layerType, userId })),
+          deliberationTimerRemaining: fs.deliberation.timerRemaining,
+          // Ceremony
+          ceremonyLayerOrder: fs.ceremony.layerOrder,
+          ceremonyLockedLayers: Array.from(fs.ceremony.lockedLayers.entries())
+            .map(([layerType, fragmentId]) => ({ layerType, fragmentId })),
+          ceremonyForfeitedLayers: fs.ceremony.forfeitedLayers,
+          currentCeremonyLayer: fs.ceremony.currentIndex >= 0
+            ? (fs.ceremony.layerOrder[fs.ceremony.currentIndex] ?? null)
+            : null,
+          currentAmbassador: fs.ceremony.currentAmbassador,
+          ceremonyComplete: fs.ceremony.ceremonyComplete,
+          // NPC
           npcMessage: fs.npc.currentMessage,
-          mixActiveLayers: Array.from(fs.performerMix.activeLayers.entries()).map(([layerType, fragmentId]) => ({
-            layerType,
-            fragmentId,
-          })),
+          // Performer mix
+          mixActiveLayers: Array.from(fs.performerMix.activeLayers.entries())
+            .map(([layerType, fragmentId]) => ({ layerType, fragmentId })),
           mixPendingChanges: fs.performerMix.pendingChanges,
           loopPosition: fs.performerMix.loopPosition,
         } : null,
@@ -561,39 +691,86 @@ export function filterStateForClient(
       let myFinale: object | null = null;
       const fs = state.finaleState;
       if (fs) {
-        // Find this user's consensus vote (null if not voted this round)
-        const myVoteFinale: string | null = fs.consensusGame.votes.get(userId) ?? null;
+        // Determine user's group assignment
+        let myGroup: LayerType | null = null;
+        for (const [layerType, members] of fs.assembly.groups) {
+          if (members.includes(userId)) { myGroup = layerType; break; }
+        }
 
-        // Mark available fragments as locked if their role is already locked
-        const lockedRoleTypes = new Set(fs.consensusGame.lockedRoles.keys());
-        const availableWithLocked = fs.availableFragments.map(fragment => ({
-          fragment,
-          locked: lockedRoleTypes.has(fragment.layerType),
-        }));
+        // All group sizes
+        const groupSizes = Array.from(fs.assembly.groups.entries())
+          .map(([layerType, members]) => ({ layerType, count: members.length }));
 
-        // Flatten lockedRoles map to array for JSON transport
-        const lockedRoles: Array<{ layerType: string; fragmentId: string }> =
-          Array.from(fs.consensusGame.lockedRoles.entries()).map(([layerType, fragmentId]) => ({
-            layerType,
-            fragmentId,
-          }));
+        // Deliberation: fragments available to user's group
+        const myGroupFragments = myGroup
+          ? fs.availableFragments.filter(f => f.layerType === myGroup)
+          : [];
 
-        // Flatten performerMix activeLayers for JSON transport
-        const mixActiveLayers: Array<{ layerType: string; fragmentId: string | null }> =
-          Array.from(fs.performerMix.activeLayers.entries()).map(([layerType, fragmentId]) => ({
-            layerType,
-            fragmentId,
-          }));
+        // Vote counts for user's group
+        const groupVoteCounts: Array<{ fragmentId: string; count: number }> = [];
+        if (myGroup) {
+          const votes = fs.deliberation.groupVotes.get(myGroup);
+          if (votes) {
+            const counts = new Map<string, number>();
+            for (const fId of votes.values()) counts.set(fId, (counts.get(fId) ?? 0) + 1);
+            for (const [fragmentId, count] of counts) groupVoteCounts.push({ fragmentId, count });
+          }
+        }
+
+        // User's own vote in deliberation
+        const myGroupVote = myGroup
+          ? (fs.deliberation.groupVotes.get(myGroup)?.get(userId) ?? null)
+          : null;
+
+        // Chosen fragment for user's group
+        const chosenFragment = myGroup
+          ? (fs.deliberation.chosenFragments.get(myGroup) ?? null)
+          : null;
+
+        // Ambassador volunteer status
+        const isAmbassadorVolunteer = myGroup
+          ? (fs.deliberation.ambassadorVolunteers.get(myGroup)?.includes(userId) ?? false)
+          : false;
+
+        // Selected ambassador for user's group
+        const myAmbassadorStatus = myGroup
+          ? (fs.deliberation.ambassadors.get(myGroup) ?? null)
+          : null;
+
+        // Ceremony progress for display
+        const ceremonyProgress = fs.ceremony.layerOrder.map(lt => {
+          if (fs.ceremony.lockedLayers.has(lt)) return { layerType: lt, status: 'locked' as const };
+          if (fs.ceremony.forfeitedLayers.includes(lt)) return { layerType: lt, status: 'forfeited' as const };
+          const currentLayer = fs.ceremony.currentIndex >= 0
+            ? fs.ceremony.layerOrder[fs.ceremony.currentIndex]
+            : null;
+          if (currentLayer === lt) return { layerType: lt, status: 'current' as const };
+          return { layerType: lt, status: 'upcoming' as const };
+        });
+
+        const isCurrentAmbassador = fs.ceremony.currentAmbassador === userId;
+        const altarReady = isCurrentAmbassador && fs.ceremony.altarReady;
+
+        // Performer mix layers
+        const mixActiveLayers = Array.from(fs.performerMix.activeLayers.entries())
+          .map(([layerType, fragmentId]) => ({ layerType, fragmentId }));
 
         myFinale = {
           finalePhase: fs.phase,
-          availableFragments: availableWithLocked,
-          myVote: myVoteFinale,
-          convergenceValue: fs.consensusGame.convergenceValue,
-          threshold: fs.consensusGame.threshold,
-          roundTimeRemaining: fs.consensusGame.roundTimeRemaining,
-          currentRound: fs.consensusGame.currentRound,
-          lockedRoles,
+          myGroup,
+          groupSizes,
+          assemblyTimerRemaining: fs.assembly.timerRemaining,
+          myGroupFragments,
+          groupVoteCounts,
+          myGroupVote,
+          chosenFragment,
+          isAmbassadorVolunteer,
+          myAmbassadorStatus,
+          deliberationTimerRemaining: fs.deliberation.timerRemaining,
+          volunteerTimerRemaining: fs.deliberation.volunteerTimerRemaining,
+          ceremonyProgress,
+          isCurrentAmbassador,
+          altarReady,
           npcMessage: fs.npc.currentMessage,
           mixActiveLayers,
         };

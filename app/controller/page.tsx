@@ -16,7 +16,8 @@ import { useShowState } from '@/hooks/useShowState';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
-import { ConsensusControls } from '@/components/controller/ConsensusControls';
+import { AssemblyControls } from '@/components/controller/AssemblyControls';
+import { DeliberationControls } from '@/components/controller/DeliberationControls';
 import { NpcControls } from '@/components/controller/NpcControls';
 import { MixingSurface } from '@/components/finale/MixingSurface';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
@@ -89,7 +90,12 @@ function ControllerContent() {
       )}
 
       {/* Finale controls — only during finale phases */}
-      {/* TODO: V3 migration Phase 4 — add AssemblyControls, DeliberationControls, CeremonyControls */}
+      {isFinale && phase === 'finale_assembly' && (
+        <AssemblyControls fullState={fullState} sendCommand={sendCommand} />
+      )}
+      {isFinale && phase === 'finale_deliberation' && (
+        <DeliberationControls fullState={fullState} sendCommand={sendCommand} />
+      )}
       {isFinale && (phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
         <NpcControls fullState={fullState} sendCommand={sendCommand} />
       )}

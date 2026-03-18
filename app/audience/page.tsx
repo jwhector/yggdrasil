@@ -9,6 +9,9 @@ import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
+import { AssemblyCards } from '@/components/finale/AssemblyCards';
+import { GroupIdentity } from '@/components/finale/GroupIdentity';
+import { DeliberationBoard } from '@/components/finale/DeliberationBoard';
 import type { AudienceFinaleView } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
@@ -150,7 +153,7 @@ function AudienceContent() {
 
       {(phase === 'finale_elegy' || phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
         state.myFinale
-          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} />
+          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} userId={userId ?? ''} />
           : <DarkListenScreen />
       )}
 
@@ -169,20 +172,17 @@ function FinaleAudienceView({
   myFinale,
   phase,
   socket,
-  emit: _emit,
+  emit,
+  userId,
 }: {
   myFinale: AudienceFinaleView;
   phase: string;
   socket: Socket | null;
   emit: (event: string, data: unknown) => void;
+  userId: string;
 }) {
-  void socket; // used by NpcDisplay sub-component
-
   // --- Elegy phase: show all fragments non-interactively ---
   if (phase === 'finale_elegy') {
-    // Derive winners/locked from myGroupFragments + ceremonyProgress
-    // For now use elegy data from the projector-compatible fields
-    // TODO: V3 migration Phase 4 — use proper elegy data from server
     return (
       <div
         style={{
@@ -213,27 +213,51 @@ function FinaleAudienceView({
     );
   }
 
-  // --- Assembly / Deliberation / Ceremony phases ---
-  // TODO: V3 migration Phase 4 — implement AssemblyCards, DeliberationBoard, AmbassadorPrompt, AltarReady, CeremonyView
-  if (phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony') {
+  // --- Assembly phase ---
+  if (phase === 'finale_assembly') {
+    // Grace period: timer expired and user has been assigned a group
+    if (myFinale.assemblyTimerRemaining <= 0 && myFinale.myGroup !== null) {
+      return <GroupIdentity layerType={myFinale.myGroup} />;
+    }
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100%',
-          minHeight: '100vh',
-          gap: '16px',
-        }}
-      >
+      <AssemblyCards
+        myGroup={myFinale.myGroup}
+        groupSizes={myFinale.groupSizes}
+        timerRemaining={myFinale.assemblyTimerRemaining}
+        onJoinGroup={(layerType) => emit('join_group', { layerType })}
+        socket={socket}
+      />
+    );
+  }
+
+  // --- Deliberation phase ---
+  if (phase === 'finale_deliberation') {
+    if (!myFinale.myGroup) return <DarkListenScreen />;
+    return (
+      <DeliberationBoard
+        myGroup={myFinale.myGroup}
+        myGroupFragments={myFinale.myGroupFragments}
+        groupVoteCounts={myFinale.groupVoteCounts}
+        myGroupVote={myFinale.myGroupVote}
+        chosenFragment={myFinale.chosenFragment}
+        isAmbassadorVolunteer={myFinale.isAmbassadorVolunteer}
+        myAmbassadorStatus={myFinale.myAmbassadorStatus}
+        deliberationTimerRemaining={myFinale.deliberationTimerRemaining}
+        volunteerTimerRemaining={myFinale.volunteerTimerRemaining}
+        onVote={(fragmentId) => emit('group_vote', { layerType: myFinale.myGroup, fragmentId })}
+        onVolunteer={() => emit('volunteer_ambassador', { layerType: myFinale.myGroup })}
+        userId={userId}
+      />
+    );
+  }
+
+  // --- Ceremony phase: passive observation ---
+  if (phase === 'finale_ceremony') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', minHeight: '100vh', gap: '16px' }}>
         <PulsingDot />
         <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
-          {phase === 'finale_assembly' ? 'Choose your group' : phase === 'finale_deliberation' ? 'Deliberating' : 'Ceremony'}
-        </p>
-        <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.65rem' }}>
-          TODO: V3 migration Phase 4
+          Ceremony
         </p>
       </div>
     );

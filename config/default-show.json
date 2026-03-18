@@ -200,22 +200,22 @@
   ],
 
   "finale": {
-    "consensusRoundDurationMs": 15000,
-    "firstRoundDurationMs": 20000,
-    "initialThreshold": 0.4,
-    "thresholdDecayPerFailure": 0.05,
-    "minThreshold": 0.25,
-    "interRoundDelayMs": 3000,
-    "successCelebrationMs": 6000,
-    "npcAutoTriggers": [
-      { "condition": "consecutive_failures", "threshold": 2, "message": "scattered... try again" },
-      { "condition": "consecutive_failures", "threshold": 4, "message": "we're falling apart... just like before" },
-      { "condition": "same_song_streak", "threshold": 3, "message": "again? we KNOW that one works. what about the rest?" },
-      { "condition": "near_miss", "threshold": 0.05, "message": "so close... you're almost there" },
-      { "condition": "first_success", "message": "yes! keep going!" },
-      { "condition": "final_fragment", "message": "one more. make it count." },
-      { "condition": "single_option_role", "message": "only one path forward here" }
-    ]
+    "assemblyTimerMs": 60000,
+    "assemblyGracePeriodMs": 15000,
+    "deliberationTimerMs": 120000,
+    "ambassadorVolunteerTimerMs": 15000,
+    "ceremonyLayerOrder": ["bass", "drums", "pad", "melody", "harmony", "fx1", "fx2"],
+    "audioPreviewPath": "/audio/previews",
+    "layerLabels": {
+      "melody": "The Voice",
+      "drums": "The Heartbeat",
+      "pad": "The Warmth",
+      "bass": "The Ground",
+      "harmony": "The Color",
+      "fx1": "The Shimmer",
+      "fx2": "The Shadow"
+    },
+    "npcMessages": []
   },
 
   "timing": {

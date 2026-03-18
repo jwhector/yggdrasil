@@ -799,7 +799,7 @@ export function createAudioRouter(
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  function handleConsensusActivate(cue: Extract<AudioCue, { type: 'ceremony_activate' }>): void {
+  function handleCeremonyActivate(cue: Extract<AudioCue, { type: 'ceremony_activate' }>): void {
     ensureTransportStarted();
 
     // Snap to entry gain then swell to unity
@@ -922,7 +922,7 @@ export function createAudioRouter(
             handleRejectionGesture(cue, state);
             break;
           case 'ceremony_activate':
-            handleConsensusActivate(cue);
+            handleCeremonyActivate(cue);
             break;
           case 'mix_update':
             handleMixUpdate(cue, state);
