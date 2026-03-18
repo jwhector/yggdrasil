@@ -390,6 +390,8 @@ export function createAudioRouter(
       gs.currentGain = 0;
       oscBridge.send('/live/track/set/mute', i, 1);
     }
+
+    oscBridge.send('/live/song/stop_playing');
   }
 
   function enableEffects(audioRef: AudioReference): void {

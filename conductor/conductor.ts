@@ -116,6 +116,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
   state.version++;
   state.lastUpdated = Date.now();
 
+  console.log('[Conductor] processCommand: ', command.type);
+
   switch (command.type) {
     // Show flow
     case 'ADVANCE_PHASE':
@@ -193,7 +195,7 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     case 'EXTEND_DELIBERATION_TIMER':
       return handleExtendDeliberationTimer(state, command.additionalMs);
     case 'FORCE_END_DELIBERATION':
-      return handleForceEndDeliberation(state);
+      return handleDeliberationTimerExpired(state);
 
     // Ceremony
     case 'START_CEREMONY':
@@ -361,22 +363,26 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     }
   }
 
-  if (nextPhase === 'finale_elegy' && !state.finaleState) {
+  if (nextPhase === 'finale_elegy') {
     // Auto-setup finale state (generate fragments from attempt results)
+    console.log('handleAdvancePhase: auto-setup finale state');
     events.push(...handleSetupFinale(state));
   }
 
   if (nextPhase === 'finale_assembly' && state.finaleState) {
-    state.finaleState.phase = 'assembly';
-    state.finaleState.assembly = initializeAssembly(state.users, state.config.finale);
+    events.push(...handleStartAssembly(state));
+  }
+
+  if (nextPhase === 'finale_deliberation' && state.finaleState) {
+    events.push(...handleStartDeliberation(state));
+  }
+
+  if (nextPhase === 'finale_ceremony' && state.finaleState) {
+    events.push(...handleStartCeremony(state));
   }
 
   if (nextPhase === 'finale_performer_mix' && state.finaleState) {
-    if (state.finaleState.phase !== 'performer_mix') {
-      state.finaleState.phase = 'performer_mix';
-      state.finaleState.performerMix.activeLayers = new Map(state.finaleState.ceremony.lockedLayers);
-      events.push({ type: 'PERFORMER_MIX_STARTED' });
-    }
+    events.push(...handleStartPerformerMix(state));
   }
 
   events.push({
