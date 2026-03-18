@@ -11,10 +11,15 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/controller/page": [
+    "/audience/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/controller/page.js"
+      "static/chunks/app/audience/page.js"
+    ],
+    "/projector/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/projector/page.js"
     ]
   }
 }

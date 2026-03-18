@@ -71,6 +71,12 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   stepsPerBeat: 2,
 };
 
+const COLLAPSE_TEMPO_RAMP_DURATION_MS = 2000;
+const COLLAPSE_TEMPO_FLOOR_BPM = 20;
+const COLLAPSE_DELAY_TAIL_MS = 10000;
+const NOMINAL_TEMPO_BPM = 120;
+const TEMPO_RAMP_STEPS = 20;
+
 // ============================================================================
 // Track Index Computation
 // ============================================================================
@@ -131,7 +137,7 @@ interface AudioRouterState {
   /** Per-track gain and fade state */
   trackGains: Map<number, TrackGainState>;
   /** Cached Utility device info per track (populated by discoverDevices) */
-  deviceCache: Map<number, TrackDeviceInfo>;
+  deviceCache: Map<"master" | number, TrackDeviceInfo>;
   /** Whether device discovery has completed */
   discoveryComplete: boolean;
   /** Monotonic counter for unique fade IDs */
@@ -140,6 +146,12 @@ interface AudioRouterState {
   transportStarted: boolean;
   /** Pending collapse cleanup timers, keyed by attemptIndex */
   collapseTimers: Map<number, NodeJS.Timeout>;
+  /** In-flight tempo ramp step timers for the collapse gesture */
+  tempoRampTimers: NodeJS.Timeout[];
+  /** In-flight wall-clock gain ramp timers for the collapse gesture */
+  collapseGainRampTimers: NodeJS.Timeout[];
+  /** Scheduled Master delay disable timer for the collapse gesture */
+  collapseDelayTimer: NodeJS.Timeout | null;
   /** Pending rejection cleanup timers, keyed by attemptIndex */
   rejectionTimers: Map<number, NodeJS.Timeout>;
   /** Active layer type → track index for performer mix */
@@ -175,6 +187,9 @@ export function createAudioRouter(
     fadeCounter: 0,
     transportStarted: false,
     collapseTimers: new Map(),
+    tempoRampTimers: [],
+    collapseGainRampTimers: [],
+    collapseDelayTimer: null,
     rejectionTimers: new Map(),
     activeLayerTracks: new Map(),
     fragmentTrackIndices: new Set(),
@@ -350,13 +365,14 @@ export function createAudioRouter(
 
 
   /**
-   * Immediately silence all fragment tracks:
-   * - Cancels all in-flight fades
-   * - Sets all Utility device gains to 0 (if device is cached)
-   * - Mutes all fragment tracks directly (using fragmentTrackIndices — no group tracks)
+   * Immediately silence all tracks:
+   * - Cancels all in-flight fades (synchronous)
+   * - Queries Ableton for the full track list, skipping foldable (group) tracks
+   * - Sets Utility device gains to 0 on non-foldable tracks (if device is cached)
+   * - Mutes all non-foldable tracks
    */
-  function silenceAllTracks(): void {
-    // Cancel all in-flight fades and sub-beat timers
+  async function silenceAllTracks(): Promise<void> {
+    // Cancel all in-flight fades and sub-beat timers immediately
     for (const gs of routerState.trackGains.values()) {
       if (gs.activeFadeId) {
         timingEngine?.cancelCallbacks(gs.activeFadeId);
@@ -365,9 +381,30 @@ export function createAudioRouter(
       for (const timer of gs.subBeatTimers) clearTimeout(timer);
       gs.subBeatTimers = [];
     }
+    routerState.unmutedTracks.clear();
+    routerState.activeLayerTracks.clear();
 
-    // Zero all Utility device gains and mute all known fragment tracks
-    for (const i of routerState.fragmentTrackIndices) {
+    // Query total track count
+    oscBridge.send('/live/song/get/num_tracks');
+    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+    if (!numTracksResp) {
+      console.warn('[AudioRouter] silenceAllTracks: no response for num_tracks');
+      return;
+    }
+    const numTracks = numTracksResp[0] as number;
+
+    // Bulk-query is_foldable for all tracks in one round-trip
+    oscBridge.send('/live/song/get/track_data', 0, numTracks, 'track.is_foldable');
+    const trackDataResp = await waitForOSC('/live/song/get/track_data', 3000);
+    if (!trackDataResp) {
+      console.warn('[AudioRouter] silenceAllTracks: no response for track_data');
+      return;
+    }
+
+    // Response is a flat array: [is_foldable_0, is_foldable_1, ...]
+    for (let i = 0; i < numTracks; i++) {
+      if (trackDataResp[i] === true) continue; // skip group tracks
+
       const gs = getOrCreateTrackGainState(i);
       gs.currentGain = 0;
 
@@ -384,9 +421,6 @@ export function createAudioRouter(
 
       oscBridge.send('/live/track/set/mute', i, 1);
     }
-
-    routerState.unmutedTracks.clear();
-    routerState.activeLayerTracks.clear();
   }
 
   function enableEffects(audioRef: AudioReference): void {
@@ -408,6 +442,16 @@ export function createAudioRouter(
   function clearCollapseTimers(): void {
     for (const timer of routerState.collapseTimers.values()) clearTimeout(timer);
     routerState.collapseTimers.clear();
+    for (const timer of routerState.tempoRampTimers) clearTimeout(timer);
+    routerState.tempoRampTimers = [];
+    for (const timer of routerState.collapseGainRampTimers) clearTimeout(timer);
+    routerState.collapseGainRampTimers = [];
+    if (routerState.collapseDelayTimer) {
+      clearTimeout(routerState.collapseDelayTimer);
+      routerState.collapseDelayTimer = null;
+    }
+    oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
+    oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 0);
   }
 
   function clearRejectionTimers(): void {
@@ -479,7 +523,7 @@ export function createAudioRouter(
    * If multiple Utility devices exist on a track, uses the LAST one
    * (the one closest to the output in the device chain).
    */
-  async function discoverTrackDevice(trackIndex: number): Promise<void> {
+  async function discoverTrackDevice(trackIndex: number | "master"): Promise<void> {
     oscBridge.send('/live/track/get/num_devices', trackIndex);
     const numDevicesResp = await waitForOSC('/live/track/get/num_devices');
     if (!numDevicesResp) {
@@ -532,16 +576,16 @@ export function createAudioRouter(
       updateFragmentTrackSet(state);
     }
 
-    const trackList = routerState.fragmentTrackIndices.size > 0
-      ? Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b)
-      : null;
+    // const trackList = routerState.fragmentTrackIndices.size > 0
+    //   ? Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b)
+    //   : null;
 
-    if (trackList) {
-      console.log(`[AudioRouter] Starting device discovery for ${trackList.length} fragment tracks...`);
-      for (const trackIndex of trackList) {
-        await discoverTrackDevice(trackIndex);
-      }
-    } else {
+    // if (trackList) {
+    //   console.log(`[AudioRouter] Starting device discovery for ${trackList.length} fragment tracks...`);
+    //   for (const trackIndex of trackList) {
+    //     await discoverTrackDevice(trackIndex);
+    //   }
+    // } else {
       // Fallback: query Ableton for total track count
       oscBridge.send('/live/song/get/num_tracks');
       const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
@@ -550,7 +594,9 @@ export function createAudioRouter(
       for (let trackIndex = 0; trackIndex < numTracks; trackIndex++) {
         await discoverTrackDevice(trackIndex);
       }
-    }
+      await discoverTrackDevice("master");
+      oscBridge.send('/live/song/get/send_tracks');
+    // }
 
     routerState.discoveryComplete = true;
     console.log(`[AudioRouter] Device discovery complete. ${routerState.deviceCache.size} tracks have Utility devices.`);
@@ -604,7 +650,7 @@ export function createAudioRouter(
 
     // Winner: snap to full gain
     unmuteTrack(winnerAudioRef.trackIndex);
-    setGain(winnerAudioRef.trackIndex, 1.0);
+    fadeGain(winnerAudioRef.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
     enableEffects(winnerAudioRef);
 
     // Loser: fade to silent
@@ -614,23 +660,116 @@ export function createAudioRouter(
     }
   }
 
-  function handleCollapseGesture(
-    cue: Extract<AudioCue, { type: 'collapse_gesture' }>,
-    state: ShowState,
-  ): void {
-    // Enable return track effects for collapse animation
-    oscBridge.send('/live/return/set/mute', layout.collapseReturnTrackIndex, 0);
+  /**
+   * Linearly ramp the Ableton tempo from `fromBpm` to `toBpm` over `durationMs`.
+   * Cancels any in-flight ramp before starting. Replaces routerState.tempoRampTimers.
+   */
+  function startTempoRamp(fromBpm: number, toBpm: number, durationMs: number): void {
+    for (const t of routerState.tempoRampTimers) clearTimeout(t);
+    routerState.tempoRampTimers = [];
 
-    // Fade all tracks in the collapsing attempt to 0
-    for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      fadeGain(layer.optionA.trackIndex, 0, currentGainConfig.collapseFadeBeats);
-      fadeGain(layer.optionB.trackIndex, 0, currentGainConfig.collapseFadeBeats);
+    // oscBridge.send('/live/song/get/num_tracks');
+    // const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+    // if (!numTracksResp) {
+    //   console.warn('[AudioRouter] silenceAllTracks: no response for num_tracks');
+    //   return;
+    // }
+    // const numTracks = numTracksResp[0] as number;
+
+
+    const stepMs = durationMs / TEMPO_RAMP_STEPS;
+    for (let i = 1; i <= TEMPO_RAMP_STEPS; i++) {
+      const t = i / TEMPO_RAMP_STEPS;
+      const bpm = fromBpm + (toBpm - fromBpm) * t;
+      const timer = setTimeout(() => {
+        oscBridge.send('/live/song/set/tempo', bpm);
+      }, stepMs * i);
+      routerState.tempoRampTimers.push(timer);
+    }
+  }
+
+  /**
+   * Wall-clock gain ramp for the collapse gesture.
+   * Ramps all given tracks from their current gain to 0 over `durationMs`,
+   * then hard-mutes them at the end. Decoupled from the beat clock so the
+   * simultaneous tempo ramp-down doesn't stretch the fade.
+   */
+  function startCollapseGainRamp(trackIndices: number[], durationMs: number): void {
+    for (const timer of routerState.collapseGainRampTimers) clearTimeout(timer);
+    routerState.collapseGainRampTimers = [];
+
+    const steps = TEMPO_RAMP_STEPS;
+    const stepMs = durationMs / steps;
+
+    // Snapshot each track's starting gain
+    const startGains = trackIndices.map(i => getOrCreateTrackGainState(i).currentGain);
+
+    // Cancel any beat-locked fades on these tracks so they don't fight
+    for (const i of trackIndices) {
+      const gs = getOrCreateTrackGainState(i);
+      if (gs.activeFadeId) {
+        timingEngine?.cancelCallbacks(gs.activeFadeId);
+        gs.activeFadeId = null;
+      }
+      for (const t of gs.subBeatTimers) clearTimeout(t);
+      gs.subBeatTimers = [];
     }
 
-    // Schedule re-mute of return track after collapse animation completes
+    for (let step = 1; step <= steps; step++) {
+      const progress = step / steps;
+      const timer = setTimeout(() => {
+        for (let j = 0; j < trackIndices.length; j++) {
+          const gain = startGains[j] * (1 - progress);
+          setGain(trackIndices[j], Math.max(0, gain));
+        }
+
+        // Hard-mute all tracks on the final step
+        if (step === steps) {
+          for (const i of trackIndices) {
+            oscBridge.send('/live/track/set/mute', i, 1);
+          }
+        }
+      }, stepMs * step);
+      routerState.collapseGainRampTimers.push(timer);
+    }
+  }
+
+  async function handleCollapseGesture(
+    cue: Extract<AudioCue, { type: 'collapse_gesture' }>,
+    state: ShowState,
+  ): Promise<void> {
+    // Collect all track indices for the collapsing attempt
+    const collapseTrackIndices: number[] = [];
+    for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
+      collapseTrackIndices.push(layer.optionA.trackIndex, layer.optionB.trackIndex);
+    }
+
+    // Enable Master track delay device at the start of the collapse
+    oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 1);
+
+    // Wall-clock gain ramp to 0, decoupled from beat clock
+    startCollapseGainRamp(collapseTrackIndices, COLLAPSE_TEMPO_RAMP_DURATION_MS);
+
+    // Query current tempo then ramp down to COLLAPSE_TEMPO_FLOOR_BPM over the same duration
+    oscBridge.send('/live/song/get/tempo');
+    const tempoResp = await waitForOSC('/live/song/get/tempo');
+    const currentTempo = (tempoResp?.[0] as number) ?? NOMINAL_TEMPO_BPM;
+    startTempoRamp(currentTempo, COLLAPSE_TEMPO_FLOOR_BPM, COLLAPSE_TEMPO_RAMP_DURATION_MS);
+
+    // Schedule Master delay disable after gain ramp + tail duration
+    if (routerState.collapseDelayTimer) {
+      clearTimeout(routerState.collapseDelayTimer);
+    }
+    routerState.collapseDelayTimer = setTimeout(() => {
+      oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 0);
+      routerState.collapseDelayTimer = null;
+    }, COLLAPSE_TEMPO_RAMP_DURATION_MS + COLLAPSE_DELAY_TAIL_MS);
+
+    // Schedule cleanup: snap tempo back to nominal after the full collapse window
     const collapseMs = state.config.timing.revealSequenceDurationMs;
     const timer = setTimeout(() => {
-      oscBridge.send('/live/return/set/mute', layout.collapseReturnTrackIndex, 1);
+      oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
+      oscBridge.send('/live/song/stop_playing');
       routerState.collapseTimers.delete(cue.attemptIndex);
     }, collapseMs);
 
