@@ -1,7 +1,7 @@
-# Solo Show — Technical Architecture Specification (V3)
+# Solo Show — Technical Architecture Specification (V2)
 
 ## Document Purpose
-This document is the **authoritative source of truth** for the Solo Show system architecture. It supersedes the V2 ARCHITECTURE.md and reflects a complete redesign of the finale system — replacing the consensus game with a physically embodied, four-phase sequence (group assembly, deliberation, ambassador ceremony, performer mix).
+This document is the **authoritative source of truth** for the Solo Show system architecture. It supersedes the original ARCHITECTURE.md and reflects significant design changes to song-building mechanics and the finale system.
 
 **When this document conflicts with code, this document is correct and the code should be updated.**
 
@@ -10,12 +10,12 @@ This document is the **authoritative source of truth** for the Solo Show system 
 ## Project Overview
 
 ### What This Is
-An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. The audience makes blind binary choices to layer musical elements while a Health Bar tracks the cumulative cost of their disagreement. Each layer costs more than the last (rising resistance), and if the Health Bar reaches zero, the song collapses — unreached layers are lost. Songs that survive all layers are narratively rejected by the performer anyway (self-sabotage). In the finale, the audience — abandoned by the performer — physically self-organizes into seven groups (one per layer type), deliberates on which fragment to carry forward, selects ambassadors, and ceremonially locks each layer into the final mix at a physical altar. The fragments, drawn from three different songs and emotional chapters, reveal through sound alone that they were always harmonically compatible. The performer returns to co-create the climax.
+An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. The audience makes blind binary choices to layer musical elements while a Health Bar tracks the cumulative cost of their disagreement. Each layer costs more than the last (rising resistance), and if the Health Bar reaches zero, the song collapses — unreached layers are lost. Songs that survive all layers are narratively rejected by the performer anyway (self-sabotage). In the finale, the audience — abandoned by the performer — must find wordless consensus to resurrect fragments from the wreckage, proving the songs were compatible all along. The performer returns to co-create the climax.
 
 ### Core Metaphor
 > **"If I can build a song, I can build a life."**
 
-The audience is framed as the performer's inner council — parts of the subconscious trying to cohere into a finished creative work. Disagreement is internal conflict. A collapsing song is the cumulative weight of internal division. The performer's rejection of a completed song is self-sabotage. The finale proves that integration was always possible — the council self-organizes, each part finds its role, and the fragments fit together without the ego directing them.
+The audience is framed as the performer's inner council — parts of the subconscious trying to cohere into a finished creative work. Disagreement is internal conflict. A collapsing song is the cumulative weight of internal division. The performer's rejection of a completed song is self-sabotage. The finale proves that integration was always possible.
 
 ### Design Principles
 1. **Story is uninterrupted.** Audience phones are used only during music-building and finale phases.
@@ -23,8 +23,8 @@ The audience is framed as the performer's inner council — parts of the subcons
 3. **Central timing, distributed choice.** The system runs on a master musical clock: audience controls *what* and *how*, not *when*.
 4. **Legibility over complexity.** Binary choices, consistent visual cues, minimal UI.
 5. **Safety constraints.** All musical actions are quantized and bounded so outputs remain coherent.
-6. **Finale = embodiment + integration.** Audience physically self-organizes, deliberates, and ceremonially assembles the final song. The reveal arrives through the ear, not explanation.
-7. **Projector tells the story, phone is the instrument.** Visual narrative lives on the projector; audience phones are input devices and personal audio preview tools.
+6. **Finale = discovery + integration.** Audience discovers fragments fit together through collective play; performer re-enters to shape the climax.
+7. **Projector tells the story, phone is the instrument.** Visual narrative lives on the projector; audience phones are purely mechanical input devices.
 
 ---
 
@@ -44,17 +44,13 @@ The audience is framed as the performer's inner council — parts of the subcons
 | **Blind Vote** | The song-building voting mechanic. Audience votes without seeing live split feedback. Results are revealed after the window closes. |
 | **Reveal** | The post-vote moment when the A/B split is shown, the health bar drains, and the winning option locks in. |
 | **Song Rejection** | The performer's narrative act of rejecting a **completed** song (one that survived all layers without collapsing). Triggered manually via controller; accompanied by an OSC-triggered audio effect. Only applies when the song completes — collapsed songs are already dead. |
-| **Fragment** | A winning option from a reached layer during song-building, available in the finale. Only winners from layers that were actually voted on survive. |
+| **Fragment** | A winning option from a reached layer during song-building, available in the finale consensus game. Only winners from layers that were actually voted on survive. |
 | **Locked Fragment** | A fragment visible in the pre-game "elegy" display but not available during gameplay. Includes: losing options from voted layers AND both options from unreached layers (due to collapse). Represents "what could have been." |
-| **Group Assembly** | The first active finale phase. Audience members self-select into one of 7 layer-type groups by choosing a role on their phone, then physically finding others who chose the same role. Timer-based; undecided members are randomly assigned when the timer expires. |
-| **Deliberation** | The second active finale phase. Each group privately previews available fragments for their layer type on their phones and votes for which fragment to carry into the final song. Timer-based; majority wins when the timer expires. |
-| **Audio Preview** | In-browser playback of pre-rendered fragment audio files during deliberation. Each audience member controls playback independently on their own phone. |
-| **Ambassador** | One volunteer from each group who carries the group's chosen fragment to the altar during the ceremony. Selected by volunteering; random selection if multiple volunteers; layer forfeited if no volunteer. |
-| **Ceremony** | The third active finale phase. Ambassadors are called one at a time in a fixed configurable order. Each approaches the altar and locks their group's fragment into the final mix by placing their phone face-down on the altar surface. |
-| **Altar** | A physical surface on stage. Requires no electronics — the ambassador's phone detects the face-down placement via the accelerometer. The altar's power is accumulated from staging and narrative, not technology. |
-| **Altar Lock-in** | The gesture that activates a fragment: the ambassador places their phone face-down on the altar and holds it still for ~2 seconds. Detected via Device Orientation / Accelerometer API. Triggers immediate audio activation (quantized to next bar boundary). |
-| **NPC** | A system-controlled narrative voice displayed on audience phones during the finale. Reacts to key events (performer abandonment, group formation, ceremony moments). Terminal-style typeface. Event-driven, not auto-triggered on a per-round basis. |
-| **Performer Mix** | The final phase of the finale. The performer live-mixes fragments using a visual mixing surface, with changes quantized to loop boundaries. Initial state is pre-loaded from the ceremony results. |
+| **Consensus Game** | The first phase of the finale. Audience collectively converges on fragments to activate them, one role at a time, through timed rounds with a live convergence meter. |
+| **Convergence Meter** | A single scalar (0.0–1.0) showing how aligned the audience is during a consensus round. Does NOT show which fragment is leading. |
+| **Convergence Threshold** | The minimum convergence value required for a round to succeed. Starts at ~40%, softens after consecutive failures. |
+| **NPC** | A system-controlled narrative voice displayed on audience phones during the finale consensus game. Reacts to audience behavior, provides guidance, creates urgency. Terminal-style typeface. |
+| **Performer Mix** | The second phase of the finale. The performer live-mixes fragments using a visual mixing surface, with changes quantized to loop boundaries. |
 | **Pending Changes** | Fragment activations/deactivations queued by the performer that fire simultaneously at the next loop boundary. |
 | **Loop Boundary** | The downbeat of each 8-bar loop cycle. All audio changes are quantized to these boundaries. |
 | **Layer Identity** | Consistent color + symbol for each layer type, used across all 3 attempts. |
@@ -108,16 +104,6 @@ Unchanged from V1. Single process serves Next.js pages and real-time show logic 
 
 Unchanged from V1. Cloud-hosted server with local Ableton bridge.
 
-### Static Audio Preview Files
-
-Pre-rendered audio files (mp3/ogg) for each of the 42 fragment clips, exported from Ableton and served statically by the Next.js server. Used during the deliberation phase for in-browser playback on audience phones.
-
-**File naming convention:** `preview-{songIndex}-{layerIndex}-{option}.mp3` (e.g., `preview-0-2-A.mp3`)
-
-**Serving:** Static files from `public/audio/previews/` directory, served via Next.js static file handling.
-
-**Production step:** Render each Ableton clip as a short audio file (4–8 bars recommended; full 8-bar loop acceptable). Export at 128kbps mp3 for minimal file size while maintaining adequate quality for phone speakers in a noisy room.
-
 ---
 
 ## Client Routes (Next.js App Router)
@@ -140,42 +126,24 @@ Pre-rendered audio files (mp3/ogg) for each of the 42 fragment clips, exported f
 - Layer progress indicator showing completed layers and upcoming layers
 - Personal vote history dot on each completed layer (subtle indicator of which side you voted for)
 
-**Finale — Elegy moment (optional pre-assembly beat):**
+**Finale — Elegy moment (pre-game):**
 - Full grid of all fragments from all three songs, organized by role
 - Winners glowing, losers/locked fragments visually cracked or dimmed
 - NPC text narrates: "This is what we have left. This is what we lost."
 - Duration: ~10–15 seconds, purely observational, no interaction
 
-**Finale — Group Assembly:**
-- 7 tappable cards, one per layer type, each showing: layer symbol, layer color, configurable label (e.g., "The Heartbeat", "The Ground")
-- Live group size count displayed on each card (updates in real time as others join)
-- Timer visible at top of screen (configurable duration, e.g., 60 seconds)
-- Tap a card to join that group; tap a different card to switch (free choice, no constraints)
-- NPC text may appear to frame the moment ("Choose your role. Find each other.")
-- When timer expires: any undecided audience members are randomly assigned to a group by the server
-- After assignment: screen transitions to show "You are [Layer Label]" with the group's symbol, color, and member count, plus instruction to physically find others with the same role
-- Groups with 0 members are marked empty — that layer type will be skipped in the ceremony
-
-**Finale — Deliberation:**
-- Header: group identity (layer symbol + color + label + member count)
-- Available fragments for this layer type displayed as tappable cards (1–3 cards, one per song that has an available fragment for this layer type)
-- Each fragment card shows: chapter color, emotional tagline from song-building, play/pause button for audio preview
-- **Audio preview**: tap play to hear the fragment on the phone speaker; tap again to pause; only one fragment plays at a time per phone (switching auto-pauses the previous)
-- Vote button on each card: tap to cast vote for this fragment; can change vote freely during the timer
-- Live vote tally visible to group members (within-group transparency, unlike the blind song-building vote)
-- Timer visible at top (configurable duration, e.g., 120 seconds)
-- When timer expires: the fragment with the most votes wins (simple majority); ties broken randomly
-- After vote resolves: screen shows the chosen fragment with celebration animation
-- **Ambassador volunteering**: after the fragment is chosen, a prompt appears: "Will you carry this forward?" with Accept/Decline buttons. Timer for volunteering (e.g., 15 seconds). If multiple volunteer, one is selected randomly. If none volunteer, the layer is forfeited — NPC acknowledges the loss.
-- After ambassador is selected: ambassador's phone shows a distinct "Ambassador" state; other group members see who was chosen
-
-**Finale — Ceremony:**
-- **Non-ambassadors**: passive viewing state. Screen shows the ceremony progress — which layers have been locked, which ambassador is currently called, the layer order
-- **Ambassador (before being called)**: waiting state with their layer identity prominent. "Wait for your name."
-- **Ambassador (when called)**: phone enters altar-ready mode. Screen shows instruction: "Approach the altar. Place your phone face-down." Device Orientation API begins listening for face-down + still detection.
-- **Altar lock-in detection**: phone uses `DeviceOrientationEvent` to detect when the device is face-down (gravity vector pointing upward through the screen, i.e., beta ≈ ±180° or gamma ≈ ±180° depending on orientation). Must remain in face-down position and substantially still (accelerometer delta < threshold) for ~2 seconds. On detection: sends lock-in event to server, phone vibrates once (if Vibration API available), screen illuminates with confirmation glow in the layer's color.
-- **After lock-in**: ambassador picks up phone, sees confirmation. Audio for this fragment fades into the room mix (quantized to next bar boundary, using existing fade-in mechanic). Ceremony advances to next layer.
-- **Forfeited layers** (no ambassador): skipped in the ceremony order with brief NPC acknowledgment
+**Finale — Consensus Game:**
+- Clean game board: ONLY available (winning) fragments, organized by role row
+- Each role row: role symbol + color on left, 1–3 tappable fragment tiles (one per song) to the right
+- Fragment tiles show: chapter color background, short emotional label from song-building, personal history dot if user voted for this option
+- Locked/completed roles compressed at top as small glowing badges
+- **Convergence Meter** pinned to top: full-width, animated, with visible threshold zone
+- NPC text appears below meter when active
+- Tap a fragment to vote; tap a different one to change vote; must always have a vote placed
+- Round timer visible (integrated into meter or alongside it)
+- When convergence crosses threshold: meter visual shifts (glow, color change) — but round continues until timer expires
+- Round success: winning tile bursts with chapter color, role row locks and compresses, sound fades into room
+- Round failure: grid briefly shakes, votes clear, new round begins after ~3 seconds
 
 **Finale — Performer Mix phase:**
 - **TBD** — Options under consideration: phones go dark, minimal ambient visualization, or endorsement tap surface. See Open Questions.
@@ -191,31 +159,11 @@ Pre-rendered audio files (mp3/ogg) for each of the 42 fragment clips, exported f
 - Reveal animation: vote split visualization, health bar drain
 - Stack history: icons of chosen layers so far
 
-**Finale — Elegy:**
-- Full fragment grid with winners glowing, losers/locked dimmed
+**Finale — Consensus Game:**
+- Richer view than phones: all fragments including locked ones (full history of the show)
+- Convergence visualization (particles clustering, colors coalescing)
+- Celebration animation when a fragment locks in
 - NPC text displayed prominently
-
-**Finale — Group Assembly:**
-- Large visualization of the 7 groups forming in real time
-- Each group shown with layer symbol, color, and growing member count
-- Animated: members flowing into groups as people choose on their phones
-- Timer displayed prominently
-- NPC text when relevant
-
-**Finale — Deliberation:**
-- Overview of all 7 groups and their deliberation status
-- Per-group: which fragment is currently leading (vote counts visible on projector, unlike phones which show only within-group)
-- Groups that have reached majority shown with a "decided" visual state
-- Ambassador volunteering status visible as it happens
-- Timer displayed prominently
-
-**Finale — Ceremony:**
-- Central focus: the current ambassador being called
-- Layer identity (symbol + color + label) displayed large
-- The chosen fragment's chapter color and emotional tagline
-- Lock-in celebration animation when altar detects the phone
-- Assembled layers stack visualization — each locked layer glows, building the visual representation of the final song
-- Forfeited layers shown as dark/absent gaps in the stack
 
 **Finale — Performer Mix:**
 - Mirror of the performer's mixing surface (simplified/beautified)
@@ -238,21 +186,16 @@ Pre-rendered audio files (mp3/ogg) for each of the 42 fragment clips, exported f
 | **Health Bar** | Adjust drain factor per attempt, Adjust layer multipliers, View current health, Override health value, Force Collapse |
 | **Song Rejection** | Trigger rejection effect (OSC command to Ableton) — only for completed songs |
 | **Audio** | Transport Play/Stop, Hard Mute/Panic, Reset Utilities (all gains to 0 dB), Per-layer force on/off |
-| **Finale — Assembly** | View group sizes in real time, Extend/shorten timer, Force-assign user to group, Force end assembly early |
-| **Finale — Deliberation** | View per-group vote distributions, Extend/shorten timer, Force fragment selection for a group, Force end deliberation early |
-| **Finale — Ceremony** | View ambassador status per group, Call next ambassador (auto-advances in fixed order, but can skip/reorder), Force lock-in for a layer, Mark layer as forfeited, Fire NPC lines manually |
+| **Finale — Consensus** | Start/stop consensus rounds, Adjust threshold, View convergence data (which fragment leading, by how much), Fire NPC lines manually |
 | **Finale — Performer Mix** | 7×6 mixing grid (7 layers × 6 fragments: 3 songs × 2 options), Queue/dequeue fragment changes, Mute/unmute layers, Snapshot presets, Loop position display |
-| **NPC** | Bank of pre-written NPC lines (organized by phase), Free-text input for improvised lines, Fire button |
 | **Live Performance** | Toggle live input tracks (vocal, synth, etc.) |
 | **Emergency** | Pause/Resume show, Export/Import state as JSON, Force reconnect all clients, Reset to lobby |
 
 **Metrics/Telemetry:**
 - Connected clients count
-- Vote counts A vs B, time remaining
+- Vote counts A vs B, consensus percent, time remaining
 - Health bar status per attempt
-- Assembly: group sizes per layer type, timer remaining, undecided count
-- Deliberation: per-group fragment votes, timer remaining, ambassador volunteer status
-- Ceremony: current layer, ambassador status, locked layers, forfeited layers
+- Consensus game: convergence value, round number, which fragment leading (controller only), failures count
 - Performer mix: active layers, pending changes, loop position
 - System health: WebSocket status, Ableton OSC status, error log tail
 
@@ -267,23 +210,21 @@ lobby → opener → attempt_story → attempt_build → attempt_resolve (if com
                                        ↓ (if collapsed)
                  attempt_story → attempt_build → attempt_resolve (if completed) →
                                        ↓ (if collapsed)
-                 finale_elegy → finale_assembly → finale_deliberation → finale_ceremony → finale_performer_mix → ended
+                 finale_elegy → finale_consensus → finale_performer_mix → ended
 ```
 
 ### Phase Details
 
 ```typescript
 type ShowPhase =
-  | 'lobby'                    // Audience joining, scanning QR codes
-  | 'opener'                   // Performer monologue (phones dark)
-  | 'attempt_story'            // Story phase for current attempt (phones dark)
-  | 'attempt_build'            // Song-building phase for current attempt (phones active)
-  | 'attempt_resolve'          // Song completed; performer rejects it (phones dim/watch)
-  | 'finale_elegy'             // Audience sees full fragment wreckage (phones passive)
-  | 'finale_assembly'          // Audience self-selects into 7 layer-type groups (phones active)
-  | 'finale_deliberation'      // Groups preview fragments, vote, select ambassadors (phones active)
-  | 'finale_ceremony'          // Ambassadors lock fragments at the altar (phones active for ambassadors)
-  | 'finale_performer_mix'     // Performer live-mixes and escalates (phones TBD)
+  | 'lobby'                // Audience joining, scanning QR codes
+  | 'opener'               // Performer monologue (phones dark)
+  | 'attempt_story'        // Story phase for current attempt (phones dark)
+  | 'attempt_build'        // Song-building phase for current attempt (phones active)
+  | 'attempt_resolve'      // Song completed; performer rejects it (phones dim/watch)
+  | 'finale_elegy'         // Audience sees full fragment wreckage (phones passive)
+  | 'finale_consensus'     // Consensus game — audience builds base mix (phones active)
+  | 'finale_performer_mix' // Performer live-mixes and escalates (phones TBD)
   | 'ended';
 ```
 
@@ -301,10 +242,8 @@ type ShowPhase =
 | `attempt_build` (attempt 2) | `finale_elegy` | **Auto** on collapse, or Manual after rejection | Song 3 → finale regardless of outcome |
 | `attempt_resolve` | `attempt_story` | Manual | Performer triggers rejection + advance; increments attempt index |
 | `attempt_resolve` (attempt 2) | `finale_elegy` | Manual | After Song 3 rejection |
-| `finale_elegy` | `finale_assembly` | Manual or Auto (after timer) | NPC rallies the audience |
-| `finale_assembly` | `finale_deliberation` | **Auto** | When assembly timer expires (undecided randomly assigned first) |
-| `finale_deliberation` | `finale_ceremony` | **Auto** | When deliberation timer expires (majority locked, ambassadors resolved) |
-| `finale_ceremony` | `finale_performer_mix` | Manual or **Auto** | When all non-forfeited layers locked in, or performer triggers transition |
+| `finale_elegy` | `finale_consensus` | Manual or Auto (after timer) | NPC takes over |
+| `finale_consensus` | `finale_performer_mix` | Manual | When performer returns |
 | `finale_performer_mix` | `ended` | Manual | |
 
 ---
@@ -472,7 +411,7 @@ interface LayerResult {
 ```
 
 **Fragment availability for finale:**
-- `locked_in` layers: the **winning** option becomes an available fragment in the finale
+- `locked_in` layers: the **winning** option becomes an available fragment in the finale consensus game
 - `locked_in` layers: the **losing** option is visible in the elegy display but NOT available during gameplay
 - `unreached` layers (due to collapse): **both** options are visible in the elegy display but NOT available during gameplay — these represent "what could have been"
 - The performer's mixing surface has access to **all fragments** regardless of availability (both winners and losers from reached layers, plus both options from unreached layers)
@@ -489,144 +428,115 @@ interface LayerResult {
 
 ### Overview
 
-The finale has five sub-phases:
-1. **Elegy** — audience observes the wreckage of all three songs (optional brief beat)
-2. **Assembly** — audience self-selects into 7 layer-type groups and physically regroups
-3. **Deliberation** — groups preview audio, vote on fragments, and select ambassadors
-4. **Ceremony** — ambassadors lock fragments into the final mix at the altar
-5. **Performer Mix** — performer returns to live-mix the escalation and climax
+The finale has three sub-phases:
+1. **Elegy** — audience observes the wreckage of all three songs
+2. **Consensus Game** — audience collectively resurrects fragments through wordless consensus
+3. **Performer Mix** — performer returns to live-mix the escalation and climax
 
 ### Narrative Setup
 
-After Song 3's resolution (collapse or rejection), the performer "abandons" the stage — stepping back, giving up, unable to finish anything. Lights shift to red. Every audience member's phone receives an NPC message in terminal-style typeface. The NPC represents the "inner council" gaining consciousness and refusing to let the creator give up: *"He's gone. We need to do this ourselves."*
+After Song 3's rejection, the performer "abandons" the stage — stepping back, giving up, unable to finish anything. The audience's phones display NPC text in a terminal-style typeface. The NPC represents the "inner council" gaining consciousness and refusing to let the creator give up. Something like: "He's gone. We need to salvage this ourselves."
 
-This frames the finale as a mutiny — the audience acting without the performer, each part of the mind finding its role, proving integration was always possible.
+This frames the consensus game as a mutiny — the audience acting without the performer, proving integration was always possible.
 
 ### Phase 1: Finale Elegy
 
-An optional 10–15 second observational moment. Phones show the full grid of all fragments from all three songs:
+A 10–15 second observational moment. Phones show the full grid of all fragments from all three songs:
 - Winning fragments glow with their chapter color
 - Losing fragments are cracked, dimmed, desaturated
 - Organized by role (7 rows)
 - NPC narrates: acknowledges what survived and what was lost
 - No interaction — pure narrative beat
-- Transitions to assembly when NPC rallies the audience (manual or auto-timed)
+- Transitions to consensus game when NPC rallies the audience (manual or auto-timed)
 
-### Phase 2: Group Assembly
+### Phase 2: Consensus Game
 
-The audience physically self-organizes into seven groups — one per layer type.
+The core finale mechanic. The audience collectively activates fragments one at a time.
 
-**Phone UI:** Seven tappable cards, each displaying the layer's symbol, color, and configurable label (from `default-show.json`). Live group size counts update in real time as people choose. No constraints on group size — any group can be empty or hold all 40 people.
+**Game Board:** The phone screen transitions from the elegy grid to a clean game board showing ONLY available fragments (21 tiles maximum, organized into 7 role rows of up to 3 tiles each). All locked fragments are hidden — the game board is purely functional.
 
-**Timer:** Configurable duration (default: 60 seconds). Displayed prominently on phones and projector. When the timer expires:
-1. Any audience member who has not selected a group is **randomly assigned** to one of the 7 groups by the server
-2. Groups with 0 members are marked as **empty** — that layer type will be skipped in the ceremony and will not have a fragment in the initial mix
-3. The system transitions to the deliberation phase
+**Round Flow:**
+1. All unlocked role rows are active simultaneously; audience can vote for any fragment in any role
+2. Each user taps one fragment (their vote). Can change vote freely during the round window.
+3. Convergence meter (pinned to top of screen) updates in real time at ~4-5 Hz, reflecting how aligned the room is
+4. Timer counts down (default: 15 seconds; first round: 20 seconds)
+5. When timer expires:
+   - If the most-voted fragment's convergence ≥ threshold → **SUCCESS**: fragment activates, role row locks
+   - If no fragment crosses threshold → **FAILURE**: grid shakes, votes clear, NPC reacts, next round begins after ~3 seconds
 
-**Physical movement:** After groups are assigned (timer expiry), the phone screen shows "You are [Layer Label]" with the group's identity. The audience is expected to physically move to find others with the same role. The chaos of reorganization is intentional — it mirrors the script's theme of internal parts finding each other. The system does NOT wait for physical assembly to complete; the deliberation timer begins after a brief grace period (configurable, e.g., 10–15 seconds).
-
-**Projector:** Shows the groups forming in real time — animated member counts, layer symbols growing/pulsing as people join. Timer prominent.
-
-### Phase 3: Deliberation
-
-Each group privately deliberates on which fragment to carry into the final song.
-
-**Phone UI per group:** Shows only the available fragments for this group's layer type (1–3 fragments, one per song that reached this layer type). Each fragment card displays:
-- Chapter color background
-- Emotional tagline from song-building
-- Play/pause button for audio preview
-- Vote button
-
-**Audio preview:** Each audience member controls playback independently. Tapping play on a fragment starts that clip in the browser via the HTML5 Audio API. Tapping play on a different fragment auto-pauses the first. Volume is at the browser's default level. The natural social dynamics of a huddle (people sharing phones, taking turns, or just listening to the ambient mix of everyone's phones) are part of the experience. Preview files are pre-rendered static mp3s served from `public/audio/previews/`.
-
-**Voting within the group:** Transparent — group members can see how many votes each fragment has. Votes can be changed freely during the deliberation window. This is the opposite of the blind song-building vote; within a small group, transparency encourages real discussion and convergence.
-
-**Timer:** Configurable duration (default: 120 seconds). When the timer expires:
-1. The fragment with the most votes in each group wins (**simple majority**). Ties broken randomly.
-2. The chosen fragment is locked for each group
-3. **Ambassador volunteering** begins immediately after fragment selection
-
-**Ambassador selection:** After the fragment is chosen, each group member sees a prompt: "Will you carry this forward?" with Accept/Decline buttons. Volunteering window: configurable (default: 15 seconds).
-- If exactly 1 person volunteers → they are the ambassador
-- If multiple volunteer → one is selected randomly
-- If nobody volunteers → the layer is **forfeited**. NPC acknowledges: this part of the mind couldn't find its voice. The layer will be skipped in the ceremony.
-
-**Edge cases:**
-- **Single-fragment layer types** (only one song reached this layer): the deliberation is trivially decided — the one available fragment wins automatically. The group still goes through the ambassador selection.
-- **Single-member groups:** one person makes all decisions — they choose the fragment, they are the ambassador by default (no volunteering step needed).
-- **Empty groups:** skipped entirely — no deliberation, no ambassador, layer forfeited.
-
-### Phase 4: Ceremony
-
-The performer returns to the stage (or is about to — the ceremony is the transition point). The system calls ambassadors one by one in a **fixed configurable order** (set in `default-show.json`, e.g., `[bass, drums, pad, melody, harmony, fx1, fx2]`).
-
-**Ceremony flow per layer:**
-1. The system announces the next layer (NPC text on phones + projector display: layer symbol, color, label)
-2. The ambassador for that layer is called — their phone enters **altar-ready mode**
-3. The ambassador approaches the altar on stage
-4. The ambassador places their phone face-down on the altar surface
-5. The phone detects the face-down + still position via Device Orientation API (~2 second hold)
-6. On detection: lock-in event fires to server → audio activation (quantized to next bar boundary, fade-in per existing gain config) → phone vibrates once → screen illuminates with confirmation
-7. Ambassador picks up phone, returns to seat
-8. System advances to next layer
-
-**Altar lock-in detection (Device Orientation API):**
+**Convergence calculation:**
 ```typescript
-// Detection logic (runs on ambassador's phone during altar-ready mode)
-interface AltarDetectionConfig {
-  faceDownThreshold: number;       // degrees from face-down (default: 30°)
-  stillnessThreshold: number;      // max acceleration delta (default: 0.5 m/s²)
-  holdDurationMs: number;          // how long face-down + still must be sustained (default: 2000)
-}
+function calculateConvergence(votes: Map<UserId, FragmentId>): {
+  convergence: number;         // 0.0 to 1.0
+  leadingFragment: FragmentId;
+  distribution: Map<FragmentId, number>;  // vote counts (controller-only data)
+} {
+  // Count votes per fragment
+  const counts = new Map<FragmentId, number>();
+  for (const fragmentId of votes.values()) {
+    counts.set(fragmentId, (counts.get(fragmentId) || 0) + 1);
+  }
+  const total = votes.size;
+  if (total === 0) return { convergence: 0, leadingFragment: '', distribution: counts };
 
-// DeviceOrientationEvent: check if phone is face-down
-// Face-down = screen pointing toward ground
-// Using absolute orientation: when face-down, the z-axis accelerometer reads ~+9.8 m/s²
-// (gravity pulling "up" through the back of the phone)
-// OR using beta/gamma: beta ≈ ±180° indicates face-down
-//
-// The detection fires when:
-// 1. Phone is within faceDownThreshold degrees of perfectly face-down
-// 2. Accelerometer readings are stable (delta < stillnessThreshold) for holdDurationMs
-// 3. Both conditions sustained simultaneously
+  let maxCount = 0;
+  let leader = '';
+  for (const [id, count] of counts) {
+    if (count > maxCount) { maxCount = count; leader = id; }
+  }
+  return { convergence: maxCount / total, leadingFragment: leader, distribution: counts };
+}
 ```
 
-**Forfeited layers:** Skipped in the ceremony order. NPC may acknowledge briefly. No audio activation for that layer.
+**Key convergence meter rules:**
+- The meter shows a single scalar value (how aligned the room is). It does NOT show which fragment is leading.
+- A visible threshold zone on the meter indicates the target. Below the line = not enough consensus. Above the line = success zone.
+- When convergence enters the success zone, the visual treatment shifts (glow, color change) — creating a "hold it, hold it..." moment as the timer runs down.
+- The round succeeds only if convergence is **above the threshold when the timer expires.** Briefly crossing and falling back is not enough.
 
-**Ceremony completion:** After all non-forfeited layers have been locked in, the ceremony ends. The song now plays with all locked fragments active. The performer takes over for the performer mix phase.
+**Threshold behavior:**
+- Starting threshold: ~40% (configurable)
+- After 2 consecutive failures: threshold drops to ~30%
+- After 4+ consecutive failures: threshold drops to ~25%
+- Threshold resets after each success
+- NPC narratively acknowledges threshold softening: "we don't need everyone, just enough of us"
 
-**Audio activation during ceremony:** Each lock-in unmutes the fragment's Ableton track, quantized to the next bar boundary, with the standard fade-in (per `GainConfig.ceremonySwellBeats`). The song assembles layer by layer — each ambassador's lock-in adds a new voice to the growing mix. By the last lock-in, the audience hears the complete assembled song.
+**Sound activation:** When a fragment locks in, its Ableton track is unmuted, quantized to the next bar boundary. Fade in over ~2 bars for a graceful entrance. The audience hears the fragment join the existing mix.
 
-### NPC System (Finale)
+**Role locking:** When a role's fragment activates, the entire role row compresses to a small glowing badge at the top of the screen. Remaining unlocked rows spread to fill freed space.
 
-The NPC is a narrative voice during the finale, delivered via terminal-style typeface on audience phones and the projector.
+**Game completion:** The game ends when all roles have an active fragment (7 successful consensus rounds). Alternatively, the performer can end it early by returning (manual transition from controller).
 
-**Delivery:** Text appears briefly, disappears between messages. No auto-scrolling history — each message replaces the last.
+**Fragment voting interactions:**
+- Tap a fragment to place vote
+- Tap a different fragment to change vote (vote moves, meter responds within ~200ms)
+- Cannot deselect — must always have a vote placed
+- Can vote for fragments in any unlocked role (all roles available simultaneously)
 
-**Control model:** Event-driven messages for key moments + manual overrides from controller.
+### NPC System
 
-**Event-driven messages (configurable text in `default-show.json`):**
-- Performer abandonment: "He's gone. We need to do this ourselves."
-- Assembly start: "Choose your role. Find each other."
-- Assembly timer warning (e.g., 10s remaining): "Decide now."
-- Deliberation start: "Listen. Decide together."
-- Empty group detected: "No one chose [layer label]. We'll go without it."
-- Ambassador selected: "[Layer label] has its voice."
-- No ambassador (forfeit): "[Layer label] goes silent. Not every part survives."
-- Ceremony start: "One by one. Bring it forward."
-- Layer locked in: brief acknowledgment (varies by layer)
-- Final layer locked: "That's all of us."
-- Ceremony complete / performer return: "He's back. Show him what we built."
+The NPC is a reactive narrative voice during the consensus game.
 
-**Manual overrides:** Performer has a bank of pre-written NPC lines on the controller, organized by phase, plus a free-text input for improvised lines.
+**Delivery:** Terminal-style typeface on audience phones, below the convergence meter. Appears briefly, disappears between messages. Also displayed on projector.
 
-**Pacing:** NPC should NOT speak at every moment. The silence between messages — filled by music building layer by layer — is where the emotional weight lives.
+**Control model:** Hybrid — auto-triggered for common patterns + manual overrides from controller.
 
-### Phase 5: Performer Mix
+**Auto-triggered conditions:**
+- First failure: encouraging ("scattered... try again")
+- Consecutive same-song convergence: exasperated ("again? we KNOW that one works")
+- Near-miss (convergence just below threshold): hopeful ("so close... you're almost there")
+- Long failure streak: vulnerable ("we're falling apart... just like before")
+- First success: celebratory ("that fast? you've been holding out on me")
+- Single-option role: acknowledging ("only one path forward here")
+- Final fragment: climactic ("one more. make it count.")
+
+**Manual overrides:** Performer has a bank of NPC lines on the controller, plus a free-text input for improvised lines.
+
+**Pacing:** NPC should NOT speak every round. Best used at inflection points. Silence between messages lets the music and game breathe.
+
+### Phase 3: Performer Mix
 
 The performer returns to take control of the mix. This is a live performance tool.
-
-**Initial state:** The performer mix begins with the fragments locked in during the ceremony as the active layers. Forfeited layers start muted.
 
 **Mixing Surface (controller):**
 - 7 rows (one per layer type) × 6 columns (Song 1 A, Song 1 B, Song 2 A, Song 2 B, Song 3 A, Song 3 B)
@@ -667,45 +577,29 @@ At each loop boundary, the timing engine:
 
 ```typescript
 interface FinaleState {
-  phase: 'elegy' | 'assembly' | 'deliberation' | 'ceremony' | 'performer_mix';
+  phase: 'elegy' | 'consensus_game' | 'performer_mix';
 
   // Fragment availability (computed from song-building results)
-  availableFragments: Fragment[];     // Winners only (for group deliberation)
+  availableFragments: Fragment[];     // Winners only (for consensus game)
   allFragments: Fragment[];           // All 42 (for performer mixing surface)
-  lockedFragments: Fragment[];        // Losers + unreached (for elegy display)
+  lockedFragments: Fragment[];        // Losers (for elegy display)
 
-  // Group assembly state
-  assembly: {
-    groups: Map<LayerType, UserId[]>;       // layerType → array of user IDs
-    undecidedUsers: UserId[];               // Users who haven't chosen yet
-    timerRemaining: number;                 // ms
-    timerDuration: number;                  // ms (total)
-  };
-
-  // Deliberation state
-  deliberation: {
-    groupVotes: Map<LayerType, Map<UserId, string>>;  // layerType → (userId → fragmentId)
-    chosenFragments: Map<LayerType, string | null>;    // layerType → fragmentId or null (after timer)
-    ambassadorVolunteers: Map<LayerType, UserId[]>;    // layerType → volunteer user IDs
-    ambassadors: Map<LayerType, UserId | null>;        // layerType → chosen ambassador or null
-    timerRemaining: number;                            // ms (deliberation timer)
-    volunteerTimerRemaining: number | null;            // ms (ambassador volunteering timer, null if not active)
-  };
-
-  // Ceremony state
-  ceremony: {
-    layerOrder: LayerType[];                    // Fixed configurable order
-    currentIndex: number;                       // Index into layerOrder
-    currentAmbassador: UserId | null;           // Ambassador currently called
-    altarReady: boolean;                        // Whether current ambassador's phone is in altar-ready mode
-    lockedLayers: Map<LayerType, string>;        // layerType → fragmentId (locked in at altar)
-    forfeitedLayers: LayerType[];               // Layers with no ambassador
-    ceremonyComplete: boolean;
+  // Consensus game state
+  consensusGame: {
+    active: boolean;
+    currentRound: number;
+    roundTimeRemaining: number;       // ms
+    votes: Map<UserId, string>;       // userId → fragmentId
+    convergenceValue: number;         // 0.0 to 1.0
+    threshold: number;                // Current threshold (may decrease after failures)
+    consecutiveFailures: number;
+    lockedRoles: Map<LayerType, string>;  // layerType → fragmentId (activated fragments)
   };
 
   // NPC state
   npc: {
     currentMessage: string | null;
+    autoTriggersEnabled: boolean;
   };
 
   // Performer mix state
@@ -773,15 +667,6 @@ Each layer type occupies a designated frequency range. EQ cuts on each track rem
 - **Timbre evolution:** automate one parameter per fragment across 8 bars (filter opening, reverb swell, chorus depth).
 - **Reverb discipline:** reverb on melody, harmony, FX. Keep bass and drums dry or nearly dry.
 
-### Audio Preview Production
-
-Each of the 42 fragment clips must be exported as a standalone audio file for in-browser preview:
-- **Format:** mp3, 128kbps (adequate quality for phone speakers; small file size for fast loading)
-- **Duration:** 4–8 bars recommended. Full 8-bar loop acceptable. Shorter excerpts encourage turn-taking during group deliberation.
-- **Naming:** `preview-{songIndex}-{layerIndex}-{option}.mp3` (e.g., `preview-0-2-A.mp3`)
-- **Content:** Should start cleanly on bar 1 and ideally loop well, though looping is not required for preview purposes
-- **Total file count:** Up to 42 files (3 songs × 7 layers × 2 options), though only available fragments will be loaded by clients
-
 ---
 
 ## Audio Engine & Ableton Integration
@@ -818,10 +703,15 @@ Each of the 42 fragment clips must be exported as a standalone audio file for in
 - Rejection effect on return track activates (TBD: distinct from collapse effect — configurable)
 - After effect completes, all tracks for this attempt are muted
 
-**Finale — Ceremony lock-in:**
-- Each altar lock-in: unmute the chosen fragment's track, quantized to next bar boundary
-- Fade in per `GainConfig.ceremonySwellBeats` (e.g., ~2 bars)
-- Layers accumulate: previously locked ceremony layers stay unmuted
+**Finale — Consensus game:**
+- Each successful consensus round: unmute the winning fragment's track, quantized to next bar boundary
+- Fade in over ~2 bars
+
+**Collapse:**
+- Triggered when health bar reaches 0
+- Enable collapse return track effects via OSC
+- Rapid fade/filter sweep on all active tracks for the collapsed attempt
+- After collapse animation duration, mute all tracks for the attempt
 
 **Finale — Performer mix:**
 - Pending changes queue fires all mute/unmute commands simultaneously at loop boundary
@@ -887,19 +777,14 @@ DEFAULT_DRAIN_FACTOR=0.5
 DEFAULT_LAYER_MULTIPLIERS=0.5,0.6,0.8,1.0,1.3,1.6,2.0
 COLLAPSE_ANIMATION_MS=5000
 
-# Finale — Assembly
-ASSEMBLY_TIMER_MS=60000
-ASSEMBLY_GRACE_PERIOD_MS=15000
-
-# Finale — Deliberation
-DELIBERATION_TIMER_MS=120000
-AMBASSADOR_VOLUNTEER_TIMER_MS=15000
-
-# Finale — Ceremony
-CEREMONY_LAYER_ORDER=bass,drums,pad,melody,harmony,fx1,fx2
-
-# Audio Previews
-AUDIO_PREVIEW_PATH=/audio/previews
+# Consensus Game
+CONSENSUS_ROUND_DURATION_MS=15000
+CONSENSUS_FIRST_ROUND_DURATION_MS=20000
+CONSENSUS_INITIAL_THRESHOLD=0.4
+CONSENSUS_FAILURE_THRESHOLD_DECAY=0.05
+CONSENSUS_MIN_THRESHOLD=0.25
+CONSENSUS_INTER_ROUND_DELAY_MS=3000
+CONSENSUS_SUCCESS_CELEBRATION_MS=6000
 ```
 
 ---
@@ -916,6 +801,8 @@ interface User {
   joinedAt: number;
 }
 ```
+
+**Note:** `finaleChapter` removed. Chapter assignment no longer exists.
 
 ### Show State
 
@@ -968,24 +855,18 @@ interface AttemptConfig {
   title: string;
   layers: LayerConfig[];              // 7 layers, staggered per song
   drainFactor: number;                // Health bar base drain multiplier for this attempt
-  layerMultipliers: number[];         // Per-layer scaling factors (length 7)
+  layerMultipliers: number[];         // Per-layer scaling factors (length 7, e.g., [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0])
 }
 
 interface FinaleConfig {
-  assemblyTimerMs: number;             // Duration of group assembly phase
-  assemblyGracePeriodMs: number;       // Grace period after assignment before deliberation
-  deliberationTimerMs: number;         // Duration of group deliberation phase
-  ambassadorVolunteerTimerMs: number;  // Duration of ambassador volunteering window
-  ceremonyLayerOrder: LayerType[];     // Fixed order for ambassador call-ups
-  audioPreviewPath: string;            // Base URL path for preview audio files
-  layerLabels: Map<LayerType, string>; // Configurable display labels for assembly cards (e.g., "The Heartbeat")
-  npcMessages: NpcMessageConfig[];     // Event-driven NPC messages (event key → text)
-}
-
-interface NpcMessageConfig {
-  event: string;                       // Event key (e.g., 'performer_abandonment', 'assembly_start', 'layer_locked')
-  layerType?: LayerType;               // Optional: specific to a layer type
-  text: string;                        // The NPC message text
+  consensusRoundDurationMs: number;
+  firstRoundDurationMs: number;
+  initialThreshold: number;
+  thresholdDecayPerFailure: number;
+  minThreshold: number;
+  interRoundDelayMs: number;
+  successCelebrationMs: number;
+  npcAutoTriggers: NpcTriggerConfig[];
 }
 
 interface TimingConfig {
@@ -993,21 +874,21 @@ interface TimingConfig {
   votingWindowMs: number;
   revealSequenceDurationMs: number;
   rejectionEffectDurationMs: number;
-  beatsPerLoop: number;
-  auditionsPerLayer: number;
+  beatsPerLoop: number;        // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
+  auditionsPerLayer: number;   // Number of A/B cycles per layer before voting opens
   gain: GainConfig;
 }
 
 interface GainConfig {
-  entryGain: number;
-  entrySwellBeats: number;
-  holdBars: number;
-  exitFadeBeats: number;
-  lockInFadeBeats: number;
-  collapseFadeBeats: number;
-  ceremonySwellBeats: number;    // Beats to swell ceremony-activated fragments (replaces consensusSwellBeats)
-  unityGainValue: number;
-  stepsPerBeat: number;
+  entryGain: number;           // Initial gain when a track starts playing (0.0–1.0)
+  entrySwellBeats: number;     // Beats to swell from entryGain to 1.0
+  holdBars: number;            // Bars to hold at full gain (informational)
+  exitFadeBeats: number;       // Beats to fade out when stopping audition
+  lockInFadeBeats: number;     // Beats to fade out the losing option on lock-in
+  collapseFadeBeats: number;   // Beats to fade out all tracks on collapse
+  consensusSwellBeats: number; // Beats to swell consensus-activated fragments
+  unityGainValue: number;      // Ableton Utility param value for 0 dB (default: 0)
+  stepsPerBeat: number;        // Sub-steps per beat for gain interpolation (1 = no sub-beats)
 }
 
 interface Fragment {
@@ -1019,7 +900,6 @@ interface Fragment {
   layerType: LayerType;
   displayLabel: string;               // Emotional tagline from layer config
   audioRef: AudioReference;           // Ableton track index
-  previewAudioPath: string;           // URL path to preview audio file
 }
 ```
 
@@ -1051,41 +931,17 @@ type ConductorCommand =
   // Health Bar
   | { type: 'SET_DRAIN_FACTOR'; factor: number }
   | { type: 'SET_HEALTH'; value: number }
-  | { type: 'FORCE_COLLAPSE' }
+  | { type: 'FORCE_COLLAPSE' }                          // End attempt immediately
 
   // Song Rejection
-  | { type: 'TRIGGER_REJECTION' }
+  | { type: 'TRIGGER_REJECTION' }                       // Only for completed songs
 
-  // Finale — Setup
+  // Finale — Consensus Game
   | { type: 'SETUP_FINALE' }
-
-  // Finale — Assembly
-  | { type: 'START_ASSEMBLY' }
-  | { type: 'JOIN_GROUP'; userId: UserId; layerType: LayerType }
-  | { type: 'ASSEMBLY_TIMER_EXPIRED' }
-  | { type: 'FORCE_ASSIGN_USER'; userId: UserId; layerType: LayerType }
-  | { type: 'EXTEND_ASSEMBLY_TIMER'; additionalMs: number }
-  | { type: 'FORCE_END_ASSEMBLY' }
-
-  // Finale — Deliberation
-  | { type: 'START_DELIBERATION' }
-  | { type: 'SUBMIT_GROUP_VOTE'; userId: UserId; layerType: LayerType; fragmentId: string }
-  | { type: 'DELIBERATION_TIMER_EXPIRED' }
-  | { type: 'VOLUNTEER_AS_AMBASSADOR'; userId: UserId; layerType: LayerType }
-  | { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED'; layerType: LayerType }
-  | { type: 'FORCE_FRAGMENT_SELECTION'; layerType: LayerType; fragmentId: string }
-  | { type: 'EXTEND_DELIBERATION_TIMER'; additionalMs: number }
-  | { type: 'FORCE_END_DELIBERATION' }
-
-  // Finale — Ceremony
-  | { type: 'START_CEREMONY' }
-  | { type: 'CALL_NEXT_AMBASSADOR' }
-  | { type: 'ALTAR_LOCK_IN'; userId: UserId; layerType: LayerType }
-  | { type: 'FORCE_LOCK_IN'; layerType: LayerType }
-  | { type: 'FORFEIT_LAYER'; layerType: LayerType }
-  | { type: 'SKIP_TO_LAYER'; layerType: LayerType }
-
-  // Finale — NPC
+  | { type: 'START_CONSENSUS_ROUND' }
+  | { type: 'SUBMIT_CONSENSUS_VOTE'; userId: UserId; fragmentId: string }
+  | { type: 'END_CONSENSUS_ROUND' }
+  | { type: 'SET_CONSENSUS_THRESHOLD'; threshold: number }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
 
   // Finale — Performer Mix
@@ -1131,35 +987,14 @@ type ConductorEvent =
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
-  // Finale — Setup
+  // Finale
   | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: Fragment[]; lockedFragments: Fragment[] }
-
-  // Finale — Assembly
-  | { type: 'ASSEMBLY_STARTED'; timerDuration: number }
-  | { type: 'GROUP_MEMBERSHIP_CHANGED'; groups: Map<LayerType, UserId[]>; undecidedCount: number }
-  | { type: 'ASSEMBLY_COMPLETE'; groups: Map<LayerType, UserId[]>; emptyGroups: LayerType[] }
-
-  // Finale — Deliberation
-  | { type: 'DELIBERATION_STARTED'; timerDuration: number }
-  | { type: 'GROUP_VOTE_UPDATED'; layerType: LayerType; votes: Map<string, number> }
-  | { type: 'FRAGMENT_CHOSEN'; layerType: LayerType; fragmentId: string }
-  | { type: 'AMBASSADOR_VOLUNTEERED'; layerType: LayerType; userId: UserId }
-  | { type: 'AMBASSADOR_SELECTED'; layerType: LayerType; userId: UserId }
-  | { type: 'LAYER_FORFEITED'; layerType: LayerType }
-  | { type: 'DELIBERATION_COMPLETE' }
-
-  // Finale — Ceremony
-  | { type: 'CEREMONY_STARTED'; layerOrder: LayerType[] }
-  | { type: 'AMBASSADOR_CALLED'; layerType: LayerType; userId: UserId }
-  | { type: 'ALTAR_LOCK_IN_DETECTED'; layerType: LayerType; fragmentId: string }
-  | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
-  | { type: 'CEREMONY_LAYER_SKIPPED'; layerType: LayerType }
-  | { type: 'CEREMONY_COMPLETE'; lockedLayers: Map<LayerType, string> }
-
-  // Finale — NPC
+  | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
+  | { type: 'CONSENSUS_VOTE_UPDATED'; convergenceValue: number }
+  | { type: 'CONSENSUS_ROUND_SUCCESS'; fragmentId: string; layerType: LayerType; convergence: number }
+  | { type: 'CONSENSUS_ROUND_FAILURE'; highestConvergence: number }
+  | { type: 'CONSENSUS_GAME_COMPLETE' }
   | { type: 'NPC_MESSAGE'; message: string }
-
-  // Finale — Performer Mix
   | { type: 'PERFORMER_MIX_STARTED' }
   | { type: 'PENDING_CHANGES_FIRED'; changes: PendingChange[] }
   | { type: 'MIX_STATE_UPDATED'; activeLayers: Map<LayerType, string | null> }
@@ -1186,9 +1021,9 @@ interface VoteResult {
 
 ### State Sync Strategy
 Full state syncs on every mutation:
-- **Controller**: Full serialized state (including per-group vote distributions, ambassador status, altar state)
-- **Projector**: Public filtered state (group sizes, vote distributions, ceremony progress — no individual user data)
-- **Audience**: Personalized state (their group assignment, their group's votes, their ambassador status, their altar-ready state)
+- **Controller**: Full serialized state
+- **Projector**: Public filtered state (no individual user data; includes convergence data during consensus game)
+- **Audience**: Personalized state (their votes, their view of the game board, convergence meter value)
 
 ### Client → Server Events
 
@@ -1197,10 +1032,7 @@ Full state syncs on every mutation:
 | `join` | `{ userId?, seatId?, mode }` | All |
 | `reconnect` | `{ userId, showId, lastVersion }` | All |
 | `vote` | `{ choice: 'A' \| 'B' }` | Audience (song-building) |
-| `join_group` | `{ layerType }` | Audience (assembly phase) |
-| `group_vote` | `{ fragmentId }` | Audience (deliberation phase) |
-| `volunteer_ambassador` | `{}` | Audience (deliberation phase, after fragment chosen) |
-| `altar_lock_in` | `{}` | Audience (ceremony phase, ambassador only) |
+| `consensus_vote` | `{ fragmentId }` | Audience (finale consensus game) |
 | `command` | `ConductorCommand` | Controller |
 
 ### Server → Client Events
@@ -1209,14 +1041,11 @@ Full state syncs on every mutation:
 |-------|---------|------------|
 | `state_sync` | `ShowState` (filtered per client type) | All |
 | `identity` | `{ userId }` | New audience members |
-| `group_update` | `{ groups: Map<LayerType, number>, undecided: number }` | Audience + Projector (during assembly, ~2 Hz) |
+| `convergence_update` | `{ value: number }` | Audience + Projector (~4-5 Hz during consensus rounds) |
 | `npc_message` | `{ message: string }` | Audience + Projector |
-| `ambassador_called` | `{ layerType, userId }` | All (during ceremony) |
-| `altar_ready` | `{}` | Single audience member (the called ambassador) |
-| `altar_confirmed` | `{ layerType, fragmentId }` | All (after successful altar lock-in) |
 | `error` | `{ message }` | Controller |
 
-**Note on group updates:** Sent as a separate event during assembly at ~2 Hz for responsive group size displays, NOT as part of state_sync.
+**Note on convergence updates:** Sent as a separate high-frequency event during consensus rounds, NOT as part of state_sync. This enables the responsive meter animation.
 
 ---
 
@@ -1257,41 +1086,20 @@ CREATE TABLE votes (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE TABLE finale_groups (
+CREATE TABLE consensus_rounds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  layer_type TEXT NOT NULL,
-  auto_assigned BOOLEAN NOT NULL DEFAULT 0,     -- TRUE if randomly assigned at timer expiry
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (show_id) REFERENCES shows(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE finale_group_votes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  show_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  layer_type TEXT NOT NULL,
-  fragment_id TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (show_id) REFERENCES shows(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE ceremony_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  show_id TEXT NOT NULL,
-  layer_type TEXT NOT NULL,
-  ambassador_user_id TEXT,                       -- NULL if forfeited
-  fragment_id TEXT,                               -- NULL if forfeited
-  event_type TEXT NOT NULL CHECK(event_type IN ('locked', 'forfeited')),
+  round_number INTEGER NOT NULL,
+  winning_fragment_id TEXT,          -- NULL if round failed
+  convergence REAL,
+  threshold REAL NOT NULL,
+  success BOOLEAN NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 ```
 
-**Removed from V2:** `consensus_rounds` table.
+**Removed:** `fragment_selections` table (no individual fragment selection). `finale_chapter` column removed from `users`.
 
 ### Persistence Strategy & Recovery
 
@@ -1302,11 +1110,6 @@ Unchanged from V1. Persist after EVERY state change. Atomic SQLite transactions.
 ## Recovery & Robustness
 
 Unchanged from V1. See original architecture for heartbeat, state versioning, backup snapshots, and fallback modes.
-
-**Finale-specific recovery notes:**
-- If an ambassador disconnects during the ceremony, the controller can force-lock-in or forfeit the layer
-- If assembly or deliberation timers expire during a server restart, the system should recover to the post-timer state (groups assigned, fragments chosen by majority of recorded votes)
-- Audio preview files are static assets and require no server state
 
 ---
 
@@ -1320,7 +1123,7 @@ Unchanged from V1. See original architecture for heartbeat, state versioning, ba
 | Love | TBD | TBD | Song 2, fragment badges |
 | Avoidance | TBD | TBD | Song 3, fragment badges |
 
-### Layer Identity (consistent across all 3 attempts + finale groups)
+### Layer Identity (consistent across all 3 attempts)
 
 | Layer Type | Color | Symbol | Label |
 |------------|-------|--------|-------|
@@ -1332,7 +1135,7 @@ Unchanged from V1. See original architecture for heartbeat, state versioning, ba
 | FX1 | TBD | ~ | "The shimmer" |
 | FX2 | TBD | ∿ | "The shadow" |
 
-*Placeholders — lock before production. Labels are configurable in `default-show.json`.*
+*Placeholders — lock before production.*
 
 ### Option Identity (A vs B within a layer)
 - Option A: layer color, **solid** style
@@ -1344,9 +1147,8 @@ Unchanged from V1. See original architecture for heartbeat, state versioning, ba
 
 ```
 solo-show/
-├── ARCHITECTURE.md              # This document (V3 — source of truth)
-├── MIGRATION.md                 # Migration guide from V2 to V3
-├── PROMPTS.md                   # AI agent implementation prompts
+├── ARCHITECTURE.md              # This document (V2 — source of truth)
+├── MIGRATION.md                 # Migration guide from V1 to V2
 ├── CHANGELOG.md                 # Human-readable change history with intent
 ├── CLAUDE.md                    # AI agent instructions and context
 ├── DECISIONS.md                 # Open questions and resolved decisions
@@ -1357,12 +1159,10 @@ solo-show/
 │   ├── conductor.ts             # State machine (show phases + layer phases)
 │   ├── voting.ts                # Blind vote tallying + health bar drain
 │   ├── health-bar.ts            # Health bar state management
-│   ├── assembly.ts              # Group assembly logic (join, random assign, timer)
-│   ├── deliberation.ts          # Group deliberation (voting, majority, ambassador selection)
-│   ├── ceremony.ts              # Ceremony sequencing (ambassador calls, altar lock-in, forfeits)
+│   ├── consensus-game.ts        # Convergence calculation, round management, thresholds
 │   ├── performer-mix.ts         # Pending changes queue, mix state, snapshots
 │   ├── fragments.ts             # Fragment generation from attempt results
-│   ├── npc.ts                   # NPC event-driven message logic
+│   ├── npc.ts                   # NPC auto-trigger logic
 │   ├── types.ts                 # Shared type definitions
 │   └── __tests__/               # Unit tests
 │
@@ -1396,13 +1196,8 @@ solo-show/
 │   │   └── LayerProgress.tsx    # Completed/upcoming layer indicators
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Full fragment wreckage display
-│   │   ├── AssemblyCards.tsx    # Layer-type group selection cards
-│   │   ├── GroupIdentity.tsx    # "You are [Layer]" post-assignment display
-│   │   ├── DeliberationBoard.tsx # Fragment preview + group voting UI
-│   │   ├── AudioPreview.tsx     # In-browser audio preview player
-│   │   ├── AmbassadorPrompt.tsx # Volunteer / ambassador selection UI
-│   │   ├── CeremonyView.tsx     # Ceremony progress (non-ambassador audience)
-│   │   ├── AltarReady.tsx       # Ambassador altar-ready mode (accelerometer listener)
+│   │   ├── ConsensusBoard.tsx   # Clean game board (available fragments only)
+│   │   ├── ConvergenceMeter.tsx # Real-time convergence gauge
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
 │   │   ├── MixingSurface.tsx    # Performer's 7×6 mixing grid (controller)
 │   │   ├── MixingMirror.tsx     # Projector view of mixing state
@@ -1415,9 +1210,7 @@ solo-show/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
 │       ├── HealthBarControls.tsx # Drain factor adjustment
-│       ├── AssemblyControls.tsx # Group size monitoring, timer control
-│       ├── DeliberationControls.tsx # Per-group vote monitoring, timer control
-│       ├── CeremonyControls.tsx # Ambassador management, force lock-in, forfeits
+│       ├── ConsensusControls.tsx # Round management, threshold, convergence data
 │       ├── NpcControls.tsx      # NPC line bank + manual fire
 │       ├── MixingSurface.tsx    # Performer mix interface
 │       ├── SnapshotPresets.tsx  # Quick-load mix configurations
@@ -1426,8 +1219,7 @@ solo-show/
 ├── hooks/
 │   ├── useSocket.ts             # Socket.IO connection + reconnection
 │   ├── useShowState.ts          # Client-side state management
-│   ├── useAudioPreview.ts       # Audio preview playback management
-│   └── useAltarDetection.ts     # Device Orientation API altar lock-in detection
+│   └── useConvergence.ts        # Convergence meter animation + smoothing
 │
 ├── lib/
 │   ├── socket-client.ts         # Socket.IO client setup
@@ -1435,20 +1227,13 @@ solo-show/
 │   ├── serialization.ts         # Map/Set JSON serialization
 │   └── identity.ts              # Chapter/layer color+symbol mappings
 │
-├── public/
-│   └── audio/
-│       └── previews/            # Pre-rendered fragment audio files
-│           ├── preview-0-0-A.mp3
-│           ├── preview-0-0-B.mp3
-│           └── ...              # (up to 42 files)
-│
 ├── config/
-│   ├── default-show.json        # Pre-configured attempts, layers, fragments, layer labels, ceremony order
+│   ├── default-show.json        # Pre-configured attempts, layers, fragments
 │   ├── ableton-layout.json      # Track index mappings
-│   └── npc-messages.json        # Event-driven NPC messages (replaces npc-triggers.json)
+│   └── npc-triggers.json        # Auto-triggered NPC line conditions and text
 │
 ├── db/
-│   └── schema.sql               # SQLite schema (V3)
+│   └── schema.sql               # SQLite schema (V2)
 │
 ├── next.config.js
 ├── tsconfig.json
@@ -1469,16 +1254,9 @@ test('blind vote does not expose split during voting window', ...)
 test('attempt collapses when health bar reaches zero', ...)
 test('completed attempt transitions to attempt_resolve for rejection', ...)
 test('unreached layers are marked as locked fragments in finale', ...)
-test('undecided users are randomly assigned to groups when assembly timer expires', ...)
-test('empty groups are marked and skipped in ceremony', ...)
-test('deliberation selects fragment by simple majority at timer expiry', ...)
-test('ties in deliberation are broken randomly', ...)
-test('ambassador is selected randomly when multiple volunteers', ...)
-test('layer is forfeited when no ambassador volunteers', ...)
-test('altar lock-in requires face-down + still for configured duration', ...)
-test('ceremony lock-in triggers audio activation quantized to next bar boundary', ...)
-test('performer mix initial state reflects ceremony lock-in results', ...)
+test('consensus round succeeds only if convergence above threshold at timer expiry', ...)
 test('performer pending changes all fire simultaneously at loop boundary', ...)
+test('NPC auto-triggers on consecutive same-song convergence', ...)
 ```
 
 ---
@@ -1491,76 +1269,42 @@ test('performer pending changes all fire simultaneously at loop boundary', ...)
 - [ ] **Exact chord progression:** B minor key confirmed; specific 4-chord sequence TBD pending Ableton exploration.
 - [ ] Locked color/symbol assignments for layers + chapters
 - [ ] Specific fragment display labels (emotional taglines per option)
-- [ ] NPC text library (event-driven messages per phase)
-- [ ] Projector visual design and animations (especially ceremony layer-by-layer build)
+- [ ] NPC text library (auto-triggered and manual lines)
+- [ ] Projector visual design and animations
 - [ ] Performer mix snapshot presets
 - [ ] Live performance track configuration
-- [ ] **Audio preview file length:** 4 bars vs full 8-bar loop — needs playtesting for deliberation flow
-- [ ] **Ceremony pacing:** How long between ambassador call-ups? Performer-controlled (manual advance) or auto-timed?
-- [ ] **Altar detection tuning:** Face-down threshold angle, stillness threshold, hold duration — needs device testing across iOS/Android
-- [ ] **Assembly grace period:** How long after groups are assigned before deliberation timer starts? Enough for physical movement?
-- [ ] **Deliberation with single-fragment layers:** Skip voting UI and go straight to ambassador selection, or show the single option for confirmation?
+- [ ] Consensus game: optimal round duration tuning (15s default, needs playtesting)
+- [ ] Consensus game: minimum round window before instant-lock (proposed: 5 seconds)
 
 ---
 
-## Appendix A: What Changed from V1 → V2
+## Appendix: What Changed from V1
 
 ### Removed Systems
 - **Per-layer doubt thresholds** → replaced by Health Bar with cumulative drain and layer multipliers
 - **Chapter assignment** → no chapter assignment in finale
-- **Individual fragment selection** → replaced by consensus game (V2)
-- **Fragment queue / rotation system** → replaced by consensus game + performer mix (V2)
+- **Individual fragment selection** → replaced by consensus game
+- **Fragment queue / rotation system** → replaced by consensus game + performer mix
 - **Stewardship / safe parameter control** → removed entirely
 - **Triangle steering / centroid** → removed entirely
 - **Active slots (7-slot rotation)** → replaced by role-typed layer activation
 - **Audio metering (M4L → projector)** → removed (may be re-added for projector visuals)
 
-### New Systems (V2)
-- **Health Bar** with cumulative drain + configurable layer multipliers
-- **Mechanical collapse** when health bar reaches zero
-- **Blind vote** with reveal sequence
-- **Song rejection** for completed songs
-- **Consensus Game** (convergence meter, timed rounds, threshold softening) — *replaced in V3*
-- **NPC system** (hybrid auto/manual) — *simplified in V3*
+### New Systems
+- **Health Bar** with cumulative drain + configurable layer multipliers (rising cost of commitment)
+- **Mechanical collapse** when health bar reaches zero (songs can fail)
+- **Blind vote** with reveal sequence (no live split feedback during voting)
+- **Song rejection** for completed songs (narrative, performer-triggered, OSC effect — distinct from collapse)
+- **Consensus Game** (convergence meter, timed rounds, threshold softening)
+- **NPC system** (hybrid auto/manual, terminal-style display)
 - **Performer mixing surface** (7×6 grid, pending changes queue, loop quantization)
 - **Snapshot presets** for performer mix
 - **Musical design specification** (harmonic rules, EQ fencing, production guidelines)
 
----
-
-## Appendix B: What Changed from V2 → V3
-
-### Removed Systems
-- **Consensus Game** — convergence meter, timed consensus rounds, threshold softening, convergence calculation. Replaced by physically embodied group assembly + deliberation + ceremony.
-- **Convergence Meter** — no longer needed; groups vote transparently within themselves.
-- **NPC auto-trigger system** — the complex per-round auto-trigger conditions are replaced by simpler event-driven messages tied to phase transitions and key moments.
-- **`consensus_rounds` DB table** — replaced by `finale_groups`, `finale_group_votes`, and `ceremony_events` tables.
-- **`useConvergence` hook** — removed (no convergence meter to animate).
-- **`ConsensusBoard.tsx`** and **`ConvergenceMeter.tsx`** components — removed.
-- **`consensus-game.ts`** conductor module — removed.
-- **`npc-triggers.json`** config — replaced by `npc-messages.json` (event-driven).
-- **Web Speech Synthesis** — considered and deferred.
-- **Vibration API** — considered and deferred (except single vibration on altar lock-in confirmation).
-
-### New Systems
-- **Group Assembly** — timer-based self-selection into 7 layer-type groups with live size display. Random assignment for undecided members at timer expiry. Empty groups allowed (layer skipped).
-- **Deliberation** — per-group audio preview + transparent majority voting + ambassador volunteering. Timer-based resolution. Forfeited layers when no ambassador volunteers.
-- **Ambassador Ceremony** — fixed-order sequential lock-in at a physical altar. Accelerometer detection (Device Orientation API) for face-down phone placement. Immediate audio activation on lock-in.
-- **Audio Preview System** — pre-rendered mp3 files per fragment, served statically, played in-browser during deliberation via HTML5 Audio API.
-- **Altar Detection** — Device Orientation / Accelerometer API to detect face-down + still phone as the ceremony lock-in gesture. No external hardware required.
-- **`assembly.ts`**, **`deliberation.ts`**, **`ceremony.ts`** conductor modules.
-- **`useAudioPreview`** and **`useAltarDetection`** hooks.
-- **`AssemblyCards`**, **`DeliberationBoard`**, **`AudioPreview`**, **`AmbassadorPrompt`**, **`CeremonyView`**, **`AltarReady`** components.
-- **`finale_groups`**, **`finale_group_votes`**, **`ceremony_events`** DB tables.
-
 ### Changed Systems
-- **Show phase state machine**: `finale_consensus` replaced by `finale_assembly` → `finale_deliberation` → `finale_ceremony` (three phases instead of one).
-- **FinaleState type**: completely restructured — consensus game state replaced by assembly, deliberation, and ceremony state objects.
-- **FinaleConfig**: consensus config (round duration, thresholds, decay) replaced by assembly/deliberation/ceremony config (timer durations, ceremony order, preview paths, layer labels).
-- **Conductor commands/events**: all consensus-related commands/events removed; replaced with assembly, deliberation, and ceremony commands/events.
-- **WebSocket events**: `consensus_vote` removed; `join_group`, `group_vote`, `volunteer_ambassador`, `altar_lock_in` added. `convergence_update` removed; `group_update`, `ambassador_called`, `altar_ready`, `altar_confirmed` added.
-- **NPC system**: simplified from hybrid auto-trigger + manual to event-driven + manual. Messages are tied to phase transitions rather than per-round pattern matching.
-- **Fragment type**: gains `previewAudioPath` field for audio preview support.
-- **GainConfig**: `consensusSwellBeats` renamed to `ceremonySwellBeats`.
-- **Environment variables**: consensus variables replaced with assembly/deliberation/ceremony variables.
-- **Folder structure**: `consensus-game.ts` → `assembly.ts` + `deliberation.ts` + `ceremony.ts`. Component files renamed/replaced. New hooks added. `public/audio/previews/` directory added. `npc-triggers.json` → `npc-messages.json`.
+- **Layer types** updated: Foundation/Pulse/Color/Space/Voice → Melody/Drums/Pad/Bass/Harmony/FX1/FX2
+- **Show phase state machine** restructured (collapse and rejection are distinct paths)
+- **Collapse mechanic** redesigned: driven by cumulative health bar drain with layer multipliers, not per-layer threshold checks
+- **AttemptState** has new `healthBar` field; `collapsedAtLayer` retained
+- **Fragment** no longer has `safeParameter`
+- **User** no longer has `finaleChapter`
