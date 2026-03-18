@@ -2,16 +2,14 @@
 
 ## How to Use This File
 
-Each section below contains a self-contained prompt for an AI coding agent (e.g., Claude Code). Copy the prompt for the current phase, paste it into the agent, and let it execute. Phases should be executed in order.
+This file contains copy-paste prompts for an AI coding agent (e.g., Claude Code), one per migration phase. It is a companion to two other documents that the agent should also have access to:
 
-Each prompt includes:
-- Context about what changed and why
-- The exact files to create/modify/delete
-- The types and interfaces to implement
-- Test cases to write
-- Verification steps
+- **ARCHITECTURE.md (V3)** — The authoritative source of truth for all types, interfaces, state machines, and behaviors. When a prompt says "see ARCHITECTURE.md," the agent should read the relevant section for exact type definitions and specifications.
+- **MIGRATION.md** — The migration plan that defines the 6 phases, their dependencies, verification checklists, risk notes, and recovery considerations. Each prompt below corresponds to one phase in MIGRATION.md. The agent should read the corresponding MIGRATION.md phase section before starting work — it contains context about *why* each change is being made, edge cases to watch for, and the verification criteria that determine when the phase is complete.
 
-**Before starting any phase:** Make sure the agent has access to ARCHITECTURE.md (V3) for reference. The architecture doc is the source of truth for all types, interfaces, and behaviors.
+**Before starting any phase:** Give the agent access to all three documents. The prompt provides implementation instructions; MIGRATION.md provides the verification checklist and broader context; ARCHITECTURE.md provides the exact specifications.
+
+Phases must be executed in order — later phases depend on earlier ones. See MIGRATION.md for the dependency rationale.
 
 ---
 
@@ -20,7 +18,9 @@ Each prompt includes:
 ```
 ## Task: Update TypeScript types for V3 finale redesign
 
-Read ARCHITECTURE.md (the V3 spec) for reference. The finale system has been redesigned — the consensus game (convergence meter, timed rounds, threshold softening) is replaced by a physically embodied four-phase sequence: group assembly → deliberation → ambassador ceremony → performer mix.
+Read MIGRATION.md Phase 1 for context on what's changing and why, and the verification checklist to confirm when this phase is complete. Read ARCHITECTURE.md (the V3 spec) for exact type definitions.
+
+The high-level change: the consensus game (convergence meter, timed rounds, threshold softening) is replaced by a physically embodied four-phase sequence: group assembly → deliberation → ambassador ceremony → performer mix.
 
 ### What to change
 
@@ -81,7 +81,9 @@ After all changes, run `tsc --noEmit` and fix any import/reference errors. Don't
 ```
 ## Task: Implement V3 finale conductor modules
 
-Read ARCHITECTURE.md (V3 spec) for reference. The conductor is a pure state machine with no I/O. All functions take state in, return state out. No side effects.
+Read MIGRATION.md Phase 2 for the full list of modules to create, key behaviors, and verification checklist. Read ARCHITECTURE.md (V3 spec) for exact type definitions and state machine transitions.
+
+The conductor is a pure state machine with no I/O. All functions take state in, return state out. No side effects.
 
 ### Step 1: Delete consensus-game.ts
 
@@ -280,7 +282,7 @@ ceremony.test.ts:
 ```
 ## Task: Update server for V3 finale (Socket.IO + persistence + timers)
 
-Read ARCHITECTURE.md (V3) and the conductor modules from Phase 2 for reference.
+Read MIGRATION.md Phase 3 for the full scope of server changes, recovery considerations, and verification checklist. Read ARCHITECTURE.md (V3) for the DB schema, WebSocket protocol, and environment variables. Reference the conductor modules from Phase 2 for the command/event types.
 
 ### Step 1: Update DB schema
 
@@ -412,7 +414,7 @@ Run the full server startup sequence. Verify:
 ```
 ## Task: Build audience UI for group assembly and deliberation
 
-Read ARCHITECTURE.md (V3) Client Routes section for reference. This phase creates the phone UI that the audience uses to join groups, preview audio, vote on fragments, and volunteer as ambassadors.
+Read MIGRATION.md Phase 4 for the full list of components to create/delete and verification checklist. Read ARCHITECTURE.md (V3) Client Routes section for the exact UI specifications per phase.
 
 ### Step 1: Remove old components
 
@@ -550,7 +552,7 @@ Wire up socket events:
 ```
 ## Task: Build ceremony UI and accelerometer-based altar lock-in
 
-Read ARCHITECTURE.md (V3) for the Ceremony and Altar Lock-in sections. This is the most theatrically critical phase — ambassadors physically approach the altar and lock fragments in by placing their phone face-down.
+Read MIGRATION.md Phase 5 for context and the verification checklist — note that MIGRATION.md flags altar detection as the highest-risk component of the migration. Read ARCHITECTURE.md (V3) for the Ceremony and Altar Lock-in sections, including the detection config interface and Device Orientation API details.
 
 ### Step 1: Create useAltarDetection hook
 
@@ -679,6 +681,8 @@ During `finale_ceremony`:
 ```
 ## Task: Update configuration files and set up audio preview pipeline
 
+Read MIGRATION.md Phase 6 for the full scope and verification checklist. Also read the MIGRATION.md "Post-Migration Cleanup" section — the codebase cleanup steps in this prompt correspond to that cleanup list.
+
 ### Step 1: Update config/default-show.json
 
 Add the finale V3 configuration block. Remove any consensus-related config.
@@ -800,7 +804,7 @@ Remove all dead references. Update imports.
 ```
 ## Task: Full integration verification of V3 migration
 
-Walk through the complete show flow and verify each phase transition works correctly. This is a manual integration test.
+Read MIGRATION.md "Post-Migration Cleanup" and "Risk Notes" sections for the full cleanup checklist and known risk areas. This prompt walks through the complete show flow to verify everything works end-to-end.
 
 ### Show flow to verify:
 
