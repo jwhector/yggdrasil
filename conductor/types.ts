@@ -178,6 +178,7 @@ export interface Fragment {
   layerType: LayerType;
   displayLabel: string;                 // Emotional tagline (e.g., "Distant Pulse")
   audioRef: AudioReference;
+  previewAudioPath: string;             // URL path to preview audio file (e.g. /audio/previews/preview-0-0-A.mp3)
 }
 
 // ============================================================================
@@ -195,11 +196,11 @@ export interface PendingChange {
 // NPC
 // ============================================================================
 
-/** Configuration for an NPC auto-trigger condition. */
-export interface NpcTriggerConfig {
-  condition: string;                   // Condition identifier (e.g., 'consecutive_failures', 'near_miss')
-  threshold?: number;                  // Numeric threshold for the condition, if applicable
-  message: string;                     // NPC line to display
+/** Configuration for an event-driven NPC message. */
+export interface NpcMessageConfig {
+  event: string;                       // Event key (e.g., 'performer_abandonment', 'assembly_start', 'layer_locked')
+  layerType?: LayerType;               // Optional: specific to a layer type
+  text: string;                        // The NPC message text (supports {layerLabel} template variable)
 }
 
 // ============================================================================
@@ -226,29 +227,45 @@ export interface AbletonParamRef {
 // ============================================================================
 
 export interface FinaleState {
-  phase: 'elegy' | 'consensus_game' | 'performer_mix';
+  phase: 'elegy' | 'assembly' | 'deliberation' | 'ceremony' | 'performer_mix';
 
   // Fragment availability (computed from song-building results)
-  availableFragments: Fragment[];       // Winners only (for consensus game)
+  availableFragments: Fragment[];       // Winners only (for group deliberation)
   allFragments: Fragment[];             // All 42 (for performer mixing surface)
   lockedFragments: Fragment[];          // Losers + unreached (for elegy display)
 
-  // Consensus game state
-  consensusGame: {
-    active: boolean;
-    currentRound: number;
-    roundTimeRemaining: number;         // ms
-    votes: Map<UserId, string>;         // userId → fragmentId
-    convergenceValue: number;           // 0.0 to 1.0
-    threshold: number;                  // Current threshold (may decrease after failures)
-    consecutiveFailures: number;
-    lockedRoles: Map<LayerType, string>;  // layerType → fragmentId (activated fragments)
+  // Group assembly state
+  assembly: {
+    groups: Map<LayerType, UserId[]>;       // layerType → array of user IDs
+    undecidedUsers: UserId[];               // Users who haven't chosen yet
+    timerRemaining: number;                 // ms
+    timerDuration: number;                  // ms (total)
+  };
+
+  // Deliberation state
+  deliberation: {
+    groupVotes: Map<LayerType, Map<UserId, string>>;  // layerType → (userId → fragmentId)
+    chosenFragments: Map<LayerType, string | null>;    // layerType → fragmentId or null (after timer)
+    ambassadorVolunteers: Map<LayerType, UserId[]>;    // layerType → volunteer user IDs
+    ambassadors: Map<LayerType, UserId | null>;        // layerType → chosen ambassador or null
+    timerRemaining: number;                            // ms (deliberation timer)
+    volunteerTimerRemaining: number | null;            // ms (ambassador volunteering timer, null if not active)
+  };
+
+  // Ceremony state
+  ceremony: {
+    layerOrder: LayerType[];                    // Fixed configurable order
+    currentIndex: number;                       // Index into layerOrder
+    currentAmbassador: UserId | null;           // Ambassador currently called
+    altarReady: boolean;                        // Whether current ambassador's phone is in altar-ready mode
+    lockedLayers: Map<LayerType, string>;       // layerType → fragmentId (locked in at altar)
+    forfeitedLayers: LayerType[];               // Layers with no ambassador
+    ceremonyComplete: boolean;
   };
 
   // NPC state
   npc: {
     currentMessage: string | null;
-    autoTriggersEnabled: boolean;
   };
 
   // Performer mix state
@@ -288,7 +305,9 @@ export type ShowPhase =
   | 'attempt_build'           // Active song-building with audience voting
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
   | 'finale_elegy'            // Elegy display of all fragments (available and locked)
-  | 'finale_consensus'        // Audience consensus game to activate fragments
+  | 'finale_assembly'         // Audience self-selects into 7 layer-type groups
+  | 'finale_deliberation'     // Groups preview audio, vote on fragments, select ambassadors
+  | 'finale_ceremony'         // Ambassadors lock fragments at the altar via accelerometer
   | 'finale_performer_mix'    // Performer live-mixes the activated fragments
   | 'ended';                  // Show complete
 
@@ -325,14 +344,14 @@ export interface ShowConfig {
 }
 
 export interface FinaleConfig {
-  consensusRoundDurationMs: number;
-  firstRoundDurationMs: number;
-  initialThreshold: number;
-  thresholdDecayPerFailure: number;
-  minThreshold: number;
-  interRoundDelayMs: number;
-  successCelebrationMs: number;
-  npcAutoTriggers: NpcTriggerConfig[];
+  assemblyTimerMs: number;
+  assemblyGracePeriodMs: number;
+  deliberationTimerMs: number;
+  ambassadorVolunteerTimerMs: number;
+  ceremonyLayerOrder: LayerType[];
+  audioPreviewPath: string;
+  layerLabels: Map<LayerType, string>;
+  npcMessages: NpcMessageConfig[];
 }
 
 /**
@@ -349,7 +368,7 @@ export interface GainConfig {
   exitFadeBeats: number;        // Beats to ramp to 0.0 on exit (default 4 = 1 bar)
   lockInFadeBeats: number;      // Beats to fade out the loser on lock-in (default 4)
   collapseFadeBeats: number;    // Beats to fade all attempt tracks on collapse (default 8)
-  consensusSwellBeats: number;  // Beats for consensus fragment swell-in (default 4)
+  ceremonySwellBeats: number;   // Beats for ceremony fragment swell-in (default 4)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
   stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
 }
@@ -374,7 +393,7 @@ export type AudioCue =
   | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'rejection_gesture'; attemptIndex: number }
-  | { type: 'consensus_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
+  | { type: 'ceremony_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
   | { type: 'mix_update'; changes: PendingChange[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
@@ -410,13 +429,35 @@ export type ConductorCommand =
   // Song Rejection
   | { type: 'TRIGGER_REJECTION' }
 
-  // Finale — Consensus Game
+  // Finale — Setup & NPC
   | { type: 'SETUP_FINALE' }
-  | { type: 'START_CONSENSUS_ROUND' }
-  | { type: 'SUBMIT_CONSENSUS_VOTE'; userId: UserId; fragmentId: string }
-  | { type: 'END_CONSENSUS_ROUND' }
-  | { type: 'SET_CONSENSUS_THRESHOLD'; threshold: number }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
+
+  // Finale — Assembly
+  | { type: 'START_ASSEMBLY' }
+  | { type: 'JOIN_GROUP'; userId: UserId; layerType: LayerType }
+  | { type: 'ASSEMBLY_TIMER_EXPIRED' }
+  | { type: 'FORCE_ASSIGN_USER'; userId: UserId; layerType: LayerType }
+  | { type: 'EXTEND_ASSEMBLY_TIMER'; additionalMs: number }
+  | { type: 'FORCE_END_ASSEMBLY' }
+
+  // Finale — Deliberation
+  | { type: 'START_DELIBERATION' }
+  | { type: 'SUBMIT_GROUP_VOTE'; userId: UserId; layerType: LayerType; fragmentId: string }
+  | { type: 'DELIBERATION_TIMER_EXPIRED' }
+  | { type: 'VOLUNTEER_AS_AMBASSADOR'; userId: UserId; layerType: LayerType }
+  | { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED'; layerType: LayerType }
+  | { type: 'FORCE_FRAGMENT_SELECTION'; layerType: LayerType; fragmentId: string }
+  | { type: 'EXTEND_DELIBERATION_TIMER'; additionalMs: number }
+  | { type: 'FORCE_END_DELIBERATION' }
+
+  // Finale — Ceremony
+  | { type: 'START_CEREMONY' }
+  | { type: 'CALL_NEXT_AMBASSADOR' }
+  | { type: 'ALTAR_LOCK_IN'; userId: UserId; layerType: LayerType }
+  | { type: 'FORCE_LOCK_IN'; layerType: LayerType }
+  | { type: 'FORFEIT_LAYER'; layerType: LayerType }
+  | { type: 'SKIP_TO_LAYER'; layerType: LayerType }
 
   // Finale — Performer Mix
   | { type: 'START_PERFORMER_MIX' }
@@ -463,14 +504,32 @@ export type ConductorEvent =
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
-  // Finale
+  // Finale — Setup
   | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: Fragment[]; lockedFragments: Fragment[] }
-  | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
-  | { type: 'CONSENSUS_VOTE_UPDATED'; convergenceValue: number }
-  | { type: 'CONSENSUS_ROUND_SUCCESS'; fragmentId: string; layerType: LayerType; convergence: number }
-  | { type: 'CONSENSUS_ROUND_FAILURE'; highestConvergence: number }
-  | { type: 'CONSENSUS_GAME_COMPLETE' }
   | { type: 'NPC_MESSAGE'; message: string }
+
+  // Finale — Assembly
+  | { type: 'ASSEMBLY_STARTED'; timerDuration: number }
+  | { type: 'GROUP_MEMBERSHIP_CHANGED'; groups: Map<LayerType, UserId[]>; undecidedCount: number }
+  | { type: 'ASSEMBLY_COMPLETE'; groups: Map<LayerType, UserId[]>; emptyGroups: LayerType[] }
+
+  // Finale — Deliberation
+  | { type: 'DELIBERATION_STARTED'; timerDuration: number }
+  | { type: 'GROUP_VOTE_UPDATED'; layerType: LayerType; votes: Map<string, number> }
+  | { type: 'FRAGMENT_CHOSEN'; layerType: LayerType; fragmentId: string }
+  | { type: 'AMBASSADOR_VOLUNTEERED'; layerType: LayerType; userId: UserId }
+  | { type: 'AMBASSADOR_SELECTED'; layerType: LayerType; userId: UserId }
+  | { type: 'LAYER_FORFEITED'; layerType: LayerType }
+  | { type: 'DELIBERATION_COMPLETE' }
+
+  // Finale — Ceremony
+  | { type: 'CEREMONY_STARTED'; layerOrder: LayerType[] }
+  | { type: 'AMBASSADOR_CALLED'; layerType: LayerType; userId: UserId }
+  | { type: 'ALTAR_LOCK_IN_DETECTED'; layerType: LayerType; fragmentId: string }
+  | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
+  | { type: 'CEREMONY_LAYER_SKIPPED'; layerType: LayerType }
+  | { type: 'CEREMONY_COMPLETE'; lockedLayers: Map<LayerType, string> }
+
   | { type: 'PERFORMER_MIX_STARTED' }
   | { type: 'PENDING_CHANGES_FIRED'; changes: PendingChange[] }
   | { type: 'MIX_STATE_UPDATED'; activeLayers: Map<LayerType, string | null> }
@@ -530,19 +589,28 @@ export interface AudienceAttemptView {
 }
 
 /**
- * Finale view sent to audience clients during the consensus game phase.
- * Personalized: includes their current vote, convergence value, and available fragments.
+ * Finale view sent to audience clients during assembly/deliberation/ceremony/mix phases.
+ * Personalized: includes group assignment, votes, ambassador status.
  */
 export interface AudienceFinaleView {
   finalePhase: FinaleState['phase'];
-  // Consensus game
-  availableFragments: Array<{ fragment: Fragment; locked: boolean }>;
-  myVote: string | null;                // fragmentId they voted for this round
-  convergenceValue: number;             // 0.0 to 1.0 (updated at ~4-5 Hz)
-  threshold: number;
-  roundTimeRemaining: number;
-  currentRound: number;
-  lockedRoles: Array<{ layerType: LayerType; fragmentId: string }>;
+  // Assembly
+  myGroup: LayerType | null;                          // which group the user has joined
+  groupSizes: Array<{ layerType: LayerType; count: number }>;  // all group sizes
+  assemblyTimerRemaining: number;
+  // Deliberation
+  myGroupFragments: Fragment[];                       // fragments available for user's group
+  groupVoteCounts: Array<{ fragmentId: string; count: number }>;  // vote distribution for user's group
+  myGroupVote: string | null;                         // fragmentId user voted for
+  chosenFragment: string | null;                      // after timer: winning fragmentId for user's group
+  isAmbassadorVolunteer: boolean;                     // whether user has volunteered
+  myAmbassadorStatus: UserId | null;                  // selected ambassador for user's group
+  deliberationTimerRemaining: number;
+  volunteerTimerRemaining: number | null;
+  // Ceremony
+  ceremonyProgress: Array<{ layerType: LayerType; status: 'locked' | 'forfeited' | 'current' | 'upcoming' }>;
+  isCurrentAmbassador: boolean;                       // whether user is the currently called ambassador
+  altarReady: boolean;                                // whether altar lock-in is active for this user
   // NPC
   npcMessage: string | null;
   // Performer mix (audience observation only)
@@ -574,12 +642,25 @@ export interface ProjectorFinaleView {
   finalePhase: FinaleState['phase'];
   availableFragments: Fragment[];
   lockedFragments: Fragment[];
-  convergenceValue: number;
-  threshold: number;
-  roundTimeRemaining: number;
-  currentRound: number;
-  lockedRoles: Array<{ layerType: LayerType; fragmentId: string }>;
+  // Assembly
+  groupSizes: Array<{ layerType: LayerType; count: number }>;
+  undecidedCount: number;
+  assemblyTimerRemaining: number;
+  // Deliberation
+  groupVoteDistributions: Array<{ layerType: LayerType; votes: Array<{ fragmentId: string; count: number }> }>;
+  chosenFragments: Array<{ layerType: LayerType; fragmentId: string | null }>;
+  ambassadors: Array<{ layerType: LayerType; userId: UserId | null }>;
+  deliberationTimerRemaining: number;
+  // Ceremony
+  ceremonyLayerOrder: LayerType[];
+  ceremonyLockedLayers: Array<{ layerType: LayerType; fragmentId: string }>;
+  ceremonyForfeitedLayers: LayerType[];
+  currentCeremonyLayer: LayerType | null;
+  currentAmbassador: UserId | null;
+  ceremonyComplete: boolean;
+  // NPC
   npcMessage: string | null;
+  // Performer mix
   mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
   mixPendingChanges: PendingChange[];
   loopPosition: number;

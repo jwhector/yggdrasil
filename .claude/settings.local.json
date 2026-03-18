@@ -9,7 +9,10 @@
       "Bash(npm test -- server/__tests__/audio-router.test.ts)",
       "Bash(grep -o '\"\"trackIndex\"\": [0-9]*' config/default-show.json)",
       "Bash(sort -t: -k2 -n)",
-      "Bash(npm test -- server/)"
+      "Bash(npm test -- server/)",
+      "Bash(grep -n consensusSwellBeats /x/projects/yggdrasil -r --include=*.ts --include=*.tsx)",
+      "Bash(ls -la *.md)",
+      "Bash(npm test:*)"
     ]
   }
 }

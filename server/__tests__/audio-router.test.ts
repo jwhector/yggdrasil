@@ -42,7 +42,7 @@ const TEST_GAIN_CONFIG: GainConfig = {
   exitFadeBeats: 4,
   lockInFadeBeats: 4,
   collapseFadeBeats: 8,
-  consensusSwellBeats: 4,
+  ceremonySwellBeats: 4,
   unityGainValue: 0,
   stepsPerBeat: 1,
 };
@@ -673,16 +673,16 @@ describe('AudioRouter', () => {
   });
 
   // --------------------------------------------------------------------------
-  // consensus_activate
+  // ceremony_activate
   // --------------------------------------------------------------------------
 
-  describe('consensus_activate', () => {
+  describe('ceremony_activate', () => {
     test('starts transport and unmutes fragment track', async () => {
       jest.useFakeTimers();
       const fragment = makeFragment(0, 2, 'B'); // track 5
 
       sendCue(router, state, {
-        type: 'consensus_activate',
+        type: 'ceremony_activate',
         layerType: 'melody',
         fragmentId: fragment.id,
         audioRef: fragment.audioRef,
@@ -708,9 +708,9 @@ describe('AudioRouter', () => {
       const fragA = makeFragment(0, 0, 'A'); // track 0
       const fragB = makeFragment(0, 1, 'A'); // track 2
 
-      // First activate fragA via consensus_activate
+      // First activate fragA via ceremony_activate
       sendCue(router, state, {
-        type: 'consensus_activate',
+        type: 'ceremony_activate',
         layerType: 'melody',
         fragmentId: fragA.id,
         audioRef: fragA.audioRef,
@@ -733,7 +733,7 @@ describe('AudioRouter', () => {
       const fragA = makeFragment(0, 0, 'A'); // track 0
 
       sendCue(router, state, {
-        type: 'consensus_activate',
+        type: 'ceremony_activate',
         layerType: 'melody',
         fragmentId: fragA.id,
         audioRef: fragA.audioRef,

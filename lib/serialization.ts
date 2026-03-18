@@ -8,10 +8,14 @@
  * Solution: Convert Maps to [key, value][] arrays before sending,
  *           reconstruct after receiving.
  *
- * Maps in ShowState (V2):
+ * Maps in ShowState (V3):
  *   - ShowState.users: Map<UserId, User>
- *   - FinaleState.consensusGame.votes: Map<UserId, string>
- *   - FinaleState.consensusGame.lockedRoles: Map<LayerType, string>
+ *   - FinaleState.assembly.groups: Map<LayerType, UserId[]>
+ *   - FinaleState.deliberation.groupVotes: Map<LayerType, Map<UserId, string>>
+ *   - FinaleState.deliberation.chosenFragments: Map<LayerType, string | null>
+ *   - FinaleState.deliberation.ambassadorVolunteers: Map<LayerType, UserId[]>
+ *   - FinaleState.deliberation.ambassadors: Map<LayerType, UserId | null>
+ *   - FinaleState.ceremony.lockedLayers: Map<LayerType, string>
  *   - FinaleState.performerMix.activeLayers: Map<LayerType, string | null>
  *
  * Usage:
@@ -31,15 +35,30 @@ import type {
 // Serialized Types
 // ============================================================================
 
-export interface SerializedConsensusGame {
-  active: boolean;
-  currentRound: number;
-  roundTimeRemaining: number;
-  votes: [UserId, string][];
-  convergenceValue: number;
-  threshold: number;
-  consecutiveFailures: number;
-  lockedRoles: [LayerType, string][];
+export interface SerializedAssembly {
+  groups: [LayerType, UserId[]][];
+  undecidedUsers: UserId[];
+  timerRemaining: number;
+  timerDuration: number;
+}
+
+export interface SerializedDeliberation {
+  groupVotes: [LayerType, [UserId, string][]][];
+  chosenFragments: [LayerType, string | null][];
+  ambassadorVolunteers: [LayerType, UserId[]][];
+  ambassadors: [LayerType, UserId | null][];
+  timerRemaining: number;
+  volunteerTimerRemaining: number | null;
+}
+
+export interface SerializedCeremony {
+  layerOrder: LayerType[];
+  currentIndex: number;
+  currentAmbassador: UserId | null;
+  altarReady: boolean;
+  lockedLayers: [LayerType, string][];
+  forfeitedLayers: LayerType[];
+  ceremonyComplete: boolean;
 }
 
 export interface SerializedPerformerMix {
@@ -55,7 +74,9 @@ export interface SerializedFinaleState {
   availableFragments: FinaleState['availableFragments'];
   allFragments: FinaleState['allFragments'];
   lockedFragments: FinaleState['lockedFragments'];
-  consensusGame: SerializedConsensusGame;
+  assembly: SerializedAssembly;
+  deliberation: SerializedDeliberation;
+  ceremony: SerializedCeremony;
   npc: FinaleState['npc'];
   performerMix: SerializedPerformerMix;
 }
@@ -83,15 +104,30 @@ export function serializeFinaleState(finaleState: FinaleState): SerializedFinale
     availableFragments: finaleState.availableFragments,
     allFragments: finaleState.allFragments,
     lockedFragments: finaleState.lockedFragments,
-    consensusGame: {
-      active: finaleState.consensusGame.active,
-      currentRound: finaleState.consensusGame.currentRound,
-      roundTimeRemaining: finaleState.consensusGame.roundTimeRemaining,
-      votes: Array.from(finaleState.consensusGame.votes.entries()),
-      convergenceValue: finaleState.consensusGame.convergenceValue,
-      threshold: finaleState.consensusGame.threshold,
-      consecutiveFailures: finaleState.consensusGame.consecutiveFailures,
-      lockedRoles: Array.from(finaleState.consensusGame.lockedRoles.entries()),
+    assembly: {
+      groups: Array.from(finaleState.assembly.groups.entries()),
+      undecidedUsers: finaleState.assembly.undecidedUsers,
+      timerRemaining: finaleState.assembly.timerRemaining,
+      timerDuration: finaleState.assembly.timerDuration,
+    },
+    deliberation: {
+      groupVotes: Array.from(finaleState.deliberation.groupVotes.entries()).map(
+        ([lt, votes]) => [lt, Array.from(votes.entries())] as [LayerType, [UserId, string][]],
+      ),
+      chosenFragments: Array.from(finaleState.deliberation.chosenFragments.entries()),
+      ambassadorVolunteers: Array.from(finaleState.deliberation.ambassadorVolunteers.entries()),
+      ambassadors: Array.from(finaleState.deliberation.ambassadors.entries()),
+      timerRemaining: finaleState.deliberation.timerRemaining,
+      volunteerTimerRemaining: finaleState.deliberation.volunteerTimerRemaining,
+    },
+    ceremony: {
+      layerOrder: finaleState.ceremony.layerOrder,
+      currentIndex: finaleState.ceremony.currentIndex,
+      currentAmbassador: finaleState.ceremony.currentAmbassador,
+      altarReady: finaleState.ceremony.altarReady,
+      lockedLayers: Array.from(finaleState.ceremony.lockedLayers.entries()),
+      forfeitedLayers: finaleState.ceremony.forfeitedLayers,
+      ceremonyComplete: finaleState.ceremony.ceremonyComplete,
     },
     npc: finaleState.npc,
     performerMix: {
@@ -110,15 +146,30 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
     availableFragments: data.availableFragments,
     allFragments: data.allFragments,
     lockedFragments: data.lockedFragments,
-    consensusGame: {
-      active: data.consensusGame.active,
-      currentRound: data.consensusGame.currentRound,
-      roundTimeRemaining: data.consensusGame.roundTimeRemaining,
-      votes: new Map(data.consensusGame.votes),
-      convergenceValue: data.consensusGame.convergenceValue,
-      threshold: data.consensusGame.threshold,
-      consecutiveFailures: data.consensusGame.consecutiveFailures,
-      lockedRoles: new Map(data.consensusGame.lockedRoles),
+    assembly: {
+      groups: new Map(data.assembly.groups),
+      undecidedUsers: data.assembly.undecidedUsers,
+      timerRemaining: data.assembly.timerRemaining,
+      timerDuration: data.assembly.timerDuration,
+    },
+    deliberation: {
+      groupVotes: new Map(
+        data.deliberation.groupVotes.map(([lt, votes]) => [lt, new Map(votes)]),
+      ),
+      chosenFragments: new Map(data.deliberation.chosenFragments),
+      ambassadorVolunteers: new Map(data.deliberation.ambassadorVolunteers),
+      ambassadors: new Map(data.deliberation.ambassadors),
+      timerRemaining: data.deliberation.timerRemaining,
+      volunteerTimerRemaining: data.deliberation.volunteerTimerRemaining,
+    },
+    ceremony: {
+      layerOrder: data.ceremony.layerOrder,
+      currentIndex: data.ceremony.currentIndex,
+      currentAmbassador: data.ceremony.currentAmbassador,
+      altarReady: data.ceremony.altarReady,
+      lockedLayers: new Map(data.ceremony.lockedLayers),
+      forfeitedLayers: data.ceremony.forfeitedLayers,
+      ceremonyComplete: data.ceremony.ceremonyComplete,
     },
     npc: data.npc,
     performerMix: {

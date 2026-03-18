@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
@@ -10,11 +9,7 @@ import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { ConvergenceMeter } from '@/components/finale/ConvergenceMeter';
-import { ConsensusBoard } from '@/components/finale/ConsensusBoard';
-import { NpcDisplay } from '@/components/finale/NpcDisplay';
-import { useConvergence } from '@/hooks/useConvergence';
-import type { AudienceFinaleView, LayerType } from '@/conductor/types';
+import type { AudienceFinaleView } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -153,7 +148,7 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {(phase === 'finale_elegy' || phase === 'finale_consensus' || phase === 'finale_performer_mix') && (
+      {(phase === 'finale_elegy' || phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
         state.myFinale
           ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} />
           : <DarkListenScreen />
@@ -167,43 +162,27 @@ function AudienceContent() {
 }
 
 // ---------------------------------------------------------------------------
-// Finale audience view (V2)
+// Finale audience view (V3)
 // ---------------------------------------------------------------------------
 
 function FinaleAudienceView({
   myFinale,
   phase,
   socket,
-  emit,
+  emit: _emit,
 }: {
   myFinale: AudienceFinaleView;
   phase: string;
   socket: Socket | null;
   emit: (event: string, data: unknown) => void;
 }) {
-  const { animatedValue } = useConvergence({
-    socket,
-    threshold: myFinale.threshold,
-    timeRemaining: myFinale.roundTimeRemaining,
-  });
-
-  console.log(phase);
-
-  const handleVote = (fragmentId: string) => {
-    emit('consensus_vote', { fragmentId });
-  };
+  void socket; // used by NpcDisplay sub-component
 
   // --- Elegy phase: show all fragments non-interactively ---
   if (phase === 'finale_elegy') {
-    // Build available (winners) and locked (losers) lists from AudienceFinaleView
-    // AudienceFinaleView only provides availableFragments (winners only, with locked flag)
-    // We show them all in a simplified elegy grid
-    const winners = myFinale.availableFragments
-      .filter(a => !a.locked)
-      .map(a => a.fragment);
-    const locked = myFinale.availableFragments
-      .filter(a => a.locked)
-      .map(a => a.fragment);
+    // Derive winners/locked from myGroupFragments + ceremonyProgress
+    // For now use elegy data from the projector-compatible fields
+    // TODO: V3 migration Phase 4 — use proper elegy data from server
     return (
       <div
         style={{
@@ -226,56 +205,41 @@ function FinaleAudienceView({
           What remains
         </div>
         <ElegyGrid
-          availableFragments={winners}
-          lockedFragments={locked}
+          availableFragments={myFinale.myGroupFragments}
+          lockedFragments={[]}
           variant="audience"
         />
       </div>
     );
   }
 
-  // --- Consensus game phase ---
-  if (phase === 'finale_consensus') {
-    const roundDurationMs = 15000; // default; ideally passed from config
+  // --- Assembly / Deliberation / Ceremony phases ---
+  // TODO: V3 migration Phase 4 — implement AssemblyCards, DeliberationBoard, AmbassadorPrompt, AltarReady, CeremonyView
+  if (phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony') {
     return (
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
           width: '100%',
           minHeight: '100vh',
-          padding: '16px',
-          boxSizing: 'border-box',
-          gap: '12px',
+          gap: '16px',
         }}
       >
-        {/* Convergence meter — pinned at top */}
-        <ConvergenceMeter
-          animatedValue={animatedValue}
-          threshold={myFinale.threshold}
-          timeRemaining={myFinale.roundTimeRemaining}
-          roundDurationMs={roundDurationMs}
-          roundActive={myFinale.roundTimeRemaining > 0}
-        />
-
-        {/* NPC display */}
-        <NpcDisplay socket={socket} />
-
-        {/* Consensus board */}
-        <div style={{ flex: 1 }}>
-          <ConsensusBoard
-            availableFragments={myFinale.availableFragments}
-            myVote={myFinale.myVote}
-            lockedRoles={myFinale.lockedRoles as Array<{ layerType: LayerType; fragmentId: string }>}
-            roundActive={myFinale.roundTimeRemaining > 0}
-            onVote={handleVote}
-          />
-        </div>
+        <PulsingDot />
+        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+          {phase === 'finale_assembly' ? 'Choose your group' : phase === 'finale_deliberation' ? 'Deliberating' : 'Ceremony'}
+        </p>
+        <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.65rem' }}>
+          TODO: V3 migration Phase 4
+        </p>
       </div>
     );
   }
 
-  // --- Performer mix phase: passive dark screen (TBD) ---
+  // --- Performer mix phase: passive dark screen ---
   if (phase === 'finale_performer_mix') {
     return (
       <div

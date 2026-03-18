@@ -7,7 +7,6 @@ import { HealthBar } from '@/components/song-building/HealthBar';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { ProjectorConvergenceView } from '@/components/finale/ProjectorConvergenceView';
 import { MixingMirror } from '@/components/finale/MixingMirror';
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
 import type { LayerResult, LayerType } from '@/conductor/types';
@@ -160,25 +159,11 @@ export default function ProjectorPage() {
       );
     }
 
-    case 'finale_consensus': {
-      const fs = state.finaleState;
-      if (!fs) return <ProjectorDark />;
-      return (
-        <main style={projectorMainStyle}>
-          <ProjectorConvergenceView
-            convergenceValue={fs.convergenceValue}
-            threshold={fs.threshold}
-            roundTimeRemaining={fs.roundTimeRemaining}
-            roundDurationMs={15000}
-            currentRound={fs.currentRound}
-            lockedRoles={fs.lockedRoles as Array<{ layerType: LayerType; fragmentId: string }>}
-            availableFragments={fs.availableFragments}
-            npcMessage={fs.npcMessage}
-            socket={socket}
-          />
-        </main>
-      );
-    }
+    case 'finale_assembly':
+    case 'finale_deliberation':
+    case 'finale_ceremony':
+      // TODO: V3 migration Phase 4 — implement projector views for assembly, deliberation, ceremony
+      return <ProjectorDark />;
 
     case 'finale_performer_mix': {
       const fs = state.finaleState;

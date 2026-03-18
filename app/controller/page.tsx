@@ -24,7 +24,7 @@ import { EmergencyControls } from '@/components/controller/EmergencyControls';
 const SHOW_ID = 'default-show';
 const PASSCODE = process.env.NEXT_PUBLIC_CONTROLLER_PASSCODE ?? '';
 
-const FINALE_PHASES = new Set(['finale_elegy', 'finale_consensus', 'finale_performer_mix']);
+const FINALE_PHASES = new Set(['finale_elegy', 'finale_assembly', 'finale_deliberation', 'finale_ceremony', 'finale_performer_mix']);
 
 // ---------------------------------------------------------------------------
 // Entry point — passcode gate
@@ -89,10 +89,8 @@ function ControllerContent() {
       )}
 
       {/* Finale controls — only during finale phases */}
-      {isFinale && phase === 'finale_consensus' && (
-        <ConsensusControls fullState={fullState} sendCommand={sendCommand} />
-      )}
-      {isFinale && (phase === 'finale_consensus' || phase === 'finale_performer_mix') && (
+      {/* TODO: V3 migration Phase 4 — add AssemblyControls, DeliberationControls, CeremonyControls */}
+      {isFinale && (phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
         <NpcControls fullState={fullState} sendCommand={sendCommand} />
       )}
       {isFinale && phase === 'finale_performer_mix' && (

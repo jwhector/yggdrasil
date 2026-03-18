@@ -1,5 +1,12 @@
-import { calculateConvergence, resolveRound, adjustThreshold } from '../consensus-game';
+// TODO: V3 migration — consensus-game.ts will be deleted in Phase 2.
+// These tests are skipped until replaced with assembly/deliberation/ceremony tests.
+// @ts-nocheck
+/* eslint-disable jest/no-disabled-tests */
 import type { Fragment, LayerType } from '../types';
+
+// Placeholder imports — will fail to compile when consensus-game.ts is deleted
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { calculateConvergence, resolveRound, adjustThreshold } = {} as any;
 
 function makeFragment(id: string, layerType: LayerType): Fragment {
   return {
@@ -13,6 +20,8 @@ function makeFragment(id: string, layerType: LayerType): Fragment {
     audioRef: { trackIndex: 0 },
   };
 }
+
+describe.skip('V2 consensus-game (TODO: delete in Phase 2)', () => {
 
 describe('calculateConvergence', () => {
   test('40 users, 16 vote for fragment X → convergence = 0.4', () => {
@@ -151,3 +160,5 @@ describe('adjustThreshold', () => {
     expect(adjustThreshold(0.4, 0, 0.05, 0.25)).toBeCloseTo(0.4);
   });
 });
+
+}); // end describe.skip

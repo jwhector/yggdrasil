@@ -67,14 +67,14 @@ function createTestConfig(
       makeAttemptConfig('avoidance', layerCount, drainFactor, multipliers),
     ],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assemblyTimerMs: 60000,
+      assemblyGracePeriodMs: 15000,
+      deliberationTimerMs: 120000,
+      ambassadorVolunteerTimerMs: 15000,
+      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+      audioPreviewPath: '/audio/previews',
+      layerLabels: new Map(),
+      npcMessages: [],
     },
     timing: {
       auditionDurationMs: 4000,
@@ -162,7 +162,7 @@ describe('Show Phase Transitions', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 16; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -180,7 +180,9 @@ describe('Show Phase Transitions', () => {
       'attempt_build',       // attempt 2
       'attempt_resolve',     // attempt 2
       'finale_elegy',
-      'finale_consensus',
+      'finale_assembly',
+      'finale_deliberation',
+      'finale_ceremony',
       'finale_performer_mix',
       'ended',
     ]);
@@ -214,7 +216,7 @@ describe('Show Phase Transitions', () => {
 
   test('ADVANCE_PHASE returns error when already at ended', () => {
     const state = createTestState();
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 16; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
     }
     expect(state.phase).toBe('ended');

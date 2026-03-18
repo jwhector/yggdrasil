@@ -54,14 +54,14 @@ function createTestConfig(): ShowConfig {
       },
     ],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assemblyTimerMs: 60000,
+      assemblyGracePeriodMs: 15000,
+      deliberationTimerMs: 120000,
+      ambassadorVolunteerTimerMs: 15000,
+      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+      audioPreviewPath: '/audio/previews',
+      layerLabels: new Map(),
+      npcMessages: [],
     },
     timing: {
       auditionDurationMs: 4000,
@@ -167,26 +167,42 @@ describe('State persistence', () => {
     db.close();
   });
 
-  test('preserves finaleState Maps (consensusGame votes, lockedRoles, performerMix activeLayers)', () => {
+  test('preserves finaleState Maps (assembly groups, deliberation groupVotes, performerMix activeLayers)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
     state.finaleState = {
-      phase: 'consensus_game',
+      phase: 'assembly',
       availableFragments: [],
       allFragments: [],
       lockedFragments: [],
-      consensusGame: {
-        active: true,
-        currentRound: 2,
-        roundTimeRemaining: 10000,
-        votes: new Map([['user-1', 'frag-0-0-A'], ['user-2', 'frag-0-1-B']]),
-        convergenceValue: 0.6,
-        threshold: 0.4,
-        consecutiveFailures: 0,
-        lockedRoles: new Map([['melody', 'frag-0-0-A']]),
+      assembly: {
+        groups: new Map([['melody', ['user-1', 'user-2']], ['drums', ['user-3']]]),
+        undecidedUsers: [],
+        timerRemaining: 30000,
+        timerDuration: 60000,
+        gracePeriodActive: false,
       },
-      npc: { currentMessage: 'Try again', autoTriggersEnabled: true },
+      deliberation: {
+        groupVotes: new Map([['melody', new Map([['user-1', 'frag-0-0-A'], ['user-2', 'frag-0-1-B']])]]),
+        chosenFragments: new Map(),
+        ambassadorVolunteers: new Map(),
+        ambassadors: new Map(),
+        timerRemaining: 120000,
+        timerDuration: 120000,
+        volunteerTimerRemaining: 0,
+        volunteerTimerActive: false,
+      },
+      ceremony: {
+        layerOrder: ['melody'],
+        currentIndex: 0,
+        currentAmbassador: null,
+        altarReady: false,
+        lockedLayers: new Map(),
+        forfeitedLayers: [],
+        ceremonyComplete: false,
+      },
+      npc: { currentMessage: 'Try again' },
       performerMix: {
         activeLayers: new Map([['melody', 'frag-0-0-A'], ['drums', null]]),
         pendingChanges: [],
@@ -200,11 +216,11 @@ describe('State persistence', () => {
     const loaded = db.loadState('show-1');
 
     expect(loaded!.finaleState).not.toBeNull();
-    expect(loaded!.finaleState!.consensusGame.votes).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.consensusGame.votes.get('user-1')).toBe('frag-0-0-A');
-    expect(loaded!.finaleState!.consensusGame.votes.get('user-2')).toBe('frag-0-1-B');
-    expect(loaded!.finaleState!.consensusGame.lockedRoles).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.consensusGame.lockedRoles.get('melody')).toBe('frag-0-0-A');
+    expect(loaded!.finaleState!.assembly.groups).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.assembly.groups.get('melody')).toEqual(['user-1', 'user-2']);
+    expect(loaded!.finaleState!.deliberation.groupVotes).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.deliberation.groupVotes.get('melody')).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.deliberation.groupVotes.get('melody')!.get('user-1')).toBe('frag-0-0-A');
     expect(loaded!.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
     expect(loaded!.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
     expect(loaded!.finaleState!.performerMix.activeLayers.get('drums')).toBeNull();

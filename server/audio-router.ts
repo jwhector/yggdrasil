@@ -66,7 +66,7 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   exitFadeBeats: 4,
   lockInFadeBeats: 4,
   collapseFadeBeats: 8,
-  consensusSwellBeats: 4,
+  ceremonySwellBeats: 4,
   unityGainValue: 0,
   stepsPerBeat: 2,
 };
@@ -799,13 +799,13 @@ export function createAudioRouter(
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  function handleConsensusActivate(cue: Extract<AudioCue, { type: 'consensus_activate' }>): void {
+  function handleConsensusActivate(cue: Extract<AudioCue, { type: 'ceremony_activate' }>): void {
     ensureTransportStarted();
 
     // Snap to entry gain then swell to unity
     unmuteTrack(cue.audioRef.trackIndex);
     setGain(cue.audioRef.trackIndex, currentGainConfig.entryGain);
-    fadeGain(cue.audioRef.trackIndex, 1.0, currentGainConfig.consensusSwellBeats);
+    fadeGain(cue.audioRef.trackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
     routerState.activeLayerTracks.set(cue.layerType, cue.audioRef.trackIndex);
   }
 
@@ -828,7 +828,7 @@ export function createAudioRouter(
           const newTrack = fragment.audioRef.trackIndex;
           unmuteTrack(newTrack);
           setGain(newTrack, currentGainConfig.entryGain);
-          fadeGain(newTrack, 1.0, currentGainConfig.consensusSwellBeats);
+          fadeGain(newTrack, 1.0, currentGainConfig.ceremonySwellBeats);
           routerState.activeLayerTracks.set(layerType, newTrack);
         } else {
           console.warn(`[AudioRouter] mix_update: fragment ${fragmentId} not found in allFragments`);
@@ -921,7 +921,7 @@ export function createAudioRouter(
           case 'rejection_gesture':
             handleRejectionGesture(cue, state);
             break;
-          case 'consensus_activate':
+          case 'ceremony_activate':
             handleConsensusActivate(cue);
             break;
           case 'mix_update':

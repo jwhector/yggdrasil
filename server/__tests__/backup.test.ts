@@ -53,14 +53,14 @@ function createTestConfig(): ShowConfig {
       },
     ],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assemblyTimerMs: 60000,
+      assemblyGracePeriodMs: 15000,
+      deliberationTimerMs: 120000,
+      ambassadorVolunteerTimerMs: 15000,
+      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+      audioPreviewPath: '/audio/previews',
+      layerLabels: new Map(),
+      npcMessages: [],
     },
     timing: {
       auditionDurationMs: 4000,
@@ -157,24 +157,40 @@ describe('loadBackup', () => {
     expect(loaded.finaleState).toBeNull();
   });
 
-  test('preserves finaleState Maps', () => {
+  test('preserves finaleState Maps (assembly groups, deliberation groupVotes, performerMix activeLayers)', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     state.finaleState = {
-      phase: 'consensus_game',
+      phase: 'assembly',
       availableFragments: [],
       allFragments: [],
       lockedFragments: [],
-      consensusGame: {
-        active: true,
-        currentRound: 1,
-        roundTimeRemaining: 10000,
-        votes: new Map([['u1', 'frag-0-0-A'], ['u2', 'frag-0-1-B']]),
-        convergenceValue: 0.6,
-        threshold: 0.4,
-        consecutiveFailures: 0,
-        lockedRoles: new Map([['melody', 'frag-0-0-A']]),
+      assembly: {
+        groups: new Map([['melody', ['u1', 'u2']], ['drums', ['u3']]]),
+        undecidedUsers: [],
+        timerRemaining: 30000,
+        timerDuration: 60000,
+        gracePeriodActive: false,
       },
-      npc: { currentMessage: null, autoTriggersEnabled: false },
+      deliberation: {
+        groupVotes: new Map([['melody', new Map([['u1', 'frag-0-0-A']])]]),
+        chosenFragments: new Map(),
+        ambassadorVolunteers: new Map(),
+        ambassadors: new Map(),
+        timerRemaining: 120000,
+        timerDuration: 120000,
+        volunteerTimerRemaining: 0,
+        volunteerTimerActive: false,
+      },
+      ceremony: {
+        layerOrder: ['melody'],
+        currentIndex: 0,
+        currentAmbassador: null,
+        altarReady: false,
+        lockedLayers: new Map(),
+        forfeitedLayers: [],
+        ceremonyComplete: false,
+      },
+      npc: { currentMessage: null },
       performerMix: {
         activeLayers: new Map([['melody', 'frag-0-0-A']]),
         pendingChanges: [],
@@ -186,10 +202,11 @@ describe('loadBackup', () => {
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
-    expect(loaded.finaleState!.consensusGame.votes).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.consensusGame.votes.get('u1')).toBe('frag-0-0-A');
-    expect(loaded.finaleState!.consensusGame.lockedRoles).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.consensusGame.lockedRoles.get('melody')).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.assembly.groups).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.assembly.groups.get('melody')).toEqual(['u1', 'u2']);
+    expect(loaded.finaleState!.deliberation.groupVotes).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.deliberation.groupVotes.get('melody')).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.deliberation.groupVotes.get('melody')!.get('u1')).toBe('frag-0-0-A');
     expect(loaded.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
     expect(loaded.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
   });

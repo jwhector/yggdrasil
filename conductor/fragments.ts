@@ -50,6 +50,7 @@ export function extractAttemptResult(attempt: AttemptState): AttemptResult {
 export function generateFragments(
   attempts: AttemptState[],
   attemptConfigs: AttemptConfig[],
+  audioPreviewPath = '',
 ): FragmentAvailability[] {
   const fragments: FragmentAvailability[] = [];
 
@@ -72,6 +73,7 @@ export function generateFragments(
             attempt.chapter,
             layerConfig.type,
             result.chosenOption === 'A' ? layerConfig.optionA : layerConfig.optionB,
+            audioPreviewPath,
           ),
           selectable: true,
         });
@@ -86,6 +88,7 @@ export function generateFragments(
             attempt.chapter,
             layerConfig.type,
             loser === 'A' ? layerConfig.optionA : layerConfig.optionB,
+            audioPreviewPath,
           ),
           selectable: false,
         });
@@ -99,6 +102,7 @@ export function generateFragments(
             attempt.chapter,
             layerConfig.type,
             layerConfig.optionA,
+            audioPreviewPath,
           ),
           selectable: false,
         });
@@ -111,6 +115,7 @@ export function generateFragments(
             attempt.chapter,
             layerConfig.type,
             layerConfig.optionB,
+            audioPreviewPath,
           ),
           selectable: false,
         });
@@ -131,6 +136,7 @@ function buildFragment(
   chapter: Chapter,
   layerType: LayerType,
   audioRef: AudioReference,
+  audioPreviewPath: string,
 ): Fragment {
   // TODO: See DECISIONS.md O5 — display label generation strategy TBD
   const displayLabel = `${capitalize(chapter)}: ${capitalize(layerType)} ${option}`;
@@ -144,6 +150,7 @@ function buildFragment(
     layerType,
     displayLabel,
     audioRef,
+    previewAudioPath: `${audioPreviewPath}/preview-${attemptIndex}-${layerIndex}-${option}.mp3`,
   };
 }
 

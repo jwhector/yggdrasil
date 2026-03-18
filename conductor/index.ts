@@ -31,5 +31,4 @@ export { calculateConvergence, resolveRound, adjustThreshold } from './consensus
 export { queueChange, cancelPending, firePendingChanges } from './performer-mix';
 
 // Export NPC functions
-export { evaluateAutoTriggers } from './npc';
-export type { NpcGameState } from './npc';
+export { getNpcMessage } from './npc';

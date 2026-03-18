@@ -39,9 +39,8 @@ import type {
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { createHealthBar, applyDrain, isCollapsed } from './health-bar';
 import { generateFragments } from './fragments';
-import { calculateConvergence, resolveRound, adjustThreshold } from './consensus-game';
 import { queueChange, cancelPending, firePendingChanges } from './performer-mix';
-import { evaluateAutoTriggers } from './npc';
+// TODO: V3 migration — import assembly, deliberation, ceremony modules (Phase 2)
 
 // ============================================================================
 // State Initialization
@@ -55,7 +54,7 @@ export const DEFAULT_GAIN_CONFIG = {
   exitFadeBeats: 8,
   lockInFadeBeats: 8,
   collapseFadeBeats: 8,
-  consensusSwellBeats: 4,
+  ceremonySwellBeats: 4,
   unityGainValue: 0.5,
   stepsPerBeat: 2,
 } as const;
@@ -161,14 +160,30 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Finale
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
-    case 'START_CONSENSUS_ROUND':
-      return handleStartConsensusRound(state);
-    case 'SUBMIT_CONSENSUS_VOTE':
-      return handleSubmitConsensusVote(state, command.userId, command.fragmentId);
-    case 'END_CONSENSUS_ROUND':
-      return handleEndConsensusRound(state);
-    case 'SET_CONSENSUS_THRESHOLD':
-      return handleSetConsensusThreshold(state, command.threshold);
+    // TODO: V3 migration — assembly commands (Phase 2)
+    case 'START_ASSEMBLY':
+    case 'JOIN_GROUP':
+    case 'ASSEMBLY_TIMER_EXPIRED':
+    case 'FORCE_ASSIGN_USER':
+    case 'EXTEND_ASSEMBLY_TIMER':
+    case 'FORCE_END_ASSEMBLY':
+    // TODO: V3 migration — deliberation commands (Phase 2)
+    case 'START_DELIBERATION':
+    case 'SUBMIT_GROUP_VOTE':
+    case 'DELIBERATION_TIMER_EXPIRED':
+    case 'VOLUNTEER_AS_AMBASSADOR':
+    case 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED':
+    case 'FORCE_FRAGMENT_SELECTION':
+    case 'EXTEND_DELIBERATION_TIMER':
+    case 'FORCE_END_DELIBERATION':
+    // TODO: V3 migration — ceremony commands (Phase 2)
+    case 'START_CEREMONY':
+    case 'CALL_NEXT_AMBASSADOR':
+    case 'ALTAR_LOCK_IN':
+    case 'FORCE_LOCK_IN':
+    case 'FORFEIT_LAYER':
+    case 'SKIP_TO_LAYER':
+      return []; // TODO: V3 migration (Phase 2)
     case 'SEND_NPC_MESSAGE':
       return handleSendNpcMessage(state, command.message);
     case 'START_PERFORMER_MIX':
@@ -239,7 +254,9 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'attempt_build',       // attempt 2
   'attempt_resolve',     // attempt 2
   'finale_elegy',
-  'finale_consensus',
+  'finale_assembly',
+  'finale_deliberation',
+  'finale_ceremony',
   'finale_performer_mix',
   'ended',
 ];
@@ -283,9 +300,11 @@ function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number 
     case 'attempt_build': return 3 + attemptIndex * 3;
     case 'attempt_resolve': return 4 + attemptIndex * 3;
     case 'finale_elegy': return 11;
-    case 'finale_consensus': return 12;
-    case 'finale_performer_mix': return 13;
-    case 'ended': return 14;
+    case 'finale_assembly': return 12;
+    case 'finale_deliberation': return 13;
+    case 'finale_ceremony': return 14;
+    case 'finale_performer_mix': return 15;
+    case 'ended': return 16;
     default: return -1;
   }
 }
@@ -323,19 +342,17 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     events.push(...handleSetupFinale(state));
   }
 
-  if (nextPhase === 'finale_consensus' && state.finaleState) {
-    state.finaleState.phase = 'consensus_game';
+  if (nextPhase === 'finale_assembly' && state.finaleState) {
+    state.finaleState.phase = 'assembly';
+    // TODO: V3 migration — initialize assembly state (Phase 2)
   }
 
   if (nextPhase === 'finale_performer_mix' && state.finaleState) {
     if (state.finaleState.phase !== 'performer_mix') {
-      // Seed activeLayers from consensus game results
+      // Seed activeLayers from ceremony lock-in results
+      // TODO: V3 migration — initialize from ceremony.lockedLayers (Phase 2)
       state.finaleState.phase = 'performer_mix';
-      const activeLayers = new Map<LayerType, string | null>();
-      for (const [layerType, fragmentId] of state.finaleState.consensusGame.lockedRoles) {
-        activeLayers.set(layerType, fragmentId);
-      }
-      state.finaleState.performerMix.activeLayers = activeLayers;
+      state.finaleState.performerMix.activeLayers = new Map();
       events.push({ type: 'PERFORMER_MIX_STARTED' });
     }
   }
@@ -1055,7 +1072,7 @@ function handleImportState(state: ShowState, importedState: ShowState): Conducto
 // ============================================================================
 
 function handleSetupFinale(state: ShowState): ConductorEvent[] {
-  const allFragmentAvailability = generateFragments(state.attempts, state.config.attempts);
+  const allFragmentAvailability = generateFragments(state.attempts, state.config.attempts, state.config.finale.audioPreviewPath);
   const availableFragments = allFragmentAvailability.filter(fa => fa.selectable).map(fa => fa.fragment);
   const lockedFragments = allFragmentAvailability.filter(fa => !fa.selectable).map(fa => fa.fragment);
   const allFragments = allFragmentAvailability.map(fa => fa.fragment);
@@ -1065,19 +1082,31 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
     availableFragments,
     allFragments,
     lockedFragments,
-    consensusGame: {
-      active: false,
-      currentRound: 0,
-      roundTimeRemaining: 0,
-      votes: new Map(),
-      convergenceValue: 0,
-      threshold: state.config.finale.initialThreshold,
-      consecutiveFailures: 0,
-      lockedRoles: new Map(),
+    assembly: {
+      groups: new Map(),
+      undecidedUsers: [],
+      timerRemaining: 0,
+      timerDuration: 0,
+    },
+    deliberation: {
+      groupVotes: new Map(),
+      chosenFragments: new Map(),
+      ambassadorVolunteers: new Map(),
+      ambassadors: new Map(),
+      timerRemaining: 0,
+      volunteerTimerRemaining: null,
+    },
+    ceremony: {
+      layerOrder: state.config.finale.ceremonyLayerOrder,
+      currentIndex: 0,
+      currentAmbassador: null,
+      altarReady: false,
+      lockedLayers: new Map(),
+      forfeitedLayers: [],
+      ceremonyComplete: false,
     },
     npc: {
       currentMessage: null,
-      autoTriggersEnabled: true,
     },
     performerMix: {
       activeLayers: new Map(),
@@ -1091,109 +1120,7 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
   return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments, lockedFragments }];
 }
 
-function handleStartConsensusRound(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { consensusGame } = state.finaleState;
-  const { finale } = state.config;
-
-  consensusGame.active = true;
-  consensusGame.currentRound++;
-  consensusGame.votes = new Map();
-  consensusGame.convergenceValue = 0;
-  consensusGame.threshold = adjustThreshold(
-    finale.initialThreshold,
-    consensusGame.consecutiveFailures,
-    finale.thresholdDecayPerFailure,
-    finale.minThreshold,
-  );
-  consensusGame.roundTimeRemaining =
-    consensusGame.currentRound === 1 ? finale.firstRoundDurationMs : finale.consensusRoundDurationMs;
-
-  return [{ type: 'CONSENSUS_ROUND_STARTED', roundNumber: consensusGame.currentRound, threshold: consensusGame.threshold }];
-}
-
-function handleSubmitConsensusVote(state: ShowState, userId: UserId, fragmentId: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { consensusGame } = state.finaleState;
-  if (!consensusGame.active) return [{ type: 'ERROR', message: 'No active consensus round' }];
-
-  consensusGame.votes.set(userId, fragmentId);
-  const { convergence } = calculateConvergence(consensusGame.votes);
-  consensusGame.convergenceValue = convergence;
-
-  return [{ type: 'CONSENSUS_VOTE_UPDATED', convergenceValue: convergence }];
-}
-
-function handleEndConsensusRound(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { consensusGame, availableFragments, npc } = state.finaleState;
-  const { finale } = state.config;
-  const events: ConductorEvent[] = [];
-
-  const result = resolveRound(
-    consensusGame.votes,
-    consensusGame.threshold,
-    availableFragments,
-    consensusGame.lockedRoles,
-  );
-
-  consensusGame.active = false;
-  consensusGame.votes = new Map();
-
-  if (result.success && result.winningFragment) {
-    const { winningFragment } = result;
-    consensusGame.lockedRoles.set(winningFragment.layerType, winningFragment.id);
-    consensusGame.consecutiveFailures = 0;
-
-    events.push({
-      type: 'CONSENSUS_ROUND_SUCCESS',
-      fragmentId: winningFragment.id,
-      layerType: winningFragment.layerType,
-      convergence: result.convergence,
-    });
-    events.push({
-      type: 'AUDIO_CUE',
-      cue: { type: 'consensus_activate', layerType: winningFragment.layerType, fragmentId: winningFragment.id, audioRef: winningFragment.audioRef },
-    });
-
-    if (consensusGame.lockedRoles.size === 7) {
-      events.push({ type: 'CONSENSUS_GAME_COMPLETE' });
-    }
-  } else {
-    consensusGame.consecutiveFailures++;
-    events.push({ type: 'CONSENSUS_ROUND_FAILURE', highestConvergence: result.convergence });
-  }
-
-  // NPC auto-trigger evaluation
-  if (npc.autoTriggersEnabled && finale.npcAutoTriggers.length > 0) {
-    const npcMessage = evaluateAutoTriggers(
-      {
-        consecutiveFailures: consensusGame.consecutiveFailures,
-        lastConvergence: result.convergence,
-        threshold: consensusGame.threshold,
-        lockedRoles: consensusGame.lockedRoles,
-        availableFragments,
-        recentLockHistory: [...consensusGame.lockedRoles.entries()].map(([, fragmentId]) => {
-          const f = availableFragments.find(fr => fr.id === fragmentId);
-          return { attemptIndex: f?.attemptIndex ?? 0 };
-        }),
-      },
-      finale.npcAutoTriggers,
-    );
-    if (npcMessage) {
-      npc.currentMessage = npcMessage;
-      events.push({ type: 'NPC_MESSAGE', message: npcMessage });
-    }
-  }
-
-  return events;
-}
-
-function handleSetConsensusThreshold(state: ShowState, threshold: number): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.consensusGame.threshold = threshold;
-  return [];
-}
+// TODO: V3 migration — consensus handlers removed (Phase 2 replaces with assembly/deliberation/ceremony)
 
 function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
@@ -1206,12 +1133,8 @@ function handleStartPerformerMix(state: ShowState): ConductorEvent[] {
   const { finaleState } = state;
   finaleState.phase = 'performer_mix';
 
-  // Seed activeLayers from consensus game results
-  const activeLayers = new Map<LayerType, string | null>();
-  for (const [layerType, fragmentId] of finaleState.consensusGame.lockedRoles) {
-    activeLayers.set(layerType, fragmentId);
-  }
-  finaleState.performerMix.activeLayers = activeLayers;
+  // TODO: V3 migration — seed activeLayers from ceremony.lockedLayers (Phase 2)
+  finaleState.performerMix.activeLayers = new Map();
 
   return [{ type: 'PERFORMER_MIX_STARTED' }];
 }

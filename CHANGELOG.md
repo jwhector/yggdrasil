@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## 2026-03-17 — V3 Migration Phase 1: Types & Data Models (Consensus Game → Assembly/Deliberation/Ceremony)
+
+**Context:** Phase 1 of the V3 finale redesign. The consensus game (convergence meter, timed voting rounds, threshold softening) is replaced by a physically embodied four-phase sequence: group assembly → deliberation → ambassador ceremony → performer mix. This commit updates all TypeScript types, stubs out V2 conductor handlers, and fixes compilation across the entire codebase. No new logic is implemented — that's Phase 2.
+
+**`conductor/types.ts` — core type changes:**
+- `ShowPhase`: removed `'finale_consensus'`; added `'finale_assembly' | 'finale_deliberation' | 'finale_ceremony'`
+- `FinaleState`: removed `consensusGame` sub-object; added `assembly` (groups Map, undecidedUsers, timers), `deliberation` (nested groupVotes Map, chosenFragments, ambassadors, timers), `ceremony` (layerOrder, currentAmbassador, altarReady, lockedLayers, ceremonyComplete); simplified `npc` (removed `autoTriggersEnabled`)
+- `FinaleConfig`: removed all consensus fields; added `assemblyTimerMs`, `assemblyGracePeriodMs`, `deliberationTimerMs`, `ambassadorVolunteerTimerMs`, `ceremonyLayerOrder`, `audioPreviewPath`, `layerLabels`, `npcMessages`
+- `Fragment`: added `previewAudioPath: string`
+- `NpcTriggerConfig` removed; replaced with `NpcMessageConfig { event: string; layerType?: LayerType; text: string }`
+- `GainConfig.consensusSwellBeats` → `ceremonySwellBeats` (all references updated)
+- `AudioCue`: `consensus_activate` → `ceremony_activate` (all references updated)
+- `ConductorCommand`: removed `START_CONSENSUS_ROUND`, `SUBMIT_CONSENSUS_VOTE`, `END_CONSENSUS_ROUND`, `SET_CONSENSUS_THRESHOLD`; added assembly/deliberation/ceremony command variants
+- `ConductorEvent`: removed `CONSENSUS_ROUND_*` events; added assembly/deliberation/ceremony event variants
+- `AudienceFinaleView`, `ProjectorFinaleView`: removed consensus fields; added V3 assembly/deliberation/ceremony view fields
+
+**`conductor/conductor.ts`:**
+- Updated `PHASE_SEQUENCE` to include the three new phases
+- Replaced `handleSetupFinale` FinaleState initialization with V3 sub-objects
+- Removed V2 consensus handler functions; added stub `return []` cases for all new V3 commands (TODO: Phase 2)
+- Updated `handleStartPerformerMix` to use empty Map instead of `consensusGame.lockedRoles`
+
+**`conductor/npc.ts`:** Rewrote `getNpcMessage()` API — takes `NpcMessageConfig[]`, event string, optional layerType, supports `{layerLabel}` template substitution
+
+**`conductor/fragments.ts`:** `generateFragments` accepts `audioPreviewPath`; sets `previewAudioPath` on each fragment
+
+**`lib/serialization.ts`:** Fully migrated `SerializedFinaleState` — removed `SerializedConsensusGame`; added `SerializedAssembly`, `SerializedDeliberation`, `SerializedCeremony` with proper Map↔array conversion including nested `groupVotes` Map
+
+**Server/UI compile fixes:**
+- `server/audio-router.ts`: renamed `consensusSwellBeats` → `ceremonySwellBeats`, `consensus_activate` → `ceremony_activate`
+- `app/projector/page.tsx`: replaced `finale_consensus` case with stub cases for `finale_assembly/deliberation/ceremony`
+- `app/audience/page.tsx`: updated finale phase routing for V3; removed unused imports
+- `app/controller/page.tsx`: updated `FINALE_PHASES` set
+- `components/controller/ConsensusControls.tsx`: stubbed out (returns null), pending Phase 4
+- `components/controller/MetricsPanel.tsx`: updated phase labels/colors and finale stats display
+- `components/controller/NpcControls.tsx`: removed `autoTriggersEnabled` toggle
+- `components/controller/ShowControls.tsx`: updated phase list
+
+**Tests:**
+- `conductor/__tests__/conductor.test.ts`: updated phase sequence fixture (16 phases now)
+- `conductor/__tests__/npc.test.ts`: rewritten for V3 `getNpcMessage` API
+- `server/__tests__/persistence.test.ts`, `backup.test.ts`: updated `FinaleConfig` and `FinaleState` fixtures to V3
+- `conductor/__tests__/finale-integration.test.ts`, `consensus-game.test.ts`: added `// @ts-nocheck` + `describe.skip` (V2 tests, will be replaced in Phase 2)
+
 ## 2026-03-09 — Audio Router Polish: Gain Control, Sub-Beat Interpolation, OSC Source of Truth
 
 **Context:** Refines the audio router's gain-based control model for production use with Ableton. Fixes gain mapping formula, adds sub-beat interpolation for smoother fades, and makes Ableton the single source of truth for transport state and BPM.
