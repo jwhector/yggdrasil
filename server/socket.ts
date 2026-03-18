@@ -10,7 +10,7 @@
  * - 'controller'  — Performer controller
  *
  * High-frequency channels (NOT via state_sync):
- * - 'convergence_update' → audience + projector at ~5 Hz (during consensus rounds)
+ * - 'group_update' → audience + projector at ~2 Hz (during assembly phase)
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';

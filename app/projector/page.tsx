@@ -161,9 +161,146 @@ export default function ProjectorPage() {
 
     case 'finale_assembly':
     case 'finale_deliberation':
-    case 'finale_ceremony':
-      // TODO: V3 migration Phase 4 — implement projector views for assembly, deliberation, ceremony
+      // TODO: V3 migration — implement projector views for assembly, deliberation
       return <ProjectorDark />;
+
+    case 'finale_ceremony': {
+      const cfs = state.finaleState;
+      if (!cfs) return <ProjectorDark />;
+
+      const currentCeremonyLayerType = cfs.currentCeremonyLayer as LayerType | null;
+      const currentLayerIdentity = currentCeremonyLayerType
+        ? getLayerIdentity(currentCeremonyLayerType)
+        : null;
+
+      return (
+        <main style={projectorMainStyle}>
+          {/* NPC message */}
+          {cfs.npcMessage && (
+            <div style={{
+              textAlign: 'center',
+              fontSize: '1.1rem',
+              color: 'rgba(255,255,255,0.6)',
+              fontStyle: 'italic',
+              padding: '24px 40px 0',
+              maxWidth: '600px',
+              margin: '0 auto',
+            }}>
+              {cfs.npcMessage}
+            </div>
+          )}
+
+          {/* Current layer identity — large central display */}
+          {currentLayerIdentity && currentCeremonyLayerType && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flex: 1,
+              gap: '16px',
+              padding: '40px',
+            }}>
+              <div style={{ fontSize: '6rem', color: currentLayerIdentity.color }}>
+                {currentLayerIdentity.symbol}
+              </div>
+              <div style={{
+                fontSize: '1.2rem',
+                color: currentLayerIdentity.color,
+                letterSpacing: '0.15em',
+                fontWeight: 600,
+              }}>
+                {currentLayerIdentity.label.toUpperCase()}
+              </div>
+              {cfs.currentAmbassador && (
+                <div style={{
+                  fontSize: '0.7rem',
+                  color: 'rgba(255,255,255,0.3)',
+                  letterSpacing: '0.12em',
+                  marginTop: '8px',
+                }}>
+                  AMBASSADOR CALLED
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* No current layer — ceremony complete or between layers */}
+          {!currentLayerIdentity && cfs.ceremonyComplete && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flex: 1,
+              gap: '24px',
+              padding: '40px',
+            }}>
+              <div style={{
+                fontSize: '1rem',
+                color: 'rgba(255,255,255,0.5)',
+                letterSpacing: '0.2em',
+              }}>
+                THE SONG IS WHOLE
+              </div>
+            </div>
+          )}
+
+          {/* Layer stack — building from bottom */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            padding: '0 40px 40px',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+          }}>
+            {cfs.ceremonyLayerOrder.map((lt: LayerType) => {
+              const identity = getLayerIdentity(lt);
+              const isLocked = cfs.ceremonyLockedLayers.some(
+                (l: { layerType: LayerType; fragmentId: string }) => l.layerType === lt
+              );
+              const isForfeited = cfs.ceremonyForfeitedLayers.includes(lt);
+              const isCurrent = lt === currentCeremonyLayerType;
+
+              return (
+                <div
+                  key={lt}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.1rem',
+                    backgroundColor: isLocked
+                      ? `${identity.color}30`
+                      : isForfeited
+                      ? 'rgba(255,255,255,0.02)'
+                      : isCurrent
+                      ? `${identity.color}15`
+                      : 'rgba(255,255,255,0.03)',
+                    border: isLocked
+                      ? `2px solid ${identity.color}`
+                      : isCurrent
+                      ? `2px solid ${identity.color}80`
+                      : isForfeited
+                      ? '1px solid rgba(255,255,255,0.05)'
+                      : '1px solid rgba(255,255,255,0.06)',
+                    color: isForfeited ? 'rgba(255,255,255,0.1)' : identity.color,
+                    opacity: isForfeited ? 0.3 : isLocked || isCurrent ? 1 : 0.35,
+                    transition: 'all 0.5s ease',
+                  }}
+                >
+                  {identity.symbol}
+                </div>
+              );
+            })}
+          </div>
+        </main>
+      );
+    }
 
     case 'finale_performer_mix': {
       const fs = state.finaleState;

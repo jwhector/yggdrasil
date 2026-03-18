@@ -12,7 +12,9 @@ import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { AssemblyCards } from '@/components/finale/AssemblyCards';
 import { GroupIdentity } from '@/components/finale/GroupIdentity';
 import { DeliberationBoard } from '@/components/finale/DeliberationBoard';
-import type { AudienceFinaleView } from '@/conductor/types';
+import { AltarReady } from '@/components/finale/AltarReady';
+import { CeremonyView } from '@/components/finale/CeremonyView';
+import type { AudienceFinaleView, LayerType } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -251,15 +253,31 @@ function FinaleAudienceView({
     );
   }
 
-  // --- Ceremony phase: passive observation ---
+  // --- Ceremony phase ---
   if (phase === 'finale_ceremony') {
+    // Find current layer type from ceremony progress
+    const currentLayer = myFinale.ceremonyProgress.find(p => p.status === 'current');
+    const currentLayerType = currentLayer?.layerType as LayerType | undefined;
+    const ceremonyComplete = myFinale.ceremonyProgress.every(
+      p => p.status === 'locked' || p.status === 'forfeited'
+    );
+
+    // Ambassador sees AltarReady; everyone else sees CeremonyView
+    if (myFinale.isCurrentAmbassador && currentLayerType) {
+      return (
+        <AltarReady
+          layerType={currentLayerType}
+          onLockIn={() => emit('altar_lock_in', { layerType: currentLayerType })}
+        />
+      );
+    }
+
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', minHeight: '100vh', gap: '16px' }}>
-        <PulsingDot />
-        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
-          Ceremony
-        </p>
-      </div>
+      <CeremonyView
+        ceremonyProgress={myFinale.ceremonyProgress}
+        npcMessage={myFinale.npcMessage}
+        ceremonyComplete={ceremonyComplete}
+      />
     );
   }
 

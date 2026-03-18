@@ -1,6 +1,6 @@
 {
   "name": "Default Show Configuration",
-  "description": "Template configuration for the V2 show — replace audio references and labels with actual content",
+  "description": "Template configuration for the V3 show — replace audio references and labels with actual content",
 
   "layersPerAttempt": 7,
 
@@ -215,7 +215,19 @@
       "fx1": "The Shimmer",
       "fx2": "The Shadow"
     },
-    "npcMessages": []
+    "npcMessages": [
+      { "event": "performer_abandonment", "text": "He's gone. We need to do this ourselves." },
+      { "event": "assembly_start", "text": "Choose your role. Find each other." },
+      { "event": "assembly_timer_warning", "text": "Decide now." },
+      { "event": "deliberation_start", "text": "Listen. Decide together." },
+      { "event": "empty_group", "text": "No one chose {layerLabel}. We'll go without it." },
+      { "event": "ambassador_selected", "text": "{layerLabel} has its voice." },
+      { "event": "layer_forfeited", "text": "{layerLabel} goes silent. Not every part survives." },
+      { "event": "ceremony_start", "text": "One by one. Bring it forward." },
+      { "event": "layer_locked", "text": "" },
+      { "event": "final_layer_locked", "text": "That's all of us." },
+      { "event": "ceremony_complete", "text": "He's back. Show him what we built." }
+    ]
   },
 
   "timing": {
@@ -232,7 +244,7 @@
       "exitFadeBeats": 8,
       "lockInFadeBeats": 8,
       "collapseFadeBeats": 8,
-      "consensusSwellBeats": 4,
+      "ceremonySwellBeats": 4,
       "unityGainValue": 0,
       "stepsPerBeat": 3
     }

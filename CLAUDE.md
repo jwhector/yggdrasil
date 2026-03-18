@@ -11,7 +11,7 @@
 
 ## What This System Is
 
-Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting across 3 song attempts. Each attempt has a **health bar** that drains proportionally to vote splits — collapse is mechanical when health reaches 0. The finale features an **elegy** (display of all built fragments), a **consensus game** (audience votes to activate fragments round by round), and a **performer mixing surface** (live-mix activated layers). An **NPC character** provides auto-triggered and manually triggered narrative text throughout.
+Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting across 3 song attempts. Each attempt has a **health bar** that drains proportionally to vote splits — collapse is mechanical when health reaches 0. The finale features an **elegy** (display of all built fragments), a **group assembly** (audience self-selects into 7 layer-type groups), a **deliberation** (groups preview audio and vote on fragments, then select ambassadors), a **ceremony** (ambassadors lock fragments at the altar via accelerometer), and a **performer mixing surface** (live-mix activated layers). An **NPC character** provides event-driven narrative text throughout.
 
 **Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
 
@@ -32,7 +32,7 @@ DECISIONS.md has an "Open Decisions" section. If your current task touches one o
 The `conductor/` directory contains pure game logic — no I/O, no Socket.IO, no database calls. All side effects live in `server/`. The conductor receives commands and returns events.
 
 ### 5. High-frequency data bypasses state_sync
-Convergence updates and audio metering use dedicated socket events at high frequency (4–30 Hz). They do NOT go through `state_sync` or persistence.
+Group assembly updates and audio metering use dedicated socket events at high frequency (2–30 Hz). They do NOT go through `state_sync` or persistence.
 
 ---
 
@@ -50,9 +50,11 @@ yggdrasil/
 │   ├── conductor.ts             # State machine
 │   ├── voting.ts                # Vote tallying + VoteResult calculation
 │   ├── health-bar.ts            # Health bar drain calculation
-│   ├── consensus-game.ts        # Finale consensus game logic
+│   ├── assembly.ts              # Group assembly logic
+│   ├── deliberation.ts          # Group deliberation + ambassador selection
+│   ├── ceremony.ts              # Ceremony ambassador lock-in sequencing
 │   ├── performer-mix.ts         # Performer mixing surface logic
-│   ├── npc.ts                   # NPC auto-trigger evaluation
+│   ├── npc.ts                   # NPC event-driven message lookup
 │   ├── fragments.ts             # Fragment generation from attempt results
 │   ├── types.ts                 # Shared types
 │   └── __tests__/
@@ -76,13 +78,13 @@ yggdrasil/
 ├── components/
 │   ├── LobbyDisplay.tsx         # Projector lobby screen
 │   ├── song-building/           # Layer grid, option cards, health bar, reveal sequence
-│   ├── finale/                  # ElegyGrid, ConvergenceMeter, ConsensusBoard, MixingSurface, NpcDisplay
+│   ├── finale/                  # ElegyGrid, AssemblyCards, DeliberationBoard, CeremonyView, AltarReady, MixingSurface, MixingMirror, GroupIdentity
 │   └── controller/              # Operator controls
 │
 ├── hooks/
 │   ├── useSocket.ts
 │   ├── useShowState.ts
-│   └── useConvergence.ts        # Spring-interpolated convergence meter animation
+│   └── useAltarDetection.ts     # Device Orientation API for ceremony altar lock-in
 │
 ├── lib/
 │   ├── socket-client.ts
@@ -140,16 +142,16 @@ npm run dev:network
 4. Conductor emits events → server broadcasts state_sync
 5. Client receives updated state via `useShowState` hook
 
-### High-frequency data (convergence, metering)
+### High-frequency data (group updates, metering)
 These do NOT go through state_sync (too slow/heavy):
-- **Convergence updates**: Server broadcasts `convergence_update` to all clients at ~4-5 Hz during consensus game; `useConvergence` hook applies spring interpolation for analog-feel animation
+- **Group updates**: Server broadcasts `group_update` to audience + projector at ~2 Hz during assembly phase
 - **Audio metering**: M4L sends at ~15-30 Hz per track, server aggregates, broadcasts to projector at ~10 Hz
 - Both use dedicated socket events, not state mutations
 
 ### State filtering by client mode
 - **Controller**: full serialized state (Maps converted to arrays)
 - **Projector**: public state (no per-user data)
-- **Audience**: personalized (user's vote, available fragments for consensus game, convergence value)
+- **Audience**: personalized (user's vote, group assignment, ceremony ambassador status, NPC messages)
 
 ### Audio/OSC track layout
 - Track index: `attemptIndex * (layersPerAttempt * 2) + layerIndex * 2 + optionOffset`

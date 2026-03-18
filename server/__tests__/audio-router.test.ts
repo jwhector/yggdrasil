@@ -1,5 +1,5 @@
 /**
- * Audio Router Tests (V2 — Gain-based control)
+ * Audio Router Tests (V3 — Gain-based control)
  *
  * Tests that AUDIO_CUE events are correctly translated to AbletonOSC messages.
  *
@@ -93,14 +93,14 @@ function createTestConfig(): ShowConfig {
       makeAttemptConfig('avoidance'),
     ],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assemblyTimerMs: 60000,
+      assemblyGracePeriodMs: 15000,
+      deliberationTimerMs: 120000,
+      ambassadorVolunteerTimerMs: 15000,
+      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'] as any,
+      audioPreviewPath: '/audio/previews',
+      layerLabels: new Map(),
+      npcMessages: [],
     },
     timing: {
       beatsPerLoop: 32,
@@ -131,26 +131,40 @@ function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B
     layerType: 'melody',
     displayLabel: `Fragment ${attemptIndex}.${layerIndex}.${option}`,
     audioRef: { trackIndex },
+    previewAudioPath: `/audio/previews/preview-${attemptIndex}-${layerIndex}-${option}.mp3`,
   };
 }
 
-function makeV2FinaleState(allFragments: Fragment[] = []): FinaleState {
+function makeFinaleState(allFragments: Fragment[] = []): FinaleState {
   return {
-    phase: 'consensus_game',
+    phase: 'assembly',
     availableFragments: allFragments,
     allFragments,
     lockedFragments: [],
-    consensusGame: {
-      active: false,
-      currentRound: 0,
-      roundTimeRemaining: 0,
-      votes: new Map(),
-      convergenceValue: 0,
-      threshold: 0.4,
-      consecutiveFailures: 0,
-      lockedRoles: new Map(),
+    assembly: {
+      groups: new Map(),
+      undecidedUsers: [],
+      timerRemaining: 0,
+      timerDuration: 60000,
     },
-    npc: { currentMessage: null, autoTriggersEnabled: false },
+    deliberation: {
+      groupVotes: new Map(),
+      chosenFragments: new Map(),
+      ambassadorVolunteers: new Map(),
+      ambassadors: new Map(),
+      timerRemaining: 0,
+      volunteerTimerRemaining: null,
+    },
+    ceremony: {
+      layerOrder: [],
+      currentIndex: -1,
+      currentAmbassador: null,
+      altarReady: false,
+      lockedLayers: new Map(),
+      forfeitedLayers: [],
+      ceremonyComplete: false,
+    },
+    npc: { currentMessage: null },
     performerMix: {
       activeLayers: new Map(),
       pendingChanges: [],
@@ -717,7 +731,7 @@ describe('AudioRouter', () => {
       });
       mockSend.mockClear();
 
-      state.finaleState = makeV2FinaleState([fragA, fragB]);
+      state.finaleState = makeFinaleState([fragA, fragB]);
 
       sendCue(router, state, {
         type: 'mix_update',
@@ -740,7 +754,7 @@ describe('AudioRouter', () => {
       });
       mockSend.mockClear();
 
-      state.finaleState = makeV2FinaleState([fragA]);
+      state.finaleState = makeFinaleState([fragA]);
 
       sendCue(router, state, {
         type: 'mix_update',
@@ -754,7 +768,7 @@ describe('AudioRouter', () => {
       const fragMelody = makeFragment(0, 0, 'A'); // track 0
       const fragDrums = makeFragment(0, 1, 'B');  // track 3
 
-      state.finaleState = makeV2FinaleState([fragMelody, fragDrums]);
+      state.finaleState = makeFinaleState([fragMelody, fragDrums]);
 
       sendCue(router, state, {
         type: 'mix_update',

@@ -296,7 +296,7 @@ export interface User {
 /**
  * Show phase progression:
  * lobby → opener → attempt_story → attempt_build → attempt_resolve → ... (×3) →
- * finale_elegy → finale_consensus → finale_performer_mix → ended
+ * finale_elegy → finale_assembly → finale_deliberation → finale_ceremony → finale_performer_mix → ended
  */
 export type ShowPhase =
   | 'lobby'                   // Audience joining, waiting

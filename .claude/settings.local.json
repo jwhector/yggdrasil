@@ -12,7 +12,13 @@
       "Bash(npm test -- server/)",
       "Bash(grep -n consensusSwellBeats /x/projects/yggdrasil -r --include=*.ts --include=*.tsx)",
       "Bash(ls -la *.md)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 1 -b:a 32k -y x:/projects/yggdrasil/public/audio/previews/silence.mp3)",
+      "Bash(for s:*)",
+      "Bash(do for:*)",
+      "Bash(do cp:*)",
+      "Bash(done)",
+      "Bash(rm silence.mp3)"
     ]
   }
 }

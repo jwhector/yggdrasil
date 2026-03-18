@@ -10,6 +10,7 @@
  *
  * Maps in ShowState (V3):
  *   - ShowState.users: Map<UserId, User>
+ *   - ShowState.config.finale.layerLabels: Map<LayerType, string>
  *   - FinaleState.assembly.groups: Map<LayerType, UserId[]>
  *   - FinaleState.deliberation.groupVotes: Map<LayerType, Map<UserId, string>>
  *   - FinaleState.deliberation.chosenFragments: Map<LayerType, string | null>
@@ -191,6 +192,17 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
  * Converts all Maps to [key, value][] arrays.
  */
 export function serializeState(state: ShowState): SerializedShowState {
+  // Serialize config.finale.layerLabels Map to entries array for JSON safety
+  const serializedConfig = {
+    ...state.config,
+    finale: {
+      ...state.config.finale,
+      layerLabels: state.config.finale.layerLabels instanceof Map
+        ? Array.from(state.config.finale.layerLabels.entries())
+        : state.config.finale.layerLabels,
+    },
+  };
+
   return {
     id: state.id,
     phase: state.phase,
@@ -198,7 +210,7 @@ export function serializeState(state: ShowState): SerializedShowState {
     attempts: state.attempts,
     users: Array.from(state.users.entries()),
     finaleState: state.finaleState ? serializeFinaleState(state.finaleState) : null,
-    config: state.config,
+    config: serializedConfig as unknown as ShowState['config'],
     version: state.version,
     lastUpdated: state.lastUpdated,
     paused: state.paused,
@@ -210,6 +222,19 @@ export function serializeState(state: ShowState): SerializedShowState {
  * Reconstructs all Maps from [key, value][] arrays.
  */
 export function deserializeState(data: SerializedShowState): ShowState {
+  // Reconstruct config.finale.layerLabels Map from serialized form
+  const config = {
+    ...data.config,
+    finale: {
+      ...data.config.finale,
+      layerLabels: data.config.finale.layerLabels instanceof Map
+        ? data.config.finale.layerLabels
+        : Array.isArray(data.config.finale.layerLabels)
+          ? new Map(data.config.finale.layerLabels as [LayerType, string][])
+          : new Map(Object.entries(data.config.finale.layerLabels ?? {}) as [LayerType, string][]),
+    },
+  };
+
   return {
     id: data.id,
     phase: data.phase,
@@ -217,7 +242,7 @@ export function deserializeState(data: SerializedShowState): ShowState {
     attempts: data.attempts,
     users: new Map(data.users),
     finaleState: data.finaleState ? deserializeFinaleState(data.finaleState) : null,
-    config: data.config,
+    config: config as ShowState['config'],
     version: data.version,
     lastUpdated: data.lastUpdated,
     paused: data.paused,

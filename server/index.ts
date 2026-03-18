@@ -22,7 +22,7 @@ import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
-import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand } from '../conductor/types';
+import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, LayerType } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
 import { setupSocketHandlers, broadcastEvents } from './socket';
@@ -59,12 +59,42 @@ const _DEFAULT_DRAIN_FACTOR = parseFloat(process.env.DEFAULT_DRAIN_FACTOR || '0.
 const _DEFAULT_LAYER_MULTIPLIERS = (process.env.DEFAULT_LAYER_MULTIPLIERS || '0.5,0.6,0.8,1.0,1.3,1.6,2.0')
   .split(',').map(Number);
 
-// Finale timing overrides (env vars; defaults are drawn from show config)
-const _ASSEMBLY_TIMER_MS = parseInt(process.env.ASSEMBLY_TIMER_MS || '120000', 10);
-const _DELIBERATION_TIMER_MS = parseInt(process.env.DELIBERATION_TIMER_MS || '180000', 10);
-const _AMBASSADOR_VOLUNTEER_TIMER_MS = parseInt(process.env.AMBASSADOR_VOLUNTEER_TIMER_MS || '30000', 10);
-// Suppress unused variable warnings — these are available as env-var overrides
-void _ASSEMBLY_TIMER_MS; void _DELIBERATION_TIMER_MS; void _AMBASSADOR_VOLUNTEER_TIMER_MS;
+/**
+ * Parse show config JSON and convert layerLabels from plain object to Map.
+ * Also applies environment variable overrides for finale timing.
+ */
+function parseShowConfig(json: string): ShowConfig {
+  const config: ShowConfig = JSON.parse(json);
+
+  // Convert layerLabels from plain JSON object to Map (JSON.parse produces {}, not Map)
+  if (config.finale.layerLabels && !(config.finale.layerLabels instanceof Map)) {
+    config.finale.layerLabels = new Map(
+      Object.entries(config.finale.layerLabels) as [LayerType, string][],
+    );
+  }
+
+  // Apply environment variable overrides
+  if (process.env.ASSEMBLY_TIMER_MS) {
+    config.finale.assemblyTimerMs = parseInt(process.env.ASSEMBLY_TIMER_MS, 10);
+  }
+  if (process.env.ASSEMBLY_GRACE_PERIOD_MS) {
+    config.finale.assemblyGracePeriodMs = parseInt(process.env.ASSEMBLY_GRACE_PERIOD_MS, 10);
+  }
+  if (process.env.DELIBERATION_TIMER_MS) {
+    config.finale.deliberationTimerMs = parseInt(process.env.DELIBERATION_TIMER_MS, 10);
+  }
+  if (process.env.AMBASSADOR_VOLUNTEER_TIMER_MS) {
+    config.finale.ambassadorVolunteerTimerMs = parseInt(process.env.AMBASSADOR_VOLUNTEER_TIMER_MS, 10);
+  }
+  if (process.env.CEREMONY_LAYER_ORDER) {
+    config.finale.ceremonyLayerOrder = process.env.CEREMONY_LAYER_ORDER.split(',') as LayerType[];
+  }
+  if (process.env.AUDIO_PREVIEW_PATH) {
+    config.finale.audioPreviewPath = process.env.AUDIO_PREVIEW_PATH;
+  }
+
+  return config;
+}
 
 async function main() {
   // Initialize Next.js
@@ -115,7 +145,7 @@ async function main() {
     // Load show configuration
     const configJson = readFileSync(path.resolve(__dirname, CONFIG_PATH), 'utf-8');
     console.log(`[Server] Loaded config: ${path.resolve(__dirname, CONFIG_PATH)}`);
-    const config: ShowConfig = JSON.parse(configJson);
+    const config = parseShowConfig(configJson);
 
     // Create initial state
     const showId = `show-${Date.now()}`;
@@ -165,7 +195,7 @@ async function main() {
   // Factory to create a fresh show from config
   function createNewShow(): ShowState {
     const configJson = readFileSync(path.resolve(__dirname, CONFIG_PATH), 'utf-8');
-    const config: ShowConfig = JSON.parse(configJson);
+    const config = parseShowConfig(configJson);
     const showId = `show-${Date.now()}`;
     const newState = createInitialState(config, showId);
     console.log(`[Server] Created new show from config: ${showId}`);

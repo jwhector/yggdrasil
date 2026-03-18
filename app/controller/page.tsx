@@ -18,6 +18,7 @@ import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
 import { AssemblyControls } from '@/components/controller/AssemblyControls';
 import { DeliberationControls } from '@/components/controller/DeliberationControls';
+import { CeremonyControls } from '@/components/controller/CeremonyControls';
 import { NpcControls } from '@/components/controller/NpcControls';
 import { MixingSurface } from '@/components/finale/MixingSurface';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
@@ -95,6 +96,9 @@ function ControllerContent() {
       )}
       {isFinale && phase === 'finale_deliberation' && (
         <DeliberationControls fullState={fullState} sendCommand={sendCommand} />
+      )}
+      {isFinale && phase === 'finale_ceremony' && (
+        <CeremonyControls fullState={fullState} sendCommand={sendCommand} />
       )}
       {isFinale && (phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
         <NpcControls fullState={fullState} sendCommand={sendCommand} />
