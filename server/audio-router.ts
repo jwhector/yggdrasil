@@ -489,49 +489,84 @@ export function createAudioRouter(
   }
 
   /**
+   * Wait for an OSC response correlated by track index (first arg).
+   * Uses a persistent `on()` listener that resolves only when the first arg
+   * matches the expected trackId. Cleans up after match or timeout.
+   */
+  function waitForOSCCorrelated(
+    listenAddress: string,
+    trackId: number | "master",
+    timeoutMs: number = 2000,
+  ): Promise<any[] | null> {
+    return new Promise<any[] | null>((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          oscBridge.off(listenAddress, handler);
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      function handler(...args: any[]) {
+        if (resolved) return;
+        // AbletonOSC responses include track_id as first arg
+        if (args[0] === trackId) {
+          resolved = true;
+          clearTimeout(timer);
+          oscBridge.off(listenAddress, handler);
+          resolve(args);
+        }
+      }
+
+      oscBridge.on(listenAddress, handler);
+    });
+  }
+
+  /**
    * Discover and cache the Utility device info for a single track.
-   * Queries Ableton sequentially: num_devices → device names → param names.
+   * Uses bulk `/live/track/get/devices/name` to get all device names in one call,
+   * then queries only the Utility device's parameters.
    * If multiple Utility devices exist on a track, uses the LAST one
    * (the one closest to the output in the device chain).
    */
   async function discoverTrackDevice(trackIndex: number | "master"): Promise<void> {
-    oscBridge.send('/live/track/get/num_devices', trackIndex);
-    const numDevicesResp = await waitForOSC('/live/track/get/num_devices');
-    if (!numDevicesResp) {
-      console.warn(`[AudioRouter] discover: no response for track ${trackIndex} num_devices`);
+    // Bulk query: get all device names on this track in one round-trip
+    oscBridge.send('/live/track/get/devices/name', trackIndex);
+    const namesResp = await waitForOSCCorrelated('/live/track/get/devices/name', trackIndex);
+    if (!namesResp) {
+      console.warn(`[AudioRouter] discover: no response for track ${trackIndex} devices/name`);
       return;
     }
 
-    // Response format: [trackIndex, numDevices]
-    const numDevices = numDevicesResp[1] as number ?? numDevicesResp[0] as number;
-    if (!numDevices || numDevices === 0) return;
+    // Response format: [trackIndex, name0, name1, ...]
+    const deviceNames = namesResp.slice(1) as string[];
+    if (deviceNames.length === 0) return;
 
-    for (let deviceIndex = 0; deviceIndex < numDevices; deviceIndex++) {
-      oscBridge.send('/live/device/get/name', trackIndex, deviceIndex);
-      const nameResp = await waitForOSC('/live/device/get/name');
-      if (!nameResp) continue;
-
-      // Response format: [trackIndex, deviceIndex, name]
-      const name = nameResp[2] as string ?? nameResp[0] as string;
-      if (name !== layout.utilityDeviceName) continue;
-
-      // Found a Utility device — get param names to find Gain
-      oscBridge.send('/live/device/get/parameters/name', trackIndex, deviceIndex);
-      const paramResp = await waitForOSC('/live/device/get/parameters/name');
-      if (!paramResp) continue;
-
-      // Response format: [trackIndex, deviceIndex, name0, name1, ...]
-      const paramNames = paramResp.slice(2) as string[];
-      const gainParamIndex = paramNames.indexOf(layout.utilityGainParamName);
-
-      if (gainParamIndex >= 0) {
-        // Overwrite any earlier match — we want the last Utility in the chain
-        routerState.deviceCache.set(trackIndex, { utilityDeviceIndex: deviceIndex, gainParamIndex });
-        console.log(`[AudioRouter] Track ${trackIndex}: Utility device ${deviceIndex}, Gain param ${gainParamIndex}`);
-      } else {
-        console.warn(`[AudioRouter] Track ${trackIndex}: Utility device found but no "${layout.utilityGainParamName}" param`);
+    // Find the LAST Utility device in the chain
+    let utilityDeviceIndex = -1;
+    for (let i = deviceNames.length - 1; i >= 0; i--) {
+      if (deviceNames[i] === layout.utilityDeviceName) {
+        utilityDeviceIndex = i;
+        break;
       }
-      // Continue scanning — use the last Utility device on the track
+    }
+    if (utilityDeviceIndex < 0) return;
+
+    // Query only the Utility device's parameter names
+    oscBridge.send('/live/device/get/parameters/name', trackIndex, utilityDeviceIndex);
+    const paramResp = await waitForOSCCorrelated('/live/device/get/parameters/name', trackIndex);
+    if (!paramResp) return;
+
+    // Response format: [trackIndex, deviceIndex, name0, name1, ...]
+    const paramNames = paramResp.slice(2) as string[];
+    const gainParamIndex = paramNames.indexOf(layout.utilityGainParamName);
+
+    if (gainParamIndex >= 0) {
+      routerState.deviceCache.set(trackIndex, { utilityDeviceIndex, gainParamIndex });
+      console.log(`[AudioRouter] Track ${trackIndex}: Utility device ${utilityDeviceIndex}, Gain param ${gainParamIndex}`);
+    } else {
+      console.warn(`[AudioRouter] Track ${trackIndex}: Utility device found but no "${layout.utilityGainParamName}" param`);
     }
   }
 
@@ -539,6 +574,7 @@ export function createAudioRouter(
    * Discover Utility devices on fragment tracks.
    * Call once after the OSC bridge starts.
    *
+   * Fires all track discovery queries in parallel for fast startup.
    * If state is provided, only discovers tracks in the show config (skips group tracks).
    * Otherwise falls back to querying Ableton for total track count.
    */
@@ -547,27 +583,26 @@ export function createAudioRouter(
       updateFragmentTrackSet(state);
     }
 
-    // const trackList = routerState.fragmentTrackIndices.size > 0
-    //   ? Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b)
-    //   : null;
+    // Build list of track indices to discover
+    let trackList: (number | "master")[];
 
-    // if (trackList) {
-    //   console.log(`[AudioRouter] Starting device discovery for ${trackList.length} fragment tracks...`);
-    //   for (const trackIndex of trackList) {
-    //     await discoverTrackDevice(trackIndex);
-    //   }
-    // } else {
+    if (routerState.fragmentTrackIndices.size > 0) {
+      trackList = Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b);
+      trackList.push("master");
+      console.log(`[AudioRouter] Starting device discovery for ${trackList.length} tracks (parallel)...`);
+    } else {
       // Fallback: query Ableton for total track count
       oscBridge.send('/live/song/get/num_tracks');
       const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
       const numTracks = numTracksResp?.[0] ?? 42;
-      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (fallback)...`);
-      for (let trackIndex = 0; trackIndex < numTracks; trackIndex++) {
-        await discoverTrackDevice(trackIndex);
-      }
-      await discoverTrackDevice("master");
-      oscBridge.send('/live/song/get/send_tracks');
-    // }
+      trackList = [];
+      for (let i = 0; i < numTracks; i++) trackList.push(i);
+      trackList.push("master");
+      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (parallel, fallback)...`);
+    }
+
+    // Fire all track discoveries in parallel
+    await Promise.all(trackList.map(trackIndex => discoverTrackDevice(trackIndex)));
 
     routerState.discoveryComplete = true;
     console.log(`[AudioRouter] Device discovery complete. ${routerState.deviceCache.size} tracks have Utility devices.`);
@@ -740,9 +775,12 @@ export function createAudioRouter(
     const collapseMs = state.config.timing.revealSequenceDurationMs;
     const timer = setTimeout(() => {
       oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
-      oscBridge.send('/live/song/stop_playing');
       routerState.collapseTimers.delete(cue.attemptIndex);
+      setTimeout(() => {
+        oscBridge.send('/live/song/stop_playing');
+      }, collapseMs + 3000);
     }, collapseMs);
+    
 
     routerState.collapseTimers.set(cue.attemptIndex, timer);
   }

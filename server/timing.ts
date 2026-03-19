@@ -9,7 +9,7 @@
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
- * - For auditioning: Schedules auditionDurationMs timer → sends OPEN_VOTING
+ * - For auditioning: Schedules audition loops → sends CLOSE_VOTING when complete
  *   (or beat-synced cycling if beatsPerLoop > 0)
  * - For voting: Schedules votingWindowMs timer → sends CLOSE_VOTING
  * - For consensus rounds: Schedules round duration timer → sends END_CONSENSUS_ROUND
@@ -54,8 +54,8 @@ export interface TimingEngineConfig {
 export interface BeatPosition {
   absoluteBeat: number;    // Raw beat number from Ableton (or synthetic)
   beatInBar: number;       // 0–3 within current bar
-  barInLoop: number;       // 0–7 within current 8-bar loop
-  loopCount: number;       // Total 8-bar loops elapsed since beat tracking started
+  barInLoop: number;       // 0–(barsPerLoop-1) within current loop (driven by config.timing.beatsPerLoop)
+  loopCount: number;       // Total loops elapsed since beat tracking started
 }
 
 /** A scheduled per-beat callback. */
@@ -134,11 +134,10 @@ interface AuditionTrackingState {
  */
 interface LoopTrackingState {
   lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
-  loopBeats: number;           // LOOP_BARS * BEATS_PER_BAR
+  loopBeats: number;           // from config.timing.beatsPerLoop
 }
 
 const BEATS_PER_BAR = 4;
-const LOOP_BARS = 8;          // Performer mix loop length in bars
 
 // ============================================================================
 // Factory
@@ -174,6 +173,7 @@ export function createTimingEngine(
   let fallbackAuditionLoopIndex = 0;
   let loopState: LoopTrackingState | null = null;
   let fallbackLoopInterval: NodeJS.Timeout | null = null;
+  let configuredBeatsPerLoop: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
   let beatCallbacks: BeatCallback[] = [];
@@ -370,7 +370,7 @@ export function createTimingEngine(
    * Start beat-synced audition tracking.
    * OSC mode: counts beats from Ableton, toggles A/B every beatsPerLoop beats.
    * Fallback mode: JS interval based on fallbackBpm.
-   * After all loops complete, sends OPEN_VOTING.
+   * After all loops complete, sends CLOSE_VOTING.
    */
   function startAuditionTracking(state: ShowState): void {
     stopAuditionTracking();
@@ -388,40 +388,51 @@ export function createTimingEngine(
         totalLoops,
         currentLoopIndex: 0,
       };
+
       console.log(`[Timing] Audition tracking started (OSC, ${beatsPerLoop} beats/loop × ${totalLoops} loops)`);
     } else if (beatsPerLoop > 0) {
       // Fallback: derive interval from BPM
-      const msPerBeat = 60000 / engineConfig.fallbackBpm;
-      const intervalMs = beatsPerLoop * msPerBeat;
-      fallbackAuditionLoopIndex = 0;
-
-      fallbackAuditionInterval = setInterval(() => {
-        if (!running) return;
-        const currentState = getState();
-        const attempt = currentState.attempts[currentState.currentAttemptIndex];
-        if (!attempt || attempt.currentLayerPhase !== 'auditioning') {
-          stopAuditionTracking();
-          return;
-        }
-
-        fallbackAuditionLoopIndex++;
-
-        if (fallbackAuditionLoopIndex >= totalLoops) {
-          stopAuditionTracking();
-          sendCommand({ type: 'OPEN_VOTING' });
-        } else {
-          sendCommand({ type: 'TOGGLE_AUDITION' });
-        }
-      }, intervalMs);
-
-      console.log(`[Timing] Audition tracking started (fallback, ${intervalMs.toFixed(0)}ms/loop × ${totalLoops} loops)`);
+      startAuditionFallbackInterval(beatsPerLoop, totalLoops);
+      console.log(`[Timing] Audition tracking started (fallback, ${beatsPerLoop} beats/loop × ${totalLoops} loops)`);
     } else {
       // Legacy: flat timer using auditionDurationMs
-      console.log(`[Timing] Auditioning: scheduling ${auditionDurationMs}ms timer → OPEN_VOTING (legacy)`);
+      console.log(`[Timing] Auditioning: scheduling ${auditionDurationMs}ms timer → CLOSE_VOTING (legacy)`);
       scheduleTimer(auditionDurationMs, state.version, 'auditioning', () => {
-        sendCommand({ type: 'OPEN_VOTING' });
+        sendCommand({ type: 'CLOSE_VOTING' });
       });
     }
+  }
+
+  /**
+   * Start fallback JS interval for audition cycling (non-OSC mode only).
+   * Cleared by stopAuditionTracking().
+   */
+  function startAuditionFallbackInterval(beatsPerLoop: number, totalLoops: number): void {
+    if (fallbackAuditionInterval) {
+      clearInterval(fallbackAuditionInterval);
+    }
+    const msPerBeat = 60000 / engineConfig.fallbackBpm;
+    const intervalMs = beatsPerLoop * msPerBeat;
+    fallbackAuditionLoopIndex = 0;
+
+    fallbackAuditionInterval = setInterval(() => {
+      if (!running) return;
+      const currentState = getState();
+      const attempt = currentState.attempts[currentState.currentAttemptIndex];
+      if (!attempt || attempt.currentLayerPhase !== 'auditioning') {
+        stopAuditionTracking();
+        return;
+      }
+
+      fallbackAuditionLoopIndex++;
+
+      if (fallbackAuditionLoopIndex >= totalLoops) {
+        stopAuditionTracking();
+        sendCommand({ type: 'CLOSE_VOTING' });
+      } else {
+        sendCommand({ type: 'TOGGLE_AUDITION' });
+      }
+    }, intervalMs);
   }
 
   /**
@@ -436,19 +447,6 @@ export function createTimingEngine(
     fallbackAuditionLoopIndex = 0;
   }
 
-  /**
-   * Handle layer entering 'voting' phase.
-   * Schedules votingWindowMs timer → sends CLOSE_VOTING.
-   */
-  function handleVotingPhase(state: ShowState): void {
-    const durationMs = state.config.timing.votingWindowMs;
-    console.log(`[Timing] Voting: scheduling ${durationMs}ms timer → CLOSE_VOTING`);
-
-    scheduleTimer(durationMs, state.version, 'voting', () => {
-      sendCommand({ type: 'CLOSE_VOTING' });
-    });
-  }
-
   // --------------------------------------------------------------------------
   // Loop Boundary Tracking (Performer Mix)
   // --------------------------------------------------------------------------
@@ -460,7 +458,8 @@ export function createTimingEngine(
   function startLoopTracking(): void {
     stopLoopTracking();
 
-    const loopBeats = LOOP_BARS * BEATS_PER_BAR;
+    const loopBeats = configuredBeatsPerLoop;
+    const loopBars = configuredBeatsPerLoop / BEATS_PER_BAR;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats
@@ -468,7 +467,7 @@ export function createTimingEngine(
         lastBoundaryBeat: -1,
         loopBeats,
       };
-      console.log(`[Timing] Loop boundary tracking started (OSC, every ${LOOP_BARS} bars / ${loopBeats} beats)`);
+      console.log(`[Timing] Loop boundary tracking started (OSC, every ${loopBars} bars / ${loopBeats} beats)`);
     } else {
       // Fallback: JS interval
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
@@ -562,13 +561,13 @@ export function createTimingEngine(
 
     // Update beat position
     const beatsSinceLoopStart = beatNumber - loopStartBeat;
-    const loopBeats = LOOP_BARS * BEATS_PER_BAR; // 32
+    const loopBeats = configuredBeatsPerLoop;
     totalLoopsElapsed = Math.floor(beatsSinceLoopStart / loopBeats);
 
     currentBeatPosition = {
       absoluteBeat: beatNumber,
       beatInBar: beatNumber % BEATS_PER_BAR,
-      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % LOOP_BARS,
+      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % (configuredBeatsPerLoop / BEATS_PER_BAR),
       loopCount: totalLoopsElapsed,
     };
 
@@ -614,7 +613,7 @@ export function createTimingEngine(
 
           if (auditionState.currentLoopIndex >= auditionState.totalLoops) {
             stopAuditionTracking();
-            sendCommand({ type: 'OPEN_VOTING' });
+            sendCommand({ type: 'CLOSE_VOTING' });
           } else {
             sendCommand({ type: 'TOGGLE_AUDITION' });
           }
@@ -672,6 +671,8 @@ export function createTimingEngine(
   function onStateChanged(state: ShowState, events: ConductorEvent[]): void {
     if (!running || !engineConfig.enabled) return;
 
+    configuredBeatsPerLoop = state.config.timing.beatsPerLoop || 32;
+
     // Don't schedule if paused
     if (state.paused) {
       cancelCurrentTimer();
@@ -692,10 +693,10 @@ export function createTimingEngine(
           startAuditionTracking(state);
           break;
         case 'voting':
-          stopAuditionTracking();
-          handleVotingPhase(state);
+          // Vestigial: voting phase no longer entered (auditioning continues through vote window)
           break;
         case 'revealing': {
+          stopAuditionTracking();
           const revealMs = state.config.timing.revealSequenceDurationMs;
           console.log(`[Timing] Revealing: scheduling ${revealMs}ms timer → ADVANCE_FROM_REVEAL`);
           scheduleTimer(revealMs, state.version, 'revealing', () => {
@@ -818,6 +819,7 @@ export function createTimingEngine(
 
     // Initialize based on current state
     const state = getState();
+    configuredBeatsPerLoop = state.config.timing.beatsPerLoop || 32;
     if (state.phase === 'attempt_build') {
       const attempt = state.attempts[state.currentAttemptIndex];
       if (attempt && attempt.status === 'in_progress') {

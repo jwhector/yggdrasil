@@ -398,7 +398,7 @@ function ChapterLabel({ chapter, attemptIndex }: { chapter: string; attemptIndex
 }
 
 function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean }) {
-  if (phase === 'voting' && !hasVoted) {
+  if ((phase === 'voting' || phase === 'auditioning') && !hasVoted) {
     return (
       <p
         style={{
@@ -413,7 +413,7 @@ function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean 
       </p>
     );
   }
-  if (phase === 'voting' && hasVoted) {
+  if ((phase === 'voting' || phase === 'auditioning') && hasVoted) {
     return (
       <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', marginTop: '16px' }}>
         Vote recorded

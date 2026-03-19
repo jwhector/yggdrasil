@@ -113,10 +113,9 @@ function connectUser(state: ShowState, userId: string): void {
   processCommand(state, { type: 'USER_CONNECT', userId });
 }
 
-/** Run through the full layer cycle: audition → vote → close → advance from reveal. */
+/** Run through the full layer cycle: audition → close → advance from reveal. */
 function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | 'B' = 'A'): ConductorEvent[] {
   processCommand(state, { type: 'START_AUDITION' });
-  processCommand(state, { type: 'OPEN_VOTING' });
   for (const userId of voters) {
     processCommand(state, { type: 'SUBMIT_VOTE', userId, choice });
   }
@@ -323,29 +322,28 @@ describe('Song-Building Layer Flow', () => {
     expect(findEvent(events, 'ERROR')).toBeDefined();
   });
 
-  test('OPEN_VOTING transitions from auditioning to voting', () => {
+  test('OPEN_VOTING is a no-op (auditioning continues through voting window)', () => {
     const state = createTestState();
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
 
     const events = processCommand(state, { type: 'OPEN_VOTING' });
-    expect(state.attempts[0].currentLayerPhase).toBe('voting');
-    expect(findEvent(events, 'LAYER_PHASE_CHANGED')).toBeDefined();
+    expect(state.attempts[0].currentLayerPhase).toBe('auditioning');
+    expect(events).toHaveLength(0);
   });
 
-  test('OPEN_VOTING returns error when not in auditioning phase', () => {
+  test('OPEN_VOTING is a no-op even when not in auditioning phase', () => {
     const state = createTestState();
     advanceToBuild(state);
     const events = processCommand(state, { type: 'OPEN_VOTING' });
-    expect(findEvent(events, 'ERROR')).toBeDefined();
+    expect(events).toHaveLength(0);
   });
 
-  test('SUBMIT_VOTE records a vote during voting phase', () => {
+  test('SUBMIT_VOTE records a vote during auditioning phase', () => {
     const state = createTestState();
     connectUser(state, 'user-1');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
 
     const events = processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
     expect(findEvent(events, 'VOTE_RECEIVED')).toBeDefined();
@@ -358,7 +356,6 @@ describe('Song-Building Layer Flow', () => {
     connectUser(state, 'user-1');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
 
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'B' });
@@ -382,7 +379,7 @@ describe('Song-Building Layer Flow', () => {
     connectUser(state, 'user-2');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-2', choice: 'A' });
 
@@ -395,7 +392,7 @@ describe('Song-Building Layer Flow', () => {
     connectUser(state, 'user-1');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
 
     const events = processCommand(state, { type: 'CLOSE_VOTING' });
@@ -428,7 +425,7 @@ describe('Health Bar Drain Mechanics', () => {
     advanceToBuild(state);
 
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     for (let i = 1; i <= 7; i++) processCommand(state, { type: 'SUBMIT_VOTE', userId: `u${i}`, choice: 'A' });
     for (let i = 8; i <= 10; i++) processCommand(state, { type: 'SUBMIT_VOTE', userId: `u${i}`, choice: 'B' });
 
@@ -450,7 +447,7 @@ describe('Health Bar Drain Mechanics', () => {
 
     // Layer 0: 50/50 split → drain = 0.5 * 100 * 0.5 * 0.5 = 12.5
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     const layer0Events = processCommand(state, { type: 'CLOSE_VOTING' });
@@ -458,7 +455,7 @@ describe('Health Bar Drain Mechanics', () => {
 
     // Layer 1: 50/50 split → drain = 0.5 * 100 * 0.5 * 2.0 = 50
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     const layer1Events = processCommand(state, { type: 'CLOSE_VOTING' });
@@ -481,7 +478,7 @@ describe('Health Bar Drain Mechanics', () => {
     const drains: number[] = [];
     for (let layer = 0; layer < 7; layer++) {
       processCommand(state, { type: 'START_AUDITION' });
-      processCommand(state, { type: 'OPEN_VOTING' });
+  
       // 50/50 split → losingProportion = 0.5
       processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
       processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
@@ -529,7 +526,7 @@ describe('Vote Resolution and Lock-in', () => {
 
     // 1A, 1B: losingProportion = 0.5, drain = 25
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -593,7 +590,7 @@ describe('Health Bar Collapse', () => {
     connectUser(state, 'u2');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
@@ -615,7 +612,7 @@ describe('Health Bar Collapse', () => {
     connectUser(state, 'u2');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
@@ -638,7 +635,7 @@ describe('Health Bar Collapse', () => {
 
     // Layer 0: 50/50 but multiplier=0 → zero drain → passes
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -647,7 +644,7 @@ describe('Health Bar Collapse', () => {
 
     // Layer 1: 50/50, multiplier=1.0, drainFactor=2.0 → drain=100 → collapse
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -665,7 +662,7 @@ describe('Health Bar Collapse', () => {
     connectUser(state, 'u2');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
@@ -684,7 +681,7 @@ describe('Health Bar Collapse', () => {
     connectUser(state, 'u2');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
 
@@ -704,7 +701,7 @@ describe('Health Bar Collapse', () => {
     // Collapse attempt 0
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -714,7 +711,7 @@ describe('Health Bar Collapse', () => {
     // Advance to attempt_build 1 and collapse
     processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build 1
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -732,7 +729,7 @@ describe('Health Bar Collapse', () => {
 
     processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'attempt_build', attemptIndex: 2 });
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -754,7 +751,7 @@ describe('Health Bar Collapse', () => {
 
     // Layer 0: passes (multiplier=0 → no drain)
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -762,7 +759,7 @@ describe('Health Bar Collapse', () => {
 
     // Layer 1: collapses (drainFactor=2.0, multiplier=1.0, 50/50 → drain=100)
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
@@ -934,7 +931,7 @@ describe('Force Commands', () => {
     connectUser(state, 'u1');
     advanceToBuild(state);
     processCommand(state, { type: 'START_AUDITION' });
-    processCommand(state, { type: 'OPEN_VOTING' });
+
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
 
     expect(state.attempts[0].votes).toHaveLength(1);

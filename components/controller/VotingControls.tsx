@@ -88,19 +88,10 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
       {/* Control buttons */}
       <div style={styles.buttonGrid}>
         <button
-          onClick={() => send({ type: 'OPEN_VOTING' })}
-          disabled={isVoting}
-          style={{ ...btn, ...(isVoting ? disabled : btnPrimary) }}
-          title="Open voting window"
-        >
-          Open Vote
-        </button>
-
-        <button
           onClick={() => send({ type: 'CLOSE_VOTING' })}
           disabled={!isVoting}
           style={{ ...btn, ...(!isVoting ? disabled : btnPrimary) }}
-          title="Close voting window"
+          title="Close voting and resolve immediately"
         >
           Close Vote
         </button>
@@ -121,24 +112,6 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
           title="Force option B as winner"
         >
           Force B
-        </button>
-
-        <button
-          onClick={() => send({ type: 'EXTEND_VOTE_TIMER', additionalMs: 5000 })}
-          disabled={!isVoting}
-          style={{ ...btn, ...(!isVoting ? disabled : btnSecondary) }}
-          title="Add 5 seconds to vote timer"
-        >
-          +5s
-        </button>
-
-        <button
-          onClick={() => send({ type: 'EXTEND_VOTE_TIMER', additionalMs: 10000 })}
-          disabled={!isVoting}
-          style={{ ...btn, ...(!isVoting ? disabled : btnSecondary) }}
-          title="Add 10 seconds to vote timer"
-        >
-          +10s
         </button>
 
         <button
@@ -237,7 +210,6 @@ const btn: React.CSSProperties = {
   minHeight: '48px',
 };
 const btnPrimary: React.CSSProperties = { backgroundColor: '#f0f0f0', color: '#111' };
-const btnSecondary: React.CSSProperties = { backgroundColor: '#1e3a5f', color: '#93c5fd', border: '1px solid #1d4ed8' };
 const btnWarning: React.CSSProperties = { backgroundColor: '#451a03', color: '#fbbf24', border: '1px solid #78350f' };
 const disabled: React.CSSProperties = { backgroundColor: '#1a1a1a', color: '#555', border: '1px solid #333', cursor: 'not-allowed', opacity: 0.5 };
 

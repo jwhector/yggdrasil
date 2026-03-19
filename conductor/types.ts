@@ -272,7 +272,7 @@ export interface FinaleState {
   performerMix: {
     activeLayers: Map<LayerType, string | null>;  // layerType → fragmentId or null (muted)
     pendingChanges: PendingChange[];
-    loopPosition: number;               // 0.0 to 1.0 within current 8-bar loop
+    loopPosition: number;               // 0.0 to 1.0 within current loop (length from config.timing.beatsPerLoop)
     loopCount: number;                  // Total loops since finale started
     liveTracksActive: string[];         // IDs of active live performance tracks
   };

@@ -519,40 +519,10 @@ function handleToggleAudition(state: ShowState): ConductorEvent[] {
   ];
 }
 
-function handleOpenVoting(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'attempt_build') {
-    return [{ type: 'ERROR', message: 'Can only open voting during attempt_build' }];
-  }
-
-  const attempt = currentAttempt(state);
-  if (!attempt || attempt.status !== 'in_progress') {
-    return [{ type: 'ERROR', message: 'No active attempt' }];
-  }
-
-  if (attempt.currentLayerPhase !== 'auditioning') {
-    return [{ type: 'ERROR', message: `Cannot open voting from layer phase: ${attempt.currentLayerPhase}` }];
-  }
-
-  attempt.currentLayerPhase = 'voting';
-  attempt.currentAuditionOption = null;
-
-  return [
-    {
-      type: 'LAYER_PHASE_CHANGED',
-      attemptIndex: attempt.index,
-      layerIndex: attempt.currentLayerIndex,
-      phase: 'voting',
-    },
-    {
-      type: 'AUDIO_CUE',
-      cue: {
-        type: 'audition_stop',
-        attemptIndex: attempt.index,
-        layerIndex: attempt.currentLayerIndex,
-        option: null,
-      },
-    },
-  ];
+// Vestigial: auditioning now continues through the voting window.
+// CLOSE_VOTING fires directly when audition loops complete.
+function handleOpenVoting(_state: ShowState): ConductorEvent[] {
+  return [];
 }
 
 function handleCloseVoting(state: ShowState): ConductorEvent[] {
@@ -747,6 +717,21 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   const events: ConductorEvent[] = [];
   const layerIndex = attempt.currentLayerIndex;
   const layerMultiplier = attempt.healthBar.layerMultipliers[layerIndex] ?? 1.0;
+
+  // 0. Stop audition audio (auditioning now continues through voting window)
+  if (attempt.currentAuditionOption !== null) {
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'audition_stop',
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+        option: attempt.currentAuditionOption,
+        audioRef: getLayerAudioRef(attempt, attempt.currentAuditionOption),
+      },
+    });
+    attempt.currentAuditionOption = null;
+  }
 
   // 1. Calculate vote result and drain
   const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);

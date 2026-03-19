@@ -18,7 +18,9 @@
       "Bash(do for:*)",
       "Bash(do cp:*)",
       "Bash(done)",
-      "Bash(rm silence.mp3)"
+      "Bash(rm silence.mp3)",
+      "Bash(git stash:*)",
+      "Bash(grep -r \"Promise\\\\.all\\\\|Promise\\\\.race\\\\|concurrent\\\\|parallel\" --include=*.ts server/ conductor/)"
     ]
   }
 }

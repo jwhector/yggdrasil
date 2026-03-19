@@ -318,6 +318,44 @@ function handleMessage(address: string, args: any[]) {
       break;
     }
 
+    case '/live/track/get/devices/name': {
+      const [trackIndex] = args;
+      log('RECV', colors.cyan, '← /live/track/get/devices/name', `track=${trackIndex}`);
+      // Simulate: each fragment track has [Instrument, EQ, Compressor, Utility]
+      if (trackIndex === 'master') {
+        sendToServer('/live/track/get/devices/name', 'master', 'Delay', 'Utility');
+      } else {
+        sendToServer('/live/track/get/devices/name', trackIndex, 'Instrument Rack', 'EQ Eight', 'Compressor', 'Utility');
+      }
+      break;
+    }
+
+    case '/live/device/get/parameters/name': {
+      const [trackIndex, deviceIndex] = args;
+      log('RECV', colors.cyan, '← /live/device/get/parameters/name', `track=${trackIndex} device=${deviceIndex}`);
+      // Simulate Utility device params: [Device On, Gain, Balance, ...]
+      sendToServer('/live/device/get/parameters/name', trackIndex, deviceIndex, 'Device On', 'Gain', 'Balance', 'Mute', 'Left Inv', 'Right Inv', 'Channel Mode', 'Stereo Width', 'Mono', 'Bass Mono', 'Bass Freq');
+      break;
+    }
+
+    case '/live/song/get/is_playing': {
+      log('RECV', colors.cyan, '← /live/song/get/is_playing');
+      sendToServer('/live/song/get/is_playing', mockState.transportPlaying ? 1 : 0);
+      break;
+    }
+
+    case '/live/song/get/send_tracks': {
+      log('RECV', colors.cyan, '← /live/song/get/send_tracks');
+      // No-op for mock
+      break;
+    }
+
+    case '/live/song/set/tempo': {
+      const [tempo] = args;
+      log('RECV', colors.cyan, '← /live/song/set/tempo', `bpm=${tempo}`);
+      break;
+    }
+
     default:
       log('RECV', colors.dim, `← ${address}`, args);
       if (!address.includes('/get/')) {

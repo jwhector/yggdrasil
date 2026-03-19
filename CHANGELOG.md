@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2026-03-18 — Merge Auditioning and Voting Phases
+
+**Context:** The song-building flow previously had a silent `voting` phase after auditioning stopped — audio faded out while audience voted in silence. This change makes auditioning (A/B option cycling) continue throughout the voting window, eliminating the dead-air gap. Votes were already accepted during auditioning, so the `voting` phase was functionally redundant.
+
+**Changes:**
+- `conductor/conductor.ts`: `OPEN_VOTING` is now a no-op (returns `[]`). `resolveCurrentLayer()` emits `audition_stop` audio cue before transitioning to `revealing`, since `OPEN_VOTING` no longer handles this.
+- `server/timing.ts`: All three audition completion paths (OSC, fallback, legacy) now send `CLOSE_VOTING` directly instead of `OPEN_VOTING`. Removed `handleVotingPhase()` (dead code). Added `stopAuditionTracking()` to the `revealing` case.
+- `config/default-show.json`: `auditionsPerLayer` increased from 1 to 3 (6 A/B loops ≈ 48s at 120 BPM, covering old audition + voting duration).
+- `app/audience/page.tsx`: `LayerPhaseHint` shows "Tap to vote" / "Vote recorded" during `auditioning` phase (previously only during `voting`).
+- `components/controller/VotingControls.tsx`: Removed "Open Vote" button and "+5s"/"+10s" timer extend buttons (no voting timer to extend).
+- Tests updated across `conductor.test.ts` and `timing.test.ts`.
+
+**Note:** `LayerPhase` type still includes `'voting'` but it is never entered. `votingWindowMs` config is vestigial. Both can be removed in a future cleanup.
+
 ## 2026-03-17 — V3 Migration Phase 1: Types & Data Models (Consensus Game → Assembly/Deliberation/Ceremony)
 
 **Context:** Phase 1 of the V3 finale redesign. The consensus game (convergence meter, timed voting rounds, threshold softening) is replaced by a physically embodied four-phase sequence: group assembly → deliberation → ambassador ceremony → performer mix. This commit updates all TypeScript types, stubs out V2 conductor handlers, and fixes compilation across the entire codebase. No new logic is implemented — that's Phase 2.
