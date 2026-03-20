@@ -95,7 +95,6 @@ export interface LayerVote {
 export interface HealthBarState {
   current: number;                      // 0 = collapsed, 100 = full
   drainFactor: number;                  // Base multiplier for this attempt
-  layerMultipliers: number[];           // Per-layer scaling (length 7, e.g. [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0])
   history: HealthBarDrain[];            // One entry per resolved layer
 }
 
@@ -103,7 +102,6 @@ export interface HealthBarState {
 export interface HealthBarDrain {
   layerIndex: number;
   losingProportion: number;             // min(votesA, votesB) / total (0.0–0.5)
-  layerMultiplier: number;              // From layerMultipliers[layerIndex]
   drainAmount: number;                  // losingProportion * 100 * drainFactor * layerMultiplier
   healthAfter: number;                  // Health bar value after applying drain (floor 0)
 }
@@ -147,8 +145,6 @@ export interface AttemptConfig {
   chapter: Chapter;
   title: string;                        // Display name (e.g., "Ambition")
   layers: LayerConfig[];                // 7 layers per attempt
-  drainFactor: number;                  // Health bar base drain multiplier for this attempt
-  layerMultipliers: number[];           // Per-layer scaling factors (length 7)
 }
 
 /** Recorded result of a completed/collapsed attempt, used for fragment generation. */

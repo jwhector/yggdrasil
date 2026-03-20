@@ -2,7 +2,13 @@
 
 ## Read Order
 1. **This file** (you're here — read fully before doing anything)
-2. **ARCHITECTURE.md** — The authoritative spec. If code contradicts this, the code is wrong.
+2. **ARCHITECTURE.md** — The authoritative spec (index + core concepts). Then read only the `docs/` file relevant to your task:
+   - Conductor song-building? → `docs/song-building.md` + `docs/data-models.md`
+   - Conductor finale? → `docs/finale.md` + `docs/data-models.md`
+   - UI components or pages? → `docs/client-routes.md`
+   - Audio, OSC, or timing? → `docs/audio-engine.md`
+   - WebSocket events or persistence? → `docs/server-protocol.md`
+   - Type definitions or conductor API? → `docs/data-models.md`
 3. **DECISIONS.md** — Resolved design decisions (with rationale) and open questions (do NOT invent answers)
 4. **conductor/types.ts** — Shared type definitions
 5. **CHANGELOG.md** — Recent changes with context
@@ -19,8 +25,8 @@ Yggdrasil is an interactive live performance system. An audience collectively bu
 
 ## Critical Rules
 
-### 1. ARCHITECTURE.md is the source of truth
-If code contradicts ARCHITECTURE.md, the code is wrong.
+### 1. ARCHITECTURE.md + docs/ are the source of truth
+If code contradicts ARCHITECTURE.md or any file in `docs/`, the spec is correct and the code should be updated.
 
 ### 2. Types first
 When building new features, define the types in `conductor/types.ts` FIRST. Then implement logic. Then wire up server/client. This prevents drift.
@@ -40,7 +46,14 @@ Group assembly updates and audio metering use dedicated socket events at high fr
 
 ```
 yggdrasil/
-├── ARCHITECTURE.md              # Source of truth
+├── ARCHITECTURE.md              # Source of truth (index + core concepts)
+├── docs/                        # Detailed specs (load per-task, see ARCHITECTURE.md index)
+│   ├── song-building.md         # Layers, voting, health bar, collapse, fragments
+│   ├── finale.md                # Elegy, assembly, deliberation, ceremony, performer mix
+│   ├── data-models.md           # TypeScript interfaces, conductor commands/events
+│   ├── client-routes.md         # /audience, /projector, /controller UI + visual identity
+│   ├── audio-engine.md          # Musical design, OSC protocol, track layout, env vars
+│   └── server-protocol.md       # WebSocket events, SQLite schema, recovery
 ├── CHANGELOG.md                 # Change history with intent
 ├── CLAUDE.md                    # This file
 ├── DECISIONS.md                 # Design decisions log

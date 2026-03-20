@@ -85,7 +85,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    healthBar: createHealthBar(attemptConfig.drainFactor, attemptConfig.layerMultipliers),
+    healthBar: createHealthBar(),
     currentVoteResult: null,
     currentDrain: null,
   }));
@@ -716,7 +716,6 @@ function handleTriggerRejection(state: ShowState): ConductorEvent[] {
 function resolveCurrentLayer(state: ShowState, attempt: AttemptState): ConductorEvent[] {
   const events: ConductorEvent[] = [];
   const layerIndex = attempt.currentLayerIndex;
-  const layerMultiplier = attempt.healthBar.layerMultipliers[layerIndex] ?? 1.0;
 
   // 0. Stop audition audio (auditioning now continues through voting window)
   if (attempt.currentAuditionOption !== null) {
@@ -737,8 +736,6 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
   const { voteResult, drain } = calculateVoteResult(
     layerVotes,
-    attempt.healthBar.drainFactor,
-    layerMultiplier,
     layerIndex,
   );
 
@@ -1064,7 +1061,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    healthBar: createHealthBar(attemptConfig.drainFactor, attemptConfig.layerMultipliers),
+    healthBar: createHealthBar(),
     currentVoteResult: null,
     currentDrain: null,
   }));

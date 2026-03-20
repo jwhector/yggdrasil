@@ -46,15 +46,13 @@ export function calculateConsensus(votes: LayerVote[]): {
  */
 export function calculateVoteResult(
   votes: LayerVote[],
-  drainFactor: number,
-  layerMultiplier: number,
   layerIndex: number,
 ): {
   voteResult: VoteResult;
   drain: HealthBarDrain;
 } {
   const { consensus, winner, votesA, votesB, totalVotes } = calculateConsensus(votes);
-  const drain = calculateDrain(votesA, votesB, drainFactor, layerMultiplier, layerIndex);
+  const drain = calculateDrain(votesA, votesB, layerIndex);
 
   return {
     voteResult: { winner, consensus, votesA, votesB, totalVotes },
