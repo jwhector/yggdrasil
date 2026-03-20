@@ -655,7 +655,7 @@ function generateFragments(
 
 ---
 
-## Phase 6: Finale Updates (6 Layer Types)
+## Phase 6: Finale Updates (6 Layer Types) -- COMPLETE (2026-03-19)
 
 **Goal:** Update all finale phases for 6 layer types instead of 7.
 
@@ -707,9 +707,11 @@ function generateFragments(
 
 ---
 
-## Phase 7: Track Layout & OSC
+## Phase 7: Track Layout & OSC -- COMPLETE (2026-03-19)
 
 **Goal:** Update Ableton track mapping and all OSC commands for 36 tracks.
+
+> **Deviations:** Track indices are config-driven (`default-show.json` layer `optionA`/`optionB` AudioReferences), not computed from a formula at runtime. The `computeTrackIndex` function in `audio-router.ts` is only used for test fixtures. Config already had correct 36-track layout from Phase 1. Phase 7 work reduced to updating `ableton-layout.json` (`maxLayersPerAttempt` 7→6, comments 42→36). Audio urgency (7.3 — return track degradation per layer) deferred to Phase 8 with other urgency effects.
 
 ### 7.1 Track index formula
 

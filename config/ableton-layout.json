@@ -1,5 +1,5 @@
 {
-  "maxLayersPerAttempt": 7,
+  "maxLayersPerAttempt": 6,
   "attemptCount": 3,
   "collapseReturnTrackIndex": 0,
   "rejectionReturnTrackIndex": 1,
@@ -7,8 +7,8 @@
   "utilityGainParamName": "Gain",
   "_comments": {
     "trackFormula": "attemptIndex * (maxLayersPerAttempt * 2) + layerIndex * 2 + optionOffset",
-    "trackLayout": "42 audio tracks (0-41) for fragments: Attempt 0 = tracks 0-13, Attempt 1 = tracks 14-27, Attempt 2 = tracks 28-41. Option A = even index, Option B = odd index.",
+    "trackLayout": "36 audio tracks (0-35) for fragments: Attempt 0 = tracks 0-11, Attempt 1 = tracks 12-23, Attempt 2 = tracks 24-35. Option A = even index, Option B = odd index.",
     "returnTracks": "Return 0 (collapseReturnTrackIndex) = collapse effect chain. Return 1 (rejectionReturnTrackIndex) = song rejection effect chain.",
-    "livePerformanceTracks": "Live performance tracks start at index 42+. Define specific indices here when Ableton layout is finalised."
+    "livePerformanceTracks": "Live performance tracks start at index 36+. Define specific indices here when Ableton layout is finalised."
   }
 }

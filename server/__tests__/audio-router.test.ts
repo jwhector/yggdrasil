@@ -48,7 +48,7 @@ const TEST_GAIN_CONFIG: GainConfig = {
 };
 
 const TEST_LAYOUT: AbletonLayoutConfig = {
-  maxLayersPerAttempt: 7,
+  maxLayersPerAttempt: 6,
   attemptCount: 3,
   collapseReturnTrackIndex: 0,
   rejectionReturnTrackIndex: 1,
@@ -119,7 +119,7 @@ function createTestState(): ShowState {
 }
 
 function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B'): Fragment {
-  const trackIndex = computeTrackIndex(attemptIndex, layerIndex, option, 7);
+  const trackIndex = computeTrackIndex(attemptIndex, layerIndex, option, 6);
   return {
     id: `frag-${attemptIndex}-${layerIndex}-${option}`,
     attemptIndex,
@@ -242,27 +242,27 @@ function createMockTimingEngine() {
 
 describe('computeTrackIndex', () => {
   test('attempt 0, layer 0, option A = 0', () => {
-    expect(computeTrackIndex(0, 0, 'A', 7)).toBe(0);
+    expect(computeTrackIndex(0, 0, 'A', 6)).toBe(0);
   });
 
   test('attempt 0, layer 0, option B = 1', () => {
-    expect(computeTrackIndex(0, 0, 'B', 7)).toBe(1);
+    expect(computeTrackIndex(0, 0, 'B', 6)).toBe(1);
   });
 
   test('attempt 0, layer 2, option B = 5', () => {
-    expect(computeTrackIndex(0, 2, 'B', 7)).toBe(5);
+    expect(computeTrackIndex(0, 2, 'B', 6)).toBe(5);
   });
 
-  test('attempt 1, layer 0, option A = 14', () => {
-    expect(computeTrackIndex(1, 0, 'A', 7)).toBe(14);
+  test('attempt 1, layer 0, option A = 12', () => {
+    expect(computeTrackIndex(1, 0, 'A', 6)).toBe(12);
   });
 
-  test('attempt 2, layer 6, option B = 41', () => {
-    expect(computeTrackIndex(2, 6, 'B', 7)).toBe(41);
+  test('attempt 2, layer 5, option B = 35', () => {
+    expect(computeTrackIndex(2, 5, 'B', 6)).toBe(35);
   });
 
-  test('attempt 1, layer 3, option A = 20', () => {
-    expect(computeTrackIndex(1, 3, 'A', 7)).toBe(20);
+  test('attempt 1, layer 3, option A = 18', () => {
+    expect(computeTrackIndex(1, 3, 'A', 6)).toBe(18);
   });
 });
 

@@ -2,7 +2,7 @@
  * Assembly — Group Self-Selection Logic
  *
  * Handles the finale assembly phase where audience members self-select
- * into 7 layer-type groups. Pure functions, no I/O.
+ * into 6 layer-type groups. Pure functions, no I/O.
  */
 
 import type { LayerType, UserId, User, FinaleState, FinaleConfig } from './types';
@@ -71,7 +71,7 @@ export function joinGroup(
 }
 
 /**
- * Randomly distribute all undecided users across 7 groups (uniform random).
+ * Randomly distribute all undecided users across 6 groups (uniform random).
  * Distribution is NOT weighted by current group size.
  */
 export function assignUndecided(

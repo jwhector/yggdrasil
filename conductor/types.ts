@@ -288,7 +288,7 @@ export type ShowPhase =
   | 'attempt_build'           // Active song-building with audience voting
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
   | 'finale_elegy'            // Elegy display of all fragments (available and locked)
-  | 'finale_assembly'         // Audience self-selects into 7 layer-type groups
+  | 'finale_assembly'         // Audience self-selects into 6 layer-type groups
   | 'finale_deliberation'     // Groups preview audio, vote on fragments, select ambassadors
   | 'finale_ceremony'         // Ambassadors lock fragments at the altar via accelerometer
   | 'finale_performer_mix'    // Performer live-mixes the activated fragments

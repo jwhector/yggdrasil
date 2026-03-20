@@ -125,10 +125,10 @@ describe('SETUP_FINALE', () => {
 
     expect(state.finaleState).not.toBeNull();
     expect(state.finaleState!.phase).toBe('elegy');
-    // 3 attempts × 2 layers × 1 winner = 6 available
-    expect(state.finaleState!.availableFragments).toHaveLength(6);
-    // 3 attempts × 2 layers × 1 loser = 6 locked
-    expect(state.finaleState!.lockedFragments).toHaveLength(6);
+    // bothOptionsSurvive: true → 3 attempts × 2 layers × 2 options = 12 available
+    expect(state.finaleState!.availableFragments).toHaveLength(12);
+    // bothOptionsSurvive: true → no locked fragments (all voted layers survive)
+    expect(state.finaleState!.lockedFragments).toHaveLength(0);
   });
 
   test('allFragments contains all 12 options', () => {
@@ -220,9 +220,9 @@ describe('Assembly flow', () => {
 
 describe('Deliberation flow', () => {
   function setupDeliberationState() {
-    const state = createTestState(createFinaleConfig(7)); // 7 layers per attempt
-    const voters = connectUsers(state, 7);
-    advanceToFinale(state, voters, 7);
+    const state = createTestState(createFinaleConfig(6)); // 6 layers per attempt
+    const voters = connectUsers(state, 6);
+    advanceToFinale(state, voters, 6);
     processCommand(state, { type: 'START_ASSEMBLY' });
     // Assign each voter to a different layer type group
     const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
@@ -301,9 +301,9 @@ describe('Deliberation flow', () => {
 
 describe('Ceremony flow', () => {
   function setupCeremonyState() {
-    const state = createTestState(createFinaleConfig(7));
-    const voters = connectUsers(state, 7);
-    advanceToFinale(state, voters, 7);
+    const state = createTestState(createFinaleConfig(6));
+    const voters = connectUsers(state, 6);
+    advanceToFinale(state, voters, 6);
     processCommand(state, { type: 'START_ASSEMBLY' });
     const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
     for (let i = 0; i < voters.length; i++) {
@@ -397,9 +397,9 @@ describe('Ceremony flow', () => {
 
 describe('Performer Mix — seeded from ceremony', () => {
   test('START_PERFORMER_MIX seeds activeLayers from ceremony.lockedLayers', () => {
-    const state = createTestState(createFinaleConfig(7));
-    const voters = connectUsers(state, 7);
-    advanceToFinale(state, voters, 7);
+    const state = createTestState(createFinaleConfig(6));
+    const voters = connectUsers(state, 6);
+    advanceToFinale(state, voters, 6);
     processCommand(state, { type: 'START_ASSEMBLY' });
     const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
     for (let i = 0; i < voters.length; i++) {

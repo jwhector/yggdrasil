@@ -42,7 +42,7 @@ import type {
 // ============================================================================
 
 export interface AbletonLayoutConfig {
-  maxLayersPerAttempt: number;         // Default: 7
+  maxLayersPerAttempt: number;         // Default: 6
   attemptCount: number;                // Default: 3
   collapseReturnTrackIndex: number;    // Return track index for collapse effects
   rejectionReturnTrackIndex: number;   // Return track index for rejection effects
@@ -51,7 +51,7 @@ export interface AbletonLayoutConfig {
 }
 
 const DEFAULT_LAYOUT: AbletonLayoutConfig = {
-  maxLayersPerAttempt: 7,
+  maxLayersPerAttempt: 6,
   attemptCount: 3,
   collapseReturnTrackIndex: 0,
   rejectionReturnTrackIndex: 1,

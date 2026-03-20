@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-03-19 — V3.1 Migration Phase 7: Track Layout & OSC
+
+**Context:** Phase 7 described updating Ableton track mapping for 36 tracks. Track indices are config-driven (not computed at runtime), and `default-show.json` was already updated to 36 tracks in earlier phases.
+
+**Key changes:**
+- Updated `config/ableton-layout.json`: `maxLayersPerAttempt` 7→6, comments updated (42→36 tracks, live performance tracks at 36+ instead of 42+).
+- Audio urgency (return track degradation per layer, section 7.3) deferred to Phase 8 with other urgency effects.
+
+## 2026-03-19 — V3.1 Migration Phase 6: Finale Updates (6 Layer Types)
+
+**Context:** Phase 6 verifies all finale phases use 6 layer types (not 7). Prior phases already migrated all runtime code and UI components. This phase fixes remaining stale references.
+
+**Key changes:**
+- Fixed 3 stale comments referencing "7 groups" in `conductor/types.ts` and `conductor/assembly.ts`.
+- Fixed test parameterization in `conductor/__tests__/finale-integration.test.ts` — 3 setup functions were creating configs with 7 layers but only assigning 6 layer types.
+- Fixed fragment count assertion in `SETUP_FINALE` test to match `bothOptionsSurvive: true` behavior (12 available, 0 locked).
+- Verified: all conductor modules (assembly, deliberation, ceremony, performer-mix, fragments), UI components, config, and identity mappings already correctly use the 6-layer model. 338 tests passing (same 2 pre-existing audio-router failures).
+
 ## 2026-03-19 — V3.1 Migration Phase 4: Tempo & Timing
 
 **Context:** Per-layer tempos were defined in config but never sent to Ableton during song-building. Phase 4 wires up OSC tempo changes at each layer start, plus resets between songs and at finale.
