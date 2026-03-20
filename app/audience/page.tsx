@@ -6,6 +6,8 @@ import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
 import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
+import { RevealSequence } from '@/components/song-building/RevealSequence';
+import { UrgencyEffects } from '@/components/song-building/UrgencyEffects';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { AssemblyCards } from '@/components/finale/AssemblyCards';
 import { GroupIdentity } from '@/components/finale/GroupIdentity';
@@ -107,19 +109,45 @@ function AudienceContent() {
             chapter={currentAttempt.chapter}
           />
 
-          {/* Voting cards */}
-          {currentAttempt.currentLayerConfig ? (
-            <OptionCards
+          {/* Reveal sequence (during revealing phase) */}
+          {currentAttempt.currentLayerPhase === 'revealing'
+            && currentAttempt.currentVoteResult
+            && currentAttempt.lastThresholdCheck
+            && currentAttempt.currentLayerConfig ? (
+            <RevealSequence
+              voteResult={{
+                winner: currentAttempt.currentVoteResult.winner,
+                consensus: currentAttempt.currentVoteResult.winningProportion,
+              }}
+              thresholdCheck={currentAttempt.lastThresholdCheck}
               layerConfig={currentAttempt.currentLayerConfig}
-              myVote={currentAttempt.myVote}
-              disabled={currentAttempt.currentLayerPhase !== 'auditioning'}
-              onVote={handleVote}
-              currentAuditionOption={currentAttempt.currentAuditionOption}
+              variant="audience"
             />
           ) : null}
 
-          {/* Phase hint */}
-          <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+          {/* Voting cards (during auditioning phase) */}
+          {currentAttempt.currentLayerPhase !== 'revealing' && currentAttempt.currentLayerConfig ? (
+            <UrgencyEffects
+              layerIndex={currentAttempt.currentLayerIndex}
+              collapsed={currentAttempt.status === 'collapsed'}
+            >
+              <div className="urgency-cards">
+                <OptionCards
+                  layerConfig={currentAttempt.currentLayerConfig}
+                  myVote={currentAttempt.myVote}
+                  disabled={currentAttempt.currentLayerPhase !== 'auditioning'}
+                  onVote={handleVote}
+                  currentAuditionOption={currentAttempt.currentAuditionOption}
+                />
+              </div>
+              <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+            </UrgencyEffects>
+          ) : null}
+
+          {/* Phase hint outside urgency wrapper (only during reveal) */}
+          {currentAttempt.currentLayerPhase === 'revealing' && (
+            <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+          )}
         </div>
       )}
 

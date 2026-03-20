@@ -7,6 +7,8 @@ import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { MixingMirror } from '@/components/finale/MixingMirror';
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
+import { ThresholdDisplay } from '@/components/song-building/ThresholdDisplay';
+import { RevealSequence } from '@/components/song-building/RevealSequence';
 import type { LayerResult, LayerType } from '@/conductor/types';
 
 const SHOW_ID = 'default-show';
@@ -45,6 +47,18 @@ export default function ProjectorPage() {
 
       const chapter = getChapterIdentity(currentAttempt.chapter);
       const layer = getLayerIdentity(currentLayerConfig.type);
+      const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+      const allThresholds: number[] = attemptConfig?.thresholds ?? [];
+      const threshold = allThresholds[currentAttempt.currentLayerIndex] ?? 0.5;
+
+      // Derive threshold check data from layerResults during revealing phase
+      const revealLayerResult = currentAttempt.currentLayerPhase === 'revealing'
+        ? currentAttempt.layerResults.find(r => r.layerIndex === currentAttempt.currentLayerIndex) ?? null
+        : null;
+      const thresholdCheck = revealLayerResult && revealLayerResult.passed !== null
+        ? { winningProportion: revealLayerResult.winningProportion!, threshold: revealLayerResult.thresholdRequired!, passed: revealLayerResult.passed }
+        : null;
+
       return (
         <main
           style={{
@@ -70,8 +84,33 @@ export default function ProjectorPage() {
             userCount={userCount}
           />
 
-          {/* Current layer card */}
-          {(
+          {/* Threshold display — visible before and during the vote */}
+          {currentAttempt.currentLayerPhase !== 'locked_in' && currentAttempt.currentLayerPhase !== 'collapsed' && (
+            <ThresholdDisplay
+              threshold={threshold}
+              layerIndex={currentAttempt.currentLayerIndex}
+              allThresholds={allThresholds}
+              layerColor={layer.color}
+            />
+          )}
+
+          {/* Reveal sequence (during revealing phase) */}
+          {currentAttempt.currentLayerPhase === 'revealing'
+            && currentAttempt.currentVoteResult
+            && thresholdCheck ? (
+            <RevealSequence
+              voteResult={{
+                winner: currentAttempt.currentVoteResult.winner,
+                consensus: currentAttempt.currentVoteResult.consensus,
+                votesA: currentAttempt.currentVoteResult.votesA,
+                votesB: currentAttempt.currentVoteResult.votesB,
+              }}
+              thresholdCheck={thresholdCheck}
+              layerConfig={currentLayerConfig}
+              variant="projector"
+            />
+          ) : (
+            /* Current layer card (during auditioning / locked_in / collapsed) */
             <ProjectorLayerCard
               layerSymbol={layer.symbol}
               layerLabel={layer.label}
@@ -87,7 +126,7 @@ export default function ProjectorPage() {
           {/* Stack history */}
           <ProjectorStackHistory results={currentAttempt.layerResults} />
 
-          {/* Collapse overlay */}
+          {/* Collapse overlay — fade to black (collapse is release, not alarm) */}
           {currentAttempt.status === 'collapsed' && (
             <CollapseOverlay />
           )}
@@ -490,26 +529,17 @@ function CollapseOverlay() {
       style={{
         position: 'absolute',
         inset: 0,
-        backgroundColor: 'rgba(239,68,68,0.12)',
-        border: '2px solid rgba(239,68,68,0.3)',
-        borderRadius: '0',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        backgroundColor: '#000',
         pointerEvents: 'none',
-        // TODO: Replace with collapse animation (visual + audio sync)
+        animation: 'collapse-fade-in 0.6s ease-out forwards',
       }}
     >
-      <p
-        style={{
-          fontSize: '2rem',
-          fontWeight: 700,
-          color: 'rgba(239,68,68,0.6)',
-          letterSpacing: '0.2em',
-        }}
-      >
-        COLLAPSED
-      </p>
+      <style>{`
+        @keyframes collapse-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

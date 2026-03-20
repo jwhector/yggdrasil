@@ -799,7 +799,12 @@ export function filterStateForClient(
           currentVoteResult: attempt.currentVoteResult
             ? { winner: attempt.currentVoteResult.winner, winningProportion: attempt.currentVoteResult.consensus }
             : null,
-          lastThresholdCheck: null,
+          lastThresholdCheck: (() => {
+            const lr = attempt.layerResults.find(r => r.layerIndex === attempt.currentLayerIndex);
+            return lr && lr.passed !== null
+              ? { winningProportion: lr.winningProportion!, threshold: lr.thresholdRequired!, passed: lr.passed }
+              : null;
+          })(),
         } : null,
         myFinale,
         config: {

@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-03-20 — V3.1 Migration Phase 8: Reveal Sequence & UI
+
+**Context:** Phase 8 replaces the health bar drain with per-layer doubt threshold visualization, adds escalating urgency effects on audience phones, and implements collapse-as-release. The conductor threshold infrastructure was already complete from Phases 1-2; this phase is entirely client-side.
+
+**Key changes:**
+- `server/socket.ts`: Populated `lastThresholdCheck` in `filterStateForClient` audience branch — previously hardcoded to `null`. Now reads from `attempt.layerResults` when in `revealing` phase.
+- `components/song-building/RevealSequence.tsx`: Rewritten. Replaced `drain` beat and `HealthBar` dependency with `threshold` beat showing an animated consensus bar vs. threshold line. Pass: bar clears line with green glow. Fail: bar stops short with red pulse. Lock-in beat skipped on fail. Projector still shows vote counts.
+- `components/song-building/ThresholdDisplay.tsx`: New component (projector). Shows all 6 threshold marks as a stepped escalation bar; current layer's threshold emphasized. Visible during auditioning before the vote opens.
+- `components/song-building/UrgencyEffects.tsx`: New component (audience). Wrapper that applies `.urgency-N` CSS classes (N = layerIndex). When `collapsed=true`, strips all classes instantly.
+- `app/globals.css`: Added urgency keyframe animations (`urgency-drift-subtle/medium/heavy`, `urgency-timer-pulse`, `urgency-jitter/jitter-heavy`) and `.urgency-0` through `.urgency-5` class rules targeting `.urgency-cards` and `.urgency-timer` child selectors.
+- `app/audience/page.tsx`: Integrated `RevealSequence` (rendered during `revealing` phase) and `UrgencyEffects` (wraps OptionCards during auditioning). Collapse strips urgency instantly.
+- `app/projector/page.tsx`: Added `ThresholdDisplay` (shown during auditioning), `RevealSequence` (shown during revealing). Updated `CollapseOverlay` from red alarm to 0.6s fade-to-black (collapse is release).
+- `components/song-building/HealthBar.tsx`: Deleted. No remaining consumers.
+
+**Deviations from spec:**
+- `HealthBarControls.tsx` listed for deletion in 8.5 — file did not exist (already absent from prior phases). No action needed.
+- Audio urgency (return track degradation per layer, deferred from Phase 7) is **not** in this phase — requires Ableton session configuration that isn't ready. CSS urgency effects (8.3) are implemented.
+
 ## 2026-03-19 — V3.1 Migration Phase 7: Track Layout & OSC
 
 **Context:** Phase 7 described updating Ableton track mapping for 36 tracks. Track indices are config-driven (not computed at runtime), and `default-show.json` was already updated to 36 tracks in earlier phases.
