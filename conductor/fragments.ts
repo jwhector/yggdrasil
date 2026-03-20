@@ -3,8 +3,8 @@
  *
  * After each attempt (completed or collapsed), this module produces the fragment
  * list with correct availability for the finale:
- * - locked_in winners → selectable fragments
- * - locked_in losers → visible but locked/grayed ("what could have been")
+ * - locked_in/collapsed winners → selectable fragments
+ * - locked_in/collapsed losers → selectable when bothOptionsSurvive, else locked
  * - unreached layers → both options visible but locked/grayed
  *
  * Pure functions, no I/O.
@@ -51,6 +51,7 @@ export function generateFragments(
   attempts: AttemptState[],
   attemptConfigs: AttemptConfig[],
   audioPreviewPath = '',
+  bothOptionsSurvive = false,
 ): FragmentAvailability[] {
   const fragments: FragmentAvailability[] = [];
 
@@ -79,7 +80,7 @@ export function generateFragments(
           selectable: true,
         });
 
-        // Loser fragment — visible but locked
+        // Loser fragment — selectable when bothOptionsSurvive, else locked
         const loser: 'A' | 'B' = result.chosenOption === 'A' ? 'B' : 'A';
         fragments.push({
           fragment: buildFragment(
@@ -92,7 +93,7 @@ export function generateFragments(
             audioPreviewPath,
             false, // wonVote
           ),
-          selectable: false,
+          selectable: bothOptionsSurvive,
         });
       } else {
         // Unreached layer — both options visible but locked

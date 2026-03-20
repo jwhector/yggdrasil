@@ -1061,7 +1061,7 @@ function handleImportState(state: ShowState, importedState: ShowState): Conducto
 // ============================================================================
 
 function handleSetupFinale(state: ShowState): ConductorEvent[] {
-  const allFragmentAvailability = generateFragments(state.attempts, state.config.attempts, state.config.finale.audioPreviewPath);
+  const allFragmentAvailability = generateFragments(state.attempts, state.config.attempts, state.config.finale.audioPreviewPath, state.config.finale.bothOptionsSurvive);
   const availableFragments = allFragmentAvailability.filter(fa => fa.selectable).map(fa => fa.fragment);
   const lockedFragments = allFragmentAvailability.filter(fa => !fa.selectable).map(fa => fa.fragment);
   const allFragments = allFragmentAvailability.map(fa => fa.fragment);

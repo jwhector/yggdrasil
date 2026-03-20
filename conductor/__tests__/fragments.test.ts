@@ -222,3 +222,81 @@ describe('generateFragments', () => {
     expect(ids).toContain('0-1-B');
   });
 });
+
+describe('generateFragments — bothOptionsSurvive', () => {
+  test('bothOptionsSurvive: true makes losers from voted layers selectable', () => {
+    const attempt = makeCompletedAttempt(0, 'ambition', 3);
+    const configs = [makeAttemptConfig('ambition', 3)];
+    const fragments = generateFragments([attempt], configs, '', true);
+
+    // All 6 fragments should be selectable (3 winners + 3 losers)
+    expect(fragments).toHaveLength(6);
+    expect(fragments.filter(f => f.selectable)).toHaveLength(6);
+  });
+
+  test('bothOptionsSurvive: false keeps losers non-selectable (default behavior)', () => {
+    const attempt = makeCompletedAttempt(0, 'ambition', 3);
+    const configs = [makeAttemptConfig('ambition', 3)];
+    const fragments = generateFragments([attempt], configs, '', false);
+
+    expect(fragments).toHaveLength(6);
+    expect(fragments.filter(f => f.selectable)).toHaveLength(3);
+    expect(fragments.filter(f => !f.selectable)).toHaveLength(3);
+  });
+
+  test('collapsed layers produce selectable fragments when bothOptionsSurvive: true', () => {
+    // Collapse at layer 2: layers 0-1 locked_in, layer 2 collapsed (voted), layers 3-5 unreached
+    const attempt = makeCollapsedAttempt(0, 'ambition', 6, 2);
+    // Give the collapsed layer a vote result
+    attempt.layerResults[2] = {
+      layerIndex: 2,
+      type: 'melody',
+      status: 'collapsed',
+      chosenOption: 'A',
+      winningProportion: 0.6,
+      thresholdRequired: 0.65,
+      passed: false,
+    };
+    const configs = [makeAttemptConfig('ambition', 6)];
+    const fragments = generateFragments([attempt], configs, '', true);
+
+    // Layers 0-1: 2 selectable each = 4
+    // Layer 2 (collapsed with vote): 2 selectable (both options survive)
+    // Layers 3-5: 2 non-selectable each = 6
+    const selectable = fragments.filter(f => f.selectable);
+    expect(selectable).toHaveLength(6); // 2+2+2 from layers 0,1,2
+
+    const layer2Fragments = fragments.filter(f => f.fragment.layerIndex === 2);
+    expect(layer2Fragments).toHaveLength(2);
+    expect(layer2Fragments.every(f => f.selectable)).toBe(true);
+  });
+
+  test('unreached layers are never selectable regardless of bothOptionsSurvive', () => {
+    const attempt = makeCollapsedAttempt(0, 'ambition', 4, 1);
+    const configs = [makeAttemptConfig('ambition', 4)];
+    const fragments = generateFragments([attempt], configs, '', true);
+
+    // Layer 0: locked_in → 2 selectable (bothOptionsSurvive)
+    // Layers 1-3: unreached → 2 non-selectable each
+    const unreached = fragments.filter(f => f.fragment.layerIndex >= 1);
+    expect(unreached).toHaveLength(6);
+    expect(unreached.every(f => !f.selectable)).toBe(true);
+  });
+
+  test('wonVote is true for winners and false for losers', () => {
+    const attempt = makeCompletedAttempt(0, 'ambition', 2);
+    const configs = [makeAttemptConfig('ambition', 2)];
+    const fragments = generateFragments([attempt], configs, '', true);
+
+    // Layer 0 chose A, Layer 1 chose B
+    const layer0Winner = fragments.find(f => f.fragment.layerIndex === 0 && f.fragment.option === 'A');
+    const layer0Loser = fragments.find(f => f.fragment.layerIndex === 0 && f.fragment.option === 'B');
+    expect(layer0Winner?.fragment.wonVote).toBe(true);
+    expect(layer0Loser?.fragment.wonVote).toBe(false);
+
+    const layer1Winner = fragments.find(f => f.fragment.layerIndex === 1 && f.fragment.option === 'B');
+    const layer1Loser = fragments.find(f => f.fragment.layerIndex === 1 && f.fragment.option === 'A');
+    expect(layer1Winner?.fragment.wonVote).toBe(true);
+    expect(layer1Loser?.fragment.wonVote).toBe(false);
+  });
+});
