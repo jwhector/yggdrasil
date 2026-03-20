@@ -12,7 +12,7 @@
  */
 
 import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { createTimingEngine, type TimingEngine } from '../timing';
+import { createTimingEngine, barsToMs, type TimingEngine } from '../timing';
 import { createNullOSCBridge, type OSCBridge } from '../osc';
 import { createInitialState, processCommand } from '../../conductor/conductor';
 import type {
@@ -73,12 +73,9 @@ function createTestConfig(): ShowConfig {
       npcMessages: [],
     },
     timing: {
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 2000,
-      beatsPerLoop: 0,
-      auditionsPerLayer: 2,
+      loopBoundaryBeats: 32,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: [],
@@ -141,6 +138,25 @@ function makeMinimalFinaleState(timerRemaining = 60000): FinaleState {
 // Tests
 // ============================================================================
 
+describe('barsToMs', () => {
+  test('4 bars at 120 BPM = 8000ms', () => {
+    expect(barsToMs(4, 120)).toBe(8000);
+  });
+
+  test('2 bars at 170 BPM ≈ 2824ms', () => {
+    expect(barsToMs(2, 170)).toBeCloseTo(2823.53, 0);
+  });
+
+  test('1 bar at 60 BPM = 4000ms', () => {
+    expect(barsToMs(1, 60)).toBe(4000);
+  });
+
+  test('custom beatsPerBar', () => {
+    // 1 bar at 120 BPM with 3 beats/bar = 3 * 500ms = 1500ms
+    expect(barsToMs(1, 120, 3)).toBe(1500);
+  });
+});
+
 describe('TimingEngine', () => {
   let sendCommand: jest.Mock;
   let state: ShowState;
@@ -171,7 +187,7 @@ describe('TimingEngine', () => {
       timingEngine.start();
     });
 
-    test('auditioning phase schedules auditionDurationMs timer → sends CLOSE_VOTING', () => {
+    test('auditioning phase sends TOGGLE then CLOSE_VOTING (per-layer auditionBars)', () => {
       advanceToBuild(state);
       processCommand(state, { type: 'START_AUDITION' });
 
@@ -186,9 +202,13 @@ describe('TimingEngine', () => {
       // Timer should not have fired yet
       expect(sendCommand).not.toHaveBeenCalled();
 
-      // Advance to auditionDurationMs (4000)
-      jest.advanceTimersByTime(4000);
+      // Layer 0: auditionBars=4 at 120 BPM → 8000ms per option
+      // Loop 1 (option A complete): TOGGLE_AUDITION at 8000ms
+      jest.advanceTimersByTime(8000);
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'TOGGLE_AUDITION' });
 
+      // Loop 2 (option B complete): CLOSE_VOTING at 16000ms
+      jest.advanceTimersByTime(8000);
       expect(sendCommand).toHaveBeenCalledWith({ type: 'CLOSE_VOTING' });
     });
 
@@ -205,7 +225,7 @@ describe('TimingEngine', () => {
       }]);
 
       // Advance part way
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(4000);
 
       // Phase changes to revealing — cancels audition timer
       timingEngine.onStateChanged(state, [{
@@ -215,8 +235,8 @@ describe('TimingEngine', () => {
         phase: 'revealing',
       }]);
 
-      // Advance past the original audition timer (4000 total)
-      jest.advanceTimersByTime(3000);
+      // Advance past the original interval
+      jest.advanceTimersByTime(20000);
 
       // Should NOT have sent CLOSE_VOTING (timer was cancelled)
       expect(sendCommand).not.toHaveBeenCalledWith({ type: 'CLOSE_VOTING' });
@@ -237,7 +257,8 @@ describe('TimingEngine', () => {
       // Manually bump version to simulate an external state change
       state.version = scheduledVersion + 10;
 
-      jest.advanceTimersByTime(4000);
+      // Layer 0: 8000ms per option × 2 = 16000ms total
+      jest.advanceTimersByTime(16000);
 
       // Version check is disabled — timer still fires
       expect(sendCommand).toHaveBeenCalledWith({ type: 'CLOSE_VOTING' });
@@ -309,133 +330,13 @@ describe('TimingEngine', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Beat-Synced Audition (fallback mode)
-  // --------------------------------------------------------------------------
-
-  describe('beat-synced audition (fallback mode)', () => {
-    function createAuditionState(): ShowState {
-      const config: ShowConfig = {
-        ...createTestConfig(),
-        timing: {
-          auditionDurationMs: 4000,
-          votingWindowMs: 30000,
-          revealSequenceDurationMs: 5000,
-          rejectionEffectDurationMs: 2000,
-          beatsPerLoop: 32,
-          auditionsPerLayer: 2,
-        },
-      };
-      return createInitialState(config, 'test-show');
-    }
-
-    beforeEach(() => {
-      state = createAuditionState();
-      timingEngine = createTimingEngine(
-        sendCommand,
-        () => state,
-        { enabled: true, oscBridge: null, fallbackBpm: 120 },
-      );
-      timingEngine.start();
-    });
-
-    test('sends TOGGLE_AUDITION after one beatsPerLoop interval', () => {
-      advanceToBuild(state);
-      processCommand(state, { type: 'START_AUDITION' });
-
-      timingEngine.onStateChanged(state, [{
-        type: 'LAYER_PHASE_CHANGED',
-        attemptIndex: 0,
-        layerIndex: 0,
-        phase: 'auditioning',
-      }]);
-
-      expect(sendCommand).not.toHaveBeenCalled();
-
-      // 32 beats × (60000ms / 120bpm) = 16000ms per loop
-      jest.advanceTimersByTime(16000);
-
-      expect(sendCommand).toHaveBeenCalledWith({ type: 'TOGGLE_AUDITION' });
-    });
-
-    test('sends TOGGLE_AUDITION three times then CLOSE_VOTING for auditionsPerLayer=2 (4 total loops)', () => {
-      advanceToBuild(state);
-      processCommand(state, { type: 'START_AUDITION' });
-
-      timingEngine.onStateChanged(state, [{
-        type: 'LAYER_PHASE_CHANGED',
-        attemptIndex: 0,
-        layerIndex: 0,
-        phase: 'auditioning',
-      }]);
-
-      // 3 toggles (loops 1, 2, 3), then CLOSE_VOTING (loop 4 completes = totalLoops)
-      jest.advanceTimersByTime(16000); // loop 1 → TOGGLE
-      jest.advanceTimersByTime(16000); // loop 2 → TOGGLE
-      jest.advanceTimersByTime(16000); // loop 3 → TOGGLE
-      jest.advanceTimersByTime(16000); // loop 4 → CLOSE_VOTING
-
-      const toggleCalls = (sendCommand as jest.Mock).mock.calls.filter(
-        (c: any[]) => c[0]?.type === 'TOGGLE_AUDITION',
-      );
-      const closeVotingCalls = (sendCommand as jest.Mock).mock.calls.filter(
-        (c: any[]) => c[0]?.type === 'CLOSE_VOTING',
-      );
-
-      expect(toggleCalls).toHaveLength(3);
-      expect(closeVotingCalls).toHaveLength(1);
-    });
-
-    test('stops audition interval on phase change to revealing', () => {
-      advanceToBuild(state);
-      processCommand(state, { type: 'START_AUDITION' });
-
-      timingEngine.onStateChanged(state, [{
-        type: 'LAYER_PHASE_CHANGED',
-        attemptIndex: 0,
-        layerIndex: 0,
-        phase: 'auditioning',
-      }]);
-
-      // Transition away before interval fires (e.g., manual CLOSE_VOTING)
-      timingEngine.onStateChanged(state, [{
-        type: 'LAYER_PHASE_CHANGED',
-        attemptIndex: 0,
-        layerIndex: 0,
-        phase: 'revealing',
-      }]);
-
-      // Well past the interval
-      jest.advanceTimersByTime(64000);
-
-      expect(sendCommand).not.toHaveBeenCalledWith({ type: 'TOGGLE_AUDITION' });
-      expect(sendCommand).not.toHaveBeenCalledWith({ type: 'CLOSE_VOTING' });
-    });
-  });
-
-  // --------------------------------------------------------------------------
   // Beat-Synced Audition (OSC mode)
   // --------------------------------------------------------------------------
 
   describe('beat-synced audition (OSC mode)', () => {
     let oscBridge: OSCBridge;
 
-    function createAuditionState(): ShowState {
-      const config: ShowConfig = {
-        ...createTestConfig(),
-        timing: {
-          auditionDurationMs: 4000,
-          votingWindowMs: 30000,
-          revealSequenceDurationMs: 5000,
-          rejectionEffectDurationMs: 2000,
-          beatsPerLoop: 32,
-          auditionsPerLayer: 2,
-        },
-      };
-      return createInitialState(config, 'test-show');
-    }
-
     beforeEach(async () => {
-      state = createAuditionState();
       oscBridge = createNullOSCBridge();
       await oscBridge.start();  // Mark bridge as running
       oscBridge.send = jest.fn();
@@ -458,7 +359,7 @@ describe('TimingEngine', () => {
       expect(oscBridge.send).toHaveBeenCalledWith('/live/song/stop_listen/beat');
     });
 
-    test('sends TOGGLE_AUDITION after beatsPerLoop beats', () => {
+    test('sends TOGGLE_AUDITION after auditionBars beats (layer 0: 4 bars = 16 beats)', () => {
       advanceToBuild(state);
       processCommand(state, { type: 'START_AUDITION' });
 
@@ -469,19 +370,19 @@ describe('TimingEngine', () => {
         phase: 'auditioning',
       }]);
 
-      // Beat 1 sets baseline; beats 2-32 have beatsSinceToggle 1-31 (< 32)
+      // Beat 1 sets baseline; beats 2-16 have beatsSinceToggle 1-15 (< 16)
       timingEngine.onOSCMessage('/live/song/get/beat', [1]);
-      for (let i = 2; i <= 32; i++) {
+      for (let i = 2; i <= 16; i++) {
         timingEngine.onOSCMessage('/live/song/get/beat', [i]);
         expect(sendCommand).not.toHaveBeenCalled();
       }
 
-      // Beat 33: 33 - 1 = 32 >= beatsPerLoop(32) → TOGGLE_AUDITION
-      timingEngine.onOSCMessage('/live/song/get/beat', [33]);
+      // Beat 17: 17 - 1 = 16 >= beatsPerLoop(16) → TOGGLE_AUDITION
+      timingEngine.onOSCMessage('/live/song/get/beat', [17]);
       expect(sendCommand).toHaveBeenCalledWith({ type: 'TOGGLE_AUDITION' });
     });
 
-    test('sends CLOSE_VOTING after totalLoops × beatsPerLoop beats', () => {
+    test('sends TOGGLE then CLOSE_VOTING (totalLoops=2: A then B)', () => {
       advanceToBuild(state);
       processCommand(state, { type: 'START_AUDITION' });
 
@@ -492,23 +393,24 @@ describe('TimingEngine', () => {
         phase: 'auditioning',
       }]);
 
-      // Beat 1 sets baseline; triggers at beats 33, 65, 97 (TOGGLE) and 129 (CLOSE_VOTING)
-      for (let beat = 1; beat <= 129; beat++) {
+      // Layer 0: auditionBars=4 → beatsPerLoop=16, totalLoops=2
+      // Beat 1 sets baseline; TOGGLE at beat 17, CLOSE_VOTING at beat 33
+      for (let beat = 1; beat <= 33; beat++) {
         timingEngine.onOSCMessage('/live/song/get/beat', [beat]);
       }
-
-      const closeVotingCalls = (sendCommand as jest.Mock).mock.calls.filter(
-        (c: any[]) => c[0]?.type === 'CLOSE_VOTING',
-      );
-      expect(closeVotingCalls).toHaveLength(1);
 
       const toggleCalls = (sendCommand as jest.Mock).mock.calls.filter(
         (c: any[]) => c[0]?.type === 'TOGGLE_AUDITION',
       );
-      expect(toggleCalls).toHaveLength(3); // 3 toggles before the final CLOSE_VOTING
+      const closeVotingCalls = (sendCommand as jest.Mock).mock.calls.filter(
+        (c: any[]) => c[0]?.type === 'CLOSE_VOTING',
+      );
+
+      expect(toggleCalls).toHaveLength(1); // A → B
+      expect(closeVotingCalls).toHaveLength(1); // B complete
     });
 
-    test('sends TOGGLE_AUDITION when Ableton beats wrap (0-31 → 0)', () => {
+    test('sends TOGGLE_AUDITION when Ableton beats wrap (0-15 → 0)', () => {
       advanceToBuild(state);
       processCommand(state, { type: 'START_AUDITION' });
 
@@ -519,15 +421,15 @@ describe('TimingEngine', () => {
         phase: 'auditioning',
       }]);
 
-      // Simulate Ableton sending beats 0-31, then wrapping back to 0
+      // Simulate Ableton sending beats 0-15, then wrapping back to 0
       // Beat 0 sets baseline (lastToggleBeat = 0 monotonic)
-      for (let i = 0; i <= 31; i++) {
+      for (let i = 0; i <= 15; i++) {
         timingEngine.onOSCMessage('/live/song/get/beat', [i]);
       }
-      // After beats 0-31: beatsSinceToggle = 31 - 0 = 31, not >= 32
+      // After beats 0-15: beatsSinceToggle = 15 - 0 = 15, not >= 16
       expect(sendCommand).not.toHaveBeenCalled();
 
-      // Ableton wraps to 0 — monotonic beat 32, beatsSinceToggle = 32 >= 32
+      // Ableton wraps to 0 — monotonic beat 16, beatsSinceToggle = 16 >= 16
       timingEngine.onOSCMessage('/live/song/get/beat', [0]);
       expect(sendCommand).toHaveBeenCalledWith({ type: 'TOGGLE_AUDITION' });
     });

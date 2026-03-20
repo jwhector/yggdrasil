@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## 2026-03-19 — V3.1 Migration Phase 4: Tempo & Timing
+
+**Context:** Per-layer tempos were defined in config but never sent to Ableton during song-building. Phase 4 wires up OSC tempo changes at each layer start, plus resets between songs and at finale.
+
+**Key changes:**
+- **`set_tempo` AudioCue**: New cue type emitted by conductor at layer start (in `handleStartAudition()` and `handleRerunVote()`), before `audition_start`. Carries per-layer BPM from `AttemptConfig.tempos[]`.
+- **Audio-router `handleSetTempo()`**: Sends `/live/song/set/tempo` via OSC.
+- **`routerState.baseTempo`**: Derived from config (`attempts[0].tempos[0]`) at runtime, replacing hardcoded `NOMINAL_TEMPO_BPM` (120) in all tempo reset paths.
+- **Tempo resets**: On collapse (via `clearCollapseTimers`), on rejection (after effect fades), on `ATTEMPT_COMPLETED`, and at `finale_elegy` phase change.
+- **Tests**: 3 new conductor tests (set_tempo emission, ordering, per-layer BPM). 5 new audio-router tests (OSC send, baseTempo config derivation, rejection reset, finale_elegy reset). 333 passing, same 2 pre-existing audio-router failures.
+
+## 2026-03-19 — V3.1 Migration Phases 2 & 3: Threshold Mechanic + Per-Layer Audition Timing
+
+**Phase 2 — Threshold Mechanic:**
+- Created `conductor/threshold.ts` with `checkThreshold()` pure function (~20 lines). Independently testable with exact vote counts.
+- Updated `conductor/conductor.ts` to import and call `checkThreshold()` instead of inline threshold logic in `resolveCurrentLayer()`.
+- Exported `checkThreshold` from `conductor/index.ts`.
+- Added 7 unit tests in `conductor/__tests__/threshold.test.ts` covering all edge cases from MIGRATION-v3.1.md.
+- Cleaned up 3 stale health-bar references in `conductor/__tests__/conductor.test.ts` comments.
+
+**Phase 3 — Per-Layer Audition Timing:**
+- `TimingConfig` simplified: removed `auditionDurationMs`, `votingWindowMs`, `auditionsPerLayer`. Renamed `beatsPerLoop` → `loopBoundaryBeats` (used only for performer mix loop boundaries).
+- Audition timing now reads per-layer `auditionBars[layerIndex]` and `tempos[layerIndex]` from `AttemptConfig` instead of global config.
+- Loop structure simplified: A-B-A-B (4 loops via `auditionsPerLayer=2`) → A-then-B (2 loops). Each option plays once.
+- Added exported `barsToMs()` utility in `server/timing.ts`.
+- Rewrote `startAuditionTracking()` for per-layer config. Removed legacy flat-timer mode (3 modes → 2: OSC beat-synced + fallback JS interval).
+- No `votingWindowMs` state field — Ableton/timing engine is source of truth for audition end; votes accepted when phase is `'auditioning'`, rejected otherwise.
+- Updated `server/socket.ts`: `auditionTotalLoops` is now constant `2`.
+- Updated `config/default-show.json`, `docs/data-models.md`, and all 6 test fixture files.
+- 325 tests passing (same 2 pre-existing audio-router failures). `tsc --noEmit` clean.
+
 ## 2026-03-19 — V3.1 Migration Phase 1: Types & Constants
 
 **Context:** Phase 1 of the V3.1 migration. Updates all shared type definitions and constants so that subsequent phases (threshold mechanic, merged auditioning+voting, tempo, etc.) have a stable foundation. See `MIGRATION-v3.1.md` for the full migration plan.

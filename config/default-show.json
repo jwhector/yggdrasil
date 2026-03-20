@@ -210,10 +210,7 @@
   },
 
   "timing": {
-    "beatsPerLoop": 16,
-    "auditionsPerLayer": 2,
-    "auditionDurationMs": 8000,
-    "votingWindowMs": 10000,
+    "loopBoundaryBeats": 32,
     "revealSequenceDurationMs": 10000,
     "rejectionEffectDurationMs": 5000,
     "gain": {

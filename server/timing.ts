@@ -2,17 +2,13 @@
  * Timing Engine — Hybrid Timing with AbletonOSC + Server Timers
  *
  * Manages automatic phase advancement with a hybrid approach:
- * - Server JS timers control game logic timing (audition duration, voting window,
- *   consensus round duration)
  * - AbletonOSC beat events drive audition A/B cycling and performer mix loop boundaries
+ * - Server JS timers as fallback when OSC unavailable
  * - Per-beat callback scheduler allows audio router to lock gain changes to the musical grid
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
- * - For auditioning: Schedules audition loops → sends CLOSE_VOTING when complete
- *   (or beat-synced cycling if beatsPerLoop > 0)
- * - For voting: Schedules votingWindowMs timer → sends CLOSE_VOTING
- * - For consensus rounds: Schedules round duration timer → sends END_CONSENSUS_ROUND
+ * - For auditioning: Plays A then B (per-layer auditionBars from AttemptConfig) → sends CLOSE_VOTING
  * - For performer mix: Counts beats/bars → sends FIRE_PENDING_CHANGES at loop boundary
  *
  * Beat Callback Scheduler:
@@ -54,7 +50,7 @@ export interface TimingEngineConfig {
 export interface BeatPosition {
   absoluteBeat: number;    // Raw beat number from Ableton (or synthetic)
   beatInBar: number;       // 0–3 within current bar
-  barInLoop: number;       // 0–(barsPerLoop-1) within current loop (driven by config.timing.beatsPerLoop)
+  barInLoop: number;       // 0–(barsPerLoop-1) within current loop (driven by config.timing.loopBoundaryBeats)
   loopCount: number;       // Total loops elapsed since beat tracking started
 }
 
@@ -125,7 +121,7 @@ interface TimerState {
 interface AuditionTrackingState {
   lastToggleBeat: number;      // Beat number at last option toggle (-1 = not yet set)
   beatsPerLoop: number;        // From config
-  totalLoops: number;          // auditionsPerLayer * 2
+  totalLoops: number;          // Always 2 (A then B)
   currentLoopIndex: number;    // 0-based, increments on each toggle
 }
 
@@ -134,10 +130,18 @@ interface AuditionTrackingState {
  */
 interface LoopTrackingState {
   lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
-  loopBeats: number;           // from config.timing.beatsPerLoop
+  loopBeats: number;           // from config.timing.loopBoundaryBeats
 }
 
 const BEATS_PER_BAR = 4;
+
+/**
+ * Convert bars to milliseconds at a given BPM.
+ */
+export function barsToMs(bars: number, bpm: number, beatsPerBar: number = BEATS_PER_BAR): number {
+  const msPerBeat = 60000 / bpm;
+  return bars * beatsPerBar * msPerBeat;
+}
 
 // ============================================================================
 // Factory
@@ -173,7 +177,7 @@ export function createTimingEngine(
   let fallbackAuditionLoopIndex = 0;
   let loopState: LoopTrackingState | null = null;
   let fallbackLoopInterval: NodeJS.Timeout | null = null;
-  let configuredBeatsPerLoop: number = 32; // Set from config on start/state change
+  let configuredLoopBoundaryBeats: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
   let beatCallbacks: BeatCallback[] = [];
@@ -367,20 +371,25 @@ export function createTimingEngine(
   // --------------------------------------------------------------------------
 
   /**
-   * Start beat-synced audition tracking.
-   * OSC mode: counts beats from Ableton, toggles A/B every beatsPerLoop beats.
-   * Fallback mode: JS interval based on fallbackBpm.
-   * After all loops complete, sends CLOSE_VOTING.
+   * Start audition tracking for the current layer.
+   * Reads per-layer auditionBars from AttemptConfig to determine timing.
+   * Plays A then B (2 total loops), then sends CLOSE_VOTING.
+   * OSC mode: counts beats from Ableton. Fallback: JS interval from per-layer tempo.
    */
   function startAuditionTracking(state: ShowState): void {
     stopAuditionTracking();
 
-    const beatsPerLoop = state.config.timing.beatsPerLoop ?? 0;
-    const auditionsPerLayer = state.config.timing.auditionsPerLayer ?? 2;
-    const { auditionDurationMs } = state.config.timing;
-    const totalLoops = auditionsPerLayer * 2;
+    const attempt = state.attempts[state.currentAttemptIndex];
+    const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+    const layerIndex = attempt?.currentLayerIndex ?? 0;
 
-    if (beatsPerLoop > 0 && engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
+    // Per-layer config from AttemptConfig
+    const auditionBars = attemptConfig?.auditionBars?.[layerIndex] ?? 4;
+    const tempo = attemptConfig?.tempos?.[layerIndex] ?? engineConfig.fallbackBpm;
+    const beatsPerLoop = auditionBars * BEATS_PER_BAR;
+    const totalLoops = 2; // A then B
+
+    if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats; first beat sets the baseline in handleBeatEvent
       auditionState = {
         lastToggleBeat: -1,
@@ -389,17 +398,12 @@ export function createTimingEngine(
         currentLoopIndex: 0,
       };
 
-      console.log(`[Timing] Audition tracking started (OSC, ${beatsPerLoop} beats/loop × ${totalLoops} loops)`);
-    } else if (beatsPerLoop > 0) {
-      // Fallback: derive interval from BPM
-      startAuditionFallbackInterval(beatsPerLoop, totalLoops);
-      console.log(`[Timing] Audition tracking started (fallback, ${beatsPerLoop} beats/loop × ${totalLoops} loops)`);
+      console.log(`[Timing] Audition tracking started (OSC, ${auditionBars} bars/option × ${totalLoops} loops)`);
     } else {
-      // Legacy: flat timer using auditionDurationMs
-      console.log(`[Timing] Auditioning: scheduling ${auditionDurationMs}ms timer → CLOSE_VOTING (legacy)`);
-      scheduleTimer(auditionDurationMs, state.version, 'auditioning', () => {
-        sendCommand({ type: 'CLOSE_VOTING' });
-      });
+      // Fallback: JS interval using per-layer tempo
+      const intervalMs = barsToMs(auditionBars, tempo);
+      startAuditionFallbackInterval(intervalMs, totalLoops);
+      console.log(`[Timing] Audition tracking started (fallback, ${auditionBars} bars/option @ ${tempo} BPM, ${intervalMs.toFixed(0)}ms/option)`);
     }
   }
 
@@ -407,12 +411,10 @@ export function createTimingEngine(
    * Start fallback JS interval for audition cycling (non-OSC mode only).
    * Cleared by stopAuditionTracking().
    */
-  function startAuditionFallbackInterval(beatsPerLoop: number, totalLoops: number): void {
+  function startAuditionFallbackInterval(intervalMs: number, totalLoops: number): void {
     if (fallbackAuditionInterval) {
       clearInterval(fallbackAuditionInterval);
     }
-    const msPerBeat = 60000 / engineConfig.fallbackBpm;
-    const intervalMs = beatsPerLoop * msPerBeat;
     fallbackAuditionLoopIndex = 0;
 
     fallbackAuditionInterval = setInterval(() => {
@@ -458,8 +460,8 @@ export function createTimingEngine(
   function startLoopTracking(): void {
     stopLoopTracking();
 
-    const loopBeats = configuredBeatsPerLoop;
-    const loopBars = configuredBeatsPerLoop / BEATS_PER_BAR;
+    const loopBeats = configuredLoopBoundaryBeats;
+    const loopBars = configuredLoopBoundaryBeats / BEATS_PER_BAR;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats
@@ -561,13 +563,13 @@ export function createTimingEngine(
 
     // Update beat position
     const beatsSinceLoopStart = beatNumber - loopStartBeat;
-    const loopBeats = configuredBeatsPerLoop;
+    const loopBeats = configuredLoopBoundaryBeats;
     totalLoopsElapsed = Math.floor(beatsSinceLoopStart / loopBeats);
 
     currentBeatPosition = {
       absoluteBeat: beatNumber,
       beatInBar: beatNumber % BEATS_PER_BAR,
-      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % (configuredBeatsPerLoop / BEATS_PER_BAR),
+      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % (configuredLoopBoundaryBeats / BEATS_PER_BAR),
       loopCount: totalLoopsElapsed,
     };
 
@@ -671,7 +673,7 @@ export function createTimingEngine(
   function onStateChanged(state: ShowState, events: ConductorEvent[]): void {
     if (!running || !engineConfig.enabled) return;
 
-    configuredBeatsPerLoop = state.config.timing.beatsPerLoop || 32;
+    configuredLoopBoundaryBeats = state.config.timing.loopBoundaryBeats || 32;
 
     // Don't schedule if paused
     if (state.paused) {
@@ -816,7 +818,7 @@ export function createTimingEngine(
 
     // Initialize based on current state
     const state = getState();
-    configuredBeatsPerLoop = state.config.timing.beatsPerLoop || 32;
+    configuredLoopBoundaryBeats = state.config.timing.loopBoundaryBeats || 32;
     if (state.phase === 'attempt_build') {
       const attempt = state.attempts[state.currentAttemptIndex];
       if (attempt && attempt.status === 'in_progress') {

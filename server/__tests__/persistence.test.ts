@@ -67,12 +67,9 @@ function createTestConfig(): ShowConfig {
       npcMessages: [],
     },
     timing: {
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 2000,
-      beatsPerLoop: 0,
-      auditionsPerLayer: 2,
+      loopBoundaryBeats: 32,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1', 'seat-2'],

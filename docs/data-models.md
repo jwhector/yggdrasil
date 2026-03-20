@@ -94,12 +94,9 @@ interface NpcMessageConfig {
 }
 
 interface TimingConfig {
-  auditionDurationMs: number;
-  votingWindowMs: number;
   revealSequenceDurationMs: number;
   rejectionEffectDurationMs: number;
-  beatsPerLoop: number;
-  auditionsPerLayer: number;
+  loopBoundaryBeats: number;            // Beats per performer mix loop boundary (e.g. 32 = 8 bars)
   gain: GainConfig;
 }
 
@@ -272,6 +269,19 @@ type ConductorEvent =
 
   // State
   | { type: 'STATE_UPDATED'; version: number };
+
+type AudioCue =
+  | { type: 'set_tempo'; bpm: number; attemptIndex: number; layerIndex: number }
+  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; audioRef: AudioReference; otherAudioRef: AudioReference }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
+  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
+  | { type: 'collapse_gesture'; attemptIndex: number }
+  | { type: 'rejection_gesture'; attemptIndex: number }
+  | { type: 'ceremony_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
+  | { type: 'mix_update'; changes: PendingChange[] }
+  | { type: 'transport'; action: 'play' | 'stop' }
+  | { type: 'panic' }
+  | { type: 'reset_utilities' };
 
 interface VoteResult {
   winner: 'A' | 'B';

@@ -11,7 +11,7 @@
 
 All fragments across all three songs share:
 - **Key:** B minor (B natural minor scale: B, C#, D, E, F#, G, A)
-- **BPM:** Fixed (target: 120 BPM, configurable)
+- **BPM:** Escalates per layer per song (configurable in `default-show.json`; default curve: 120 → 120 → 130 → 140 → 155 → 170). All fragments must sound good across their song's full tempo range.
 - **Loop length:** Exactly 8 bars
 - **Time signature:** 4/4
 - **Chord progression:** Same progression across all songs
@@ -125,6 +125,7 @@ Uses the **AbletonOSC** plugin (by ideoforms). All addresses follow the `/live/*
 | `/live/song/stop_listen/beat` | - | Unsubscribe from beat events |
 | `/live/song/start_listen/tempo` | - | Subscribe to tempo changes |
 | `/live/song/stop_listen/tempo` | - | Unsubscribe from tempo changes |
+| `/live/song/set/tempo` | `bpm` | Set global tempo (per-layer, at audition start) |
 | `/live/song/get/tempo` | - | Query current tempo |
 | `/live/song/get/is_playing` | - | Query transport state |
 | `/live/song/start_playing` | - | Start global transport |

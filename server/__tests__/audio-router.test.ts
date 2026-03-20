@@ -104,12 +104,9 @@ function createTestConfig(): ShowConfig {
       npcMessages: [],
     },
     timing: {
-      beatsPerLoop: 32,
-      auditionsPerLayer: 2,
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 3000,
       rejectionEffectDurationMs: 2000,
+      loopBoundaryBeats: 32,
       gain: TEST_GAIN_CONFIG,
     },
     lobby: { waitingMessage: 'Welcome' },
@@ -1103,5 +1100,90 @@ describe('AudioRouter with device cache', () => {
 
     // No mute call should fire (fade was cancelled)
     expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
+  });
+});
+
+// ============================================================================
+// Tempo Control
+// ============================================================================
+
+describe('Tempo control', () => {
+  let osc: OSCBridge;
+  let mockSend: jest.Mock;
+  let router: AudioRouter;
+  let state: ShowState;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    osc = createNullOSCBridge();
+    mockSend = jest.fn();
+    osc.send = mockSend;
+    router = createAudioRouter(osc, TEST_LAYOUT);
+    state = createTestState();
+  });
+
+  afterEach(() => {
+    router.dispose();
+    jest.useRealTimers();
+  });
+
+  test('set_tempo cue sends /live/song/set/tempo OSC message', () => {
+    sendCue(router, state, {
+      type: 'set_tempo', bpm: 155, attemptIndex: 0, layerIndex: 4,
+    });
+    expect(mockSend).toHaveBeenCalledWith('/live/song/set/tempo', 155);
+  });
+
+  test('clearCollapseTimers resets tempo to baseTempo from config', () => {
+    // First call handleStateChange to set baseTempo from config (tempos[0] = 120)
+    router.handleStateChange(state, []);
+
+    // Trigger ATTEMPT_COMPLETED which calls clearCollapseTimers
+    router.handleStateChange(state, [
+      { type: 'ATTEMPT_COMPLETED', attemptIndex: 0 } as any,
+    ]);
+
+    expect(mockSend).toHaveBeenCalledWith('/live/song/set/tempo', 120);
+  });
+
+  test('clearCollapseTimers uses config-derived baseTempo, not hardcoded 120', () => {
+    // Override first attempt's first tempo to 100
+    state.config.attempts[0].tempos = [100, 120, 130, 140, 155, 170];
+
+    router.handleStateChange(state, [
+      { type: 'ATTEMPT_COMPLETED', attemptIndex: 0 } as any,
+    ]);
+
+    expect(mockSend).toHaveBeenCalledWith('/live/song/set/tempo', 100);
+  });
+
+  test('rejection gesture resets tempo after effect completes', () => {
+    state.attempts[0].layerPlan = [makeLayerConfig(0)];
+
+    sendCue(router, state, {
+      type: 'rejection_gesture', attemptIndex: 0,
+    });
+
+    // Tempo should not be reset immediately
+    const tempoCallsBefore = mockSend.mock.calls.filter(
+      (c: any[]) => c[0] === '/live/song/set/tempo'
+    ).length;
+    expect(tempoCallsBefore).toBe(0);
+
+    // Advance past rejection effect duration (2000ms from test config)
+    jest.advanceTimersByTime(2000);
+
+    expect(mockSend).toHaveBeenCalledWith('/live/song/set/tempo', 120);
+  });
+
+  test('SHOW_PHASE_CHANGED to finale_elegy resets tempo', () => {
+    router.handleStateChange(state, []);  // Set baseTempo
+
+    mockSend.mockClear();
+    router.handleStateChange(state, [
+      { type: 'SHOW_PHASE_CHANGED', phase: 'finale_elegy' } as any,
+    ]);
+
+    expect(mockSend).toHaveBeenCalledWith('/live/song/set/tempo', 120);
   });
 });

@@ -255,7 +255,7 @@ export interface FinaleState {
   performerMix: {
     activeLayers: Map<LayerType, string | null>;  // layerType → fragmentId or null (muted)
     pendingChanges: PendingChange[];
-    loopPosition: number;               // 0.0 to 1.0 within current loop (length from config.timing.beatsPerLoop)
+    loopPosition: number;               // 0.0 to 1.0 within current loop (length from config.timing.loopBoundaryBeats)
     loopCount: number;                  // Total loops since finale started
     liveTracksActive: string[];         // IDs of active live performance tracks
   };
@@ -358,12 +358,9 @@ export interface GainConfig {
 }
 
 export interface TimingConfig {
-  auditionDurationMs: number;           // Fallback when OSC beat sync unavailable
-  votingWindowMs: number;               // How long voting stays open
   revealSequenceDurationMs: number;     // Duration of post-vote reveal animation
   rejectionEffectDurationMs: number;    // Duration of song rejection effect
-  beatsPerLoop: number;                 // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
-  auditionsPerLayer: number;            // Number of A/B cycles per layer before voting opens
+  loopBoundaryBeats: number;            // Beats per performer mix loop boundary (e.g. 32 = 8 bars)
   gain?: GainConfig;                    // Utility device gain transition configuration (uses defaults if absent)
 }
 
@@ -375,6 +372,7 @@ export type AudioCue =
   | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; audioRef: AudioReference; otherAudioRef: AudioReference }
   | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
   | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
+  | { type: 'set_tempo'; bpm: number; attemptIndex: number; layerIndex: number }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'rejection_gesture'; attemptIndex: number }
   | { type: 'ceremony_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }

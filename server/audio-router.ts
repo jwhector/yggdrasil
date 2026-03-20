@@ -158,6 +158,8 @@ interface AudioRouterState {
   activeLayerTracks: Map<LayerType, number>;
   /** Authoritative set of fragment track indices, built from ShowState */
   fragmentTrackIndices: Set<number>;
+  /** Base tempo derived from config (first attempt, first layer), used for resets */
+  baseTempo: number;
 }
 
 // ============================================================================
@@ -193,6 +195,7 @@ export function createAudioRouter(
     rejectionTimers: new Map(),
     activeLayerTracks: new Map(),
     fragmentTrackIndices: new Set(),
+    baseTempo: NOMINAL_TEMPO_BPM,
   };
 
   // Last-seen gain config, updated at the top of handleStateChange
@@ -421,7 +424,7 @@ export function createAudioRouter(
       clearTimeout(routerState.collapseDelayTimer);
       routerState.collapseDelayTimer = null;
     }
-    oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
+    oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
     oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 0);
   }
 
@@ -612,6 +615,11 @@ export function createAudioRouter(
   // AudioCue Handlers
   // --------------------------------------------------------------------------
 
+  function handleSetTempo(cue: Extract<AudioCue, { type: 'set_tempo' }>): void {
+    oscBridge.send('/live/song/set/tempo', cue.bpm);
+    console.log(`[AudioRouter] set_tempo: ${cue.bpm} BPM (attempt ${cue.attemptIndex}, layer ${cue.layerIndex})`);
+  }
+
   function handleAuditionStart(
     cue: Extract<AudioCue, { type: 'audition_start' }>,
   ): void {
@@ -774,7 +782,7 @@ export function createAudioRouter(
     // Schedule cleanup: snap tempo back to nominal after the full collapse window
     const collapseMs = state.config.timing.revealSequenceDurationMs;
     const timer = setTimeout(() => {
-      oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
+      oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
       routerState.collapseTimers.delete(cue.attemptIndex);
       setTimeout(() => {
         oscBridge.send('/live/song/stop_playing');
@@ -798,10 +806,11 @@ export function createAudioRouter(
       fadeGain(layer.optionB.trackIndex, 0, currentGainConfig.collapseFadeBeats);
     }
 
-    // Schedule re-mute of return track after effect completes
+    // Schedule re-mute of return track and tempo reset after effect completes
     const rejectionMs = state.config.timing.rejectionEffectDurationMs;
     const timer = setTimeout(() => {
       oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 1);
+      oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
       routerState.rejectionTimers.delete(cue.attemptIndex);
     }, rejectionMs);
 
@@ -908,6 +917,8 @@ export function createAudioRouter(
   function handleStateChange(state: ShowState, events: ConductorEvent[]): void {
     // Keep gain config in sync with show config
     currentGainConfig = state.config.timing.gain ?? DEFAULT_GAIN_CONFIG;
+    // Derive base tempo from config (first attempt, first layer)
+    routerState.baseTempo = state.config.attempts[0]?.tempos?.[0] ?? NOMINAL_TEMPO_BPM;
     // Rebuild fragment track set from state (Ableton layout as source of truth)
     updateFragmentTrackSet(state);
 
@@ -915,6 +926,9 @@ export function createAudioRouter(
       if (event.type === 'AUDIO_CUE') {
         const cue = event.cue;
         switch (cue.type) {
+          case 'set_tempo':
+            handleSetTempo(cue);
+            break;
           case 'audition_start':
             handleAuditionStart(cue);
             break;
@@ -953,6 +967,14 @@ export function createAudioRouter(
         silenceAllTracks();
         clearCollapseTimers();
         clearRejectionTimers();
+      }
+
+      if (event.type === 'SHOW_PHASE_CHANGED') {
+        const phaseEvent = event as { type: 'SHOW_PHASE_CHANGED'; phase: string };
+        if (phaseEvent.phase === 'finale_elegy') {
+          oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
+          console.log(`[AudioRouter] Tempo reset to ${routerState.baseTempo} BPM at finale_elegy`);
+        }
       }
 
       if (event.type === 'SHOW_RESET') {

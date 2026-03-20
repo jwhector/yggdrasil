@@ -75,12 +75,9 @@ function createTestConfig(
       bothOptionsSurvive: true,
     },
     timing: {
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 3000,
-      beatsPerLoop: 32,
-      auditionsPerLayer: 2,
+      loopBoundaryBeats: 32,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1', 'seat-2'],
@@ -319,6 +316,56 @@ describe('Song-Building Layer Flow', () => {
     const state = createTestState();
     const events = processCommand(state, { type: 'START_AUDITION' });
     expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('START_AUDITION emits set_tempo AUDIO_CUE with BPM from config', () => {
+    const config = createTestConfig(3);
+    config.attempts[0].tempos = [110, 130, 155];
+    const state = createTestState(config);
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'START_AUDITION' });
+    const audioCues = events.filter(e => e.type === 'AUDIO_CUE') as Array<{ type: 'AUDIO_CUE'; cue: { type: string; bpm?: number } }>;
+    const tempoCue = audioCues.find(e => e.cue.type === 'set_tempo');
+
+    expect(tempoCue).toBeDefined();
+    expect(tempoCue!.cue.bpm).toBe(110);
+  });
+
+  test('set_tempo cue precedes audition_start cue in events', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'START_AUDITION' });
+    const audioCues = events.filter(e => e.type === 'AUDIO_CUE') as Array<{ type: 'AUDIO_CUE'; cue: { type: string } }>;
+    const cueTypes = audioCues.map(e => e.cue.type);
+
+    const tempoIdx = cueTypes.indexOf('set_tempo');
+    const auditionIdx = cueTypes.indexOf('audition_start');
+
+    expect(tempoIdx).toBeGreaterThanOrEqual(0);
+    expect(auditionIdx).toBeGreaterThan(tempoIdx);
+  });
+
+  test('each layer uses its own tempo from config', () => {
+    const config = createTestConfig(3);
+    config.attempts[0].tempos = [110, 140, 170];
+    const state = createTestState(config);
+    advanceToBuild(state);
+    connectUser(state, 'user-1');
+
+    // Layer 0 → 110 BPM
+    let events = processCommand(state, { type: 'START_AUDITION' });
+    let tempoCue = (events.filter(e => e.type === 'AUDIO_CUE') as any[]).find(e => e.cue.type === 'set_tempo');
+    expect(tempoCue.cue.bpm).toBe(110);
+
+    // Complete layer 0
+    completeSingleLayer(state, ['user-1'], 'A');
+
+    // Layer 1 → 140 BPM
+    events = processCommand(state, { type: 'START_AUDITION' });
+    tempoCue = (events.filter(e => e.type === 'AUDIO_CUE') as any[]).find(e => e.cue.type === 'set_tempo');
+    expect(tempoCue.cue.bpm).toBe(140);
   });
 
   test('SUBMIT_VOTE records a vote during auditioning phase', () => {

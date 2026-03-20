@@ -429,12 +429,25 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
   attempt.currentAuditionOption = 'A';
   attempt.auditionLoopIndex = 0;
 
+  // Per-layer tempo from config
+  const attemptConfig = state.config.attempts[attempt.index];
+  const layerTempo = attemptConfig?.tempos?.[attempt.currentLayerIndex] ?? 120;
+
   return [
     {
       type: 'LAYER_PHASE_CHANGED',
       attemptIndex: attempt.index,
       layerIndex: attempt.currentLayerIndex,
       phase: 'auditioning',
+    },
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'set_tempo',
+        bpm: layerTempo,
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+      },
     },
     {
       type: 'AUDIO_CUE',
@@ -601,12 +614,25 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
   attempt.currentAuditionOption = 'A';
   attempt.auditionLoopIndex = 0;
 
+  // Per-layer tempo from config
+  const attemptConfig = state.config.attempts[attempt.index];
+  const layerTempo = attemptConfig?.tempos?.[attempt.currentLayerIndex] ?? 120;
+
   return [
     {
       type: 'LAYER_PHASE_CHANGED',
       attemptIndex: attempt.index,
       layerIndex: attempt.currentLayerIndex,
       phase: 'auditioning',
+    },
+    {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'set_tempo',
+        bpm: layerTempo,
+        attemptIndex: attempt.index,
+        layerIndex: attempt.currentLayerIndex,
+      },
     },
     {
       type: 'AUDIO_CUE',

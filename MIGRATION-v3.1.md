@@ -318,9 +318,11 @@ Add:
 
 ---
 
-## Phase 2: Threshold Mechanic
+## Phase 2: Threshold Mechanic -- COMPLETE (2026-03-19)
 
 **Goal:** Replace the health bar with the per-layer doubt threshold. This is the core mechanic change.
+
+> **Deviations:** `checkThreshold()` extracted to `conductor/threshold.ts` as a standalone module. Conductor calls it with raw vote counts (votesA, votesB) rather than pre-computed consensus.
 
 ### 2.1 Rewrite `health-bar.ts` → `threshold.ts`
 
@@ -418,9 +420,11 @@ Remove `HealthBarControls.tsx`. The controller should display the current layer'
 
 ---
 
-## Phase 3: Merged Auditioning + Voting
+## Phase 3: Merged Auditioning + Voting -- COMPLETE (2026-03-19)
 
 **Goal:** Combine the `auditioning` and `voting` phases into a single `auditioning_and_voting` phase where the vote is open from the moment the first option starts playing.
+
+> **Deviations:** Behavioral merge was already complete (see Phase 1 deviations). Phase 3 focused on per-layer audition timing: `TimingConfig` simplified (removed `auditionDurationMs`, `votingWindowMs`, `auditionsPerLayer`; renamed `beatsPerLoop` → `loopBoundaryBeats`). Loop structure changed from A-B-A-B to A-then-B. No `votingWindowMs` state field — Ableton/timing engine is source of truth; votes accepted when phase is `'auditioning'`. Client countdown timer deferred to Phase 8.
 
 ### 3.1 Update layer phase machine
 
@@ -510,9 +514,11 @@ The audience phone shows voting cards **immediately** when the layer starts — 
 
 ---
 
-## Phase 4: Tempo & Timing
+## Phase 4: Tempo & Timing -- COMPLETE (2026-03-19)
 
 **Goal:** Implement per-layer, per-song tempo changes and ensure all timing is correct with variable BPM.
+
+> **Deviations:** Tempo sent via new `set_tempo` AudioCue (not timing engine). `NOMINAL_TEMPO_BPM` retained as fallback constant; `routerState.baseTempo` derived from config at runtime. Tempo reset added to rejection gesture (not in original spec). Finale tempo reset triggers on `SHOW_PHASE_CHANGED` → `finale_elegy` in audio-router event loop.
 
 ### 4.1 Tempo change via OSC
 

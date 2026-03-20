@@ -68,12 +68,9 @@ function createFinaleConfig(layerCount = 2): ShowConfig {
       bothOptionsSurvive: true,
     },
     timing: {
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 3000,
-      beatsPerLoop: 32,
-      auditionsPerLayer: 2,
+      loopBoundaryBeats: 32,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: [],

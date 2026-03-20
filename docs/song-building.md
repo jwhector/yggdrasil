@@ -61,13 +61,15 @@ type LayerPhase =
 
 ## Blind Vote Mechanic
 
-The vote window is a configurable duration (default: 10–15 seconds). During this window:
-- Audience sees Option A and Option B as large tappable cards
+The vote window equals the audition duration — it is **derived**, not separately configured. It opens when option A starts playing and closes when option B finishes. The duration is `auditionBars[layerIndex] * 2 * barsToMs(1, tempos[layerIndex])`, which naturally compresses as tempo increases and audition bars decrease (default: ~16s at layer 0, ~5.6s at layer 5).
+
+During this window:
+- Audience sees Option A and Option B as large tappable cards (shown immediately at layer start)
 - Each user taps once to vote; vote is final (no changing during blind vote)
 - **No live feedback** on vote distribution. The audience cannot see which option is leading.
 - This preserves authentic expression: you vote your preference, not the crowd's momentum
 
-When the vote window closes, the **Reveal Sequence** plays (~5s total, matching `revealSequenceDurationMs`). The conductor pauses at `revealing` phase until `ADVANCE_FROM_REVEAL` fires from the timing engine after this duration.
+When the audition/vote window closes, the **Reveal Sequence** plays (~5s total, matching `revealSequenceDurationMs`). The conductor pauses at `revealing` phase until `ADVANCE_FROM_REVEAL` fires from the timing engine after this duration.
 
 1. **Tension beat** (~0.9s): both options displayed equal size, muted, no result
 2. **Split reveal** (~2s): winning option grows (flex proportional to consensus), losing option shrinks + dims
@@ -103,11 +105,23 @@ interface LayerResult {
 
 **Per-attempt tuning:** The `thresholds` array can vary per song. Song 1 could use a gentler curve as the audience learns. Song 3 could use a steeper curve for dramatic tension.
 
+## Tempo Escalation
+
+Each layer has a configurable tempo (from `AttemptConfig.tempos[]`). At the start of each layer (when entering `auditioning` phase), the conductor emits a `set_tempo` AudioCue and the audio-router sends `/live/song/set/tempo` via OSC. This changes the global Ableton tempo — all previously locked layers play at the new BPM (Ableton's warp engine handles time-stretching).
+
+**Default tempo curve:** `[120, 120, 130, 140, 155, 170]`
+
+The tempo escalation serves two purposes:
+1. **Urgency atmosphere**: The music accelerates as doubt rises, creating tension
+2. **Compressed voting window**: Faster tempo + fewer audition bars = shorter time to listen and vote
+
+**Tempo resets to base** (first attempt's `tempos[0]`) on: collapse, song rejection, attempt completion, and `finale_elegy` phase. The next song's layer 0 sets its own starting tempo.
+
 ## Collapse Behavior
 
 When the doubt threshold is not met after a vote:
 1. The current layer enters `collapsed` phase — the vote's winner is still determined but the layer does NOT lock in
-2. **Audio**: Collapse effect triggers via OSC (return track effects — distortion, filter sweep, reverb tail)
+2. **Audio**: Collapse effect triggers via OSC (return track effects — distortion, filter sweep, reverb tail). Tempo ramps down to floor then resets to base.
 3. **Visual**: Collapse state shown on projector; phone UI shows collapse state
 4. **System**: All remaining layers for this attempt are marked `unreached`
 5. **Data**: Locked-in layers from earlier in this attempt are preserved as available finale fragments. The collapsed layer and all unreached layers are lost (both options visible but locked in finale elegy).
