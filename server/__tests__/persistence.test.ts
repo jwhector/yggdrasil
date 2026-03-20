@@ -30,6 +30,7 @@ function createTestConfig(): ShowConfig {
         thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
         tempos: [120, 120, 130, 140, 155, 170],
         auditionBars: [4, 4, 4, 2, 2, 2],
+        auditionCycles: [1, 1, 1, 1, 1, 1],
         layers: [
           { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
           { index: 1, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
@@ -41,6 +42,7 @@ function createTestConfig(): ShowConfig {
         thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
         tempos: [120, 120, 130, 140, 155, 170],
         auditionBars: [4, 4, 4, 2, 2, 2],
+        auditionCycles: [1, 1, 1, 1, 1, 1],
         layers: [
           { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
         ],
@@ -51,6 +53,7 @@ function createTestConfig(): ShowConfig {
         thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
         tempos: [120, 120, 130, 140, 155, 170],
         auditionBars: [4, 4, 4, 2, 2, 2],
+        auditionCycles: [1, 1, 1, 1, 1, 1],
         layers: [
           { index: 0, type: 'bass', optionA: { trackIndex: 6 }, optionB: { trackIndex: 7 }, labelA: 'A', labelB: 'B' },
         ],

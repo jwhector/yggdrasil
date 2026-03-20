@@ -795,7 +795,7 @@ export function filterStateForClient(
           myVote,
           currentAuditionOption: attempt.currentAuditionOption,
           auditionLoopIndex: attempt.auditionLoopIndex,
-          auditionTotalLoops: 2, // Always 2: A then B
+          auditionTotalLoops: (state.config.attempts[state.currentAttemptIndex]?.auditionCycles?.[attempt.currentLayerIndex] ?? 1) * 2,
           currentVoteResult: attempt.currentVoteResult
             ? { winner: attempt.currentVoteResult.winner, winningProportion: attempt.currentVoteResult.consensus }
             : null,

@@ -23,6 +23,7 @@ import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, LayerType } from '../conductor/types';
+import { LAYERS_PER_ATTEMPT } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
 import { setupSocketHandlers, broadcastEvents } from './socket';
@@ -53,11 +54,6 @@ const OSC_ENABLED = process.env.OSC_ENABLED !== 'false'; // Default: true
 const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '11000', 10);
 const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
 const ABLETON_HOST = process.env.ABLETON_HOST || process.env.OSC_HOST || '127.0.0.1';
-
-// Health Bar defaults (used as config overrides when not specified in show config)
-const _DEFAULT_DRAIN_FACTOR = parseFloat(process.env.DEFAULT_DRAIN_FACTOR || '0.5');
-const _DEFAULT_LAYER_MULTIPLIERS = (process.env.DEFAULT_LAYER_MULTIPLIERS || '0.5,0.6,0.8,1.0,1.3,1.6,2.0')
-  .split(',').map(Number);
 
 /**
  * Parse show config JSON and convert layerLabels from plain object to Map.
@@ -93,7 +89,80 @@ function parseShowConfig(json: string): ShowConfig {
     config.finale.audioPreviewPath = process.env.AUDIO_PREVIEW_PATH;
   }
 
+  validateShowConfig(config);
   return config;
+}
+
+const VALID_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
+
+function validateShowConfig(config: ShowConfig): void {
+  const errors: string[] = [];
+
+  for (let i = 0; i < config.attempts.length; i++) {
+    const attempt = config.attempts[i];
+    const prefix = `attempts[${i}]`;
+
+    if (attempt.layers.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.layers has length ${attempt.layers.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.thresholds.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.thresholds has length ${attempt.thresholds.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.tempos.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.tempos has length ${attempt.tempos.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.auditionBars.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.auditionBars has length ${attempt.auditionBars.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.auditionCycles.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.auditionCycles has length ${attempt.auditionCycles.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+
+    for (let j = 0; j < attempt.thresholds.length; j++) {
+      const t = attempt.thresholds[j];
+      if (typeof t !== 'number' || t < 0 || t > 1) {
+        errors.push(`${prefix}.thresholds[${j}] = ${t}, must be a number in [0, 1]`);
+      }
+    }
+    for (let j = 0; j < attempt.tempos.length; j++) {
+      if (typeof attempt.tempos[j] !== 'number' || attempt.tempos[j] <= 0) {
+        errors.push(`${prefix}.tempos[${j}] = ${attempt.tempos[j]}, must be a positive number`);
+      }
+    }
+    for (let j = 0; j < attempt.auditionBars.length; j++) {
+      const b = attempt.auditionBars[j];
+      if (!Number.isInteger(b) || b <= 0) {
+        errors.push(`${prefix}.auditionBars[${j}] = ${b}, must be a positive integer`);
+      }
+    }
+    for (let j = 0; j < attempt.auditionCycles.length; j++) {
+      const c = attempt.auditionCycles[j];
+      if (!Number.isInteger(c) || c <= 0) {
+        errors.push(`${prefix}.auditionCycles[${j}] = ${c}, must be a positive integer`);
+      }
+    }
+  }
+
+  if (typeof config.finale.bothOptionsSurvive !== 'boolean') {
+    errors.push(`finale.bothOptionsSurvive = ${config.finale.bothOptionsSurvive}, must be a boolean`);
+  }
+
+  const order = config.finale.ceremonyLayerOrder;
+  if (order.length !== LAYERS_PER_ATTEMPT) {
+    errors.push(`finale.ceremonyLayerOrder has length ${order.length}, expected ${LAYERS_PER_ATTEMPT}`);
+  }
+  for (const lt of order) {
+    if (!VALID_LAYER_TYPES.includes(lt)) {
+      errors.push(`finale.ceremonyLayerOrder contains invalid layer type: "${lt}"`);
+    }
+  }
+  if (new Set(order).size !== order.length) {
+    errors.push(`finale.ceremonyLayerOrder contains duplicates`);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Invalid show config:\n  - ${errors.join('\n  - ')}`);
+  }
 }
 
 async function main() {

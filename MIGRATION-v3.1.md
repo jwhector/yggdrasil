@@ -825,9 +825,11 @@ Add:
 
 ---
 
-## Phase 9: Config & Environment
+## Phase 9: Config & Environment -- COMPLETE (2026-03-20)
 
 **Goal:** Finalize all configuration changes.
+
+> **Deviations:** `default-show.json`, `ableton-layout.json`, and `conductor/types.ts` were already V3.1-compliant from earlier phases. Phase 9 focused on adding config validation to `parseShowConfig()` in `server/index.ts`, removing dead health bar env var declarations, and fixing `.env.example`.
 
 ### 9.1 `default-show.json`
 

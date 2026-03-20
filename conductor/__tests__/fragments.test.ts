@@ -29,6 +29,7 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCoun
     thresholds: Array(layerCount).fill(0.5),
     tempos: Array(layerCount).fill(120),
     auditionBars: Array(layerCount).fill(4),
+    auditionCycles: Array(layerCount).fill(1),
   };
 }
 

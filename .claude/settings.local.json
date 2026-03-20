@@ -25,7 +25,8 @@
       "Bash(sed -i '' \"s/''melody'', ''drums'', ''pad'', ''bass'', ''harmony'', ''fx1'', ''fx2''/''melody'', ''drums'', ''pad'', ''bass'', ''harmony'', ''fx''/g\" server/__tests__/timing.test.ts)",
       "Bash(perl -i -0pe ':*)",
       "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/conductor --include=*.ts)",
-      "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/server --include=*.ts)"
+      "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/server --include=*.ts)",
+      "Bash(grep -r \"default-show.json\\\\|CONFIG_PATH\\\\|loadConfig\\\\|validateConfig\" /Users/jared/Documents/Projects/yggdrasil/server /Users/jared/Documents/Projects/yggdrasil/conductor --include=*.ts)"
     ]
   }
 }

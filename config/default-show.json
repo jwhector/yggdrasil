@@ -11,52 +11,53 @@
       "thresholds": [0.50, 0.50, 0.65, 0.78, 0.88, 0.95],
       "tempos": [120, 120, 130, 140, 155, 170],
       "auditionBars": [4, 4, 4, 2, 2, 2],
+      "auditionCycles": [2, 2, 2, 2, 2, 2],
       "layers": [
         {
           "index": 0,
           "type": "bass",
-          "optionA": { "trackIndex": 0, "clipSlot": 0 },
-          "optionB": { "trackIndex": 1, "clipSlot": 0 },
+          "optionA": { "trackIndex": 31, "clipSlot": 0 },
+          "optionB": { "trackIndex": 33, "clipSlot": 0 },
           "labelA": "Grounded",
           "labelB": "Restless"
         },
         {
           "index": 1,
           "type": "drums",
-          "optionA": { "trackIndex": 2, "clipSlot": 0 },
-          "optionB": { "trackIndex": 3, "clipSlot": 0 },
+          "optionA": { "trackIndex": 18, "clipSlot": 0 },
+          "optionB": { "trackIndex": 19, "clipSlot": 0 },
           "labelA": "Steady",
           "labelB": "Urgent"
         },
         {
           "index": 2,
           "type": "melody",
-          "optionA": { "trackIndex": 4, "clipSlot": 0 },
-          "optionB": { "trackIndex": 5, "clipSlot": 0 },
+          "optionA": { "trackIndex": 5, "clipSlot": 0 },
+          "optionB": { "trackIndex": 2, "clipSlot": 0 },
           "labelA": "Rising",
           "labelB": "Falling"
         },
         {
           "index": 3,
           "type": "harmony",
-          "optionA": { "trackIndex": 6, "clipSlot": 0 },
-          "optionB": { "trackIndex": 7, "clipSlot": 0 },
+          "optionA": { "trackIndex": 11, "clipSlot": 0 },
+          "optionB": { "trackIndex": 13, "clipSlot": 0 },
           "labelA": "Open",
           "labelB": "Tight"
         },
         {
           "index": 4,
           "type": "pad",
-          "optionA": { "trackIndex": 8, "clipSlot": 0 },
-          "optionB": { "trackIndex": 9, "clipSlot": 0 },
+          "optionA": { "trackIndex": 28, "clipSlot": 0 },
+          "optionB": { "trackIndex": 29, "clipSlot": 0 },
           "labelA": "Warm",
           "labelB": "Cold"
         },
         {
           "index": 5,
           "type": "fx",
-          "optionA": { "trackIndex": 10, "clipSlot": 0 },
-          "optionB": { "trackIndex": 11, "clipSlot": 0 },
+          "optionA": { "trackIndex": 39, "clipSlot": 0 },
+          "optionB": { "trackIndex": 40, "clipSlot": 0 },
           "labelA": "Bright",
           "labelB": "Dark"
         }
@@ -68,6 +69,7 @@
       "thresholds": [0.50, 0.50, 0.65, 0.78, 0.88, 0.95],
       "tempos": [120, 120, 130, 140, 155, 170],
       "auditionBars": [4, 4, 4, 2, 2, 2],
+      "auditionCycles": [2, 2, 2, 2, 2, 2],
       "layers": [
         {
           "index": 0,
@@ -125,6 +127,7 @@
       "thresholds": [0.50, 0.50, 0.65, 0.78, 0.88, 0.95],
       "tempos": [120, 120, 130, 140, 155, 170],
       "auditionBars": [4, 4, 4, 2, 2, 2],
+      "auditionCycles": [2, 2, 2, 2, 2, 2],
       "layers": [
         {
           "index": 0,
@@ -237,7 +240,8 @@
     "layerOrdering": "Layers are staggered across songs so different types unlock first. Song 1 (ambition): bass/drums/melody/harmony/pad/fx. Song 2 (love): melody/harmony/fx/bass/pad/drums. Song 3 (avoidance): pad/fx/drums/bass/melody/harmony.",
     "thresholds": "Per-layer doubt thresholds. winningProportion must meet or exceed threshold to pass. Layer 0-1: 0.50 (any majority passes). Layer 5: 0.95 (near-perfect alignment required).",
     "tempos": "Per-layer BPM. Increases each layer to create urgency. Layer 0: 120 BPM (relaxed), Layer 5: 170 BPM (desperate).",
-    "auditionBars": "Bars per option (A and B each get this many bars). Total voting window = auditionBars * 2 * barsToMs(1, tempo).",
+    "auditionBars": "Bars per option per cycle (A and B each get this many bars per cycle). Total voting window = auditionBars * 2 * auditionCycles * barsToMs(1, tempo).",
+    "auditionCycles": "Number of A-B cycles per layer. 1 = A then B (default). 2 = A-B-A-B. Each cycle plays option A for auditionBars bars, then option B for auditionBars bars.",
     "audioReferences": "trackIndex values follow the formula above. clipSlot is 0-indexed. Replace with actual Ableton layout.",
     "optionLabels": "Emotional taglines are placeholders. Replace with labels that match actual musical content.",
     "collapseReturnTrackIndex": "The Ableton return track index for collapse effects is configured in config/ableton-layout.json."

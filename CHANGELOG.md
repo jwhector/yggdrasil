@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-03-20 — V3.1 Migration Phase 9: Config & Environment
+
+**Context:** Phase 9 finalizes configuration changes. Most config (`default-show.json`, `ableton-layout.json`, `conductor/types.ts`) was already V3.1-compliant from earlier phases. This phase adds runtime config validation and removes dead code.
+
+**Key changes:**
+- `server/index.ts`: Added `validateShowConfig()` — validates per-attempt array lengths (thresholds, tempos, auditionBars, layers all === 6), threshold ranges [0,1], positive tempos, positive integer auditionBars, `bothOptionsSurvive` is boolean, `ceremonyLayerOrder` has 6 unique valid LayerType entries. Server refuses to start with bad config.
+- `server/index.ts`: Removed dead `_DEFAULT_DRAIN_FACTOR` and `_DEFAULT_LAYER_MULTIPLIERS` declarations (health bar remnants, unused since Phase 1-2).
+- `.env.example`: Fixed `CEREMONY_LAYER_ORDER` example from `fx1,fx2` to `fx`.
+
 ## 2026-03-20 — V3.1 Migration Phase 8: Reveal Sequence & UI
 
 **Context:** Phase 8 replaces the health bar drain with per-layer doubt threshold visualization, adds escalating urgency effects on audience phones, and implements collapse-as-release. The conductor threshold infrastructure was already complete from Phases 1-2; this phase is entirely client-side.

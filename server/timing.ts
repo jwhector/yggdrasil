@@ -121,7 +121,7 @@ interface TimerState {
 interface AuditionTrackingState {
   lastToggleBeat: number;      // Beat number at last option toggle (-1 = not yet set)
   beatsPerLoop: number;        // From config
-  totalLoops: number;          // Always 2 (A then B)
+  totalLoops: number;          // auditionCycles * 2 (each cycle = A + B)
   currentLoopIndex: number;    // 0-based, increments on each toggle
 }
 
@@ -387,7 +387,8 @@ export function createTimingEngine(
     const auditionBars = attemptConfig?.auditionBars?.[layerIndex] ?? 4;
     const tempo = attemptConfig?.tempos?.[layerIndex] ?? engineConfig.fallbackBpm;
     const beatsPerLoop = auditionBars * BEATS_PER_BAR;
-    const totalLoops = 2; // A then B
+    const auditionCycles = attemptConfig?.auditionCycles?.[layerIndex] ?? 1;
+    const totalLoops = auditionCycles * 2; // Each cycle = A + B
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats; first beat sets the baseline in handleBeatEvent

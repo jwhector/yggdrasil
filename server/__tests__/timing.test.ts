@@ -50,6 +50,7 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): AttemptC
     thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
     tempos: [120, 120, 130, 140, 155, 170],
     auditionBars: [4, 4, 4, 2, 2, 2],
+    auditionCycles: [1, 1, 1, 1, 1, 1],
     layers: [0, 1, 2].map(i => makeLayerConfig(i)),
   };
 }

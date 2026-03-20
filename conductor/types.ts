@@ -131,6 +131,7 @@ export interface AttemptConfig {
   thresholds: number[];                 // Per-layer doubt thresholds (length 6)
   tempos: number[];                     // Per-layer BPM (length 6)
   auditionBars: number[];               // Bars per option during audition (length 6)
+  auditionCycles: number[];             // A-B cycles per layer (1 = A then B, 2 = A-B-A-B) (length 6)
 }
 
 /** Recorded result of a completed/collapsed attempt, used for fragment generation. */
