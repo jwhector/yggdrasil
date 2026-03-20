@@ -160,6 +160,8 @@ interface AudioRouterState {
   fragmentTrackIndices: Set<number>;
   /** Base tempo derived from config (first attempt, first layer), used for resets */
   baseTempo: number;
+  /** Track indices identified as foldable (group tracks) during discovery — never muted */
+  foldableTracks: Set<number>;
 }
 
 // ============================================================================
@@ -196,6 +198,7 @@ export function createAudioRouter(
     activeLayerTracks: new Map(),
     fragmentTrackIndices: new Set(),
     baseTempo: NOMINAL_TEMPO_BPM,
+    foldableTracks: new Set(),
   };
 
   // Last-seen gain config, updated at the top of handleStateChange
@@ -214,8 +217,9 @@ export function createAudioRouter(
     return gs;
   }
 
-  /** Low-level Ableton track mute (for session view legibility). Always sends OSC. */
+  /** Low-level Ableton track mute (for session view legibility). Skips foldable (group) tracks. */
   function muteTrack(trackIndex: number): void {
+    if (routerState.foldableTracks.has(trackIndex)) return;
     oscBridge.send('/live/track/set/mute', trackIndex, 1);
     routerState.unmutedTracks.delete(trackIndex);
   }
@@ -534,6 +538,16 @@ export function createAudioRouter(
    * (the one closest to the output in the device chain).
    */
   async function discoverTrackDevice(trackIndex: number | "master"): Promise<void> {
+    // Check if this is a foldable (group) track — skip device discovery if so
+    if (trackIndex !== "master") {
+      oscBridge.send('/live/track/get/is_foldable', trackIndex);
+      const foldableResp = await waitForOSCCorrelated('/live/track/get/is_foldable', trackIndex);
+      if (foldableResp?.[1] === 1) {
+        routerState.foldableTracks.add(trackIndex);
+        return;
+      }
+    }
+
     // Bulk query: get all device names on this track in one round-trip
     oscBridge.send('/live/track/get/devices/name', trackIndex);
     const namesResp = await waitForOSCCorrelated('/live/track/get/devices/name', trackIndex);
