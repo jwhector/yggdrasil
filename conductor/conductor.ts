@@ -12,11 +12,12 @@
  *   finale_elegy → finale_assembly → finale_deliberation → finale_ceremony → finale_performer_mix → ended
  *
  * Song-building layer flow:
- *   locked → auditioning → voting → revealing → locked_in | collapsed
+ *   locked → auditioning → revealing → locked_in | collapsed
+ *   (voting is open concurrently during auditioning — no separate voting phase)
  *
  * Two song outcomes:
- *   - Collapse: health bar reaches 0 → auto-advance to next attempt_story
- *   - Completion: all layers locked in, health bar > 0 → auto-advance to attempt_resolve
+ *   - Collapse: doubt threshold not met → auto-advance to next attempt_story
+ *   - Completion: all layers locked in → auto-advance to attempt_resolve
  *     In attempt_resolve the performer triggers TRIGGER_REJECTION to narratively reject the song.
  */
 
@@ -37,7 +38,7 @@ import type {
   FinaleState,
 } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
-import { createHealthBar, applyDrain, isCollapsed } from './health-bar';
+import { checkThreshold } from './threshold';
 import { generateFragments } from './fragments';
 import { queueChange, cancelPending, firePendingChanges } from './performer-mix';
 import { getNpcMessage } from './npc';
@@ -85,9 +86,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    healthBar: createHealthBar(),
     currentVoteResult: null,
-    currentDrain: null,
   }));
 
   return {
@@ -134,8 +133,6 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleStartAudition(state);
     case 'TOGGLE_AUDITION':
       return handleToggleAudition(state);
-    case 'OPEN_VOTING':
-      return handleOpenVoting(state);
     case 'CLOSE_VOTING':
       return handleCloseVoting(state);
     case 'ADVANCE_FROM_REVEAL':
@@ -149,12 +146,6 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [];
     case 'RERUN_VOTE':
       return handleRerunVote(state);
-
-    // Health Bar
-    case 'SET_DRAIN_FACTOR':
-      return handleSetDrainFactor(state, command.factor);
-    case 'SET_HEALTH':
-      return handleSetHealth(state, command.value);
     case 'FORCE_COLLAPSE':
       return handleForceCollapse(state);
 
@@ -519,12 +510,6 @@ function handleToggleAudition(state: ShowState): ConductorEvent[] {
   ];
 }
 
-// Vestigial: auditioning now continues through the voting window.
-// CLOSE_VOTING fires directly when audition loops complete.
-function handleOpenVoting(_state: ShowState): ConductorEvent[] {
-  return [];
-}
-
 function handleCloseVoting(state: ShowState): ConductorEvent[] {
   if (state.phase !== 'attempt_build') {
     return [{ type: 'ERROR', message: 'Can only close voting during attempt_build' }];
@@ -535,7 +520,7 @@ function handleCloseVoting(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  if (attempt.currentLayerPhase !== 'voting' && attempt.currentLayerPhase !== 'auditioning') {
+  if (attempt.currentLayerPhase !== 'auditioning') {
     return [{ type: 'ERROR', message: `Cannot close voting from layer phase: ${attempt.currentLayerPhase}` }];
   }
 
@@ -552,7 +537,7 @@ function handleSubmitVote(state: ShowState, userId: UserId, choice: 'A' | 'B'): 
     return [];
   }
 
-  if (attempt.currentLayerPhase !== 'voting' && attempt.currentLayerPhase !== 'auditioning') {
+  if (attempt.currentLayerPhase !== 'auditioning') {
     return []; // Silently ignore votes outside voting window
   }
 
@@ -594,8 +579,8 @@ function handleForceOption(state: ShowState, choice: 'A' | 'B'): ConductorEvent[
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  // Force locks in the layer with the chosen option, bypassing health bar drain
-  return lockInLayer(state, attempt, choice, null);
+  // Force locks in the layer with the chosen option, bypassing threshold check
+  return lockInLayer(state, attempt, choice);
 }
 
 function handleRerunVote(state: ShowState): ConductorEvent[] {
@@ -645,30 +630,6 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
   ];
 }
 
-// ============================================================================
-// Health Bar Commands
-// ============================================================================
-
-function handleSetDrainFactor(state: ShowState, factor: number): ConductorEvent[] {
-  const attempt = currentAttempt(state);
-  if (!attempt) {
-    return [{ type: 'ERROR', message: 'No active attempt' }];
-  }
-
-  attempt.healthBar.drainFactor = factor;
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
-function handleSetHealth(state: ShowState, value: number): ConductorEvent[] {
-  const attempt = currentAttempt(state);
-  if (!attempt) {
-    return [{ type: 'ERROR', message: 'No active attempt' }];
-  }
-
-  attempt.healthBar.current = Math.max(0, Math.min(100, value));
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
 function handleForceCollapse(state: ShowState): ConductorEvent[] {
   if (state.phase !== 'attempt_build') {
     return [{ type: 'ERROR', message: 'Can only force collapse during attempt_build' }];
@@ -678,9 +639,6 @@ function handleForceCollapse(state: ShowState): ConductorEvent[] {
   if (!attempt || attempt.status !== 'in_progress') {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
-
-  // Force health bar to zero regardless of current value
-  attempt.healthBar.current = 0;
 
   return collapseAttempt(state, attempt);
 }
@@ -710,14 +668,16 @@ function handleTriggerRejection(state: ShowState): ConductorEvent[] {
 // ============================================================================
 
 /**
- * Resolve the current layer: calculate vote result, apply health bar drain,
- * then either collapse or lock in.
+ * Resolve the current layer: calculate vote result, check doubt threshold,
+ * then transition to revealing.
+ * Phase 2 will wire in threshold.ts; for now the threshold is read directly from config.
  */
 function resolveCurrentLayer(state: ShowState, attempt: AttemptState): ConductorEvent[] {
   const events: ConductorEvent[] = [];
   const layerIndex = attempt.currentLayerIndex;
+  const layerConfig = attempt.layerPlan[layerIndex];
 
-  // 0. Stop audition audio (auditioning now continues through voting window)
+  // 0. Stop audition audio
   if (attempt.currentAuditionOption !== null) {
     events.push({
       type: 'AUDIO_CUE',
@@ -732,35 +692,28 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
     attempt.currentAuditionOption = null;
   }
 
-  // 1. Calculate vote result and drain
+  // 1. Calculate vote result
   const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
-  const { voteResult, drain } = calculateVoteResult(
-    layerVotes,
+  const voteResult = calculateVoteResult(layerVotes);
+
+  // 2. Threshold check
+  const attemptConfig = state.config.attempts[attempt.index];
+  const threshold = attemptConfig?.thresholds?.[layerIndex] ?? 0;
+  const { passed, winningProportion } = checkThreshold(voteResult.votesA, voteResult.votesB, threshold);
+
+  // 3. Record the layer result
+  attempt.layerResults.push({
     layerIndex,
-  );
+    type: layerConfig?.type ?? 'melody',
+    status: passed ? 'locked_in' : 'collapsed',
+    chosenOption: voteResult.winner,
+    winningProportion,
+    thresholdRequired: threshold,
+    passed,
+  });
 
-  // 2. Apply drain to health bar (also sets drain.healthAfter)
-  applyDrain(attempt.healthBar, drain);
-
-  // 3. For non-collapse paths: record the layer result early (during revealing)
-  //    so the UI can display it before lock-in. For collapse paths, collapseAttempt
-  //    handles the result with status='unreached'/drainAmount=null.
-  if (!isCollapsed(attempt.healthBar)) {
-    const { consensus } = calculateConsensus(layerVotes);
-    const layerConfig = attempt.layerPlan[layerIndex];
-    attempt.layerResults.push({
-      layerIndex,
-      type: layerConfig?.type ?? 'melody',
-      status: 'locked_in',
-      chosenOption: voteResult.winner,
-      consensus,
-      drainAmount: drain.drainAmount,
-    });
-  }
-
-  // 4. Store reveal data on attempt for client access during revealing phase
+  // 4. Store vote result on attempt for client access during revealing phase
   attempt.currentVoteResult = voteResult;
-  attempt.currentDrain = drain;
 
   // 5. Transition to revealing
   attempt.currentLayerPhase = 'revealing';
@@ -779,12 +732,14 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
     result: voteResult,
   });
 
-  // 7. Emit HEALTH_BAR_DRAINED (drain.healthAfter now set)
+  // 7. Emit THRESHOLD_CHECK
   events.push({
-    type: 'HEALTH_BAR_DRAINED',
+    type: 'THRESHOLD_CHECK',
     attemptIndex: attempt.index,
     layerIndex,
-    drain,
+    winningProportion,
+    threshold,
+    passed,
   });
 
   // The actual lock-in or collapse happens when ADVANCE_FROM_REVEAL is received
@@ -811,30 +766,29 @@ function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
   }
 
   const voteResult = attempt.currentVoteResult;
-  const drain = attempt.currentDrain;
 
   // Clear reveal data
   attempt.currentVoteResult = null;
-  attempt.currentDrain = null;
 
-  if (isCollapsed(attempt.healthBar)) {
+  // Determine pass/collapse from the layer result recorded during resolveCurrentLayer
+  const layerResult = attempt.layerResults.find(r => r.layerIndex === attempt.currentLayerIndex);
+  const passed = layerResult?.passed ?? true;
+
+  if (!passed) {
     return collapseAttempt(state, attempt);
   } else {
     const winner = voteResult?.winner ?? 'A';
-    const drainAmount = drain?.drainAmount ?? null;
-    return lockInLayer(state, attempt, winner, drainAmount);
+    return lockInLayer(state, attempt, winner);
   }
 }
 
 /**
  * Lock in the current layer with the winning option and advance to next layer.
- * drainAmount is null for forced lock-ins (FORCE_OPTION).
  */
 function lockInLayer(
   state: ShowState,
   attempt: AttemptState,
   winner: 'A' | 'B',
-  drainAmount: number | null,
 ): ConductorEvent[] {
   const events: ConductorEvent[] = [];
   const layerIndex = attempt.currentLayerIndex;
@@ -845,17 +799,17 @@ function lockInLayer(
   const existingResult = attempt.layerResults.find(r => r.layerIndex === layerIndex);
   if (!existingResult) {
     const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
-    const { consensus } = calculateConsensus(layerVotes);
+    const { winningProportion } = calculateConsensus(layerVotes);
     attempt.layerResults.push({
       layerIndex,
       type: layerConfig?.type ?? 'melody',
       status: 'locked_in',
       chosenOption: winner,
-      consensus,
-      drainAmount,
+      winningProportion,
+      thresholdRequired: null,
+      passed: true,
     });
   } else {
-    // Update status/chosenOption in case it was set as 'unreached' during revealing
     existingResult.status = 'locked_in';
     existingResult.chosenOption = winner;
   }
@@ -932,8 +886,9 @@ function collapseAttempt(state: ShowState, attempt: AttemptState): ConductorEven
       type: attempt.layerPlan[attempt.currentLayerIndex]?.type ?? 'melody',
       status: 'unreached',
       chosenOption: null,
-      consensus: null,
-      drainAmount: null,
+      winningProportion: null,
+      thresholdRequired: null,
+      passed: null,
     });
   }
 
@@ -951,7 +906,6 @@ function collapseAttempt(state: ShowState, attempt: AttemptState): ConductorEven
     type: 'ATTEMPT_COLLAPSED',
     attemptIndex: attempt.index,
     atLayer: attempt.currentLayerIndex,
-    healthBar: attempt.healthBar,
   });
 
   events.push({
@@ -977,8 +931,9 @@ function markUnreachedLayers(attempt: AttemptState): void {
         type: layerConfig.type,
         status: 'unreached',
         chosenOption: null,
-        consensus: null,
-        drainAmount: null,
+        winningProportion: null,
+        thresholdRequired: null,
+        passed: null,
       });
     }
   }
@@ -1061,9 +1016,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    healthBar: createHealthBar(),
     currentVoteResult: null,
-    currentDrain: null,
   }));
 
   return [

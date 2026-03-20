@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 2026-03-19 — V3.1 Migration Phase 1: Types & Constants
+
+**Context:** Phase 1 of the V3.1 migration. Updates all shared type definitions and constants so that subsequent phases (threshold mechanic, merged auditioning+voting, tempo, etc.) have a stable foundation. See `MIGRATION-v3.1.md` for the full migration plan.
+
+**Key changes:**
+- **7 layer types → 6**: Removed `fx1` and `fx2`, added `fx`. Updated across all conductor modules, components, tests, config, and identity mappings.
+- **Health bar removed**: Deleted `HealthBarState`, `HealthBarDrain` interfaces, `health-bar.ts` module, and all health bar test file. Removed `drainFactor` and `layerMultipliers` from `AttemptConfig`; replaced with `thresholds`, `tempos`, `auditionBars` arrays (all length 6).
+- **`LAYERS_PER_ATTEMPT = 6`**: Updated constant and all references.
+- **`LayerPhase` simplified**: Removed `'voting'` (voting now concurrent with `'auditioning'`). Removed all standalone `'voting'` phase checks across conductor, server, components, and hooks.
+- **`LayerResult` new shape**: `consensus`/`drainAmount` → `winningProportion`/`thresholdRequired`/`passed`.
+- **`Fragment` gains `wonVote: boolean`**: Marks whether a fragment won its blind vote.
+- **`FinaleConfig` gains `bothOptionsSurvive: boolean`**: Configures whether losing options are available in finale.
+- **Commands removed**: `OPEN_VOTING`, `SET_DRAIN_FACTOR`, `SET_HEALTH`.
+- **Events updated**: Removed `HEALTH_BAR_DRAINED`, added `THRESHOLD_CHECK`.
+- **Config**: `default-show.json` updated with 6-layer stagger tables, per-layer thresholds/tempos/auditionBars, `bothOptionsSurvive`, and 6-entry `ceremonyLayerOrder`.
+- **Identity**: `lib/identity.ts` updated — `fx1`/`fx2` entries replaced with single `fx` ("The Shimmer", `~`).
+- **Components**: Removed HealthBar/RevealSequence usage from audience and projector pages (compile fixes only — component files remain for Phase 8 deletion). Removed `'voting'` phase checks from `VotingControls`, `LayerProgress`, `useShowState`.
+- **Tests**: 315 passing (2 pre-existing audio-router failures unrelated to migration). Deleted `health-bar.test.ts`. Updated all test files for fx→fx, 7→6, threshold shape, removed drain assertions.
+
+**Deviations from MIGRATION-v3.1.md:** Kept `'auditioning'` as the LayerPhase name (not `'auditioning_and_voting'`) and kept `START_AUDITION` as the command name (not `START_LAYER`). These are semantic — the behavior change (concurrent voting during auditioning) is already implemented.
+
 ## 2026-03-18 — Merge Auditioning and Voting Phases
 
 **Context:** The song-building flow previously had a silent `voting` phase after auditioning stopped — audio faded out while audience voted in silence. This change makes auditioning (A/B option cycling) continue throughout the voting window, eliminating the dead-air gap. Votes were already accepted during auditioning, so the `voting` phase was functionally redundant.

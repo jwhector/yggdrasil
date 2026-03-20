@@ -3,8 +3,6 @@
 import { useMemo, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { HealthBar } from '@/components/song-building/HealthBar';
-import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { MixingMirror } from '@/components/finale/MixingMirror';
@@ -16,20 +14,6 @@ const SHOW_ID = 'default-show';
 export default function ProjectorPage() {
   const { socket, userId } = useSocket({ showId: SHOW_ID, mode: 'projector' });
   const { state, isLoading, currentAttempt } = useShowState(socket, 'projector', userId);
-
-  // Derive live vote tallies from the current layer's votes
-  const liveVotes = useMemo(() => {
-    if (!currentAttempt) return null;
-    const layerVotes = currentAttempt.votes.filter(
-      (v) => v.layerIndex === currentAttempt.currentLayerIndex
-    );
-    const votesA = layerVotes.filter((v) => v.choice === 'A').length;
-    const votesB = layerVotes.filter((v) => v.choice === 'B').length;
-    const total = votesA + votesB;
-    const consensus = total > 0 ? Math.max(votesA, votesB) / total : null;
-    const winner: 'A' | 'B' = votesA >= votesB ? 'A' : 'B';
-    return { votesA, votesB, total, consensus, winner };
-  }, [currentAttempt]);
 
   // Current layer config
   const currentLayerConfig = useMemo(() => {
@@ -61,22 +45,6 @@ export default function ProjectorPage() {
 
       const chapter = getChapterIdentity(currentAttempt.chapter);
       const layer = getLayerIdentity(currentLayerConfig.type);
-      const isRevealing = currentAttempt.currentLayerPhase === 'revealing';
-
-      // During revealing phase: compute vote result from votes + latest drain from health history
-      const latestDrain = isRevealing
-        ? currentAttempt.healthBar.history[currentAttempt.healthBar.history.length - 1] ?? null
-        : null;
-      const revealVoteResult = isRevealing && liveVotes
-        ? {
-            winner: liveVotes.winner,
-            consensus: liveVotes.consensus ?? 0.5,
-            votesA: liveVotes.votesA,
-            votesB: liveVotes.votesB,
-            totalVotes: liveVotes.total,
-          }
-        : null;
-
       return (
         <main
           style={{
@@ -102,23 +70,8 @@ export default function ProjectorPage() {
             userCount={userCount}
           />
 
-          {/* Health bar — prominent, always visible */}
-          <HealthBar
-            health={currentAttempt.healthBar.current}
-            drainShadow={isRevealing && latestDrain ? latestDrain.drainAmount : 0}
-            variant="projector"
-          />
-
-          {/* Current layer card OR reveal sequence */}
-          {isRevealing && revealVoteResult && latestDrain ? (
-            <RevealSequence
-              voteResult={revealVoteResult}
-              drain={{ drainAmount: latestDrain.drainAmount, healthAfter: latestDrain.healthAfter }}
-              healthBefore={currentAttempt.healthBar.current + latestDrain.drainAmount}
-              layerConfig={currentLayerConfig}
-              variant="projector"
-            />
-          ) : (
+          {/* Current layer card */}
+          {(
             <ProjectorLayerCard
               layerSymbol={layer.symbol}
               layerLabel={layer.label}

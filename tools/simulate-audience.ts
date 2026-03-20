@@ -40,7 +40,7 @@ const bots = Array.from({ length: NUM_BOTS }, (_, i) => {
     console.log(`[bot ${botId}] state_sync phase=${state.phase} layerPhase=${layerPhase}`);
 
     // Auto-vote when voting opens
-    if (layerPhase === 'auditioning' && typeof attemptIndex === 'number' && typeof layerIndex === 'number' && ) {
+    if (layerPhase === 'auditioning' && typeof attemptIndex === 'number' && typeof layerIndex === 'number') {
       const layerKey = `${attemptIndex}:${layerIndex}`;
       if (votedLayerKeys.has(layerKey)) return;
 

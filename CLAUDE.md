@@ -17,9 +17,11 @@
 
 ## What This System Is
 
-Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting across 3 song attempts. Each attempt has a **health bar** that drains proportionally to vote splits — collapse is mechanical when health reaches 0. The finale features an **elegy** (display of all built fragments), a **group assembly** (audience self-selects into 7 layer-type groups), a **deliberation** (groups preview audio and vote on fragments, then select ambassadors), a **ceremony** (ambassadors lock fragments at the altar via accelerometer), and a **performer mixing surface** (live-mix activated layers). An **NPC character** provides event-driven narrative text throughout.
+Yggdrasil is an interactive live performance system. An audience collectively builds a song through binary A/B voting across 3 song attempts. Each attempt has 6 layers (melody, drums, pad, bass, harmony, fx), each with a **doubt threshold** — if the winning vote proportion falls below the threshold, the song collapses. Thresholds escalate per layer, representing the performer's rising inner doubt. The finale features an **elegy** (display of all built fragments), a **group assembly** (audience self-selects into 6 layer-type groups), a **deliberation** (groups preview audio and vote on fragments, then select ambassadors), a **ceremony** (ambassadors lock fragments at the altar via accelerometer), and a **performer mixing surface** (live-mix activated layers). An **NPC character** provides event-driven narrative text throughout.
 
 **Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
+
+**Active migration:** V3 → V3.1 in progress. See `MIGRATION-v3.1.md` for the implementation plan. When MIGRATION-v3.1.md conflicts with ARCHITECTURE.md, the migration doc is correct.
 
 ---
 
@@ -48,7 +50,7 @@ Group assembly updates and audio metering use dedicated socket events at high fr
 yggdrasil/
 ├── ARCHITECTURE.md              # Source of truth (index + core concepts)
 ├── docs/                        # Detailed specs (load per-task, see ARCHITECTURE.md index)
-│   ├── song-building.md         # Layers, voting, health bar, collapse, fragments
+│   ├── song-building.md         # Layers, voting, doubt threshold, collapse, fragments
 │   ├── finale.md                # Elegy, assembly, deliberation, ceremony, performer mix
 │   ├── data-models.md           # TypeScript interfaces, conductor commands/events
 │   ├── client-routes.md         # /audience, /projector, /controller UI + visual identity
@@ -62,7 +64,6 @@ yggdrasil/
 │   ├── index.ts
 │   ├── conductor.ts             # State machine
 │   ├── voting.ts                # Vote tallying + VoteResult calculation
-│   ├── health-bar.ts            # Health bar drain calculation
 │   ├── assembly.ts              # Group assembly logic
 │   ├── deliberation.ts          # Group deliberation + ambassador selection
 │   ├── ceremony.ts              # Ceremony ambassador lock-in sequencing
@@ -90,7 +91,7 @@ yggdrasil/
 │
 ├── components/
 │   ├── LobbyDisplay.tsx         # Projector lobby screen
-│   ├── song-building/           # Layer grid, option cards, health bar, reveal sequence
+│   ├── song-building/           # Layer grid, option cards, reveal sequence
 │   ├── finale/                  # ElegyGrid, AssemblyCards, DeliberationBoard, CeremonyView, AltarReady, MixingSurface, MixingMirror, GroupIdentity
 │   └── controller/              # Operator controls
 │
@@ -123,7 +124,7 @@ npm run dev
 # Run conductor tests (most important — pure logic, no mocks)
 npm test -- conductor/
 
-# Run all tests (198 tests across 9 suites)
+# Run all tests (315 tests across 12 suites)
 npm test
 
 # Type check
@@ -168,7 +169,7 @@ These do NOT go through state_sync (too slow/heavy):
 
 ### Audio/OSC track layout
 - Track index: `attemptIndex * (layersPerAttempt * 2) + layerIndex * 2 + optionOffset`
-- 42 fragment tracks (3 attempts × 7 layers × 2 options); group (foldable) tracks are intermixed
+- 36 fragment tracks (3 attempts × 6 layers × 2 options); group (foldable) tracks are intermixed
 - Gain-based control via Utility devices; mute/unmute queries is_foldable to skip group tracks
 - Collapse gesture: return track 0 effects enabled, delayed mute after animation
 - Song rejection gesture: return track 1 effects enabled

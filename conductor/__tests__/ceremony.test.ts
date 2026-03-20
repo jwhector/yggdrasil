@@ -10,7 +10,7 @@ import {
 } from '../ceremony';
 import type { LayerType } from '../types';
 
-const LAYER_ORDER: LayerType[] = ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'];
+const LAYER_ORDER: LayerType[] = ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'];
 
 function makeChosenFragments(entries: Partial<Record<LayerType, string | null>> = {}): Map<LayerType, string | null> {
   const map = new Map<LayerType, string | null>();
@@ -38,9 +38,8 @@ describe('initializeCeremony', () => {
   });
 
   test('stores forfeited layers', () => {
-    const ceremony = initializeCeremony(LAYER_ORDER, makeChosenFragments(), makeAmbassadors(), ['fx1', 'fx2']);
-    expect(ceremony.forfeitedLayers).toContain('fx1');
-    expect(ceremony.forfeitedLayers).toContain('fx2');
+    const ceremony = initializeCeremony(LAYER_ORDER, makeChosenFragments(), makeAmbassadors(), ['fx']);
+    expect(ceremony.forfeitedLayers).toContain('fx');
   });
 });
 
@@ -124,7 +123,7 @@ describe('isCeremonyComplete', () => {
   });
 
   test('returns true when all non-forfeited layers are locked', () => {
-    const forfeited: LayerType[] = ['fx1', 'fx2'];
+    const forfeited: LayerType[] = ['fx'];
     const ceremony = initializeCeremony(LAYER_ORDER, makeChosenFragments(), makeAmbassadors(), forfeited);
     // Lock all non-forfeited layers
     for (const lt of LAYER_ORDER) {
@@ -137,10 +136,10 @@ describe('isCeremonyComplete', () => {
 
   test('returns false if even one non-forfeited layer is unlocked', () => {
     const ceremony = initializeCeremony(LAYER_ORDER, makeChosenFragments(), makeAmbassadors(), []);
-    for (const lt of LAYER_ORDER.slice(0, 6)) {
+    for (const lt of LAYER_ORDER.slice(0, 5)) {
       ceremony.lockedLayers.set(lt, `frag-${lt}`);
     }
-    // 'fx2' not locked
+    // 'fx' not locked
     expect(isCeremonyComplete(ceremony)).toBe(false);
   });
 });
@@ -188,7 +187,7 @@ describe('skipToLayer', () => {
     const ambassadors = makeAmbassadors();
     const ceremony = initializeCeremony(LAYER_ORDER, makeChosenFragments(), ambassadors, []);
     callNextAmbassador(ceremony, ambassadors);
-    skipToLayer(ceremony, 'fx2');
+    skipToLayer(ceremony, 'fx');
     expect(ceremony.currentAmbassador).toBeNull();
     expect(ceremony.altarReady).toBe(false);
   });

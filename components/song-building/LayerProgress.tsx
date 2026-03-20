@@ -75,7 +75,7 @@ export function LayerProgress({
           textColor = 'rgba(255,255,255,0.8)';
         }
 
-        const isPulsing = isCurrent && (currentLayerPhase === 'voting' || currentLayerPhase === 'auditioning');
+        const isPulsing = isCurrent && currentLayerPhase === 'auditioning';
 
         return (
           <div

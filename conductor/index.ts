@@ -17,8 +17,8 @@ export { createInitialState, processCommand } from './conductor';
 // Export voting functions
 export { calculateConsensus, calculateVoteResult } from './voting';
 
-// Export health bar functions
-export { createHealthBar, calculateDrain, applyDrain, isCollapsed } from './health-bar';
+// Export threshold functions
+export { checkThreshold } from './threshold';
 
 // Export fragment functions
 export { generateFragments, extractAttemptResult } from './fragments';

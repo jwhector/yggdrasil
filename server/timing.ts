@@ -692,9 +692,6 @@ export function createTimingEngine(
         case 'auditioning':
           startAuditionTracking(state);
           break;
-        case 'voting':
-          // Vestigial: voting phase no longer entered (auditioning continues through vote window)
-          break;
         case 'revealing': {
           stopAuditionTracking();
           const revealMs = state.config.timing.revealSequenceDurationMs;

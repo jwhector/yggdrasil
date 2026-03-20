@@ -20,7 +20,12 @@
       "Bash(done)",
       "Bash(rm silence.mp3)",
       "Bash(git stash:*)",
-      "Bash(grep -r \"Promise\\\\.all\\\\|Promise\\\\.race\\\\|concurrent\\\\|parallel\" --include=*.ts server/ conductor/)"
+      "Bash(grep -r \"Promise\\\\.all\\\\|Promise\\\\.race\\\\|concurrent\\\\|parallel\" --include=*.ts server/ conductor/)",
+      "Bash(sed -i '' \"s/''bass'', ''drums'', ''pad'', ''melody'', ''harmony'', ''fx1'', ''fx2''/''bass'', ''drums'', ''pad'', ''melody'', ''harmony'', ''fx''/g\" server/__tests__/persistence.test.ts server/__tests__/audio-router.test.ts server/__tests__/backup.test.ts)",
+      "Bash(sed -i '' \"s/''melody'', ''drums'', ''pad'', ''bass'', ''harmony'', ''fx1'', ''fx2''/''melody'', ''drums'', ''pad'', ''bass'', ''harmony'', ''fx''/g\" server/__tests__/timing.test.ts)",
+      "Bash(perl -i -0pe ':*)",
+      "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/conductor --include=*.ts)",
+      "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/server --include=*.ts)"
     ]
   }
 }

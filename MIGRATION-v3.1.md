@@ -121,9 +121,11 @@ All 6 covered. "Live" layers (bass, melody, pad) are at position 0 in their resp
 
 ---
 
-## Phase 1: Types & Constants
+## Phase 1: Types & Constants -- COMPLETE (2026-03-19)
 
 **Goal:** Update all shared type definitions and constants. Everything else depends on this.
+
+> **Deviations:** Kept `'auditioning'` as LayerPhase name (not `'auditioning_and_voting'`) and `START_AUDITION` as command name (not `START_LAYER`). The behavioral change (concurrent voting during auditioning) was already implemented prior to V3.1. See CHANGELOG 2026-03-18.
 
 ### 1.1 Update `LayerType`
 

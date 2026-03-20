@@ -5,7 +5,7 @@ import { getLayerIdentity } from '@/lib/identity';
 import type { LayerType } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 interface AssemblyCardsProps {
   myGroup: LayerType | null;

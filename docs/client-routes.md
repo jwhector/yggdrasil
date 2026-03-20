@@ -19,9 +19,8 @@
 - After vote closes → **Reveal sequence**:
   1. Both options shown side by side, no result (tension beat)
   2. Split revealed: winning option grows, losing option shrinks proportionally
-  3. Health Bar animates its drain (shadow region depletes)
+  3. Threshold check (winning proportion compared against doubt threshold)
   4. Winning option's audio locks into the mix
-- Health Bar always visible (top of screen), showing cumulative song vitality
 - Layer progress indicator showing completed layers and upcoming layers
 - Personal vote history dot on each completed layer (subtle indicator of which side you voted for)
 
@@ -32,7 +31,7 @@
 - Duration: ~10–15 seconds, purely observational, no interaction
 
 **Finale — Group Assembly:**
-- 7 tappable cards, one per layer type, each showing: layer symbol, layer color, configurable label (e.g., "The Heartbeat", "The Ground")
+- 6 tappable cards, one per layer type, each showing: layer symbol, layer color, configurable label (e.g., "The Heartbeat", "The Ground")
 - Live group size count displayed on each card (updates in real time as others join)
 - Timer visible at top of screen (configurable duration, e.g., 60 seconds)
 - Tap a card to join that group; tap a different card to switch (free choice, no constraints)
@@ -72,8 +71,8 @@
 **Song-building phases:**
 - Top: Song attempt title + chapter color/icon
 - Center: Current layer card — layer symbol + label, Option A vs Option B
-- Health Bar: large, prominent, visible to whole room
-- Reveal animation: vote split visualization, health bar drain
+- Threshold display: current layer's threshold line
+- Reveal animation: vote split visualization, threshold check
 - Stack history: icons of chosen layers so far
 
 **Finale — Elegy:**
@@ -81,14 +80,14 @@
 - NPC text displayed prominently
 
 **Finale — Group Assembly:**
-- Large visualization of the 7 groups forming in real time
+- Large visualization of the 6 groups forming in real time
 - Each group shown with layer symbol, color, and growing member count
 - Animated: members flowing into groups as people choose on their phones
 - Timer displayed prominently
 - NPC text when relevant
 
 **Finale — Deliberation:**
-- Overview of all 7 groups and their deliberation status
+- Overview of all 6 groups and their deliberation status
 - Per-group: which fragment is currently leading (vote counts visible on projector, unlike phones which show only within-group)
 - Groups that have reached majority shown with a "decided" visual state
 - Ambassador volunteering status visible as it happens
@@ -104,7 +103,7 @@
 
 **Finale — Performer Mix:**
 - Mirror of the performer's mixing surface (simplified/beautified)
-- 7 rows showing active fragment per layer, chapter color
+- 6 rows showing active fragment per layer, chapter color
 - Pending changes visible (pulsing, about to land)
 - Loop position indicator
 - Visual energy/density increases as mix builds
@@ -120,13 +119,13 @@
 |----------|----------|
 | **Show Phase** | Start Show, Stop Show, Advance Phase, Jump to Phase (dropdown) |
 | **Song-Building** | Open Vote, Close Vote, Force Option A/B, Extend Timer, Rerun Vote |
-| **Health Bar** | Adjust drain factor per attempt, Adjust layer multipliers, View current health, Override health value, Force Collapse |
+| **Threshold** | Read-only current threshold, Last vote's winning proportion, FORCE_COLLAPSE |
 | **Song Rejection** | Trigger rejection effect (OSC command to Ableton) — only for completed songs |
 | **Audio** | Transport Play/Stop, Hard Mute/Panic, Reset Utilities (all gains to 0 dB), Per-layer force on/off |
 | **Finale — Assembly** | View group sizes in real time, Extend/shorten timer, Force-assign user to group, Force end assembly early |
 | **Finale — Deliberation** | View per-group vote distributions, Extend/shorten timer, Force fragment selection for a group, Force end deliberation early |
 | **Finale — Ceremony** | View ambassador status per group, Call next ambassador (auto-advances in fixed order, but can skip/reorder), Force lock-in for a layer, Mark layer as forfeited, Fire NPC lines manually |
-| **Finale — Performer Mix** | 7×6 mixing grid (7 layers × 6 fragments: 3 songs × 2 options), Queue/dequeue fragment changes, Mute/unmute layers, Snapshot presets, Loop position display |
+| **Finale — Performer Mix** | 6×6 mixing grid (6 layers × 6 fragments: 3 songs × 2 options), Queue/dequeue fragment changes, Mute/unmute layers, Snapshot presets, Loop position display |
 | **NPC** | Bank of pre-written NPC lines (organized by phase), Free-text input for improvised lines, Fire button |
 | **Live Performance** | Toggle live input tracks (vocal, synth, etc.) |
 | **Emergency** | Pause/Resume show, Export/Import state as JSON, Force reconnect all clients, Reset to lobby |
@@ -134,7 +133,7 @@
 **Metrics/Telemetry:**
 - Connected clients count
 - Vote counts A vs B, time remaining
-- Health bar status per attempt
+- Threshold status per attempt
 - Assembly: group sizes per layer type, timer remaining, undecided count
 - Deliberation: per-group fragment votes, timer remaining, ambassador volunteer status
 - Ceremony: current layer, ambassador status, locked layers, forfeited layers
@@ -162,8 +161,7 @@
 | Pad | TBD | ◆ | "The warmth" |
 | Bass | TBD | ■ | "The ground" |
 | Harmony | TBD | ● | "The color" |
-| FX1 | TBD | ~ | "The shimmer" |
-| FX2 | TBD | ∿ | "The shadow" |
+| FX | TBD | ~ | "The Shimmer" |
 
 *Placeholders — lock before production. Labels are configurable in `default-show.json`.*
 

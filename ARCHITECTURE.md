@@ -5,17 +5,19 @@ This document and the `docs/` directory are the **authoritative source of truth*
 
 **When this document or any file in `docs/` conflicts with code, the spec is correct and the code should be updated.**
 
+**V3.1 migration in progress.** See `MIGRATION-v3.1.md` for the implementation plan. Where MIGRATION-v3.1.md conflicts with this document, the migration doc is correct.
+
 ---
 
 ## Project Overview
 
 ### What This Is
-An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. The audience makes blind binary choices to layer musical elements while a Health Bar tracks the cumulative cost of their disagreement. Each layer costs more than the last (rising resistance), and if the Health Bar reaches zero, the song collapses — unreached layers are lost. Songs that survive all layers are narratively rejected by the performer anyway (self-sabotage). In the finale, the audience — abandoned by the performer — physically self-organizes into seven groups (one per layer type), deliberates on which fragment to carry forward, selects ambassadors, and ceremonially locks each layer into the final mix at a physical altar. The fragments, drawn from three different songs and emotional chapters, reveal through sound alone that they were always harmonically compatible. The performer returns to co-create the climax.
+An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. The audience makes blind binary choices to layer musical elements, with each layer carrying a doubt threshold — if the winning vote proportion falls below the threshold, the song collapses. Thresholds escalate per layer, representing the rising cost of commitment. Songs that survive all layers are narratively rejected by the performer anyway (self-sabotage). In the finale, the audience — abandoned by the performer — physically self-organizes into six groups (one per layer type), deliberates on which fragment to carry forward, selects ambassadors, and ceremonially locks each layer into the final mix at a physical altar. The fragments, drawn from three different songs and emotional chapters, reveal through sound alone that they were always harmonically compatible. The performer returns to co-create the climax.
 
 ### Core Metaphor
 > **"If I can build a song, I can build a life."**
 
-The audience is framed as the performer's inner council — parts of the subconscious trying to cohere into a finished creative work. Disagreement is internal conflict. A collapsing song is the cumulative weight of internal division. The performer's rejection of a completed song is self-sabotage. The finale proves that integration was always possible — the council self-organizes, each part finds its role, and the fragments fit together without the ego directing them.
+The audience is framed as the performer's inner council — parts of the subconscious trying to cohere into a finished creative work. Disagreement is internal conflict. A collapsing song is a moment where doubt overwhelms commitment. The performer's rejection of a completed song is self-sabotage. The finale proves that integration was always possible — the council self-organizes, each part finds its role, and the fragments fit together without the ego directing them.
 
 ### Design Principles
 1. **Story is uninterrupted.** Audience phones are used only during music-building and finale phases.
@@ -34,19 +36,17 @@ The audience is framed as the performer's inner council — parts of the subcons
 |------|------------|
 | **Attempt** | One story/song-building cycle. The show has 3 attempts, each tied to a chapter. |
 | **Chapter** | A thematic identity: Ambition (Song 1), Love (Song 2), Avoidance (Song 3). Chapters have consistent colors/icons throughout. |
-| **Layer** | A single musical element within a song attempt. Each attempt has 7 layers. Each layer has a type (Melody, Drums, Pad, Bass, Harmony, FX1, FX2). |
+| **Layer** | A single musical element within a song attempt. Each attempt has 6 layers. Each layer has a type (Melody, Drums, Pad, Bass, Harmony, FX). |
 | **Option** | One of 2 choices (A or B) within a layer. Binary choice. |
 | **Lock-in** | When a layer's winning option is confirmed and becomes part of the song stack. |
-| **Health Bar** | A visible gauge representing the song's vitality. Drains after each vote based on the losing vote proportion multiplied by a configurable layer multiplier. When it reaches zero, the song **collapses** — the current and all subsequent layers are lost. |
-| **Drain** | The amount subtracted from the Health Bar after a vote. Equal to the losing side's proportion × 100 × drain factor × layer multiplier. |
-| **Layer Multiplier** | A configurable per-layer scaling factor for drain. Increases with layer depth, representing the rising cost of creative commitment. Early layers are cheap; late layers are expensive. |
-| **Collapse** | When the Health Bar reaches zero. The song "falls apart" — audio collapses via OSC-triggered effect, current and all unreached layers are lost. Fragments from reached layers survive for the finale. |
+| **Doubt Threshold** | A per-layer pass/fail check. Each layer has a configurable threshold (e.g., 0.50 → 0.95). If the winning vote proportion falls below the threshold, the song collapses. No cumulative state — each vote is independent. Thresholds escalate per layer, representing the rising cost of commitment. |
+| **Collapse** | When a layer's winning vote proportion falls below its doubt threshold. The song "falls apart" — audio collapses via OSC-triggered effect, current and all unreached layers are lost. Fragments from reached layers survive for the finale. |
 | **Blind Vote** | The song-building voting mechanic. Audience votes without seeing live split feedback. Results are revealed after the window closes. |
-| **Reveal** | The post-vote moment when the A/B split is shown, the health bar drains, and the winning option locks in. |
+| **Reveal** | The post-vote moment when the A/B split is shown, the threshold check is visualized, and the winning option locks in. |
 | **Song Rejection** | The performer's narrative act of rejecting a **completed** song (one that survived all layers without collapsing). Triggered manually via controller; accompanied by an OSC-triggered audio effect. Only applies when the song completes — collapsed songs are already dead. |
-| **Fragment** | A winning option from a reached layer during song-building, available in the finale. Only winners from layers that were actually voted on survive. |
-| **Locked Fragment** | A fragment visible in the pre-game "elegy" display but not available during gameplay. Includes: losing options from voted layers AND both options from unreached layers (due to collapse). Represents "what could have been." |
-| **Group Assembly** | The first active finale phase. Audience members self-select into one of 7 layer-type groups by choosing a role on their phone, then physically finding others who chose the same role. Timer-based; undecided members are randomly assigned when the timer expires. |
+| **Fragment** | An option from a reached layer during song-building, available in the finale. Which options survive is configurable via `bothOptionsSurvive` — when true, both A and B from voted layers are available; when false, only winners survive. |
+| **Locked Fragment** | A fragment visible in the pre-game "elegy" display but not available during gameplay. Includes: both options from unreached layers (due to collapse), and losing options from voted layers when `bothOptionsSurvive` is false. Represents "what could have been." |
+| **Group Assembly** | The first active finale phase. Audience members self-select into one of 6 layer-type groups by choosing a role on their phone, then physically finding others who chose the same role. Timer-based; undecided members are randomly assigned when the timer expires. |
 | **Deliberation** | The second active finale phase. Each group privately previews available fragments for their layer type on their phones and votes for which fragment to carry into the final song. Timer-based; majority wins when the timer expires. |
 | **Audio Preview** | In-browser playback of pre-rendered fragment audio files during deliberation. Each audience member controls playback independently on their own phone. |
 | **Ambassador** | One volunteer from each group who carries the group's chosen fragment to the altar during the ceremony. Selected by volunteering; random selection if multiple volunteers; layer forfeited if no volunteer. |
@@ -132,14 +132,14 @@ type ShowPhase =
   | 'attempt_build'            // Song-building phase for current attempt (phones active)
   | 'attempt_resolve'          // Song completed; performer rejects it (phones dim/watch)
   | 'finale_elegy'             // Audience sees full fragment wreckage (phones passive)
-  | 'finale_assembly'          // Audience self-selects into 7 layer-type groups (phones active)
+  | 'finale_assembly'          // Audience self-selects into 6 layer-type groups (phones active)
   | 'finale_deliberation'      // Groups preview fragments, vote, select ambassadors (phones active)
   | 'finale_ceremony'          // Ambassadors lock fragments at the altar (phones active for ambassadors)
   | 'finale_performer_mix'     // Performer live-mixes and escalates (phones TBD)
   | 'ended';
 ```
 
-**Note:** `attempt_story`, `attempt_build`, and `attempt_resolve` are parameterized by `currentAttemptIndex` (0, 1, 2). `attempt_resolve` is only entered when a song completes (health bar > 0 after all layers). Collapsed songs skip `attempt_resolve`.
+**Note:** `attempt_story`, `attempt_build`, and `attempt_resolve` are parameterized by `currentAttemptIndex` (0, 1, 2). `attempt_resolve` is only entered when a song completes (all layers pass their thresholds). Collapsed songs skip `attempt_resolve`.
 
 ### Transitions
 
@@ -148,8 +148,8 @@ type ShowPhase =
 | `lobby` | `opener` | Manual | |
 | `opener` | `attempt_story` | Manual | Sets currentAttemptIndex = 0 |
 | `attempt_story` | `attempt_build` | Manual | Activates voting UI |
-| `attempt_build` | `attempt_resolve` | **Auto** | When all layers voted on AND health bar > 0 |
-| `attempt_build` | `attempt_story` | **Auto** | When health bar reaches 0 (collapse); increments attempt index |
+| `attempt_build` | `attempt_resolve` | **Auto** | When all layers voted on AND all layers pass their thresholds |
+| `attempt_build` | `attempt_story` | **Auto** | When doubt threshold not met (collapse); increments attempt index |
 | `attempt_build` (attempt 2) | `finale_elegy` | **Auto** on collapse, or Manual after rejection | Song 3 → finale regardless of outcome |
 | `attempt_resolve` | `attempt_story` | Manual | Performer triggers rejection + advance; increments attempt index |
 | `attempt_resolve` (attempt 2) | `finale_elegy` | Manual | After Song 3 rejection |
@@ -178,7 +178,7 @@ Read the sections above first, then load only the docs relevant to your task:
 
 | File | Contents |
 |------|----------|
-| [docs/song-building.md](docs/song-building.md) | Layer structure, staggered ordering, blind vote, health bar, collapse, rejection, fragment generation |
+| [docs/song-building.md](docs/song-building.md) | Layer structure, staggered ordering, blind vote, doubt thresholds, collapse, rejection, fragment generation |
 | [docs/finale.md](docs/finale.md) | All 5 finale sub-phases (elegy, assembly, deliberation, ceremony, performer mix), NPC system, FinaleState type |
 | [docs/data-models.md](docs/data-models.md) | TypeScript interfaces (User, ShowState, ShowConfig, Fragment), Conductor commands & events, VoteResult |
 | [docs/client-routes.md](docs/client-routes.md) | /audience, /projector, /controller UI specs, visual identity system (colors, symbols) |
@@ -209,8 +209,7 @@ solo-show/
 ├── conductor/                   # Pure game logic (no I/O)
 │   ├── index.ts                 # Exports
 │   ├── conductor.ts             # State machine (show phases + layer phases)
-│   ├── voting.ts                # Blind vote tallying + health bar drain
-│   ├── health-bar.ts            # Health bar state management
+│   ├── voting.ts                # Blind vote tallying
 │   ├── assembly.ts              # Group assembly logic (join, random assign, timer)
 │   ├── deliberation.ts          # Group deliberation (voting, majority, ambassador selection)
 │   ├── ceremony.ts              # Ceremony sequencing (ambassador calls, altar lock-in, forfeits)
@@ -246,7 +245,7 @@ solo-show/
 │   ├── song-building/
 │   │   ├── OptionCards.tsx       # A/B voting cards
 │   │   ├── RevealSequence.tsx   # Post-vote reveal animation
-│   │   ├── HealthBar.tsx        # Health bar visualization
+│   │   ├── HealthBar.tsx        # Health bar visualization (pending deletion — Phase 8)
 │   │   └── LayerProgress.tsx    # Completed/upcoming layer indicators
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Full fragment wreckage display
@@ -258,7 +257,7 @@ solo-show/
 │   │   ├── CeremonyView.tsx     # Ceremony progress (non-ambassador audience)
 │   │   ├── AltarReady.tsx       # Ambassador altar-ready mode (accelerometer listener)
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
-│   │   ├── MixingSurface.tsx    # Performer's 7×6 mixing grid (controller)
+│   │   ├── MixingSurface.tsx    # Performer's 6×6 mixing grid (controller)
 │   │   ├── MixingMirror.tsx     # Projector view of mixing state
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
 │   ├── shared/
@@ -268,7 +267,7 @@ solo-show/
 │   └── controller/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
-│       ├── HealthBarControls.tsx # Drain factor adjustment
+│       ├── HealthBarControls.tsx # Drain factor adjustment (pending deletion — Phase 8)
 │       ├── AssemblyControls.tsx # Group size monitoring, timer control
 │       ├── DeliberationControls.tsx # Per-group vote monitoring, timer control
 │       ├── CeremonyControls.tsx # Ambassador management, force lock-in, forfeits
@@ -294,7 +293,7 @@ solo-show/
 │       └── previews/            # Pre-rendered fragment audio files
 │           ├── preview-0-0-A.mp3
 │           ├── preview-0-0-B.mp3
-│           └── ...              # (up to 42 files)
+│           └── ...              # (up to 36 files)
 │
 ├── config/
 │   ├── default-show.json        # Pre-configured attempts, layers, fragments, layer labels, ceremony order
@@ -318,9 +317,9 @@ Unchanged from V1. See original architecture for context management, making chan
 
 **Updated test name examples:**
 ```typescript
-test('health bar drains by losing proportion times drain factor times layer multiplier', ...)
+test('layer collapses when winning proportion falls below doubt threshold', ...)
 test('blind vote does not expose split during voting window', ...)
-test('attempt collapses when health bar reaches zero', ...)
+test('doubt thresholds escalate per layer index', ...)
 test('completed attempt transitions to attempt_resolve for rejection', ...)
 test('unreached layers are marked as locked fragments in finale', ...)
 test('undecided users are randomly assigned to groups when assembly timer expires', ...)
@@ -341,7 +340,7 @@ test('performer pending changes all fire simultaneously at loop boundary', ...)
 
 - [ ] **Audience phones during performer mix phase:** Go dark, minimal ambient visualization, or endorsement tap surface?
 - [ ] **Song rejection audio effect:** Exact Ableton effect chain and OSC trigger method. Should be distinct from collapse effect.
-- [ ] **Collapse audio effect:** Exact Ableton effect chain for when health bar hits zero. Should be distinct from rejection effect.
+- [ ] **Collapse audio effect:** Exact Ableton effect chain for when a song collapses. Should be distinct from rejection effect.
 - [ ] **Exact chord progression:** B minor key confirmed; specific 4-chord sequence TBD pending Ableton exploration.
 - [ ] Locked color/symbol assignments for layers + chapters
 - [ ] Specific fragment display labels (emotional taglines per option)
@@ -360,7 +359,7 @@ test('performer pending changes all fire simultaneously at loop boundary', ...)
 ## Appendix A: What Changed from V1 → V2
 
 ### Removed Systems
-- **Per-layer doubt thresholds** → replaced by Health Bar with cumulative drain and layer multipliers
+- **Per-layer doubt thresholds** → replaced by Health Bar with cumulative drain and layer multipliers (V2); **Health Bar reversed back to per-layer doubt thresholds in V3.1**
 - **Chapter assignment** → no chapter assignment in finale
 - **Individual fragment selection** → replaced by consensus game (V2)
 - **Fragment queue / rotation system** → replaced by consensus game + performer mix (V2)
@@ -370,13 +369,13 @@ test('performer pending changes all fire simultaneously at loop boundary', ...)
 - **Audio metering (M4L → projector)** → removed (may be re-added for projector visuals)
 
 ### New Systems (V2)
-- **Health Bar** with cumulative drain + configurable layer multipliers
-- **Mechanical collapse** when health bar reaches zero
+- **Health Bar** with cumulative drain + configurable layer multipliers — *replaced by per-layer doubt thresholds in V3.1*
+- **Mechanical collapse** when health bar reaches zero — *replaced by per-layer threshold check in V3.1*
 - **Blind vote** with reveal sequence
 - **Song rejection** for completed songs
 - **Consensus Game** (convergence meter, timed rounds, threshold softening) — *replaced in V3*
 - **NPC system** (hybrid auto/manual) — *simplified in V3*
-- **Performer mixing surface** (7×6 grid, pending changes queue, loop quantization)
+- **Performer mixing surface** (6×6 grid, pending changes queue, loop quantization)
 - **Snapshot presets** for performer mix
 - **Musical design specification** (harmonic rules, EQ fencing, production guidelines)
 
@@ -397,7 +396,7 @@ test('performer pending changes all fire simultaneously at loop boundary', ...)
 - **Vibration API** — considered and deferred (except single vibration on altar lock-in confirmation).
 
 ### New Systems
-- **Group Assembly** — timer-based self-selection into 7 layer-type groups with live size display. Random assignment for undecided members at timer expiry. Empty groups allowed (layer skipped).
+- **Group Assembly** — timer-based self-selection into 6 layer-type groups with live size display. Random assignment for undecided members at timer expiry. Empty groups allowed (layer skipped).
 - **Deliberation** — per-group audio preview + transparent majority voting + ambassador volunteering. Timer-based resolution. Forfeited layers when no ambassador volunteers.
 - **Ambassador Ceremony** — fixed-order sequential lock-in at a physical altar. Accelerometer detection (Device Orientation API) for face-down phone placement. Immediate audio activation on lock-in.
 - **Audio Preview System** — pre-rendered mp3 files per fragment, served statically, played in-browser during deliberation via HTML5 Audio API.
@@ -418,3 +417,15 @@ test('performer pending changes all fire simultaneously at loop boundary', ...)
 - **GainConfig**: `consensusSwellBeats` renamed to `ceremonySwellBeats`.
 - **Environment variables**: consensus variables replaced with assembly/deliberation/ceremony variables.
 - **Folder structure**: `consensus-game.ts` → `assembly.ts` + `deliberation.ts` + `ceremony.ts`. Component files renamed/replaced. New hooks added. `public/audio/previews/` directory added. `npc-triggers.json` → `npc-messages.json`.
+
+---
+
+## Appendix C: What Changed from V3 → V3.1
+
+**V3.1 migration in progress.** See `MIGRATION-v3.1.md` for the full implementation plan.
+
+### Key Changes
+- **Health Bar → Doubt Thresholds**: Cumulative health bar with drain replaced by per-layer pass/fail threshold checks. No cumulative state — each vote is independent. Thresholds escalate per layer.
+- **7 layers → 6 layers**: FX1/FX2 consolidated into a single FX layer. Layer types: Melody, Drums, Pad, Bass, Harmony, FX.
+- **`health-bar.ts` removed**: Threshold logic integrated into `voting.ts`.
+- **`bothOptionsSurvive` config**: Fragment generation is configurable — both options from voted layers can survive for the finale.

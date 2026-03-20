@@ -47,8 +47,9 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): AttemptC
   return {
     chapter,
     title: chapter,
-    drainFactor: 0.5,
-    layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
+    thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
+    tempos: [120, 120, 130, 140, 155, 170],
+    auditionBars: [4, 4, 4, 2, 2, 2],
     layers: [0, 1, 2].map(i => makeLayerConfig(i)),
   };
 }
@@ -66,7 +67,7 @@ function createTestConfig(): ShowConfig {
       assemblyGracePeriodMs: 15000,
       deliberationTimerMs: 180000,
       ambassadorVolunteerTimerMs: 30000,
-      ceremonyLayerOrder: ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'],
+      ceremonyLayerOrder: ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'],
       audioPreviewPath: '/audio/previews',
       layerLabels: new Map(),
       npcMessages: [],
@@ -96,7 +97,7 @@ function advanceToBuild(state: ShowState): void {
 }
 
 function makeMinimalFinaleState(timerRemaining = 60000): FinaleState {
-  const layerTypes = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'] as const;
+  const layerTypes = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'] as const;
   return {
     phase: 'assembly',
     availableFragments: [],

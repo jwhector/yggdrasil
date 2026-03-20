@@ -35,8 +35,7 @@ export const LAYER_IDENTITY: Record<LayerType, LayerIdentity> = {
   pad:     { color: '#7b2d8b', symbol: '\u25C6', label: 'The warmth' },     // ◆
   bass:    { color: '#8b1a1a', symbol: '\u25A0', label: 'The ground' },     // ■
   harmony: { color: '#2563eb', symbol: '\u25CF', label: 'The color' },      // ●
-  fx1:     { color: '#22c55e', symbol: '~',      label: 'The shimmer' },
-  fx2:     { color: '#6b7280', symbol: '\u223F', label: 'The shadow' },     // ∿
+  fx:      { color: '#22c55e', symbol: '~',      label: 'The shimmer' },
 };
 
 const FALLBACK_LAYER: LayerIdentity = {

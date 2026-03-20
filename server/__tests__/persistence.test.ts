@@ -27,8 +27,9 @@ function createTestConfig(): ShowConfig {
       {
         chapter: 'ambition',
         title: 'Ambition',
-        drainFactor: 0.5,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
+        thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
+        tempos: [120, 120, 130, 140, 155, 170],
+        auditionBars: [4, 4, 4, 2, 2, 2],
         layers: [
           { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
           { index: 1, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
@@ -37,8 +38,9 @@ function createTestConfig(): ShowConfig {
       {
         chapter: 'love',
         title: 'Love',
-        drainFactor: 0.6,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
+        thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
+        tempos: [120, 120, 130, 140, 155, 170],
+        auditionBars: [4, 4, 4, 2, 2, 2],
         layers: [
           { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
         ],
@@ -46,8 +48,9 @@ function createTestConfig(): ShowConfig {
       {
         chapter: 'avoidance',
         title: 'Avoidance',
-        drainFactor: 0.7,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
+        thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
+        tempos: [120, 120, 130, 140, 155, 170],
+        auditionBars: [4, 4, 4, 2, 2, 2],
         layers: [
           { index: 0, type: 'bass', optionA: { trackIndex: 6 }, optionB: { trackIndex: 7 }, labelA: 'A', labelB: 'B' },
         ],
@@ -58,7 +61,7 @@ function createTestConfig(): ShowConfig {
       assemblyGracePeriodMs: 15000,
       deliberationTimerMs: 120000,
       ambassadorVolunteerTimerMs: 15000,
-      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'],
       audioPreviewPath: '/audio/previews',
       layerLabels: new Map(),
       npcMessages: [],

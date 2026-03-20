@@ -796,17 +796,10 @@ export function filterStateForClient(
           currentAuditionOption: attempt.currentAuditionOption,
           auditionLoopIndex: attempt.auditionLoopIndex,
           auditionTotalLoops: (state.config.timing.auditionsPerLayer ?? 2) * 2,
-          healthBar: {
-            current: attempt.healthBar.current,
-            drainFactor: attempt.healthBar.drainFactor,
-            history: attempt.healthBar.history,
-          },
           currentVoteResult: attempt.currentVoteResult
-            ? { winner: attempt.currentVoteResult.winner, consensus: attempt.currentVoteResult.consensus }
+            ? { winner: attempt.currentVoteResult.winner, winningProportion: attempt.currentVoteResult.consensus }
             : null,
-          currentDrain: attempt.currentDrain
-            ? { drainAmount: attempt.currentDrain.drainAmount, healthAfter: attempt.currentDrain.healthAfter }
-            : null,
+          lastThresholdCheck: null,
         } : null,
         myFinale,
         config: {

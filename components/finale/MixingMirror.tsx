@@ -13,7 +13,7 @@ import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
 import { LoopIndicator } from '@/components/finale/LoopIndicator';
 import type { Fragment, LayerType, PendingChange } from '@/conductor/types';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 interface MixingMirrorProps {
   activeLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;

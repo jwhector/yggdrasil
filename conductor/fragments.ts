@@ -63,7 +63,7 @@ export function generateFragments(
     for (const layerConfig of config.layers) {
       const result = attempt.layerResults.find(r => r.layerIndex === layerConfig.index);
 
-      if (result && result.status === 'locked_in' && result.chosenOption !== null) {
+      if (result && (result.status === 'locked_in' || result.status === 'collapsed') && result.chosenOption !== null) {
         // Winner fragment — selectable
         fragments.push({
           fragment: buildFragment(
@@ -74,6 +74,7 @@ export function generateFragments(
             layerConfig.type,
             result.chosenOption === 'A' ? layerConfig.optionA : layerConfig.optionB,
             audioPreviewPath,
+            true, // wonVote
           ),
           selectable: true,
         });
@@ -89,6 +90,7 @@ export function generateFragments(
             layerConfig.type,
             loser === 'A' ? layerConfig.optionA : layerConfig.optionB,
             audioPreviewPath,
+            false, // wonVote
           ),
           selectable: false,
         });
@@ -103,6 +105,7 @@ export function generateFragments(
             layerConfig.type,
             layerConfig.optionA,
             audioPreviewPath,
+            false, // wonVote
           ),
           selectable: false,
         });
@@ -116,6 +119,7 @@ export function generateFragments(
             layerConfig.type,
             layerConfig.optionB,
             audioPreviewPath,
+            false, // wonVote
           ),
           selectable: false,
         });
@@ -137,6 +141,7 @@ function buildFragment(
   layerType: LayerType,
   audioRef: AudioReference,
   audioPreviewPath: string,
+  wonVote: boolean,
 ): Fragment {
   // TODO: See DECISIONS.md O5 — display label generation strategy TBD
   const displayLabel = `${capitalize(chapter)}: ${capitalize(layerType)} ${option}`;
@@ -149,6 +154,7 @@ function buildFragment(
     chapter,
     layerType,
     displayLabel,
+    wonVote,
     audioRef,
     previewAudioPath: `${audioPreviewPath}/preview-${attemptIndex}-${layerIndex}-${option}.mp3`,
   };

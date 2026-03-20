@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { getLayerIdentity } from '@/lib/identity';
 import type { ShowState, ConductorCommand, LayerType, UserId } from '@/conductor/types';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 interface AssemblyControlsProps {
   fullState: ShowState;

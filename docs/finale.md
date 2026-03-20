@@ -9,7 +9,7 @@
 
 The finale has five sub-phases:
 1. **Elegy** — audience observes the wreckage of all three songs (optional brief beat)
-2. **Assembly** — audience self-selects into 7 layer-type groups and physically regroups
+2. **Assembly** — audience self-selects into 6 layer-type groups and physically regroups
 3. **Deliberation** — groups preview audio, vote on fragments, and select ambassadors
 4. **Ceremony** — ambassadors lock fragments into the final mix at the altar
 5. **Performer Mix** — performer returns to live-mix the escalation and climax
@@ -25,19 +25,19 @@ This frames the finale as a mutiny — the audience acting without the performer
 An optional 10–15 second observational moment. Phones show the full grid of all fragments from all three songs:
 - Winning fragments glow with their chapter color
 - Losing fragments are cracked, dimmed, desaturated
-- Organized by role (7 rows)
+- Organized by role (6 rows)
 - NPC narrates: acknowledges what survived and what was lost
 - No interaction — pure narrative beat
 - Transitions to assembly when NPC rallies the audience (manual or auto-timed)
 
 ## Phase 2: Group Assembly
 
-The audience physically self-organizes into seven groups — one per layer type.
+The audience physically self-organizes into six groups — one per layer type.
 
-**Phone UI:** Seven tappable cards, each displaying the layer's symbol, color, and configurable label (from `default-show.json`). Live group size counts update in real time as people choose. No constraints on group size — any group can be empty or hold all 40 people.
+**Phone UI:** Six tappable cards, each displaying the layer's symbol, color, and configurable label (from `default-show.json`). Live group size counts update in real time as people choose. No constraints on group size — any group can be empty or hold all 40 people.
 
 **Timer:** Configurable duration (default: 60 seconds). Displayed prominently on phones and projector. When the timer expires:
-1. Any audience member who has not selected a group is **randomly assigned** to one of the 7 groups by the server
+1. Any audience member who has not selected a group is **randomly assigned** to one of the 6 groups by the server
 2. Groups with 0 members are marked as **empty** — that layer type will be skipped in the ceremony and will not have a fragment in the initial mix
 3. The system transitions to the deliberation phase
 
@@ -76,7 +76,7 @@ Each group privately deliberates on which fragment to carry into the final song.
 
 ## Phase 4: Ceremony
 
-The performer returns to the stage (or is about to — the ceremony is the transition point). The system calls ambassadors one by one in a **fixed configurable order** (set in `default-show.json`, e.g., `[bass, drums, pad, melody, harmony, fx1, fx2]`).
+The performer returns to the stage (or is about to — the ceremony is the transition point). The system calls ambassadors one by one in a **fixed configurable order** (set in `default-show.json`, e.g., `[bass, drums, pad, melody, harmony, fx]`).
 
 **Ceremony flow per layer:**
 1. The system announces the next layer (NPC text on phones + projector display: layer symbol, color, label)
@@ -147,7 +147,7 @@ The performer returns to take control of the mix. This is a live performance too
 **Initial state:** The performer mix begins with the fragments locked in during the ceremony as the active layers. Forfeited layers start muted.
 
 **Mixing Surface (controller):**
-- 7 rows (one per layer type) × 6 columns (Song 1 A, Song 1 B, Song 2 A, Song 2 B, Song 3 A, Song 3 B)
+- 6 rows (one per layer type) × 6 columns (Song 1 A, Song 1 B, Song 2 A, Song 2 B, Song 3 A, Song 3 B)
 - Each cell is a fragment. Tapping a cell **queues** it to activate at the next loop boundary.
 - Active fragment in each row is highlighted
 - Pending (queued) fragment shows distinct visual (pulsing border, countdown)
@@ -158,7 +158,7 @@ The performer returns to take control of the mix. This is a live performance too
 
 **Loop position indicator:** Progress bar or radial timer showing position within current 8-bar loop and time until next boundary. This is the performance clock.
 
-**Snapshot presets:** Configurable buttons that queue an entire mix state (all 7 layers set to specific fragments) in one tap. Useful for rehearsed structural jumps.
+**Snapshot presets:** Configurable buttons that queue an entire mix state (all 6 layers set to specific fragments) in one tap. Useful for rehearsed structural jumps.
 
 **Live performance tracks:** Additional on/off toggles for tracks not in the fragment pool — vocal mic, live synth, etc. These are the performer's secret weapon, the element the audience never had access to.
 
@@ -189,7 +189,7 @@ interface FinaleState {
 
   // Fragment availability (computed from song-building results)
   availableFragments: Fragment[];     // Winners only (for group deliberation)
-  allFragments: Fragment[];           // All 42 (for performer mixing surface)
+  allFragments: Fragment[];           // All 36 (for performer mixing surface)
   lockedFragments: Fragment[];        // Losers + unreached (for elegy display)
 
   // Group assembly state

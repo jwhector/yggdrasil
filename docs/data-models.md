@@ -1,7 +1,7 @@
 # Data Models & Conductor API
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
-> **Related:** [song-building.md](song-building.md) (health bar, layer types), [finale.md](finale.md) (FinaleState type definition)
+> **Related:** [song-building.md](song-building.md) (doubt threshold, layer types), [finale.md](finale.md) (FinaleState type definition)
 
 **Note:** FinaleState is defined in [finale.md](finale.md) alongside its behavioral specification.
 
@@ -37,12 +37,14 @@ interface ShowState {
 interface AttemptState {
   index: number;                       // 0, 1, 2
   chapter: Chapter;                    // 'ambition' | 'love' | 'avoidance'
-  layerPlan: LayerConfig[];            // Always length 7
+  layerPlan: LayerConfig[];            // Always length 6
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerResults: LayerResult[];         // Populated as layers resolve
   votes: LayerVote[];                  // All votes for this attempt
-  healthBar: HealthBarState;
+  currentVoteResult: VoteResult | null;
+  currentAuditionOption: 'A' | 'B' | null;
+  auditionLoopIndex: number;
   status: 'pending' | 'in_progress' | 'completed' | 'collapsed';
   collapsedAtLayer: number | null;     // Layer index where collapse occurred, or null
 }
@@ -54,7 +56,7 @@ type Chapter = 'ambition' | 'love' | 'avoidance';
 
 ```typescript
 interface ShowConfig {
-  layersPerAttempt: number;            // Always 7
+  layersPerAttempt: number;            // Always 6
   attempts: AttemptConfig[];           // Length 3
   finale: FinaleConfig;
   timing: TimingConfig;
@@ -67,9 +69,10 @@ interface ShowConfig {
 interface AttemptConfig {
   chapter: Chapter;
   title: string;
-  layers: LayerConfig[];              // 7 layers, staggered per song
-  drainFactor: number;                // Health bar base drain multiplier for this attempt
-  layerMultipliers: number[];         // Per-layer scaling factors (length 7)
+  layers: LayerConfig[];              // 6 layers, staggered per song
+  thresholds: number[];             // Per-layer doubt thresholds (length 6)
+  tempos: number[];                 // Per-layer BPM (length 6)
+  auditionBars: number[];           // Bars per option during audition (length 6)
 }
 
 interface FinaleConfig {
@@ -77,7 +80,8 @@ interface FinaleConfig {
   assemblyGracePeriodMs: number;       // Grace period after assignment before deliberation
   deliberationTimerMs: number;         // Duration of group deliberation phase
   ambassadorVolunteerTimerMs: number;  // Duration of ambassador volunteering window
-  ceremonyLayerOrder: LayerType[];     // Fixed order for ambassador call-ups
+  bothOptionsSurvive: boolean;         // When true, both options from voted layers are available in finale
+  ceremonyLayerOrder: LayerType[];     // Fixed order for ambassador call-ups (length 6, was 7)
   audioPreviewPath: string;            // Base URL path for preview audio files
   layerLabels: Map<LayerType, string>; // Configurable display labels for assembly cards (e.g., "The Heartbeat")
   npcMessages: NpcMessageConfig[];     // Event-driven NPC messages (event key → text)
@@ -121,6 +125,7 @@ interface Fragment {
   displayLabel: string;               // Emotional tagline from layer config
   audioRef: AudioReference;           // Ableton track index
   previewAudioPath: string;           // URL path to preview audio file
+  wonVote: boolean;                   // true if this option won the blind vote
 }
 ```
 
@@ -142,16 +147,13 @@ type ConductorCommand =
 
   // Song-building
   | { type: 'START_AUDITION' }
-  | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
   | { type: 'RERUN_VOTE' }
-
-  // Health Bar
-  | { type: 'SET_DRAIN_FACTOR'; factor: number }
-  | { type: 'SET_HEALTH'; value: number }
+  | { type: 'ADVANCE_FROM_REVEAL' }
+  | { type: 'TOGGLE_AUDITION' }
   | { type: 'FORCE_COLLAPSE' }
 
   // Song Rejection
@@ -227,8 +229,8 @@ type ConductorEvent =
   | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
-  | { type: 'HEALTH_BAR_DRAINED'; attemptIndex: number; layerIndex: number; drain: HealthBarDrain }
-  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; healthBar: HealthBarState }
+  | { type: 'THRESHOLD_CHECK'; attemptIndex: number; layerIndex: number; winningProportion: number; threshold: number; passed: boolean }
+  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number }
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
@@ -273,10 +275,9 @@ type ConductorEvent =
 
 interface VoteResult {
   winner: 'A' | 'B';
-  consensus: number;           // Winning side's proportion
+  consensus: number;           // Winning side's proportion (kept for backward compat, same as winningProportion)
   votesA: number;
   votesB: number;
   totalVotes: number;
-  drain: HealthBarDrain;
 }
 ```

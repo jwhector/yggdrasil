@@ -1,5 +1,5 @@
 /**
- * Solo Show — Core Type Definitions (V2)
+ * Solo Show — Core Type Definitions (V3.1)
  *
  * This file defines the shared language for the entire system.
  * Changes here affect conductor, server, and client packages.
@@ -8,6 +8,9 @@
  *
  * Self-contained: no imports from other project files.
  */
+
+/** Number of layers per song attempt. */
+export const LAYERS_PER_ATTEMPT = 6;
 
 // ============================================================================
 // Primitive Types
@@ -27,7 +30,7 @@ export type Chapter = 'ambition' | 'love' | 'avoidance';
 
 /**
  * Layer types represent the musical role of each layer in a song.
- * 7 fixed types — one per layer slot per attempt.
+ * 6 fixed types — one per layer slot per attempt.
  */
 export type LayerType =
   | 'melody'
@@ -35,8 +38,7 @@ export type LayerType =
   | 'pad'
   | 'bass'
   | 'harmony'
-  | 'fx1'
-  | 'fx2';
+  | 'fx';
 
 // ============================================================================
 // Layer Phases & Config
@@ -45,18 +47,19 @@ export type LayerType =
 /**
  * Phase of a single layer within an attempt_build phase.
  *
- * locked → auditioning → voting → revealing → locked_in
- *                                     │
- *                                     ▼ (if health bar reaches zero)
- *                                 collapsed (attempt ends)
+ * locked → auditioning → revealing → locked_in
+ *                            │
+ *                            ▼ (if threshold fails)
+ *                        collapsed (attempt ends)
+ *
+ * Note: voting is open concurrently during 'auditioning' (no separate voting phase).
  */
 export type LayerPhase =
   | 'locked'        // Not yet reached; displayed as unexplored square
-  | 'auditioning'   // Playing A and B previews
-  | 'voting'        // Vote window open, audience selecting A or B (blind — no live split)
-  | 'revealing'     // Vote closed, showing split + health drain + winner lock-in
+  | 'auditioning'   // Playing A and B previews; vote is open simultaneously
+  | 'revealing'     // Vote closed, showing split + threshold check + winner lock-in
   | 'locked_in'     // Option chosen, layer committed to song stack
-  | 'collapsed';    // Attempt failed at this layer (health bar reached zero)
+  | 'collapsed';    // Attempt failed at this layer (threshold not met)
 
 /** Configuration for a single layer within an attempt. */
 export interface LayerConfig {
@@ -72,10 +75,11 @@ export interface LayerConfig {
 export interface LayerResult {
   layerIndex: number;
   type: LayerType;
-  status: 'locked_in' | 'unreached';   // unreached = never got to vote on this layer
+  status: 'locked_in' | 'collapsed' | 'unreached';  // collapsed = threshold failed here
   chosenOption: 'A' | 'B' | null;      // null if unreached
-  consensus: number | null;            // null if unreached
-  drainAmount: number | null;          // health bar drain from this layer; null if unreached
+  winningProportion: number | null;    // max(votesA, votesB) / total; null if unreached
+  thresholdRequired: number | null;    // doubt threshold for this layer; null if unreached
+  passed: boolean | null;             // null if unreached
 }
 
 /** A single audience member's vote on a layer. */
@@ -85,25 +89,6 @@ export interface LayerVote {
   layerIndex: number;
   choice: 'A' | 'B';
   timestamp: Timestamp;
-}
-
-// ============================================================================
-// Health Bar
-// ============================================================================
-
-/** Cumulative health bar state for a song-building attempt. */
-export interface HealthBarState {
-  current: number;                      // 0 = collapsed, 100 = full
-  drainFactor: number;                  // Base multiplier for this attempt
-  history: HealthBarDrain[];            // One entry per resolved layer
-}
-
-/** A single drain event applied to the health bar after a vote resolves. */
-export interface HealthBarDrain {
-  layerIndex: number;
-  losingProportion: number;             // min(votesA, votesB) / total (0.0–0.5)
-  drainAmount: number;                  // losingProportion * 100 * drainFactor * layerMultiplier
-  healthAfter: number;                  // Health bar value after applying drain (floor 0)
 }
 
 // ============================================================================
@@ -135,16 +120,17 @@ export interface AttemptState {
   collapsedAtLayer: number | null;
   currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing
   auditionLoopIndex: number;                  // 0-based count of loops completed
-  healthBar: HealthBarState;
   currentVoteResult: VoteResult | null;       // Set during revealing phase, cleared on lock-in
-  currentDrain: HealthBarDrain | null;        // Set during revealing phase, cleared on lock-in
 }
 
 /** Static configuration for a single attempt. */
 export interface AttemptConfig {
   chapter: Chapter;
   title: string;                        // Display name (e.g., "Ambition")
-  layers: LayerConfig[];                // 7 layers per attempt
+  layers: LayerConfig[];                // 6 layers per attempt
+  thresholds: number[];                 // Per-layer doubt thresholds (length 6)
+  tempos: number[];                     // Per-layer BPM (length 6)
+  auditionBars: number[];               // Bars per option during audition (length 6)
 }
 
 /** Recorded result of a completed/collapsed attempt, used for fragment generation. */
@@ -173,6 +159,7 @@ export interface Fragment {
   chapter: Chapter;
   layerType: LayerType;
   displayLabel: string;                 // Emotional tagline (e.g., "Distant Pulse")
+  wonVote: boolean;                     // true if this option won the blind vote
   audioRef: AudioReference;
   previewAudioPath: string;             // URL path to preview audio file (e.g. /audio/previews/preview-0-0-A.mp3)
 }
@@ -227,7 +214,7 @@ export interface FinaleState {
 
   // Fragment availability (computed from song-building results)
   availableFragments: Fragment[];       // Winners only (for group deliberation)
-  allFragments: Fragment[];             // All 42 (for performer mixing surface)
+  allFragments: Fragment[];             // All 36 (for performer mixing surface)
   lockedFragments: Fragment[];          // Losers + unreached (for elegy display)
 
   // Group assembly state
@@ -329,7 +316,7 @@ export interface ShowState {
 // ============================================================================
 
 export interface ShowConfig {
-  layersPerAttempt: number;             // Always 7; used for track index calculation
+  layersPerAttempt: number;             // Always 6; used for track index calculation
   attempts: AttemptConfig[];            // Length 3
   finale: FinaleConfig;
   timing: TimingConfig;
@@ -340,11 +327,12 @@ export interface ShowConfig {
 }
 
 export interface FinaleConfig {
+  bothOptionsSurvive: boolean;          // When true, both winner and loser are available in deliberation
   assemblyTimerMs: number;
   assemblyGracePeriodMs: number;
   deliberationTimerMs: number;
   ambassadorVolunteerTimerMs: number;
-  ceremonyLayerOrder: LayerType[];
+  ceremonyLayerOrder: LayerType[];      // Length 6
   audioPreviewPath: string;
   layerLabels: Map<LayerType, string>;
   npcMessages: NpcMessageConfig[];
@@ -409,17 +397,12 @@ export type ConductorCommand =
   // Song-building
   | { type: 'START_AUDITION' }
   | { type: 'TOGGLE_AUDITION' }
-  | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
   | { type: 'ADVANCE_FROM_REVEAL' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
   | { type: 'RERUN_VOTE' }
-
-  // Health Bar
-  | { type: 'SET_DRAIN_FACTOR'; factor: number }
-  | { type: 'SET_HEALTH'; value: number }
   | { type: 'FORCE_COLLAPSE' }
 
   // Song Rejection
@@ -495,8 +478,8 @@ export type ConductorEvent =
   | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
-  | { type: 'HEALTH_BAR_DRAINED'; attemptIndex: number; layerIndex: number; drain: HealthBarDrain }
-  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; healthBar: HealthBarState }
+  | { type: 'THRESHOLD_CHECK'; attemptIndex: number; layerIndex: number; winningProportion: number; threshold: number; passed: boolean }
+  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number }
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
@@ -575,13 +558,8 @@ export interface AudienceAttemptView {
   currentAuditionOption: 'A' | 'B' | null;
   auditionLoopIndex: number;
   auditionTotalLoops: number;
-  healthBar: {
-    current: number;
-    drainFactor: number;
-    history: HealthBarDrain[];
-  };
-  currentVoteResult: { winner: 'A' | 'B'; consensus: number } | null;
-  currentDrain: { drainAmount: number; healthAfter: number } | null;
+  currentVoteResult: { winner: 'A' | 'B'; winningProportion: number } | null;
+  lastThresholdCheck: { winningProportion: number; threshold: number; passed: boolean } | null;
 }
 
 /**

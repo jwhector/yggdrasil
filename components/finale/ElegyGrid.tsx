@@ -12,7 +12,7 @@
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
 import type { Fragment, LayerType } from '@/conductor/types';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 interface ElegyGridProps {
   availableFragments: Fragment[];   // winners — glowing
@@ -34,8 +34,7 @@ export function ElegyGrid({
     pad:     { winners: [], losers: [] },
     bass:    { winners: [], losers: [] },
     harmony: { winners: [], losers: [] },
-    fx1:     { winners: [], losers: [] },
-    fx2:     { winners: [], losers: [] },
+    fx:      { winners: [], losers: [] },
   };
 
   for (const f of availableFragments) {

@@ -24,7 +24,7 @@ function makeAudioRef(index: number): AudioReference {
   return { trackIndex: index };
 }
 
-const LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 function makeLayerConfig(index: number): LayerConfig {
   return {
@@ -42,8 +42,9 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCoun
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
     layers: Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i)),
-    drainFactor: 0.1,
-    layerMultipliers: Array(layerCount).fill(1.0),
+    thresholds: Array(layerCount).fill(0.5),
+    tempos: Array(layerCount).fill(120),
+    auditionBars: Array(layerCount).fill(4),
   };
 }
 
@@ -60,10 +61,11 @@ function createFinaleConfig(layerCount = 2): ShowConfig {
       assemblyGracePeriodMs: 15000,
       deliberationTimerMs: 120000,
       ambassadorVolunteerTimerMs: 15000,
-      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'],
       audioPreviewPath: '/audio/previews',
       layerLabels: new Map(),
       npcMessages: [],
+      bothOptionsSurvive: true,
     },
     timing: {
       auditionDurationMs: 4000,
@@ -90,7 +92,6 @@ function connectUsers(state: ShowState, count: number): string[] {
 
 function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | 'B' = 'A'): void {
   processCommand(state, { type: 'START_AUDITION' });
-  processCommand(state, { type: 'OPEN_VOTING' });
   for (const userId of voters) processCommand(state, { type: 'SUBMIT_VOTE', userId, choice });
   processCommand(state, { type: 'CLOSE_VOTING' });
   processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
@@ -170,7 +171,7 @@ describe('Assembly flow', () => {
     expect(findEvent(events, 'ASSEMBLY_STARTED')).toBeDefined();
     expect(state.finaleState!.phase).toBe('assembly');
     expect(state.finaleState!.assembly.undecidedUsers).toHaveLength(6);
-    expect(state.finaleState!.assembly.groups.size).toBe(7);
+    expect(state.finaleState!.assembly.groups.size).toBe(6);
   });
 
   test('JOIN_GROUP moves user to group and emits GROUP_MEMBERSHIP_CHANGED', () => {
@@ -227,7 +228,7 @@ describe('Deliberation flow', () => {
     advanceToFinale(state, voters, 7);
     processCommand(state, { type: 'START_ASSEMBLY' });
     // Assign each voter to a different layer type group
-    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
     for (let i = 0; i < voters.length; i++) {
       processCommand(state, { type: 'JOIN_GROUP', userId: voters[i], layerType: layerTypes[i] });
     }
@@ -307,7 +308,7 @@ describe('Ceremony flow', () => {
     const voters = connectUsers(state, 7);
     advanceToFinale(state, voters, 7);
     processCommand(state, { type: 'START_ASSEMBLY' });
-    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
     for (let i = 0; i < voters.length; i++) {
       processCommand(state, { type: 'JOIN_GROUP', userId: voters[i], layerType: layerTypes[i] });
     }
@@ -330,7 +331,7 @@ describe('Ceremony flow', () => {
     const { state } = setupCeremonyState();
     processCommand(state, { type: 'START_CEREMONY' });
     const events = processCommand(state, { type: 'CALL_NEXT_AMBASSADOR' });
-    // First non-forfeited in ceremonyLayerOrder ['bass','drums','pad','melody','harmony','fx1','fx2']
+    // First non-forfeited in ceremonyLayerOrder ['bass','drums','pad','melody','harmony','fx']
     const calledEvent = findEvent(events, 'AMBASSADOR_CALLED') as Extract<ConductorEvent, { type: 'AMBASSADOR_CALLED' }> | undefined;
     expect(calledEvent).toBeDefined();
   });
@@ -403,7 +404,7 @@ describe('Performer Mix — seeded from ceremony', () => {
     const voters = connectUsers(state, 7);
     advanceToFinale(state, voters, 7);
     processCommand(state, { type: 'START_ASSEMBLY' });
-    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+    const layerTypes: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
     for (let i = 0; i < voters.length; i++) {
       processCommand(state, { type: 'JOIN_GROUP', userId: voters[i], layerType: layerTypes[i] });
     }

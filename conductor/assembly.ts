@@ -7,7 +7,7 @@
 
 import type { LayerType, UserId, User, FinaleState, FinaleConfig } from './types';
 
-const ALL_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const ALL_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 /**
  * Initialize assembly state from connected users and config.

@@ -2,7 +2,7 @@ import { describe, test, expect } from '@jest/globals';
 import { initializeAssembly, joinGroup, assignUndecided, getGroupSizes, getEmptyGroups } from '../assembly';
 import type { User, FinaleConfig, UserId } from '../types';
 
-const ALL_LAYER_TYPES = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'] as const;
+const ALL_LAYER_TYPES = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'] as const;
 
 function makeUser(id: UserId, connected = true): User {
   return { id, seatId: null, connected, joinedAt: 0 };
@@ -10,11 +10,12 @@ function makeUser(id: UserId, connected = true): User {
 
 function makeFinaleConfig(): FinaleConfig {
   return {
+    bothOptionsSurvive: true,
     assemblyTimerMs: 60000,
     assemblyGracePeriodMs: 15000,
     deliberationTimerMs: 120000,
     ambassadorVolunteerTimerMs: 15000,
-    ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+    ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'],
     audioPreviewPath: '/audio/previews',
     layerLabels: new Map([
       ['melody', 'The Voice'],
@@ -22,8 +23,7 @@ function makeFinaleConfig(): FinaleConfig {
       ['pad', 'The Warmth'],
       ['bass', 'The Ground'],
       ['harmony', 'The Color'],
-      ['fx1', 'The Shimmer'],
-      ['fx2', 'The Shadow'],
+      ['fx', 'The Shimmer'],
     ]),
     npcMessages: [],
   };
@@ -54,10 +54,10 @@ describe('initializeAssembly', () => {
     expect(assembly.undecidedUsers).not.toContain('u2');
   });
 
-  test('creates empty groups for all 7 layer types', () => {
+  test('creates empty groups for all 6 layer types', () => {
     const users = new Map();
     const assembly = initializeAssembly(users, makeFinaleConfig());
-    expect(assembly.groups.size).toBe(7);
+    expect(assembly.groups.size).toBe(6);
     for (const layerType of ALL_LAYER_TYPES) {
       expect(assembly.groups.get(layerType)).toEqual([]);
     }
@@ -187,7 +187,7 @@ describe('getEmptyGroups', () => {
     const users = new Map();
     const assembly = initializeAssembly(users, makeFinaleConfig());
     const empty = getEmptyGroups(assembly);
-    expect(empty).toHaveLength(7);
+    expect(empty).toHaveLength(6);
   });
 
   test('excludes groups with members', () => {
@@ -196,6 +196,6 @@ describe('getEmptyGroups', () => {
     joinGroup(assembly, 'u1', 'melody');
     const empty = getEmptyGroups(assembly);
     expect(empty).not.toContain('melody');
-    expect(empty).toHaveLength(6);
+    expect(empty).toHaveLength(5);
   });
 });

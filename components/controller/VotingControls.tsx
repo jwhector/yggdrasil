@@ -31,7 +31,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
   const pctA = total > 0 ? Math.round((votesA / total) * 100) : 0;
   const pctB = total > 0 ? Math.round((votesB / total) * 100) : 0;
 
-  const isVoting = currentLayerPhase === 'voting' || currentLayerPhase === 'auditioning';
+  const isVoting = currentLayerPhase === 'auditioning';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const isRevealing = currentLayerPhase === 'revealing';
 
@@ -191,7 +191,6 @@ function VoteOption({
 
 function phaseColor(phase: LayerPhase): string {
   switch (phase) {
-    case 'voting': return '#4ade80';
     case 'auditioning': return '#fbbf24';
     case 'revealing': return '#60a5fa';
     case 'locked_in': return '#818cf8';

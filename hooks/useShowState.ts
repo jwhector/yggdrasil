@@ -132,7 +132,7 @@ export function useShowState(
   if (mode === 'audience') {
     const state = rawState as AudienceClientState | null;
     const currentAttempt = state?.currentAttempt ?? null;
-    const isVotingActive = currentAttempt?.currentLayerPhase === 'voting';
+    const isVotingActive = currentAttempt?.currentLayerPhase === 'auditioning';
     const isDark = !state || DARK_PHASES.has(state.phase);
     return { state, isLoading, sendCommand, currentAttempt, isVotingActive, isDark };
   }
@@ -142,7 +142,7 @@ export function useShowState(
     const currentAttempt = state
       ? (state.attempts[state.currentAttemptIndex] ?? null)
       : null;
-    const isVotingActive = currentAttempt?.currentLayerPhase === 'voting';
+    const isVotingActive = currentAttempt?.currentLayerPhase === 'auditioning';
     const isDark = !state || DARK_PHASES.has(state.phase);
     return { state, isLoading, sendCommand, currentAttempt, isVotingActive, isDark };
   }

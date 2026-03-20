@@ -10,15 +10,16 @@ import {
 } from '../deliberation';
 import type { Fragment, FinaleConfig, LayerType, UserId } from '../types';
 
-const ALL_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const ALL_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 function makeFinaleConfig(): FinaleConfig {
   return {
+    bothOptionsSurvive: true,
     assemblyTimerMs: 60000,
     assemblyGracePeriodMs: 15000,
     deliberationTimerMs: 120000,
     ambassadorVolunteerTimerMs: 15000,
-    ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx1', 'fx2'],
+    ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'],
     audioPreviewPath: '/audio/previews',
     layerLabels: new Map(),
     npcMessages: [],
@@ -34,6 +35,7 @@ function makeFragment(id: string, layerType: LayerType, attemptIndex = 0, layerI
     chapter: 'ambition',
     layerType,
     displayLabel: `${layerType} ${id}`,
+    wonVote: false,
     audioRef: { trackIndex: 0 },
     previewAudioPath: `/audio/previews/preview-${attemptIndex}-${layerIndex}-A.mp3`,
   };
@@ -48,11 +50,11 @@ function makeGroups(assignments: Partial<Record<LayerType, UserId[]>>): Map<Laye
 }
 
 describe('initializeDeliberation', () => {
-  test('creates empty votes and null choices for all 7 layer types', () => {
+  test('creates empty votes and null choices for all 6 layer types', () => {
     const groups = makeGroups({});
     const delib = initializeDeliberation(groups, [], makeFinaleConfig());
-    expect(delib.groupVotes.size).toBe(7);
-    expect(delib.chosenFragments.size).toBe(7);
+    expect(delib.groupVotes.size).toBe(6);
+    expect(delib.chosenFragments.size).toBe(6);
     for (const lt of ALL_LAYER_TYPES) {
       expect(delib.groupVotes.get(lt)?.size).toBe(0);
       expect(delib.chosenFragments.get(lt)).toBeNull();

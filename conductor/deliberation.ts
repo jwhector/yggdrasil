@@ -7,7 +7,7 @@
 
 import type { LayerType, UserId, Fragment, FinaleState, FinaleConfig } from './types';
 
-const ALL_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const ALL_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 /**
  * Set up per-group voting state from assembly results and available fragments.

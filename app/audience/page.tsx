@@ -4,10 +4,8 @@ import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { HealthBar } from '@/components/song-building/HealthBar';
 import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
-import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { AssemblyCards } from '@/components/finale/AssemblyCards';
 import { GroupIdentity } from '@/components/finale/GroupIdentity';
@@ -100,17 +98,6 @@ function AudienceContent() {
           {/* Chapter label */}
           <ChapterLabel chapter={currentAttempt.chapter} attemptIndex={state.currentAttemptIndex} />
 
-          {/* Health bar */}
-          <HealthBar
-            health={currentAttempt.healthBar.current}
-            drainShadow={
-              currentAttempt.currentLayerPhase === 'revealing' && currentAttempt.currentDrain
-                ? currentAttempt.currentDrain.drainAmount
-                : 0
-            }
-            variant="audience"
-          />
-
           {/* Layer progress strip */}
           <LayerProgress
             layerResults={currentAttempt.layerResults}
@@ -120,25 +107,12 @@ function AudienceContent() {
             chapter={currentAttempt.chapter}
           />
 
-          {/* Voting cards OR reveal sequence */}
-          {currentAttempt.currentLayerPhase === 'revealing' &&
-            currentAttempt.currentVoteResult &&
-            currentAttempt.currentDrain &&
-            currentAttempt.currentLayerConfig ? (
-            <RevealSequence
-              voteResult={currentAttempt.currentVoteResult}
-              drain={currentAttempt.currentDrain}
-              healthBefore={currentAttempt.healthBar.current + currentAttempt.currentDrain.drainAmount}
-              layerConfig={currentAttempt.currentLayerConfig}
-              variant="audience"
-            />
-          ) : currentAttempt.currentLayerConfig ? (
+          {/* Voting cards */}
+          {currentAttempt.currentLayerConfig ? (
             <OptionCards
               layerConfig={currentAttempt.currentLayerConfig}
               myVote={currentAttempt.myVote}
-              disabled={
-                (currentAttempt.currentLayerPhase !== 'auditioning' && currentAttempt.currentLayerPhase !== 'voting')
-              }
+              disabled={currentAttempt.currentLayerPhase !== 'auditioning'}
               onVote={handleVote}
               currentAuditionOption={currentAttempt.currentAuditionOption}
             />
@@ -398,7 +372,7 @@ function ChapterLabel({ chapter, attemptIndex }: { chapter: string; attemptIndex
 }
 
 function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean }) {
-  if ((phase === 'voting' || phase === 'auditioning') && !hasVoted) {
+  if (phase === 'auditioning' && !hasVoted) {
     return (
       <p
         style={{
@@ -413,7 +387,7 @@ function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean 
       </p>
     );
   }
-  if ((phase === 'voting' || phase === 'auditioning') && hasVoted) {
+  if (phase === 'auditioning' && hasVoted) {
     return (
       <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', marginTop: '16px' }}>
         Vote recorded
