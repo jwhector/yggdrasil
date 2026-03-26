@@ -26,7 +26,9 @@
       "Bash(perl -i -0pe ':*)",
       "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/conductor --include=*.ts)",
       "Bash(grep -r \"healthBar\\\\|health_bar\\\\|HealthBar\\\\|drainFactor\\\\|drainAmount\\\\|drain_factor\\\\|HEALTH_BAR_DRAINED\\\\|SET_DRAIN_FACTOR\\\\|SET_HEALTH\" /Users/jared/Documents/Projects/yggdrasil/server --include=*.ts)",
-      "Bash(grep -r \"default-show.json\\\\|CONFIG_PATH\\\\|loadConfig\\\\|validateConfig\" /Users/jared/Documents/Projects/yggdrasil/server /Users/jared/Documents/Projects/yggdrasil/conductor --include=*.ts)"
+      "Bash(grep -r \"default-show.json\\\\|CONFIG_PATH\\\\|loadConfig\\\\|validateConfig\" /Users/jared/Documents/Projects/yggdrasil/server /Users/jared/Documents/Projects/yggdrasil/conductor --include=*.ts)",
+      "Bash(find /Users/jared/Documents/Projects/yggdrasil -name layer-groups.ts -o -name *layer-group*)",
+      "Bash(grep -E \"\\\\.ts$\")"
     ]
   }
 }

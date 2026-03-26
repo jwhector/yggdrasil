@@ -383,6 +383,7 @@ export function createAudioRouter(
     routerState.activeLayerTracks.clear();
 
     for (const i of routerState.fragmentTrackIndices) {
+      if (routerState.foldableTracks.has(i)) continue;
       const deviceInfo = routerState.deviceCache.get(i);
       if (deviceInfo) {
         oscBridge.send(
@@ -542,7 +543,8 @@ export function createAudioRouter(
     if (trackIndex !== "master") {
       oscBridge.send('/live/track/get/is_foldable', trackIndex);
       const foldableResp = await waitForOSCCorrelated('/live/track/get/is_foldable', trackIndex);
-      if (foldableResp?.[1] === 1) {
+      if (foldableResp?.[1] === true) {
+        console.log(`[AudioRouter] foldable track: ${trackIndex} is foldable`);
         routerState.foldableTracks.add(trackIndex);
         return;
       }

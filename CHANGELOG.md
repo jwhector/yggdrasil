@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-03-26 — V3.2 Migration Phase 1: Type System Foundation
+
+**Context:** First phase of the V3.2 migration (bundled layer groups + Incredibox-style finale). Adds all new V3.2 type definitions alongside existing V3.1 types. No conductor logic, server, or UI changes — purely additive type groundwork.
+
+**Key changes:**
+- `conductor/types.ts`: Added new `// V3.2 Types` section with:
+  - `V32_LAYERS_PER_ATTEMPT = 3` constant (existing `LAYERS_PER_ATTEMPT = 6` untouched)
+  - Core abstractions: `GranularType`, `GranularTrackRef`, `TrackBundle`, `LayerGroupId`, `LayerGroupConfig`, `LayerGroup`, `LiveSeedConfig`
+  - Attempt config: `V32LayerConfig`, `V32AttemptConfig` (3 layer groups + live seed per attempt)
+  - Finale types: `GranularFragment`, `LiveMixVote`, `V32FinaleConfig`, `V32FinaleState`
+  - Client types: `AuditionProgress` (bar-level progress for audition UI)
+  - Show config: `V32ShowConfig` (with `granularTypes[]` and `layerGroups[]` registries)
+- `config/default-show.json`: Added V3.2 config alongside existing V3.1 config:
+  - `granularTypes`: 6 granular type definitions (bass, drums, pad, melody, harmony, fx)
+  - `layerGroups`: 3 group definitions (bones/flesh/spark) referencing granular types
+  - `v32Attempts`: 3 attempts with `liveSeed` + `TrackBundle` structure, staggered per V3.2 spec
+  - `v32Finale`: Slim config (assignmentMode, bothOptionsSurvive, crossSongConstraint)
+
+**Design rationale:** All new types are additive (V32-prefixed where they shadow existing types). Existing V3.1 types, constants, and consumers are untouched. This allows incremental migration — the conductor logic phase will swap references from V3.1 to V3.2 types, then the V3.1 types and V32 prefixes are removed in cleanup.
+
+**No tests changed.** Compilation clean. 336/338 tests passing (same 2 pre-existing failures).
+
 ## 2026-03-20 — V3.1 Migration Phase 9: Config & Environment
 
 **Context:** Phase 9 finalizes configuration changes. Most config (`default-show.json`, `ableton-layout.json`, `conductor/types.ts`) was already V3.1-compliant from earlier phases. This phase adds runtime config validation and removes dead code.

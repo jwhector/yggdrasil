@@ -30,6 +30,7 @@ body {
 }
 .audition-glow {
   animation: audition-pulse 1.5s ease-in-out infinite;
+  background-color: fuchsia !important;
 }
 
 /* ============================================================

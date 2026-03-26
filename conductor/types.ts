@@ -526,6 +526,179 @@ export type ConductorEvent =
   | { type: 'ERROR'; message: string; command?: ConductorCommand };
 
 // ============================================================================
+// V3.2 Types — LayerGroup Abstraction & Incredibox Finale
+// ============================================================================
+
+/** Number of audience-facing layer groups per attempt in V3.2 (bones, flesh, spark). */
+export const V32_LAYERS_PER_ATTEMPT = 3;
+
+/**
+ * A single granular instrument type — the atomic unit of the finale.
+ * 6 types by default, configurable. These are the V3.2 equivalent of LayerType values.
+ */
+export interface GranularType {
+  id: string;           // e.g., 'bass', 'drums', 'melody'
+  label: string;        // Finale-facing name (e.g., 'The Ground')
+  color: string;        // For finale UI
+  symbol: string;       // For finale UI
+}
+
+/** Reference to a single Ableton track within a bundle, tagged with its granular type. */
+export interface GranularTrackRef {
+  granularType: string;   // e.g., 'bass'
+  trackIndex: number;     // Ableton track index
+}
+
+/** A collection of granular tracks for one option (A or B) of a layer group. */
+export interface TrackBundle {
+  tracks: GranularTrackRef[];
+}
+
+/**
+ * A layer group ID used during song-building.
+ * Configurable — defaults are 'bones' | 'flesh' | 'spark'.
+ */
+export type LayerGroupId = string;
+
+/**
+ * Config-level definition of a layer group within an attempt.
+ * The audience makes one A/B vote per LayerGroupConfig entry.
+ */
+export interface LayerGroupConfig {
+  id: LayerGroupId;
+  label: string;
+  granularTypes: string[];    // References to GranularType.id values in this bundle
+  optionA: TrackBundle;
+  optionB: TrackBundle;
+}
+
+/**
+ * Runtime-resolved layer group — GranularType values expanded from IDs.
+ * Used in conductor state where the full type objects are needed.
+ */
+export interface LayerGroup {
+  id: LayerGroupId;
+  label: string;
+  granularTypes: GranularType[];
+}
+
+/** Config for the live seed tracks that play throughout a song-building attempt. */
+export interface LiveSeedConfig {
+  trackIndices: number[];
+  label?: string;
+}
+
+/** V3.2 equivalent of LayerConfig — uses LayerGroupId + TrackBundle instead of LayerType + AudioReference. */
+export interface V32LayerConfig {
+  index: number;
+  group: LayerGroupId;
+  labelA: string;
+  labelB: string;
+  optionA: TrackBundle;
+  optionB: TrackBundle;
+}
+
+/** V3.2 attempt configuration — 3 layer groups + live seed per attempt. */
+export interface V32AttemptConfig {
+  chapter: Chapter;
+  title: string;
+  liveSeed: LiveSeedConfig;
+  layers: V32LayerConfig[];               // 3 entries (bones, flesh, spark)
+  thresholds: number[];                   // [0.50, 0.66, 0.99]
+  tempos: number[];                       // Per-layer BPM
+  auditionBars: number[];                 // Bars per option during audition
+  auditionCycles: number[];               // A-B cycles per layer
+}
+
+/**
+ * A granular fragment is the atomic unit of the V3.2 finale.
+ * Song-building produces LayerGroup results; those are decomposed into GranularFragments
+ * (one per granular track per option). Each finale group controls one granular type.
+ */
+export interface GranularFragment {
+  id: string;
+  songIndex: number;
+  layerGroupId: LayerGroupId;   // Which bundle this came from ('bones', 'flesh', 'spark')
+  granularType: string;         // Which specific type ('bass', 'drums', etc.)
+  option: 'A' | 'B';
+  chapter: Chapter;
+  trackIndex: number;           // Ableton track index for this specific granular track
+  wonVote: boolean;
+  previewAudioPath: string;
+}
+
+/** A single user's live mix vote — continuous preference for a fragment within their granular type's group. */
+export interface LiveMixVote {
+  fragmentId: string;
+  timestamp: number;            // For recency tiebreak on 50/50 splits
+}
+
+/** Bar-level audition progress emitted by the server at ~4 Hz during auditioning. */
+export interface AuditionProgress {
+  layerIndex: number;
+  currentOption: 'A' | 'B';
+  barProgress: number;          // 0.0 to 1.0 within current option's audition
+  totalBars: number;            // auditionBars for this layer
+  tempo: number;                // Current BPM
+  votingWindowMs: number;       // Derived total voting window for client timer
+  elapsedMs: number;            // Time since audition started
+}
+
+/** V3.2 finale config — replaces FinaleConfig when conductor is updated. */
+export interface V32FinaleConfig {
+  assignmentMode: 'auto' | 'self_select';
+  assignmentTimerMs: number;    // Only used when assignmentMode === 'self_select'
+  bothOptionsSurvive: boolean;  // When true, both winner and loser tracks are available in finale
+  crossSongConstraint: boolean; // When false, each group picks independently across songs
+  audioPreviewPath: string;
+  npcMessages: NpcMessageConfig[];
+}
+
+/** V3.2 show config — parallel to ShowConfig, used after conductor is updated. */
+export interface V32ShowConfig {
+  granularTypes: GranularType[];          // Master registry of granular types
+  layerGroups: LayerGroupConfig[];        // Layer group definitions (bones, flesh, spark)
+  layersPerAttempt: number;               // 3 in V3.2
+  attempts: V32AttemptConfig[];
+  finale: V32FinaleConfig;
+  timing: TimingConfig;
+  lobby: { waitingMessage: string };
+  seatIds: SeatId[];
+}
+
+/**
+ * V3.2 finale state — replaces FinaleState when conductor is updated.
+ * Phases: elegy → assignment → live_mix (no deliberation/ceremony/performer_mix).
+ */
+export interface V32FinaleState {
+  phase: 'elegy' | 'assignment' | 'live_mix';
+
+  // Fragment availability (GranularFragments decomposed from layer group results)
+  availableFragments: GranularFragment[];   // Available to each granular group
+  allFragments: GranularFragment[];         // All fragments including locked (for performer)
+
+  // Assignment state
+  assignment: {
+    mode: 'auto' | 'self_select';
+    groups: Map<string, UserId[]>;          // granularTypeId → user IDs
+    timerRemaining: number | null;          // Only populated in self_select mode
+  };
+
+  // Live mix state
+  liveMix: {
+    votes: Map<string, Map<UserId, LiveMixVote>>;  // granularTypeId → (userId → vote)
+    activeFragments: Map<string, string>;           // granularTypeId → fragmentId (current majority)
+    lockedTypes: string[];                          // Performer-locked granular types
+    performerOverrides: Map<string, string>;        // granularTypeId → fragmentId (performer forced)
+    liveTracksActive: string[];                     // Live performance track IDs
+    loopPosition: number;                           // 0.0 to 1.0 within current loop
+    loopCount: number;
+  };
+
+  npc: { currentMessage: string | null };
+}
+
+// ============================================================================
 // Client Identity (stored in localStorage for reconnection)
 // ============================================================================
 

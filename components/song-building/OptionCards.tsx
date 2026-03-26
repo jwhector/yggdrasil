@@ -131,7 +131,7 @@ function OptionButton({ option, label, identity, myVote, disabled, onVote, curre
         ...colorStyle,
         ...votedOtherStyle,
         ...selectedStyle,
-        ...(isAuditioning ? { '--glow-color': identity.color + '88' } as React.CSSProperties : {}),
+        ...(isAuditioning ? { '--glow-color': 'yellow' + '88' } as React.CSSProperties : {}),
       }}
     >
       {/* Layer symbol */}

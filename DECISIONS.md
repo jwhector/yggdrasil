@@ -115,6 +115,23 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Decision:** Kept `'auditioning'` as the LayerPhase name rather than renaming to `'auditioning_and_voting'` as MIGRATION-v3.1.md specified. Similarly kept `START_AUDITION` command rather than `START_LAYER`.
 **Rationale:** The behavioral change (voting open during auditioning) was already implemented in V3 (see CHANGELOG 2026-03-18). The names accurately describe the primary activity. Renaming would churn all references for no behavioral change.
 
+### R21: V3.2 type migration strategy — additive V32-prefixed types
+**Date:** 2026-03-26
+**Decision:** V3.2 types are added as new exports with `V32` prefix (e.g., `V32AttemptConfig`, `V32FinaleState`) alongside existing V3.1 types. Existing types are not modified. Config additions use separate JSON keys (`v32Attempts`, `v32Finale`).
+**Rationale:** 48+ files import from `conductor/types.ts`. Modifying existing types would cascade compilation errors into conductor logic, server, and UI code — contradicting the phased migration strategy. Additive types let the conductor logic phase swap references one module at a time, then cleanup removes the V3.1 types and V32 prefixes.
+**Impact:** `conductor/types.ts` has both V3.1 and V3.2 type definitions temporarily. `default-show.json` has both `attempts`/`finale` (V3.1) and `v32Attempts`/`v32Finale` (V3.2) keys.
+
+### R22: LayerGroupId is string, not a fixed union
+**Date:** 2026-03-26
+**Decision:** `LayerGroupId = string` rather than `'bones' | 'flesh' | 'spark'`. Similarly, `GranularType.id` is `string` rather than the fixed `LayerType` union.
+**Rationale:** The V3.2 design makes groupings configurable — different shows or songs could have different group names and different granular type counts. A string type allows config-driven flexibility. The existing `LayerType` union remains for V3.1 code that still needs it.
+
+### R23: Layer count — 3 audience-facing groups per attempt (V3.2)
+**Date:** 2026-03-26
+**Decision:** Song-building has 3 audience-facing layer groups (bones/flesh/spark) with thresholds `[0.50, 0.66, 0.99]`. Each group bundles 1-3 granular Ableton tracks. Supersedes R18 (6 layers) for V3.2.
+**Rationale:** 3 choices per song makes each choice a dramatic shift (choosing between full musical identities, not individual instruments). The 0.99 threshold at layer 2 means songs almost always collapse — the doubt wins, which is the narrative point. See MIGRATION-V3.2.md Change 2.
+**Impact:** `V32_LAYERS_PER_ATTEMPT = 3`. Existing `LAYERS_PER_ATTEMPT = 6` remains for V3.1 code.
+
 ---
 
 ## Open Decisions
