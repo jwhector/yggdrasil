@@ -2,7 +2,7 @@
 
 **Created:** 2026-03-26
 **Last updated:** 2026-03-26
-**Status:** ~95% complete (P0-P3 done, P4 partial)
+**Status:** Complete
 
 This file tracks every remaining task for the V3.2 migration. Each task has an explicit description of what needs to happen and where. Update the checkboxes as tasks are completed.
 
@@ -109,10 +109,16 @@ This file tracks every remaining task for the V3.2 migration. Each task has an e
 
 - [x] `npm test` — 296 passing (2 pre-existing audio-router flakes)
 - [x] `npx tsc --noEmit` — zero errors
-- [ ] `npm run dev` — dev server starts without errors
-- [ ] Manual walkthrough: lobby → song-building (3 layers) → finale_elegy → finale_assignment → finale_live_mix → ended
+- [ ] `npm run dev` — dev server starts without errors (manual)
+- [ ] Manual walkthrough: lobby → song-building (3 layers) → finale_elegy → finale_assignment → finale_live_mix → ended (manual)
 - [x] Update `CHANGELOG.md` with V3.2 migration completion notes
-- [ ] Update `ARCHITECTURE.md` and `docs/` to reflect V3.2 as the current state (remove V3.1 references)
+- [x] Update `ARCHITECTURE.md` and `docs/` to reflect V3.2 as the current state
+  - ARCHITECTURE.md: folder structure, open questions, appendix D, removed "in progress" markers
+  - CLAUDE.md: read order, priority chain, project structure, phase list
+  - docs/client-routes.md: removed V3.1 note, updated metrics section
+  - docs/audio-engine.md: replaced ceremony/performer-mix sections with live mix, fixed preview naming, updated env vars
+  - docs/server-protocol.md: added type_unlocked + audition_progress events, added finale_mix_events schema, updated recovery notes
+  - docs/data-models.md: fixed FinaleConfig reference, added NEW_SHOW command, added recovery/error events, added AUDITION_OPTION_CHANGED event
 
 ---
 

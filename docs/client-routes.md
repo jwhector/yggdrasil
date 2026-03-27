@@ -41,7 +41,7 @@
 - Crossfades happen at bar boundaries
 - NPC text appears at key moments
 
-> **Note:** V3.1 finale phases (assembly, deliberation, ceremony) are still in the codebase pending full V3.2 finale rewrite. See `MIGRATION-V3.2.md` for details.
+> **Note:** V3.2 finale implementation is complete. V3.1 finale code (assembly, deliberation, ceremony) has been removed.
 
 ### `/projector` — Public Display
 
@@ -86,10 +86,8 @@
 - Connected clients count
 - Vote counts A vs B, time remaining
 - Threshold status per attempt
-- Assembly: group sizes per layer type, timer remaining, undecided count
-- Deliberation: per-group fragment votes, timer remaining, ambassador volunteer status
-- Ceremony: current layer, ambassador status, locked layers, forfeited layers
-- Performer mix: active layers, pending changes, loop position
+- Assignment: group sizes per granular type, assignment mode
+- Live mix: per-type active fragments, vote distributions, locked types, loop position
 - System health: WebSocket status, Ableton OSC status, error log tail
 
 ---

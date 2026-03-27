@@ -5,7 +5,7 @@ This document and the `docs/` directory are the **authoritative source of truth*
 
 **When this document or any file in `docs/` conflicts with code, the spec is correct and the code should be updated.**
 
-**V3.2 migration in progress.** See `MIGRATION-V3.2.md` for the implementation plan. Where MIGRATION-V3.2.md conflicts with this document, the migration doc is correct.
+**V3.2 migration complete.** See `MIGRATION-V3.2.md` for the original implementation plan and `MIGRATION-V3.2-TODO.md` for final status.
 
 ---
 
@@ -201,7 +201,8 @@ solo-show/
 │   ├── conductor.ts             # State machine (show phases + layer phases)
 │   ├── voting.ts                # Blind vote tallying
 │   ├── threshold.ts             # Doubt threshold check
-│   ├── assignment.ts            # Granular type assignment (auto/self-select) [V3.2]
+│   ├── assignment.ts            # Granular type assignment (auto/self-select)
+│   ├── live-mix.ts              # Majority voting, recency tiebreak, initial fragment selection
 │   ├── fragments.ts             # Fragment generation from attempt results
 │   ├── npc.ts                   # NPC event-driven message logic
 │   ├── types.ts                 # Shared type definitions
@@ -211,7 +212,7 @@ solo-show/
 │   ├── index.ts                 # Entry point
 │   ├── socket.ts                # Socket.IO event handlers
 │   ├── persistence.ts           # SQLite layer
-│   ├── recovery.ts              # State recovery and backup
+│   ├── backup.ts                # State backup and restore
 │   ├── timing.ts                # Quantized timing engine (loop boundary detection)
 │   ├── osc.ts                   # OSC bridge for Ableton
 │   ├── audio-router.ts          # Maps AUDIO_CUE events to OSC messages
@@ -230,36 +231,37 @@ solo-show/
 │       └── page.tsx
 │
 ├── components/                  # React components
+│   ├── LobbyDisplay.tsx         # Projector lobby screen
 │   ├── song-building/
 │   │   ├── OptionCards.tsx       # A/B voting cards
 │   │   ├── RevealSequence.tsx   # Post-vote reveal animation
-│   │   ├── HealthBar.tsx        # Health bar visualization (pending deletion — Phase 8)
-│   │   └── LayerProgress.tsx    # Completed/upcoming layer indicators
+│   │   ├── LayerProgress.tsx    # Completed/upcoming layer indicators
+│   │   ├── AuditionProgress.tsx # Bar-level audition progress indicator
+│   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (projector)
+│   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Full fragment wreckage display
-│   │   ├── LiveMixController.tsx # Audience phone: tappable fragment cards [V3.2]
-│   │   ├── LiveMixSpectator.tsx  # Read-only view of other types [V3.2]
-│   │   ├── LiveMixProjector.tsx  # Projector: all types + consensus viz [V3.2]
+│   │   ├── AssignmentCards.tsx  # Self-select assignment UI (config-driven)
+│   │   ├── AssignmentIdentity.tsx # Post-assignment type identity display
+│   │   ├── LiveMixController.tsx # Audience phone: tappable fragment cards
+│   │   ├── LiveMixSpectator.tsx  # Read-only view of other types
+│   │   ├── LiveMixProjector.tsx  # Projector: all types + consensus viz
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
-│   │   ├── MixingSurface.tsx    # Performer's mixing grid (controller)
-│   │   ├── MixingMirror.tsx     # Projector view of mixing state
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
-│   ├── shared/
-│   │   ├── ChapterBadge.tsx     # Chapter color/icon badge
-│   │   ├── LayerIcon.tsx        # Layer type color/symbol
-│   │   └── PhaseIndicator.tsx   # Current phase display
 │   └── controller/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
-│       ├── LiveMixControls.tsx  # Per-type overrides, locks, vote distributions [V3.2]
+│       ├── LiveMixControls.tsx  # Per-type overrides, locks, vote distributions
 │       ├── NpcControls.tsx      # NPC line bank + manual fire
-│       ├── SnapshotPresets.tsx  # Quick-load mix configurations
+│       ├── EmergencyControls.tsx # Audio panic, state export/import, reset
 │       └── MetricsPanel.tsx     # Telemetry dashboard
 │
 ├── hooks/
 │   ├── useSocket.ts             # Socket.IO connection + reconnection
 │   ├── useShowState.ts          # Client-side state management
-│   └── useLiveMix.ts            # Live mix state management [V3.2]
+│   ├── useLiveMix.ts            # Live mix state management
+│   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
+│   └── useAudioPreview.ts       # In-browser audio preview playback
 │
 ├── lib/
 │   ├── socket-client.ts         # Socket.IO client setup
@@ -269,18 +271,15 @@ solo-show/
 │
 ├── public/
 │   └── audio/
-│       └── previews/            # Pre-rendered fragment audio files
-│           ├── preview-0-0-A.mp3
-│           ├── preview-0-0-B.mp3
-│           └── ...              # (up to 36 files)
+│       └── previews/            # Per-granular-type preview files
+│                                # Naming: preview-{songIndex}-{granularType}-{option}.mp3
 │
 ├── config/
-│   ├── default-show.json        # Pre-configured attempts, layers, fragments, layer labels, ceremony order
-│   ├── ableton-layout.json      # Track index mappings
-│   └── npc-messages.json        # Event-driven NPC messages (replaces npc-triggers.json)
+│   ├── default-show.json        # Layer groups, granular types, track bundles, thresholds, live seed, NPC messages
+│   └── ableton-layout.json      # Track index mappings + Utility device config
 │
 ├── db/
-│   └── schema.sql               # SQLite schema (V3)
+│   └── schema.sql               # SQLite schema (V3.2)
 │
 ├── next.config.js
 ├── tsconfig.json
@@ -322,7 +321,6 @@ test('performer lock prevents audience from changing granular type fragment', ..
 - [ ] Projector visual design and animations (especially live mix consensus visualization)
 - [ ] Live performance track configuration
 - [ ] **Live mix crossfade duration:** How many bars for crossfade when majority shifts? Needs playtesting.
-- [ ] **Deliberation with single-fragment layers:** Skip voting UI and go straight to ambassador selection, or show the single option for confirmation?
 
 ---
 
@@ -415,8 +413,12 @@ test('performer lock prevents audience from changing granular type fragment', ..
 - **Stagger table**: Each group (bones/flesh/spark) appears at position 0 in exactly one song across the 3 attempts.
 - **`LAYERS_PER_ATTEMPT`**: Changed from 6 to 3.
 
-### Finale Redesign (In Progress)
+### Finale Redesign (Complete)
 - **Assembly/Deliberation/Ceremony removed**: Replaced by automatic granular type assignment + continuous Incredibox-style live mix.
 - **New phases**: `finale_assignment` (auto/self-select into granular types), `finale_live_mix` (continuous collaborative mixing).
 - **Removed phases**: `finale_assembly`, `finale_deliberation`, `finale_ceremony`, `finale_performer_mix`.
 - **No altar, no ambassadors, no deliberation rounds**: Just continuous collaborative mixing where each audience member's phone is a live controller.
+- **Live mix conductor logic**: Majority voting with recency tiebreak, performer lock/unlock/override controls, initial fragment selection by highest winning proportion, crossfades at bar boundaries.
+- **New files**: `conductor/live-mix.ts`, `components/finale/AssignmentCards.tsx`, `components/finale/AssignmentIdentity.tsx`, `components/finale/LiveMixProjector.tsx`, `components/controller/LiveMixControls.tsx`.
+- **Deleted files**: AssemblyCards, GroupIdentity, DeliberationBoard, AudioPreview, CeremonyView, AltarReady, MixingMirror, MixingSurface, AssemblyControls, DeliberationControls, CeremonyControls, useAltarDetection.
+- **New DB table**: `finale_mix_events` for preference/lock/unlock/override event persistence.

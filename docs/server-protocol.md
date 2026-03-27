@@ -33,8 +33,10 @@ Full state syncs on every mutation:
 | `group_update` | `{ groupSizes: Array<{ granularType, count }> }` | Audience + Projector (during assignment, ~2 Hz) |
 | `assigned` | `{ granularType, groupSize }` | Individual audience member (after assignment) |
 | `npc_message` | `{ message: string }` | Audience + Projector |
-| `mix_state` | `{ activeFragments, votes }` | Audience (live mix, ~4 Hz) |
-| `type_locked` | `{ granularType }` | Audience (performer locked a type) |
+| `mix_state` | `{ activeFragments, voteDistributions, lockedTypes }` | Audience + Projector + Controller (live mix, ~4 Hz) |
+| `type_locked` | `{ granularType }` | Audience + Projector (performer locked a type) |
+| `type_unlocked` | `{ granularType }` | Audience + Projector (performer unlocked a type) |
+| `audition_progress` | `AuditionProgress` | Audience + Projector (song-building, ~4 Hz) |
 | `error` | `{ message }` | Controller |
 
 **Note on group updates:** Sent as a separate event during assignment at ~2 Hz for responsive group size displays, NOT as part of state_sync. The `mix_state` event is high-frequency during live mix to keep the UI responsive.
@@ -87,6 +89,17 @@ CREATE TABLE finale_assignments (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
+
+CREATE TABLE finale_mix_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  granular_type TEXT NOT NULL,
+  fragment_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('preference', 'lock', 'unlock', 'override')),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
 ```
 
 **Removed in V3.2:** `finale_groups`, `finale_group_votes`, `ceremony_events` tables (deprecated, kept in schema for historical data).
@@ -97,5 +110,5 @@ Unchanged from V1. Persist after EVERY state change. Atomic SQLite transactions.
 
 **Finale-specific recovery notes:**
 - If the assignment timer expires during a server restart, the system fires ASSIGNMENT_COMPLETE to assign remaining users
-- Live mix state (votes, active fragments) is held in memory and broadcast at ~4 Hz — not persisted per-vote
+- Live mix votes and active fragments are held in memory and broadcast at ~4 Hz; preference/lock/unlock/override events are persisted to `finale_mix_events` for audit/recovery
 - Audio preview files are static assets and require no server state

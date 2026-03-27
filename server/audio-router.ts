@@ -398,8 +398,6 @@ export function createAudioRouter(
       gs.currentGain = 0;
       oscBridge.send('/live/track/set/mute', i, 1);
     }
-
-    oscBridge.send('/live/song/stop_playing');
   }
 
   function clearCollapseTimers(): void {
@@ -467,7 +465,7 @@ export function createAudioRouter(
     }
     if (state.finaleState) {
       for (const fragment of state.finaleState.allFragments) {
-        routerState.fragmentTrackIndices.add(fragment.audioRef.trackIndex);
+        routerState.fragmentTrackIndices.add(fragment.trackIndex);
       }
     }
   }
@@ -615,7 +613,12 @@ export function createAudioRouter(
     }
 
     // Fire all track discoveries in parallel
+    // Temporarily raise listener limit to avoid MaxListenersExceededWarning
+    // (each parallel discovery adds a listener on the same OSC response address)
+    const prevMax = oscBridge.getMaxListeners();
+    oscBridge.setMaxListeners(trackList.length * 3 + prevMax);
     await Promise.all(trackList.map(trackIndex => discoverTrackDevice(trackIndex)));
+    oscBridge.setMaxListeners(prevMax);
 
     routerState.discoveryComplete = true;
     console.log(`[AudioRouter] Device discovery complete. ${routerState.deviceCache.size} tracks have Utility devices.`);
@@ -875,6 +878,7 @@ export function createAudioRouter(
 
   function handlePanic(): void {
     silenceAllTracks();
+    stopPlayback();
   }
 
   /**

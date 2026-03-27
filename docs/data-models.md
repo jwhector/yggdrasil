@@ -60,7 +60,7 @@ interface ShowConfig {
   granularTypes?: GranularType[];      // V3.2: master registry of granular types
   layerGroups?: LayerGroupConfig[];    // V3.2: layer group definitions (bones/flesh/spark)
   attempts: V32AttemptConfig[];        // Length 3
-  finale: FinaleConfig;
+  finale: V32FinaleConfig;
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;
@@ -222,7 +222,8 @@ type ConductorCommand =
   | { type: 'EXPORT_STATE' }
   | { type: 'IMPORT_STATE'; state: ShowState }
   | { type: 'FORCE_RECONNECT_ALL' }
-  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean };
+  | { type: 'RESET_TO_LOBBY'; preserveUsers: boolean }
+  | { type: 'NEW_SHOW' };
 ```
 
 ### Events (Output)
@@ -236,6 +237,7 @@ type ConductorEvent =
 
   // Song-building
   | { type: 'LAYER_PHASE_CHANGED'; attemptIndex: number; layerIndex: number; phase: LayerPhase }
+  | { type: 'AUDITION_OPTION_CHANGED'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; loopIndex: number; totalLoops: number }
   | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
@@ -262,7 +264,14 @@ type ConductorEvent =
   | { type: 'AUDIO_CUE'; cue: AudioCue }
 
   // State
-  | { type: 'STATE_UPDATED'; version: number };
+  | { type: 'STATE_UPDATED'; version: number }
+
+  // Recovery
+  | { type: 'FORCE_RECONNECT'; reason: string }
+  | { type: 'SHOW_RESET'; preservedUsers: boolean }
+
+  // Errors
+  | { type: 'ERROR'; message: string; command?: ConductorCommand };
 
 type AudioCue =
   | { type: 'set_tempo'; bpm: number; attemptIndex: number; layerIndex: number }

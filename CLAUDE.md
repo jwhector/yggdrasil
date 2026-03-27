@@ -2,19 +2,18 @@
 
 ## Read Order
 1. **This file** (you're here — read fully before doing anything)
-2. **MIGRATION-V3.2.md** — The active migration spec. **This takes priority over everything below when there's a conflict.**
-3. **ARCHITECTURE.md** — The base architecture spec (index + core concepts). Then read only the `docs/` file relevant to your task:
+2. **ARCHITECTURE.md** — The architecture spec (index + core concepts). Then read only the `docs/` file relevant to your task:
    - Conductor song-building? → `docs/song-building.md` + `docs/data-models.md`
    - Conductor finale? → `docs/finale.md` + `docs/data-models.md`
    - UI components or pages? → `docs/client-routes.md`
    - Audio, OSC, or timing? → `docs/audio-engine.md`
    - WebSocket events or persistence? → `docs/server-protocol.md`
    - Type definitions or conductor API? → `docs/data-models.md`
-4. **DECISIONS.md** — Resolved design decisions (with rationale) and open questions (do NOT invent answers)
-5. **conductor/types.ts** — Shared type definitions
-6. **CHANGELOG.md** — Recent changes with context
+3. **DECISIONS.md** — Resolved design decisions (with rationale) and open questions (do NOT invent answers)
+4. **conductor/types.ts** — Shared type definitions
+5. **CHANGELOG.md** — Recent changes with context
 
-**Priority chain:** MIGRATION-V3.2.md > ARCHITECTURE.md + docs/ > code. If any of these conflict, the higher-priority source is correct.
+**Priority chain:** ARCHITECTURE.md + docs/ > code. If any of these conflict, the docs are correct.
 
 ---
 
@@ -28,14 +27,14 @@ Yggdrasil is an interactive live performance system where ~40 audience members b
 
 **Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
 
-**Active migration:** V3.2 in progress. See `MIGRATION-V3.2.md` for the full implementation plan.
+**V3.2 migration complete.** See `MIGRATION-V3.2.md` for the original design spec and `MIGRATION-V3.2-TODO.md` for final status.
 
 ---
 
 ## Critical Rules
 
-### 1. MIGRATION-V3.2.md is the active source of truth
-If code or ARCHITECTURE.md contradicts MIGRATION-V3.2.md, the migration doc is correct. After V3.2 is complete, ARCHITECTURE.md and docs/ will be updated to match.
+### 1. ARCHITECTURE.md + docs/ are the source of truth
+ARCHITECTURE.md and the `docs/` files have been updated to reflect V3.2. If code contradicts these docs, the docs are correct. MIGRATION-V3.2.md is retained as a historical reference.
 
 ### 2. Types first
 When building new features, define the types in `conductor/types.ts` FIRST. Then implement logic. Then wire up server/client. This prevents drift.
@@ -55,11 +54,12 @@ Live mix state, audition progress, and audio metering use dedicated socket event
 
 ```
 yggdrasil/
-├── ARCHITECTURE.md              # Base spec (index + core concepts)
-├── MIGRATION-V3.2.md            # Active migration spec (takes priority)
+├── ARCHITECTURE.md              # Architecture spec (index + core concepts)
+├── MIGRATION-V3.2.md            # V3.2 design spec (historical reference)
+├── MIGRATION-V3.2-TODO.md       # V3.2 implementation status
 ├── docs/                        # Detailed specs (load per-task, see ARCHITECTURE.md index)
 │   ├── song-building.md         # Layers, voting, doubt threshold, collapse, fragments
-│   ├── finale.md                # Finale phases (being rewritten for V3.2)
+│   ├── finale.md                # Finale phases (elegy, assignment, live mix)
 │   ├── data-models.md           # TypeScript interfaces, conductor commands/events
 │   ├── client-routes.md         # /audience, /projector, /controller UI + visual identity
 │   ├── audio-engine.md          # Musical design, OSC protocol, track layout, env vars
@@ -72,29 +72,22 @@ yggdrasil/
 │   ├── index.ts
 │   ├── conductor.ts             # State machine (show phases + layer phases)
 │   ├── voting.ts                # Vote tallying + doubt threshold check
+│   ├── threshold.ts             # Doubt threshold check
 │   ├── fragments.ts             # Fragment generation (layer group → granular decomposition)
-│   ├── layer-groups.ts          # LayerGroup ↔ GranularType decomposition logic [V3.2 NEW]
-│   ├── assignment.ts            # Finale group auto/self-select assignment [V3.2 NEW]
-│   ├── live-mix.ts              # Continuous majority tracking + recency tiebreak [V3.2 NEW]
-│   ├── performer-mix.ts         # Performer override/lock controls (may merge into live-mix.ts)
+│   ├── assignment.ts            # Finale group auto/self-select assignment
+│   ├── live-mix.ts              # Majority voting, recency tiebreak, initial fragment selection
 │   ├── npc.ts                   # NPC event-driven message lookup
 │   ├── types.ts                 # Shared types (LayerGroup, GranularType, GranularFragment, etc.)
 │   └── __tests__/
 │
-│   # REMOVED in V3.2:
-│   # ├── assembly.ts            # Replaced by assignment.ts
-│   # ├── deliberation.ts        # No deliberation phase
-│   # └── ceremony.ts            # No ceremony phase
-│
 ├── server/
 │   ├── index.ts                 # Entry point
-│   ├── socket.ts                # Socket.IO handlers
+│   ├── socket.ts                # Socket.IO handlers + mix_state broadcast
 │   ├── persistence.ts           # SQLite
 │   ├── backup.ts                # Backup + restore
 │   ├── timing.ts                # Quantized timing + audition progress emission
 │   ├── osc.ts                   # OSC bridge
 │   ├── audio-router.ts          # AUDIO_CUE → OSC mapping (track bundles + granular crossfades)
-│   ├── metering.ts              # M4L audio levels → projector
 │   └── __tests__/
 │
 ├── app/                         # Next.js pages
@@ -105,42 +98,35 @@ yggdrasil/
 ├── components/
 │   ├── LobbyDisplay.tsx         # Projector lobby screen
 │   ├── song-building/
-│   │   ├── OptionCards.tsx       # A/B voting cards (3 layers now, not 6)
+│   │   ├── OptionCards.tsx       # A/B voting cards
 │   │   ├── RevealSequence.tsx   # Post-vote reveal + threshold check
 │   │   ├── LayerProgress.tsx    # 3-layer progress indicator
-│   │   └── AuditionProgress.tsx # Bar-level audition progress [V3.2 NEW]
+│   │   ├── AuditionProgress.tsx # Bar-level audition progress
+│   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (projector)
+│   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Fragment wreckage display
-│   │   ├── LiveMixController.tsx # Audience phone: tappable fragment cards [V3.2 NEW]
-│   │   ├── LiveMixSpectator.tsx  # Read-only view of other types [V3.2 NEW]
-│   │   ├── LiveMixProjector.tsx  # Projector: all types + consensus viz [V3.2 NEW]
+│   │   ├── AssignmentCards.tsx  # Self-select assignment UI (config-driven)
+│   │   ├── AssignmentIdentity.tsx # Post-assignment type identity display
+│   │   ├── LiveMixController.tsx # Audience phone: tappable fragment cards
+│   │   ├── LiveMixSpectator.tsx  # Read-only view of other types
+│   │   ├── LiveMixProjector.tsx  # Projector: all types + consensus viz
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
-│   │   ├── MixingSurface.tsx    # Performer's mixing grid (adapted for granular types)
-│   │   ├── MixingMirror.tsx     # Projector view of mixing state
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
-│   │
-│   │   # REMOVED in V3.2:
-│   │   # AssemblyCards, DeliberationBoard, AudioPreview,
-│   │   # AmbassadorPrompt, CeremonyView, AltarReady, GroupIdentity
-│   │
 │   └── controller/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
-│       ├── LiveMixControls.tsx  # Per-type overrides, locks, vote distributions [V3.2 NEW]
+│       ├── LiveMixControls.tsx  # Per-type overrides, locks, vote distributions
 │       ├── NpcControls.tsx      # NPC line bank + manual fire
-│       ├── SnapshotPresets.tsx  # Quick-load mix configurations
+│       ├── EmergencyControls.tsx # Audio panic, state export/import, reset
 │       └── MetricsPanel.tsx     # Telemetry dashboard
-│
-│       # REMOVED in V3.2:
-│       # AssemblyControls, DeliberationControls, CeremonyControls
 │
 ├── hooks/
 │   ├── useSocket.ts
 │   ├── useShowState.ts
-│   └── useLiveMix.ts           # Live mix state management [V3.2 NEW]
-│
-│   # REMOVED in V3.2:
-│   # └── useAltarDetection.ts  # No altar
+│   ├── useLiveMix.ts            # Live mix state management
+│   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
+│   └── useAudioPreview.ts       # In-browser audio preview playback
 │
 ├── lib/
 │   ├── socket-client.ts
@@ -155,7 +141,7 @@ yggdrasil/
 │
 ├── config/
 │   ├── default-show.json        # Layer groups, granular types, track bundles, thresholds, live seed
-│   └── ableton-layout.json      # Track bundle mappings (config-driven, no formula)
+│   └── ableton-layout.json      # Track bundle mappings + Utility device config
 │
 └── db/
     └── schema.sql               # finale_assignments + finale_mix_events tables
@@ -232,5 +218,4 @@ lobby → opener → attempt_story → attempt_build → attempt_resolve (if com
                  finale_elegy → finale_assignment → finale_live_mix → ended
 ```
 
-Removed phases: `finale_assembly`, `finale_deliberation`, `finale_ceremony`, `finale_performer_mix`
-New phases: `finale_assignment`, `finale_live_mix`
+Finale phases: `finale_elegy`, `finale_assignment`, `finale_live_mix`

@@ -1,7 +1,7 @@
 # Audio Engine, Musical Design & Ableton Integration
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
-> **Related:** [song-building.md](song-building.md) (collapse/rejection audio), [finale.md](finale.md) (ceremony audio activation, performer mix)
+> **Related:** [song-building.md](song-building.md) (collapse/rejection audio), [finale.md](finale.md) (live mix audio behavior)
 
 ---
 
@@ -62,9 +62,9 @@ Each layer type occupies a designated frequency range. EQ cuts on each track rem
 Each fragment clip must be exported as a standalone audio file for in-browser preview:
 - **Format:** mp3, 128kbps (adequate quality for phone speakers; small file size for fast loading)
 - **Duration:** 4–8 bars recommended. Full 8-bar loop acceptable. Shorter excerpts encourage turn-taking during group deliberation.
-- **Naming:** `preview-{songIndex}-{layerIndex}-{option}.mp3` (e.g., `preview-0-2-A.mp3`)
+- **Naming:** `preview-{songIndex}-{granularType}-{option}.mp3` (e.g., `preview-0-bass-A.mp3`)
 - **Content:** Should start cleanly on bar 1 and ideally loop well, though looping is not required for preview purposes
-- **Total file count:** Up to 18 files (3 songs × 3 layer groups × 2 options), though only available fragments will be loaded by clients
+- **Total file count:** Up to 72 files (3 songs × 6 granular types × 2 options × 2 layer groups containing that type), though only available fragments will be loaded by clients. Actual count depends on composition.
 
 ---
 
@@ -111,15 +111,12 @@ Each fragment clip must be exported as a standalone audio file for in-browser pr
 - Rejection effect on return track activates (TBD: distinct from collapse effect — configurable)
 - After effect completes, all tracks for this attempt are muted
 
-**Finale — Ceremony lock-in:**
-- Each altar lock-in: unmute the chosen fragment's track, quantized to next bar boundary
-- Fade in per `GainConfig.ceremonySwellBeats` (e.g., ~2 bars)
-- Layers accumulate: previously locked ceremony layers stay unmuted
-
-**Finale — Performer mix:**
-- Pending changes queue fires all mute/unmute commands simultaneously at loop boundary
-- Swaps within a role: ~1 bar crossfade (old fades out, new fades in)
-- Muting a role: fade out over ~1 bar at loop boundary
+**Finale — Live mix (V3.2):**
+- When live mix starts: unmute initial active fragment tracks per granular type (via `live_mix_start` cue)
+- When majority shifts for a type: crossfade at next bar boundary (via `live_mix_crossfade` cue)
+- Individual granular tracks controlled independently (not bundled)
+- Performer lock freezes a type's active fragment; override forces a specific fragment
+- Crossfade: fade out outgoing track, fade in incoming track, ~1 bar overlap
 
 ### OSC Protocol
 
@@ -163,7 +160,7 @@ Unchanged from V1. Timing engine uses JS timers; audio cues are logged but not s
 
 Pre-rendered audio files (mp3/ogg) for each fragment clip, exported from Ableton and served statically by the Next.js server. Used during the finale for in-browser playback on audience phones.
 
-**File naming convention:** `preview-{songIndex}-{layerIndex}-{option}.mp3` (e.g., `preview-0-2-A.mp3`)
+**File naming convention:** `preview-{songIndex}-{granularType}-{option}.mp3` (e.g., `preview-0-bass-A.mp3`)
 
 **Serving:** Static files from `public/audio/previews/` directory, served via Next.js static file handling.
 
@@ -188,16 +185,9 @@ MOCK_BPM=120
 
 COLLAPSE_ANIMATION_MS=5000
 
-# Finale — Assembly
-ASSEMBLY_TIMER_MS=60000
-ASSEMBLY_GRACE_PERIOD_MS=15000
-
-# Finale — Deliberation
-DELIBERATION_TIMER_MS=120000
-AMBASSADOR_VOLUNTEER_TIMER_MS=15000
-
-# Finale — Ceremony
-CEREMONY_LAYER_ORDER=bass,drums,pad,melody,harmony,fx
+# Finale — Assignment (V3.2)
+FINALE_ASSIGNMENT_MODE=auto
+FINALE_ASSIGNMENT_TIMER_MS=30000
 
 # Audio Previews
 AUDIO_PREVIEW_PATH=/audio/previews

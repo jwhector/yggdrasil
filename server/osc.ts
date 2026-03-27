@@ -31,6 +31,10 @@ export interface OSCBridge {
   /** Remove handler for incoming OSC messages */
   off(address: string, handler: (...args: any[]) => void): void;
 
+  /** Get/set max listeners (delegates to underlying EventEmitter) */
+  getMaxListeners(): number;
+  setMaxListeners(n: number): void;
+
   /** Start listening for incoming messages */
   start(): Promise<void>;
 
@@ -388,6 +392,8 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
     on,
     once,
     off,
+    getMaxListeners: () => emitter.getMaxListeners(),
+    setMaxListeners: (n: number) => { emitter.setMaxListeners(n); },
     start,
     stop,
     isRunning,
@@ -415,6 +421,8 @@ export function createNullOSCBridge(): OSCBridge {
     off(address: string, handler: (...args: any[]) => void): void {
       emitter.off(address, handler);
     },
+    getMaxListeners: () => emitter.getMaxListeners(),
+    setMaxListeners: (n: number) => { emitter.setMaxListeners(n); },
     async start(): Promise<void> {
       running = true;
       console.log('[OSC-Null] Null bridge started (no actual OSC communication)');

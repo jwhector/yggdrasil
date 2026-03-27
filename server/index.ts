@@ -22,7 +22,7 @@ import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
-import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, LayerType } from '../conductor/types';
+import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand } from '../conductor/types';
 import { LAYERS_PER_ATTEMPT } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
@@ -56,35 +56,12 @@ const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
 const ABLETON_HOST = process.env.ABLETON_HOST || process.env.OSC_HOST || '127.0.0.1';
 
 /**
- * Parse show config JSON and convert layerLabels from plain object to Map.
- * Also applies environment variable overrides for finale timing.
+ * Parse show config JSON and apply environment variable overrides.
  */
 function parseShowConfig(json: string): ShowConfig {
   const config: ShowConfig = JSON.parse(json);
 
-  // Convert layerLabels from plain JSON object to Map (JSON.parse produces {}, not Map)
-  if (config.finale.layerLabels && !(config.finale.layerLabels instanceof Map)) {
-    config.finale.layerLabels = new Map(
-      Object.entries(config.finale.layerLabels) as [LayerType, string][],
-    );
-  }
-
   // Apply environment variable overrides
-  if (process.env.ASSEMBLY_TIMER_MS) {
-    config.finale.assemblyTimerMs = parseInt(process.env.ASSEMBLY_TIMER_MS, 10);
-  }
-  if (process.env.ASSEMBLY_GRACE_PERIOD_MS) {
-    config.finale.assemblyGracePeriodMs = parseInt(process.env.ASSEMBLY_GRACE_PERIOD_MS, 10);
-  }
-  if (process.env.DELIBERATION_TIMER_MS) {
-    config.finale.deliberationTimerMs = parseInt(process.env.DELIBERATION_TIMER_MS, 10);
-  }
-  if (process.env.AMBASSADOR_VOLUNTEER_TIMER_MS) {
-    config.finale.ambassadorVolunteerTimerMs = parseInt(process.env.AMBASSADOR_VOLUNTEER_TIMER_MS, 10);
-  }
-  if (process.env.CEREMONY_LAYER_ORDER) {
-    config.finale.ceremonyLayerOrder = process.env.CEREMONY_LAYER_ORDER.split(',') as LayerType[];
-  }
   if (process.env.AUDIO_PREVIEW_PATH) {
     config.finale.audioPreviewPath = process.env.AUDIO_PREVIEW_PATH;
   }
@@ -164,20 +141,6 @@ function validateShowConfig(config: ShowConfig): void {
 
   if (typeof config.finale.bothOptionsSurvive !== 'boolean') {
     errors.push(`finale.bothOptionsSurvive = ${config.finale.bothOptionsSurvive}, must be a boolean`);
-  }
-
-  // ceremonyLayerOrder is a V3.1 finale concept — validate only if present
-  const order = config.finale.ceremonyLayerOrder;
-  if (order && order.length > 0) {
-    const VALID_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
-    for (const lt of order) {
-      if (!VALID_LAYER_TYPES.includes(lt)) {
-        errors.push(`finale.ceremonyLayerOrder contains invalid layer type: "${lt}"`);
-      }
-    }
-    if (new Set(order).size !== order.length) {
-      errors.push(`finale.ceremonyLayerOrder contains duplicates`);
-    }
   }
 
   if (errors.length > 0) {
