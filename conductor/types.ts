@@ -319,6 +319,7 @@ export type AudioCue =
   | { type: 'live_mix_start'; activeTrackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
+  | { type: 'master_panic' }            // Authoritative: query Ableton for all tracks, mute every non-foldable, reset gains
   | { type: 'reset_utilities' };        // Emergency: set all Utility gains to 0 dB, unmute all tracks
 
 // ============================================================================
@@ -366,6 +367,7 @@ export type ConductorCommand =
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
   | { type: 'AUDIO_PANIC' }
+  | { type: 'MASTER_PANIC' }            // Authoritative: query Ableton, mute all non-foldable tracks
   | { type: 'RESET_UTILITIES' }         // Emergency: reset all Utility gains to 0 dB
 
   // Connection

@@ -105,9 +105,17 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
               <button
                 onClick={() => send({ type: 'AUDIO_PANIC' })}
                 style={{ ...btn, ...btnDanger, minWidth: '120px' }}
-                title="Hard mute all Ableton tracks"
+                title="Hard mute all configured tracks and stop transport"
               >
                 AUDIO PANIC
+              </button>
+
+              <button
+                onClick={() => send({ type: 'MASTER_PANIC' })}
+                style={{ ...btn, ...btnMasterPanic, minWidth: '140px' }}
+                title="Query Ableton for ALL tracks, mute every non-group track, reset gains"
+              >
+                MASTER PANIC
               </button>
 
               <button
@@ -231,6 +239,7 @@ const btnPrimary: React.CSSProperties = { backgroundColor: '#f0f0f0', color: '#1
 const btnSecondary: React.CSSProperties = { backgroundColor: '#1e3a5f', color: '#93c5fd', border: '1px solid #1d4ed8' };
 const btnWarning: React.CSSProperties = { backgroundColor: '#451a03', color: '#fbbf24', border: '1px solid #78350f' };
 const btnDanger: React.CSSProperties = { backgroundColor: '#450a0a', color: '#f87171', border: '1px solid #7f1d1d' };
+const btnMasterPanic: React.CSSProperties = { backgroundColor: '#3b0764', color: '#c084fc', border: '1px solid #6b21a8' };
 
 const styles = {
   section: {

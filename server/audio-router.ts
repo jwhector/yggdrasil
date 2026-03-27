@@ -110,6 +110,8 @@ export interface AudioRouter {
   handleStateChange(state: ShowState, events: ConductorEvent[]): void;
   /** Discover Utility devices on fragment tracks. Pass ShowState to target only known tracks. */
   discoverDevices(state?: ShowState): Promise<void>;
+  /** Authoritative panic: query Ableton for all tracks, mute every non-foldable, reset gains */
+  masterPanic(): Promise<void>;
   /** Clean up resources */
   dispose(): void;
 }
@@ -882,6 +884,106 @@ export function createAudioRouter(
   }
 
   /**
+   * Authoritative master panic: queries Ableton for total track count, then
+   * mutes every non-foldable track and resets Utility gains to -inf.
+   * Foldable (group) tracks are unmuted. Master track gain reset to unity.
+   * Unlike handlePanic(), this doesn't rely on the config-driven fragmentTrackIndices —
+   * it discovers the full track list from Ableton directly.
+   */
+  async function masterPanic(): Promise<void> {
+    console.log('[AudioRouter] Master panic: querying Ableton for full track list...');
+
+    // 1. Cancel all in-flight fades and sub-beat timers
+    for (const gs of routerState.trackGains.values()) {
+      if (gs.activeFadeId) {
+        timingEngine?.cancelCallbacks(gs.activeFadeId);
+        gs.activeFadeId = null;
+      }
+      for (const timer of gs.subBeatTimers) clearTimeout(timer);
+      gs.subBeatTimers = [];
+    }
+    routerState.unmutedTracks.clear();
+    routerState.activeLayerTracks.clear();
+    clearCollapseTimers();
+    clearRejectionTimers();
+
+    // 2. Query Ableton for total track count
+    oscBridge.send('/live/song/get/num_tracks');
+    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+    const numTracks = numTracksResp?.[0] ?? 0;
+    if (numTracks === 0) {
+      console.warn('[AudioRouter] Master panic: no track count from Ableton, aborting');
+      return;
+    }
+
+    // 3. Process each track in parallel — check foldable, mute/reset non-foldable
+    const trackIndices: number[] = [];
+    for (let i = 0; i < numTracks; i++) trackIndices.push(i);
+
+    const prevMax = oscBridge.getMaxListeners();
+    oscBridge.setMaxListeners(numTracks * 3 + prevMax);
+
+    let mutedCount = 0;
+    let foldableCount = 0;
+
+    await Promise.all(trackIndices.map(async (trackIndex) => {
+      // Check if foldable (group track)
+      oscBridge.send('/live/track/get/is_foldable', trackIndex);
+      const foldableResp = await waitForOSCCorrelated('/live/track/get/is_foldable', trackIndex);
+
+      if (foldableResp?.[1] === true) {
+        // Group track — unmute it so groups are open
+        foldableCount++;
+        oscBridge.send('/live/track/set/mute', trackIndex, 0);
+        return;
+      }
+
+      // Non-foldable — mute and reset gain
+      mutedCount++;
+
+      // Use cached device info if available, otherwise discover on the fly
+      let deviceInfo = routerState.deviceCache.get(trackIndex);
+      if (!deviceInfo) {
+        await discoverTrackDevice(trackIndex);
+        deviceInfo = routerState.deviceCache.get(trackIndex);
+      }
+
+      if (deviceInfo) {
+        oscBridge.send(
+          '/live/device/set/parameter/value',
+          trackIndex,
+          deviceInfo.utilityDeviceIndex,
+          deviceInfo.gainParamIndex,
+          -1,
+        );
+      }
+
+      const gs = getOrCreateTrackGainState(trackIndex);
+      gs.currentGain = 0;
+      oscBridge.send('/live/track/set/mute', trackIndex, 1);
+    }));
+
+    oscBridge.setMaxListeners(prevMax);
+
+    // 4. Reset master track Utility gain to unity (0 dB)
+    const masterDevice = routerState.deviceCache.get('master');
+    if (masterDevice) {
+      oscBridge.send(
+        '/live/device/set/parameter/value',
+        'master',
+        masterDevice.utilityDeviceIndex,
+        masterDevice.gainParamIndex,
+        0,
+      );
+    }
+
+    // 5. Stop transport
+    stopPlayback();
+
+    console.log(`[AudioRouter] Master panic complete. Muted ${mutedCount} tracks, skipped ${foldableCount} foldable.`);
+  }
+
+  /**
    * Emergency reset: set all Utility gains to 0 dB on fragment tracks.
    * Allows the performer to take over from Ableton's mixer.
    * Note: tracks are not unmuted — performers can adjust manually in Ableton.
@@ -971,6 +1073,9 @@ export function createAudioRouter(
           case 'panic':
             handlePanic();
             break;
+          case 'master_panic':
+            // Async — actual work done via audioRouter.masterPanic() from socket handler
+            break;
           case 'reset_utilities':
             handleResetUtilities();
             break;
@@ -1034,6 +1139,7 @@ export function createAudioRouter(
   return {
     handleStateChange,
     discoverDevices,
+    masterPanic,
     dispose,
   };
 }

@@ -185,6 +185,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [{ type: 'AUDIO_CUE', cue: { type: 'transport', action: command.action } }];
     case 'AUDIO_PANIC':
       return [{ type: 'AUDIO_CUE', cue: { type: 'panic' } }];
+    case 'MASTER_PANIC':
+      return [{ type: 'AUDIO_CUE', cue: { type: 'master_panic' } }];
     case 'RESET_UTILITIES':
       return [{ type: 'AUDIO_CUE', cue: { type: 'reset_utilities' } }];
 

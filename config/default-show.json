@@ -19,7 +19,7 @@
       "auditionBars": [
         4,
         4,
-        2
+        8
       ],
       "auditionCycles": [
         2,
@@ -28,77 +28,67 @@
       ],
       "liveSeed": {
         "trackIndices": [
-          0,
-          1,
-          2
+          6
         ],
         "label": "The seed"
       },
       "layers": [
         {
           "index": 0,
-          "group": "bones",
-          "labelA": "Heavy. Driving.",
-          "labelB": "Light. Floating.",
+          "group": "flesh",
+          "labelA": "Tender",
+          "labelB": "Electric",
           "optionA": {
             "tracks": [
               {
-                "granularType": "bass",
-                "trackIndex": 3
+                "granularType": "harmony",
+                "trackIndex": 21
               },
               {
-                "granularType": "drums",
-                "trackIndex": 4
+                "granularType": "pad",
+                "trackIndex": 44
               }
             ]
           },
           "optionB": {
             "tracks": [
               {
-                "granularType": "bass",
-                "trackIndex": 5
+                "granularType": "harmony",
+                "trackIndex": 22
               },
               {
-                "granularType": "drums",
-                "trackIndex": 6
+                "granularType": "pad",
+                "trackIndex": 44
               }
             ]
           }
         },
         {
           "index": 1,
-          "group": "flesh",
-          "labelA": "Warm. Open.",
-          "labelB": "Cool. Guarded.",
+          "group": "bones",
+          "labelA": "Rooted",
+          "labelB": "Drifting",
           "optionA": {
             "tracks": [
               {
-                "granularType": "melody",
-                "trackIndex": 7
+                "granularType": "bass",
+                "trackIndex": 49
               },
               {
-                "granularType": "pad",
-                "trackIndex": 8
-              },
-              {
-                "granularType": "harmony",
-                "trackIndex": 9
+                "granularType": "drums",
+                "trackIndex": 28
               }
             ]
           },
           "optionB": {
             "tracks": [
               {
-                "granularType": "melody",
-                "trackIndex": 10
+                "granularType": "drums",
+                "trackIndex": 29
               },
               {
-                "granularType": "pad",
-                "trackIndex": 11
-              },
-              {
-                "granularType": "harmony",
-                "trackIndex": 12
+                "granularType": "bass",
+                "trackIndex": 51
               }
             ]
           }
@@ -112,7 +102,11 @@
             "tracks": [
               {
                 "granularType": "fx",
-                "trackIndex": 13
+                "trackIndex": 60
+              },
+              {
+                "granularType": "fx",
+                "trackIndex": 61
               }
             ]
           },
@@ -120,7 +114,7 @@
             "tracks": [
               {
                 "granularType": "fx",
-                "trackIndex": 14
+                "trackIndex": 62
               }
             ]
           }
@@ -152,75 +146,13 @@
       ],
       "liveSeed": {
         "trackIndices": [
-          15,
-          16,
-          17
+          10
         ],
         "label": "The seed"
       },
       "layers": [
         {
           "index": 0,
-          "group": "flesh",
-          "labelA": "Tender",
-          "labelB": "Electric",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "melody",
-                "trackIndex": 18
-              },
-              {
-                "granularType": "pad",
-                "trackIndex": 19
-              },
-              {
-                "granularType": "harmony",
-                "trackIndex": 20
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "melody",
-                "trackIndex": 21
-              },
-              {
-                "granularType": "pad",
-                "trackIndex": 22
-              },
-              {
-                "granularType": "harmony",
-                "trackIndex": 23
-              }
-            ]
-          }
-        },
-        {
-          "index": 1,
-          "group": "spark",
-          "labelA": "Open",
-          "labelB": "Guarded",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "fx",
-                "trackIndex": 24
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "fx",
-                "trackIndex": 25
-              }
-            ]
-          }
-        },
-        {
-          "index": 2,
           "group": "bones",
           "labelA": "Rooted",
           "labelB": "Drifting",
@@ -228,11 +160,11 @@
             "tracks": [
               {
                 "granularType": "bass",
-                "trackIndex": 26
+                "trackIndex": 47
               },
               {
                 "granularType": "drums",
-                "trackIndex": 27
+                "trackIndex": 31
               }
             ]
           },
@@ -240,11 +172,67 @@
             "tracks": [
               {
                 "granularType": "bass",
-                "trackIndex": 28
+                "trackIndex": 53
               },
               {
                 "granularType": "drums",
-                "trackIndex": 29
+                "trackIndex": 36
+              }
+            ]
+          }
+        },
+        {
+          "index": 1,
+          "group": "flesh",
+          "labelA": "Warm",
+          "labelB": "Cool",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndex": 18
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 19
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndex": 20
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 42
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 43
+              }
+            ]
+          }
+        },
+        {
+          "index": 2,
+          "group": "spark",
+          "labelA": "Bright. Sharp.",
+          "labelB": "Dark. Soft.",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 63
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 66
               }
             ]
           }

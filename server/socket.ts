@@ -24,6 +24,7 @@ import type {
 } from '../conductor/types';
 import { processCommand } from '../conductor';
 import type { PersistenceLayer } from './persistence';
+import type { AudioRouter } from './audio-router';
 import { serializeState } from '../lib/serialization';
 
 // ============================================================================
@@ -61,13 +62,15 @@ const MIX_STATE_BROADCAST_INTERVAL_MS = 250;    // ~4 Hz during live mix
  * @param setState     - Updates state and fires hooks (audio, timing)
  * @param persistence  - Persistence layer for saving data
  * @param createNewShow - Factory for creating a fresh show (optional)
+ * @param audioRouter   - Audio router for direct async operations (e.g. master panic)
  */
 export function setupSocketHandlers(
   io: SocketIOServer,
   getState: () => ShowState,
   setState: (state: ShowState, events: ConductorEvent[]) => void,
   persistence: PersistenceLayer,
-  createNewShow?: () => ShowState
+  createNewShow?: () => ShowState,
+  audioRouter?: AudioRouter,
 ): void {
   // Heartbeat tracking
   const heartbeats = new Map<string, ClientHeartbeat>();
@@ -445,6 +448,16 @@ export function setupSocketHandlers(
     // ------------------------------------------------------------------
     socket.on('command', async (command: ConductorCommand) => {
       console.log(`[Socket] Command: ${command.type}`);
+
+      // MASTER_PANIC is async (OSC round-trips) — call audio router directly
+      if (command.type === 'MASTER_PANIC') {
+        if (!audioRouter) {
+          console.error('[Socket] MASTER_PANIC rejected: no audio router available');
+          return;
+        }
+        await audioRouter.masterPanic();
+        return;
+      }
 
       // NEW_SHOW is handled at server level (needs I/O to read config)
       if (command.type === 'NEW_SHOW') {

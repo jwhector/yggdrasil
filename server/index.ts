@@ -254,9 +254,8 @@ async function main() {
     return newState;
   }
 
-  // Setup socket handlers
-  console.log('[Server] Setting up Socket.IO handlers...');
-  setupSocketHandlers(io, getState, setState, persistence, createNewShow);
+  // Socket handlers are set up after audio router creation (below)
+  // so that masterPanic() can be wired directly.
 
   // ============================================================================
   // OSC Bridge and Timing Engine Setup
@@ -334,6 +333,10 @@ async function main() {
   stateChangeHooks.push((state, events) => {
     audioRouter.handleStateChange(state, events);
   });
+
+  // Setup socket handlers (after audio router so masterPanic can be wired)
+  console.log('[Server] Setting up Socket.IO handlers...');
+  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter);
 
   // Start OSC bridge and timing engine
   try {
