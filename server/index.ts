@@ -93,8 +93,6 @@ function parseShowConfig(json: string): ShowConfig {
   return config;
 }
 
-const VALID_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
-
 function validateShowConfig(config: ShowConfig): void {
   const errors: string[] = [];
 
@@ -102,6 +100,7 @@ function validateShowConfig(config: ShowConfig): void {
     const attempt = config.attempts[i];
     const prefix = `attempts[${i}]`;
 
+    // V3.2: array lengths expected to match LAYERS_PER_ATTEMPT (now 3)
     if (attempt.layers.length !== LAYERS_PER_ATTEMPT) {
       errors.push(`${prefix}.layers has length ${attempt.layers.length}, expected ${LAYERS_PER_ATTEMPT}`);
     }
@@ -116,6 +115,26 @@ function validateShowConfig(config: ShowConfig): void {
     }
     if (attempt.auditionCycles.length !== LAYERS_PER_ATTEMPT) {
       errors.push(`${prefix}.auditionCycles has length ${attempt.auditionCycles.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+
+    // V3.2: liveSeed must be present with at least one track
+    if (!attempt.liveSeed || !Array.isArray(attempt.liveSeed.trackIndices) || attempt.liveSeed.trackIndices.length === 0) {
+      errors.push(`${prefix}.liveSeed.trackIndices must be a non-empty array`);
+    }
+
+    // V3.2: each layer must have a group id and non-empty track bundles
+    for (let j = 0; j < attempt.layers.length; j++) {
+      const layer = attempt.layers[j];
+      const lprefix = `${prefix}.layers[${j}]`;
+      if (!layer.group) {
+        errors.push(`${lprefix}.group must be a non-empty string`);
+      }
+      if (!layer.optionA?.tracks?.length) {
+        errors.push(`${lprefix}.optionA.tracks must be a non-empty array`);
+      }
+      if (!layer.optionB?.tracks?.length) {
+        errors.push(`${lprefix}.optionB.tracks must be a non-empty array`);
+      }
     }
 
     for (let j = 0; j < attempt.thresholds.length; j++) {
@@ -147,17 +166,18 @@ function validateShowConfig(config: ShowConfig): void {
     errors.push(`finale.bothOptionsSurvive = ${config.finale.bothOptionsSurvive}, must be a boolean`);
   }
 
+  // ceremonyLayerOrder is a V3.1 finale concept — validate only if present
   const order = config.finale.ceremonyLayerOrder;
-  if (order.length !== LAYERS_PER_ATTEMPT) {
-    errors.push(`finale.ceremonyLayerOrder has length ${order.length}, expected ${LAYERS_PER_ATTEMPT}`);
-  }
-  for (const lt of order) {
-    if (!VALID_LAYER_TYPES.includes(lt)) {
-      errors.push(`finale.ceremonyLayerOrder contains invalid layer type: "${lt}"`);
+  if (order && order.length > 0) {
+    const VALID_LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
+    for (const lt of order) {
+      if (!VALID_LAYER_TYPES.includes(lt)) {
+        errors.push(`finale.ceremonyLayerOrder contains invalid layer type: "${lt}"`);
+      }
     }
-  }
-  if (new Set(order).size !== order.length) {
-    errors.push(`finale.ceremonyLayerOrder contains duplicates`);
+    if (new Set(order).size !== order.length) {
+      errors.push(`finale.ceremonyLayerOrder contains duplicates`);
+    }
   }
 
   if (errors.length > 0) {
@@ -319,6 +339,9 @@ async function main() {
       {
         enabled: true,
         oscBridge: OSC_ENABLED ? oscBridge : null,
+        onAuditionProgress: (progress) => {
+          io.to('audience').to('projector').emit('audition_progress', progress);
+        },
       }
     );
   }
@@ -385,7 +408,7 @@ async function main() {
       const state = getState();
 
       // Only backup during active show phases
-      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assembly', 'finale_deliberation', 'finale_ceremony', 'finale_performer_mix'];
+      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assignment', 'finale_live_mix'];
       if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);

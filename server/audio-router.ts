@@ -32,7 +32,7 @@ import type {
   ShowState,
   ConductorEvent,
   AudioCue,
-  AudioReference,
+  TrackBundle,
   LayerType,
   GainConfig,
 } from '../conductor/types';
@@ -402,22 +402,6 @@ export function createAudioRouter(
     oscBridge.send('/live/song/stop_playing');
   }
 
-  function enableEffects(audioRef: AudioReference): void {
-    if (audioRef.effectIndices) {
-      for (const deviceIndex of audioRef.effectIndices) {
-        oscBridge.send('/live/device/set/parameter/value', audioRef.trackIndex, deviceIndex, 0, 1);
-      }
-    }
-  }
-
-  function disableEffects(audioRef: AudioReference): void {
-    if (audioRef.effectIndices) {
-      for (const deviceIndex of audioRef.effectIndices) {
-        oscBridge.send('/live/device/set/parameter/value', audioRef.trackIndex, deviceIndex, 0, 0);
-      }
-    }
-  }
-
   function clearCollapseTimers(): void {
     for (const timer of routerState.collapseTimers.values()) clearTimeout(timer);
     routerState.collapseTimers.clear();
@@ -467,8 +451,18 @@ export function createAudioRouter(
     routerState.fragmentTrackIndices.clear();
     for (const attempt of state.attempts) {
       for (const layer of attempt.layerPlan) {
-        routerState.fragmentTrackIndices.add(layer.optionA.trackIndex);
-        routerState.fragmentTrackIndices.add(layer.optionB.trackIndex);
+        // V3.2: layers have TrackBundles (multiple tracks per option)
+        for (const track of layer.optionA.tracks) {
+          routerState.fragmentTrackIndices.add(track.trackIndex);
+        }
+        for (const track of layer.optionB.tracks) {
+          routerState.fragmentTrackIndices.add(track.trackIndex);
+        }
+      }
+      // Also register live seed tracks
+      const attemptCfg = state.config.attempts[attempt.index];
+      for (const idx of (attemptCfg?.liveSeed?.trackIndices ?? [])) {
+        routerState.fragmentTrackIndices.add(idx);
       }
     }
     if (state.finaleState) {
@@ -641,52 +635,49 @@ export function createAudioRouter(
   ): void {
     ensureTransportStarted();
 
-    const { audioRef, otherAudioRef } = cue;
+    const { trackBundle, otherTrackBundle } = cue;
 
-    disableEffects(otherAudioRef);
-
-    const sameTrack = otherAudioRef.trackIndex === audioRef.trackIndex;
-    if (!sameTrack) {
-      // Fade out the other option's track
-      fadeGain(otherAudioRef.trackIndex, 0, currentGainConfig.exitFadeBeats);
+    // Fade out all tracks in the outgoing bundle
+    for (const track of otherTrackBundle.tracks) {
+      fadeGain(track.trackIndex, 0, currentGainConfig.exitFadeBeats);
     }
 
-    // Bring in the new option: unmute, snap to entryGain, swell to unity
-    unmuteTrack(audioRef.trackIndex);
-    setGain(audioRef.trackIndex, currentGainConfig.entryGain);
-    fadeGain(audioRef.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
-    enableEffects(audioRef);
+    // Bring in all tracks in the incoming bundle: unmute, snap to entryGain, swell to unity
+    for (const track of trackBundle.tracks) {
+      unmuteTrack(track.trackIndex);
+      setGain(track.trackIndex, currentGainConfig.entryGain);
+      fadeGain(track.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+    }
   }
 
   function handleAuditionStop(cue: Extract<AudioCue, { type: 'audition_stop' }>): void {
-    if (!cue.audioRef) {
+    if (!cue.trackBundle) {
       // No active audition — nothing to fade
       return;
     }
-    disableEffects(cue.audioRef);
-    fadeGain(cue.audioRef.trackIndex, 0, currentGainConfig.exitFadeBeats);
+    for (const track of cue.trackBundle.tracks) {
+      fadeGain(track.trackIndex, 0, currentGainConfig.exitFadeBeats);
+    }
     // Note: transport continues running; clips keep looping silently
   }
 
   function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
-    const { winnerAudioRef, loserAudioRef } = cue;
+    const { winnerTrackBundle, loserTrackBundle } = cue;
 
-    // Cancel any in-flight fades on both tracks first
-    const winnerGs = getOrCreateTrackGainState(winnerAudioRef.trackIndex);
-    if (winnerGs.activeFadeId) {
-      timingEngine?.cancelCallbacks(winnerGs.activeFadeId);
-      winnerGs.activeFadeId = null;
+    // Winner tracks: cancel in-flight fades, snap to full gain
+    for (const track of winnerTrackBundle.tracks) {
+      const gs = getOrCreateTrackGainState(track.trackIndex);
+      if (gs.activeFadeId) {
+        timingEngine?.cancelCallbacks(gs.activeFadeId);
+        gs.activeFadeId = null;
+      }
+      unmuteTrack(track.trackIndex);
+      fadeGain(track.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
     }
 
-    // Winner: snap to full gain
-    unmuteTrack(winnerAudioRef.trackIndex);
-    fadeGain(winnerAudioRef.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
-    enableEffects(winnerAudioRef);
-
-    // Loser: fade to silent
-    disableEffects(loserAudioRef);
-    if (loserAudioRef.trackIndex !== winnerAudioRef.trackIndex) {
-      fadeGain(loserAudioRef.trackIndex, 0, currentGainConfig.lockInFadeBeats);
+    // Loser tracks: fade to silent
+    for (const track of loserTrackBundle.tracks) {
+      fadeGain(track.trackIndex, 0, currentGainConfig.lockInFadeBeats);
     }
   }
 
@@ -764,15 +755,34 @@ export function createAudioRouter(
     }
   }
 
+  function handleLiveSeedStart(cue: Extract<AudioCue, { type: 'live_seed_start' }>): void {
+    ensureTransportStarted();
+    for (const trackIndex of cue.trackIndices) {
+      unmuteTrack(trackIndex);
+      setGain(trackIndex, currentGainConfig.entryGain);
+      fadeGain(trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+    }
+  }
+
+  function handleLiveSeedStop(cue: Extract<AudioCue, { type: 'live_seed_stop' }>): void {
+    for (const trackIndex of cue.trackIndices) {
+      fadeGain(trackIndex, 0, currentGainConfig.collapseFadeBeats);
+    }
+  }
+
   async function handleCollapseGesture(
     cue: Extract<AudioCue, { type: 'collapse_gesture' }>,
     state: ShowState,
   ): Promise<void> {
-    // Collect all track indices for the collapsing attempt
+    // Collect all track indices for the collapsing attempt (V3.2: iterate TrackBundle tracks)
     const collapseTrackIndices: number[] = [];
     for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      collapseTrackIndices.push(layer.optionA.trackIndex, layer.optionB.trackIndex);
+      for (const track of layer.optionA.tracks) collapseTrackIndices.push(track.trackIndex);
+      for (const track of layer.optionB.tracks) collapseTrackIndices.push(track.trackIndex);
     }
+    // Include live seed tracks
+    const liveSeedIndices = state.config.attempts[cue.attemptIndex]?.liveSeed?.trackIndices ?? [];
+    collapseTrackIndices.push(...liveSeedIndices);
 
     // Enable Master track delay device at the start of the collapse
     oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 1);
@@ -816,11 +826,12 @@ export function createAudioRouter(
     // Enable rejection return track effects
     oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 0);
 
-    // Fade all tracks in the rejected attempt to 0
+    // Fade all tracks in the rejected attempt to 0 (V3.2: iterate TrackBundle tracks)
     for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      fadeGain(layer.optionA.trackIndex, 0, currentGainConfig.collapseFadeBeats);
-      fadeGain(layer.optionB.trackIndex, 0, currentGainConfig.collapseFadeBeats);
+      for (const track of layer.optionA.tracks) fadeGain(track.trackIndex, 0, currentGainConfig.collapseFadeBeats);
+      for (const track of layer.optionB.tracks) fadeGain(track.trackIndex, 0, currentGainConfig.collapseFadeBeats);
     }
+    // Live seed faded by the separate live_seed_stop cue emitted by the conductor
 
     // Schedule re-mute of return track and tempo reset after effect completes
     const rejectionMs = state.config.timing.rejectionEffectDurationMs;
@@ -833,45 +844,23 @@ export function createAudioRouter(
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  function handleCeremonyActivate(cue: Extract<AudioCue, { type: 'ceremony_activate' }>): void {
+  // V3.2 live mix crossfade handler (stub — full implementation in live mix task)
+  function handleLiveMixCrossfade(cue: Extract<AudioCue, { type: 'live_mix_crossfade' }>): void {
     ensureTransportStarted();
-
-    // Snap to entry gain then swell to unity
-    unmuteTrack(cue.audioRef.trackIndex);
-    setGain(cue.audioRef.trackIndex, currentGainConfig.entryGain);
-    fadeGain(cue.audioRef.trackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
-    routerState.activeLayerTracks.set(cue.layerType, cue.audioRef.trackIndex);
+    // Fade out outgoing, fade in incoming
+    fadeGain(cue.outgoingTrackIndex, 0, currentGainConfig.lockInFadeBeats);
+    unmuteTrack(cue.incomingTrackIndex);
+    setGain(cue.incomingTrackIndex, currentGainConfig.entryGain);
+    fadeGain(cue.incomingTrackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
   }
 
-  function handleMixUpdate(
-    cue: Extract<AudioCue, { type: 'mix_update' }>,
-    state: ShowState,
-  ): void {
-    for (const change of cue.changes) {
-      const { layerType, fragmentId } = change;
-
-      // Fade out the track previously assigned to this layer (if any)
-      const previousTrack = routerState.activeLayerTracks.get(layerType);
-      if (previousTrack !== undefined) {
-        fadeGain(previousTrack, 0, currentGainConfig.lockInFadeBeats);
-      }
-
-      if (fragmentId !== null) {
-        const fragment = state.finaleState?.allFragments.find(f => f.id === fragmentId);
-        if (fragment) {
-          const newTrack = fragment.audioRef.trackIndex;
-          unmuteTrack(newTrack);
-          setGain(newTrack, currentGainConfig.entryGain);
-          fadeGain(newTrack, 1.0, currentGainConfig.ceremonySwellBeats);
-          routerState.activeLayerTracks.set(layerType, newTrack);
-        } else {
-          console.warn(`[AudioRouter] mix_update: fragment ${fragmentId} not found in allFragments`);
-          routerState.activeLayerTracks.delete(layerType);
-        }
-      } else {
-        // Layer being muted — no new track
-        routerState.activeLayerTracks.delete(layerType);
-      }
+  // V3.2 live mix start handler (stub — full implementation in live mix task)
+  function handleLiveMixStart(cue: Extract<AudioCue, { type: 'live_mix_start' }>): void {
+    ensureTransportStarted();
+    for (const trackIndex of cue.activeTrackIndices) {
+      unmuteTrack(trackIndex);
+      setGain(trackIndex, currentGainConfig.entryGain);
+      fadeGain(trackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
     }
   }
 
@@ -954,17 +943,23 @@ export function createAudioRouter(
           case 'lock_in':
             handleLockIn(cue);
             break;
+          case 'live_seed_start':
+            handleLiveSeedStart(cue);
+            break;
+          case 'live_seed_stop':
+            handleLiveSeedStop(cue);
+            break;
           case 'collapse_gesture':
             handleCollapseGesture(cue, state);
             break;
           case 'rejection_gesture':
             handleRejectionGesture(cue, state);
             break;
-          case 'ceremony_activate':
-            handleCeremonyActivate(cue);
+          case 'live_mix_crossfade':
+            handleLiveMixCrossfade(cue);
             break;
-          case 'mix_update':
-            handleMixUpdate(cue, state);
+          case 'live_mix_start':
+            handleLiveMixStart(cue);
             break;
           case 'transport':
             handleTransport(cue);

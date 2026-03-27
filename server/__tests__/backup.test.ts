@@ -21,51 +21,33 @@ import type { ShowConfig } from '../../conductor/types';
 // ============================================================================
 
 function createTestConfig(): ShowConfig {
+  const makeLayer = (i: number) => ({
+    index: i,
+    group: ['bones', 'flesh', 'spark'][i % 3],
+    labelA: 'A',
+    labelB: 'B',
+    optionA: { tracks: [{ granularType: 'bass', trackIndex: i * 2 }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndex: i * 2 + 1 }] },
+  });
+  const makeAttempt = (chapter: 'ambition' | 'love' | 'avoidance') => ({
+    chapter,
+    title: chapter,
+    liveSeed: { trackIndices: [99] },
+    layers: [0, 1, 2].map(i => makeLayer(i)),
+    thresholds: [0.5, 0.66, 0.99],
+    tempos: [120, 120, 120],
+    auditionBars: [4, 4, 2],
+    auditionCycles: [1, 1, 1],
+  });
   return {
-    layersPerAttempt: 7,
-    attempts: [
-      {
-        chapter: 'ambition',
-        title: 'Ambition',
-        thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
-        tempos: [120, 120, 130, 140, 155, 170],
-        auditionBars: [4, 4, 4, 2, 2, 2],
-        auditionCycles: [1, 1, 1, 1, 1, 1],
-        layers: [
-          { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-      {
-        chapter: 'love',
-        title: 'Love',
-        thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
-        tempos: [120, 120, 130, 140, 155, 170],
-        auditionBars: [4, 4, 4, 2, 2, 2],
-        auditionCycles: [1, 1, 1, 1, 1, 1],
-        layers: [
-          { index: 0, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-      {
-        chapter: 'avoidance',
-        title: 'Avoidance',
-        thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
-        tempos: [120, 120, 130, 140, 155, 170],
-        auditionBars: [4, 4, 4, 2, 2, 2],
-        auditionCycles: [1, 1, 1, 1, 1, 1],
-        layers: [
-          { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-    ],
+    layersPerAttempt: 3,
+    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
-      assemblyTimerMs: 60000,
-      assemblyGracePeriodMs: 15000,
-      deliberationTimerMs: 120000,
-      ambassadorVolunteerTimerMs: 15000,
-      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'],
+      assignmentMode: 'auto',
+      assignmentTimerMs: 30000,
+      bothOptionsSurvive: true,
+      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
-      layerLabels: new Map(),
       npcMessages: [],
     },
     timing: {
@@ -160,58 +142,38 @@ describe('loadBackup', () => {
     expect(loaded.finaleState).toBeNull();
   });
 
-  test('preserves finaleState Maps (assembly groups, deliberation groupVotes, performerMix activeLayers)', () => {
+  test('preserves finaleState Maps (assignment groups, liveMix activeFragments)', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     state.finaleState = {
-      phase: 'assembly',
+      phase: 'assignment',
       availableFragments: [],
       allFragments: [],
-      lockedFragments: [],
-      assembly: {
-        groups: new Map([['melody', ['u1', 'u2']], ['drums', ['u3']]]),
-        undecidedUsers: [],
-        timerRemaining: 30000,
-        timerDuration: 60000,
-        gracePeriodActive: false,
+      assignment: {
+        mode: 'auto',
+        groups: new Map([['bass', ['u1', 'u2']], ['drums', ['u3']]]),
+        timerRemaining: null,
       },
-      deliberation: {
-        groupVotes: new Map([['melody', new Map([['u1', 'frag-0-0-A']])]]),
-        chosenFragments: new Map(),
-        ambassadorVolunteers: new Map(),
-        ambassadors: new Map(),
-        timerRemaining: 120000,
-        timerDuration: 120000,
-        volunteerTimerRemaining: 0,
-        volunteerTimerActive: false,
-      },
-      ceremony: {
-        layerOrder: ['melody'],
-        currentIndex: 0,
-        currentAmbassador: null,
-        altarReady: false,
-        lockedLayers: new Map(),
-        forfeitedLayers: [],
-        ceremonyComplete: false,
-      },
-      npc: { currentMessage: null },
-      performerMix: {
-        activeLayers: new Map([['melody', 'frag-0-0-A']]),
-        pendingChanges: [],
+      liveMix: {
+        votes: new Map([['bass', new Map([['u1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
+        activeFragments: new Map([['bass', 'frag-0-0-A']]),
+        lockedTypes: [],
+        performerOverrides: new Map(),
+        liveTracksActive: [],
         loopPosition: 0,
         loopCount: 0,
-        liveTracksActive: [],
       },
+      npc: { currentMessage: null },
     };
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
-    expect(loaded.finaleState!.assembly.groups).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.assembly.groups.get('melody')).toEqual(['u1', 'u2']);
-    expect(loaded.finaleState!.deliberation.groupVotes).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.deliberation.groupVotes.get('melody')).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.deliberation.groupVotes.get('melody')!.get('u1')).toBe('frag-0-0-A');
-    expect(loaded.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.assignment.groups).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.assignment.groups.get('bass')).toEqual(['u1', 'u2']);
+    expect(loaded.finaleState!.liveMix.votes).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.liveMix.votes.get('bass')).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.liveMix.votes.get('bass')!.get('u1')!.fragmentId).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.liveMix.activeFragments).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.liveMix.activeFragments.get('bass')).toBe('frag-0-0-A');
   });
 
   test('throws for non-existent file', () => {

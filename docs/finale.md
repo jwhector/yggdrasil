@@ -1,4 +1,4 @@
-# Finale System — Detailed Mechanics
+# Finale System — Detailed Mechanics (V3.2)
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
 > **Related:** [song-building.md](song-building.md) (fragment generation rules), [data-models.md](data-models.md) (conductor commands/events)
@@ -7,12 +7,10 @@
 
 ## Overview
 
-The finale has five sub-phases:
-1. **Elegy** — audience observes the wreckage of all three songs (optional brief beat)
-2. **Assembly** — audience self-selects into 6 layer-type groups and physically regroups
-3. **Deliberation** — groups preview audio, vote on fragments, and select ambassadors
-4. **Ceremony** — ambassadors lock fragments into the final mix at the altar
-5. **Performer Mix** — performer returns to live-mix the escalation and climax
+The finale has three sub-phases:
+1. **Elegy** — audience observes the wreckage of all three songs
+2. **Assignment** — audience is assigned to granular type groups (auto or self-select)
+3. **Live Mix** — Incredibox-style continuous collaborative mixing; each group controls one granular type
 
 ## Narrative Setup
 
@@ -22,98 +20,82 @@ This frames the finale as a mutiny — the audience acting without the performer
 
 ## Phase 1: Finale Elegy
 
-An optional 10–15 second observational moment. Phones show the full grid of all fragments from all three songs:
+An optional 10-15 second observational moment. Phones show the full grid of all granular fragments from all three songs:
 - Winning fragments glow with their chapter color
 - Losing fragments are cracked, dimmed, desaturated
-- Organized by role (6 rows)
+- Organized by granular type (6 rows)
 - NPC narrates: acknowledges what survived and what was lost
 - No interaction — pure narrative beat
-- Transitions to assembly when NPC rallies the audience (manual or auto-timed)
+- Transitions to assignment when NPC rallies the audience (manual or auto-timed)
 
-## Phase 2: Group Assembly
+## Phase 2: Assignment
 
-The audience physically self-organizes into six groups — one per layer type.
+Each audience member is assigned to one granular type group (~6-7 people per group for 40 audience members across 6 types). Two modes are supported, selected via config:
 
-**Phone UI:** Six tappable cards, each displaying the layer's symbol, color, and configurable label (from `default-show.json`). Live group size counts update in real time as people choose. No constraints on group size — any group can be empty or hold all 40 people.
+### Auto Mode (`assignmentMode: 'auto'`)
 
-**Timer:** Configurable duration (default: 60 seconds). Displayed prominently on phones and projector. When the timer expires:
-1. Any audience member who has not selected a group is **randomly assigned** to one of the 6 groups by the server
-2. Groups with 0 members are marked as **empty** — that layer type will be skipped in the ceremony and will not have a fragment in the initial mix
-3. The system transitions to the deliberation phase
+The system shuffles all connected users and distributes them evenly (round-robin) across the configured granular types. Assignment is instant — no timer, no user interaction. Users are notified of their assignment and the show proceeds to live mix.
 
-**Physical movement:** After groups are assigned (timer expiry), the phone screen shows "You are [Layer Label]" with the group's identity. The audience is expected to physically move to find others with the same role. The chaos of reorganization is intentional — it mirrors the script's theme of internal parts finding each other. The system does NOT wait for physical assembly to complete; the deliberation timer begins after a brief grace period (configurable, e.g., 10–15 seconds).
+### Self-Select Mode (`assignmentMode: 'self_select'`)
 
-**Projector:** Shows the groups forming in real time — animated member counts, layer symbols growing/pulsing as people join. Timer prominent.
+**Phone UI:** Tappable cards for each granular type, each displaying the type's symbol, color, and label (from config). Live group size counts update in real time as people choose. Users can switch freely before the timer expires.
 
-## Phase 3: Deliberation
+**Timer:** Configurable duration (default: 30 seconds via `assignmentTimerMs`). When the timer expires:
+1. Any user who has not selected a type is **randomly assigned** round-robin across all types
+2. The system transitions to the live mix phase
 
-Each group privately deliberates on which fragment to carry into the final song.
+**Projector:** Shows the groups forming in real time — animated member counts, granular type symbols growing/pulsing as people join. Timer prominent.
 
-**Phone UI per group:** Shows only the available fragments for this group's layer type (1–3 fragments, one per song that reached this layer type). Each fragment card displays:
-- Chapter color background
-- Emotional tagline from song-building
-- Play/pause button for audio preview
-- Vote button
+### Fragment Decomposition
 
-**Audio preview:** Each audience member controls playback independently. Tapping play on a fragment starts that clip in the browser via the HTML5 Audio API. Tapping play on a different fragment auto-pauses the first. Volume is at the browser's default level. The natural social dynamics of a huddle (people sharing phones, taking turns, or just listening to the ambient mix of everyone's phones) are part of the experience. Preview files are pre-rendered static mp3s served from `public/audio/previews/`.
+Song-building produces layer group results (e.g., "Bones Option A won in Song 1"). The assignment phase decomposes these into **granular fragments** — one per granular track per option. For example, "Bones A" from Song 1 decomposes into separate bass and drums fragments. Each granular type group sees only fragments of their type.
 
-**Voting within the group:** Transparent — group members can see how many votes each fragment has. Votes can be changed freely during the deliberation window. This is the opposite of the blind song-building vote; within a small group, transparency encourages real discussion and convergence.
+Which fragments are available depends on `bothOptionsSurvive`:
+- **true** (default): Both winner and loser options from voted layers are available
+- **false**: Only winning options survive to the finale
 
-**Timer:** Configurable duration (default: 120 seconds). When the timer expires:
-1. The fragment with the most votes in each group wins (**simple majority**). Ties broken randomly.
-2. The chosen fragment is locked for each group
-3. **Ambassador volunteering** begins immediately after fragment selection
+## Phase 3: Live Mix
 
-**Ambassador selection:** After the fragment is chosen, each group member sees a prompt: "Will you carry this forward?" with Accept/Decline buttons. Volunteering window: configurable (default: 15 seconds).
-- If exactly 1 person volunteers → they are the ambassador
-- If multiple volunteer → one is selected randomly
-- If nobody volunteers → the layer is **forfeited**. NPC acknowledges: this part of the mind couldn't find its voice. The layer will be skipped in the ceremony.
+The core finale experience. Each audience member's phone becomes a live controller for their assigned granular type.
 
-**Edge cases:**
-- **Single-fragment layer types** (only one song reached this layer): the deliberation is trivially decided — the one available fragment wins automatically. The group still goes through the ambassador selection.
-- **Single-member groups:** one person makes all decisions — they choose the fragment, they are the ambassador by default (no volunteering step needed).
-- **Empty groups:** skipped entirely — no deliberation, no ambassador, layer forfeited.
+### Audience Phone UI
 
-## Phase 4: Ceremony
+Each user sees tappable fragment cards for their granular type — one per available fragment (typically 1-6, depending on how many songs reached their type's layer group). Tapping a card sets their **preference** for which fragment should play.
 
-The performer returns to the stage (or is about to — the ceremony is the transition point). The system calls ambassadors one by one in a **fixed configurable order** (set in `default-show.json`, e.g., `[bass, drums, pad, melody, harmony, fx]`).
+The group's **majority determines what the room hears** in real time:
+- The system tracks each user's current preference per granular type
+- The fragment with the most votes in each type group is the **active fragment** — this is what Ableton plays
+- When the majority shifts, a **crossfade** happens at the next bar boundary
+- **Recency tiebreak:** On a 50/50 split, the most recently cast vote wins
 
-**Ceremony flow per layer:**
-1. The system announces the next layer (NPC text on phones + projector display: layer symbol, color, label)
-2. The ambassador for that layer is called — their phone enters **altar-ready mode**
-3. The ambassador approaches the altar on stage
-4. The ambassador places their phone face-down on the altar surface
-5. The phone detects the face-down + still position via Device Orientation API (~2 second hold)
-6. On detection: lock-in event fires to server → audio activation (quantized to next bar boundary, fade-in per existing gain config) → phone vibrates once → screen illuminates with confirmation
-7. Ambassador picks up phone, returns to seat
-8. System advances to next layer
+### Performer Controls
 
-**Altar lock-in detection (Device Orientation API):**
-```typescript
-// Detection logic (runs on ambassador's phone during altar-ready mode)
-interface AltarDetectionConfig {
-  faceDownThreshold: number;       // degrees from face-down (default: 30°)
-  stillnessThreshold: number;      // max acceleration delta (default: 0.5 m/s²)
-  holdDurationMs: number;          // how long face-down + still must be sustained (default: 2000)
-}
+The performer (via controller) can:
+- **Lock** a granular type — freezes the active fragment, audience votes are ignored
+- **Unlock** a granular type — returns to audience majority control
+- **Override** a granular type — force a specific fragment regardless of votes
+- **Clear override** — return to audience majority
 
-// DeviceOrientationEvent: check if phone is face-down
-// Face-down = screen pointing toward ground
-// Using absolute orientation: when face-down, the z-axis accelerometer reads ~+9.8 m/s²
-// (gravity pulling "up" through the back of the phone)
-// OR using beta/gamma: beta ≈ ±180° indicates face-down
-//
-// The detection fires when:
-// 1. Phone is within faceDownThreshold degrees of perfectly face-down
-// 2. Accelerometer readings are stable (delta < stillnessThreshold) for holdDurationMs
-// 3. Both conditions sustained simultaneously
-```
+### Audio Behavior
 
-**Forfeited layers:** Skipped in the ceremony order. NPC may acknowledge briefly. No audio activation for that layer.
+- Individual granular tracks are controlled independently (not bundled)
+- Crossfades happen at bar boundaries (quantized to loop position)
+- The performer returns and plays live over the shifting foundation
+- Live performance tracks (vocal mic, live synth, etc.) are toggled separately
 
-**Ceremony completion:** After all non-forfeited layers have been locked in, the ceremony ends. The song now plays with all locked fragments active. The performer takes over for the performer mix phase.
+### High-Frequency State
 
-**Audio activation during ceremony:** Each lock-in unmutes the fragment's Ableton track, quantized to the next bar boundary, with the standard fade-in (per `GainConfig.ceremonySwellBeats`). The song assembles layer by layer — each ambassador's lock-in adds a new voice to the growing mix. By the last lock-in, the audience hears the complete assembled song.
+Live mix state (`mix_state`) is broadcast at ~4 Hz as a dedicated socket event, NOT through `state_sync`. Contains:
+- Per-type active fragment
+- Per-type vote distribution (detailed for user's own type, summary for others)
+
+### Projector Display
+
+Shows all granular types with:
+- Active fragment per type (highlighted with chapter color)
+- Vote distribution visualization (consensus strength)
+- Locked types marked
+- Loop position indicator
 
 ## NPC System (Finale)
 
@@ -125,114 +107,58 @@ The NPC is a narrative voice during the finale, delivered via terminal-style typ
 
 **Event-driven messages (configurable text in `default-show.json`):**
 - Performer abandonment: "He's gone. We need to do this ourselves."
-- Assembly start: "Choose your role. Find each other."
-- Assembly timer warning (e.g., 10s remaining): "Decide now."
-- Deliberation start: "Listen. Decide together."
-- Empty group detected: "No one chose [layer label]. We'll go without it."
-- Ambassador selected: "[Layer label] has its voice."
-- No ambassador (forfeit): "[Layer label] goes silent. Not every part survives."
-- Ceremony start: "One by one. Bring it forward."
-- Layer locked in: brief acknowledgment (varies by layer)
-- Final layer locked: "That's all of us."
-- Ceremony complete / performer return: "He's back. Show him what we built."
+- Assignment start: "Find your voice."
+- Live mix start: "It's yours. Shape it."
 
 **Manual overrides:** Performer has a bank of pre-written NPC lines on the controller, organized by phase, plus a free-text input for improvised lines.
 
-**Pacing:** NPC should NOT speak at every moment. The silence between messages — filled by music building layer by layer — is where the emotional weight lives.
-
-## Phase 5: Performer Mix
-
-The performer returns to take control of the mix. This is a live performance tool.
-
-**Initial state:** The performer mix begins with the fragments locked in during the ceremony as the active layers. Forfeited layers start muted.
-
-**Mixing Surface (controller):**
-- 6 rows (one per layer type) × 6 columns (Song 1 A, Song 1 B, Song 2 A, Song 2 B, Song 3 A, Song 3 B)
-- Each cell is a fragment. Tapping a cell **queues** it to activate at the next loop boundary.
-- Active fragment in each row is highlighted
-- Pending (queued) fragment shows distinct visual (pulsing border, countdown)
-- Only one fragment per row active at a time — tapping a new one in the same row queues a swap
-- Tap the active fragment to queue a **mute** for that row at next boundary
-- Tap a pending fragment again to **cancel** (dequeue)
-- **All changes fire simultaneously at the loop boundary** — performer builds up multiple changes, they all land on the downbeat
-
-**Loop position indicator:** Progress bar or radial timer showing position within current 8-bar loop and time until next boundary. This is the performance clock.
-
-**Snapshot presets:** Configurable buttons that queue an entire mix state (all 6 layers set to specific fragments) in one tap. Useful for rehearsed structural jumps.
-
-**Live performance tracks:** Additional on/off toggles for tracks not in the fragment pool — vocal mic, live synth, etc. These are the performer's secret weapon, the element the audience never had access to.
-
-**Projector mirror:** The projector shows a simplified, beautified version of the mixing grid. Active fragments glow with chapter colors. Pending changes pulse. Loop position indicator visible. The audience watches the performer "DJ" with a legible interface.
-
-**Pending changes queue:**
-```typescript
-interface PendingChange {
-  layerType: LayerType;
-  fragmentId: string | null;    // null = mute this layer
-  queuedAt: number;
-}
-```
-
-At each loop boundary, the timing engine:
-1. Collects all pending changes
-2. Fires corresponding OSC commands simultaneously (mute outgoing, unmute incoming)
-3. Clears the pending queue
-4. Broadcasts updated state to all clients
-
-**Crossfade:** When swapping fragments in a role, Ableton handles a ~1 bar crossfade (old fragment fades out, new one fades in, overlapping at the loop boundary).
+**Pacing:** NPC should NOT speak at every moment. The silence between messages — filled by music shifting and evolving under audience control — is where the emotional weight lives.
 
 ## Finale State
 
 ```typescript
-interface FinaleState {
-  phase: 'elegy' | 'assembly' | 'deliberation' | 'ceremony' | 'performer_mix';
+interface V32FinaleState {
+  phase: 'elegy' | 'assignment' | 'live_mix';
 
-  // Fragment availability (computed from song-building results)
-  availableFragments: Fragment[];     // Winners only (for group deliberation)
-  allFragments: Fragment[];           // All 36 (for performer mixing surface)
-  lockedFragments: Fragment[];        // Losers + unreached (for elegy display)
+  // Fragment availability (GranularFragments decomposed from layer group results)
+  availableFragments: GranularFragment[];   // Available to each granular group
+  allFragments: GranularFragment[];         // All fragments including locked (for performer)
 
-  // Group assembly state
-  assembly: {
-    groups: Map<LayerType, UserId[]>;       // layerType → array of user IDs
-    undecidedUsers: UserId[];               // Users who haven't chosen yet
-    timerRemaining: number;                 // ms
-    timerDuration: number;                  // ms (total)
+  // Assignment state
+  assignment: {
+    mode: 'auto' | 'self_select';
+    groups: Map<string, UserId[]>;          // granularTypeId -> user IDs
+    timerRemaining: number | null;          // Only populated in self_select mode
   };
 
-  // Deliberation state
-  deliberation: {
-    groupVotes: Map<LayerType, Map<UserId, string>>;  // layerType → (userId → fragmentId)
-    chosenFragments: Map<LayerType, string | null>;    // layerType → fragmentId or null (after timer)
-    ambassadorVolunteers: Map<LayerType, UserId[]>;    // layerType → volunteer user IDs
-    ambassadors: Map<LayerType, UserId | null>;        // layerType → chosen ambassador or null
-    timerRemaining: number;                            // ms (deliberation timer)
-    volunteerTimerRemaining: number | null;            // ms (ambassador volunteering timer, null if not active)
+  // Live mix state
+  liveMix: {
+    votes: Map<string, Map<UserId, LiveMixVote>>;  // granularTypeId -> (userId -> vote)
+    activeFragments: Map<string, string>;           // granularTypeId -> fragmentId (current majority)
+    lockedTypes: string[];                          // Performer-locked granular types
+    performerOverrides: Map<string, string>;        // granularTypeId -> fragmentId (performer forced)
+    liveTracksActive: string[];                     // Live performance track IDs
+    loopPosition: number;                           // 0.0 to 1.0 within current loop
+    loopCount: number;
   };
 
-  // Ceremony state
-  ceremony: {
-    layerOrder: LayerType[];                    // Fixed configurable order
-    currentIndex: number;                       // Index into layerOrder
-    currentAmbassador: UserId | null;           // Ambassador currently called
-    altarReady: boolean;                        // Whether current ambassador's phone is in altar-ready mode
-    lockedLayers: Map<LayerType, string>;        // layerType → fragmentId (locked in at altar)
-    forfeitedLayers: LayerType[];               // Layers with no ambassador
-    ceremonyComplete: boolean;
-  };
+  npc: { currentMessage: string | null };
+}
 
-  // NPC state
-  npc: {
-    currentMessage: string | null;
-  };
+interface LiveMixVote {
+  fragmentId: string;
+  timestamp: number;          // For recency tiebreak
+}
 
-  // Performer mix state
-  performerMix: {
-    activeLayers: Map<LayerType, string | null>;  // layerType → fragmentId or null (muted)
-    pendingChanges: PendingChange[];
-    loopPosition: number;             // 0.0 to 1.0 within current 8-bar loop
-    loopCount: number;                // Total loops since finale started
-    liveTracksActive: string[];       // IDs of active live performance tracks
-  };
+interface GranularFragment {
+  id: string;
+  songIndex: number;
+  layerGroupId: string;       // Which bundle this came from ('bones', 'flesh', 'spark')
+  granularType: string;       // Which specific type ('bass', 'drums', etc.)
+  option: 'A' | 'B';
+  chapter: Chapter;
+  trackIndex: number;         // Ableton track index for this specific granular track
+  wonVote: boolean;
+  previewAudioPath: string;
 }
 ```

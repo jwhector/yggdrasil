@@ -11,7 +11,7 @@
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import type { ShowState, ShowId, UserId, User, LayerVote, SeatId, LayerType } from '../conductor/types';
+import type { ShowState, ShowId, UserId, User, LayerVote, SeatId } from '../conductor/types';
 import { serializeState, deserializeState } from '../lib/serialization';
 
 // ============================================================================
@@ -152,6 +152,49 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: 'v32_finale_assignments',
+    up: (db) => {
+      // V3.2: granular type assignments (replaces layer-type groups from V3.1)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS finale_assignments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          granular_type TEXT NOT NULL,
+          auto_assigned BOOLEAN NOT NULL DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id)
+        )
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_finale_assignments_show ON finale_assignments(show_id)
+      `);
+    },
+  },
+  {
+    version: 5,
+    name: 'v32_finale_mix_events',
+    up: (db) => {
+      // V3.2: continuous preference tracking during live mix
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS finale_mix_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          granular_type TEXT NOT NULL,
+          fragment_id TEXT NOT NULL,
+          event_type TEXT NOT NULL CHECK(event_type IN ('preference', 'lock', 'unlock', 'override')),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id)
+        )
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_finale_mix_events_show ON finale_mix_events(show_id)
+      `);
+    },
+  },
 ];
 
 /**
@@ -186,12 +229,10 @@ export interface PersistenceLayer {
   getLatestShow(): ShowState | null;
   saveLayerVote(vote: LayerVote, showId: ShowId): void;
   saveUser(user: User, showId: ShowId): void;
-  saveGroupAssignment(showId: ShowId, userId: UserId, layerType: LayerType, autoAssigned: boolean): void;
-  saveGroupVote(showId: ShowId, userId: UserId, layerType: LayerType, fragmentId: string): void;
-  saveCeremonyEvent(showId: ShowId, layerType: LayerType, ambassadorUserId: UserId | null, fragmentId: string | null, eventType: 'locked' | 'forfeited'): void;
-  getGroupAssignments(showId: ShowId): Array<{ userId: UserId; layerType: LayerType; autoAssigned: boolean }>;
-  getGroupVotes(showId: ShowId): Array<{ userId: UserId; layerType: LayerType; fragmentId: string }>;
-  getCeremonyEvents(showId: ShowId): Array<{ layerType: LayerType; ambassadorUserId: UserId | null; fragmentId: string | null; eventType: 'locked' | 'forfeited' }>;
+  saveFinaleAssignment(showId: ShowId, userId: UserId, granularType: string, autoAssigned: boolean): void;
+  getFinaleAssignments(showId: ShowId): Array<{ userId: UserId; granularType: string; autoAssigned: boolean }>;
+  saveMixEvent(showId: ShowId, userId: UserId, granularType: string, fragmentId: string, eventType: string): void;
+  getMixEvents(showId: ShowId): Array<{ userId: UserId; granularType: string; fragmentId: string; eventType: string; createdAt: string }>;
   getUsersByShow(showId: ShowId): Pick<User, 'id' | 'seatId'>[];
   close(): void;
 }
@@ -249,31 +290,22 @@ export function createPersistence(dbPath: string): PersistenceLayer {
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    insertGroupAssignment: db.prepare(`
-      INSERT INTO finale_groups (show_id, user_id, layer_type, auto_assigned, created_at)
+    insertFinaleAssignment: db.prepare(`
+      INSERT INTO finale_assignments (show_id, user_id, granular_type, auto_assigned, created_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    insertGroupVote: db.prepare(`
-      INSERT INTO finale_group_votes (show_id, user_id, layer_type, fragment_id, created_at)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    getFinaleAssignments: db.prepare(`
+      SELECT user_id, granular_type, auto_assigned FROM finale_assignments WHERE show_id = ?
     `),
 
-    insertCeremonyEvent: db.prepare(`
-      INSERT INTO ceremony_events (show_id, layer_type, ambassador_user_id, fragment_id, event_type, created_at)
+    insertMixEvent: db.prepare(`
+      INSERT INTO finale_mix_events (show_id, user_id, granular_type, fragment_id, event_type, created_at)
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    getGroupAssignments: db.prepare(`
-      SELECT user_id, layer_type, auto_assigned FROM finale_groups WHERE show_id = ?
-    `),
-
-    getGroupVotes: db.prepare(`
-      SELECT user_id, layer_type, fragment_id FROM finale_group_votes WHERE show_id = ?
-    `),
-
-    getCeremonyEvents: db.prepare(`
-      SELECT layer_type, ambassador_user_id, fragment_id, event_type FROM ceremony_events WHERE show_id = ?
+    getMixEvents: db.prepare(`
+      SELECT user_id, granular_type, fragment_id, event_type, created_at FROM finale_mix_events WHERE show_id = ? ORDER BY created_at ASC
     `),
   };
 
@@ -339,72 +371,49 @@ export function createPersistence(dbPath: string): PersistenceLayer {
     },
 
     /**
-     * Save a user's group assignment during finale assembly.
-     * autoAssigned = true when the timer expired and they were randomly placed.
+     * Save a user's granular type assignment during finale.
+     * autoAssigned = true when auto-mode or timer expired.
      */
-    saveGroupAssignment(showId: ShowId, userId: UserId, layerType: LayerType, autoAssigned: boolean): void {
-      stmts.insertGroupAssignment.run(showId, userId, layerType, autoAssigned ? 1 : 0);
+    saveFinaleAssignment(showId: ShowId, userId: UserId, granularType: string, autoAssigned: boolean): void {
+      stmts.insertFinaleAssignment.run(showId, userId, granularType, autoAssigned ? 1 : 0);
     },
 
     /**
-     * Save a user's fragment vote during finale deliberation.
+     * Get all finale assignments for a show (for recovery).
      */
-    saveGroupVote(showId: ShowId, userId: UserId, layerType: LayerType, fragmentId: string): void {
-      stmts.insertGroupVote.run(showId, userId, layerType, fragmentId);
-    },
-
-    /**
-     * Save a ceremony event (lock-in or forfeit) for a layer.
-     */
-    saveCeremonyEvent(
-      showId: ShowId,
-      layerType: LayerType,
-      ambassadorUserId: UserId | null,
-      fragmentId: string | null,
-      eventType: 'locked' | 'forfeited',
-    ): void {
-      stmts.insertCeremonyEvent.run(showId, layerType, ambassadorUserId, fragmentId, eventType);
-    },
-
-    /**
-     * Get all group assignments for a show (for recovery).
-     */
-    getGroupAssignments(showId: ShowId): Array<{ userId: UserId; layerType: LayerType; autoAssigned: boolean }> {
-      const rows = stmts.getGroupAssignments.all(showId) as Array<{
+    getFinaleAssignments(showId: ShowId): Array<{ userId: UserId; granularType: string; autoAssigned: boolean }> {
+      const rows = stmts.getFinaleAssignments.all(showId) as Array<{
         user_id: UserId;
-        layer_type: LayerType;
+        granular_type: string;
         auto_assigned: number;
       }>;
-      return rows.map(r => ({ userId: r.user_id, layerType: r.layer_type, autoAssigned: r.auto_assigned === 1 }));
+      return rows.map(r => ({ userId: r.user_id, granularType: r.granular_type, autoAssigned: r.auto_assigned === 1 }));
     },
 
     /**
-     * Get all group votes for a show (for recovery).
+     * Save a live mix event (preference change, lock, unlock, override).
      */
-    getGroupVotes(showId: ShowId): Array<{ userId: UserId; layerType: LayerType; fragmentId: string }> {
-      const rows = stmts.getGroupVotes.all(showId) as Array<{
+    saveMixEvent(showId: ShowId, userId: UserId, granularType: string, fragmentId: string, eventType: string): void {
+      stmts.insertMixEvent.run(showId, userId, granularType, fragmentId, eventType);
+    },
+
+    /**
+     * Get all mix events for a show (for recovery / analysis).
+     */
+    getMixEvents(showId: ShowId): Array<{ userId: UserId; granularType: string; fragmentId: string; eventType: string; createdAt: string }> {
+      const rows = stmts.getMixEvents.all(showId) as Array<{
         user_id: UserId;
-        layer_type: LayerType;
+        granular_type: string;
         fragment_id: string;
-      }>;
-      return rows.map(r => ({ userId: r.user_id, layerType: r.layer_type, fragmentId: r.fragment_id }));
-    },
-
-    /**
-     * Get all ceremony events for a show (for recovery).
-     */
-    getCeremonyEvents(showId: ShowId): Array<{ layerType: LayerType; ambassadorUserId: UserId | null; fragmentId: string | null; eventType: 'locked' | 'forfeited' }> {
-      const rows = stmts.getCeremonyEvents.all(showId) as Array<{
-        layer_type: LayerType;
-        ambassador_user_id: UserId | null;
-        fragment_id: string | null;
-        event_type: 'locked' | 'forfeited';
+        event_type: string;
+        created_at: string;
       }>;
       return rows.map(r => ({
-        layerType: r.layer_type,
-        ambassadorUserId: r.ambassador_user_id,
+        userId: r.user_id,
+        granularType: r.granular_type,
         fragmentId: r.fragment_id,
         eventType: r.event_type,
+        createdAt: r.created_at,
       }));
     },
 

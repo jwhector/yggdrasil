@@ -27,7 +27,7 @@ interface ShowState {
   currentAttemptIndex: number;         // 0, 1, 2
   attempts: AttemptState[];            // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: FinaleState | null;     // Populated at finale_elegy
+  finaleState: V32FinaleState | null;   // Populated at finale_elegy
   config: ShowConfig;
   version: number;                     // Increments on every state change
   lastUpdated: number;
@@ -37,7 +37,7 @@ interface ShowState {
 interface AttemptState {
   index: number;                       // 0, 1, 2
   chapter: Chapter;                    // 'ambition' | 'love' | 'avoidance'
-  layerPlan: LayerConfig[];            // Always length 6
+  layerPlan: V32LayerConfig[];         // Always length 3 (V3.2 bundled layer groups)
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerResults: LayerResult[];         // Populated as layers resolve
@@ -56,8 +56,10 @@ type Chapter = 'ambition' | 'love' | 'avoidance';
 
 ```typescript
 interface ShowConfig {
-  layersPerAttempt: number;            // Always 6
-  attempts: AttemptConfig[];           // Length 3
+  layersPerAttempt: number;            // Always 3 (V3.2)
+  granularTypes?: GranularType[];      // V3.2: master registry of granular types
+  layerGroups?: LayerGroupConfig[];    // V3.2: layer group definitions (bones/flesh/spark)
+  attempts: V32AttemptConfig[];        // Length 3
   finale: FinaleConfig;
   timing: TimingConfig;
   lobby: {
@@ -66,25 +68,60 @@ interface ShowConfig {
   seatIds: SeatId[];
 }
 
-interface AttemptConfig {
+interface V32AttemptConfig {
   chapter: Chapter;
   title: string;
-  layers: LayerConfig[];              // 6 layers, staggered per song
-  thresholds: number[];             // Per-layer doubt thresholds (length 6)
-  tempos: number[];                 // Per-layer BPM (length 6)
-  auditionBars: number[];           // Bars per option during audition (length 6)
+  liveSeed: LiveSeedConfig;           // Prerecorded performer loop tracks
+  layers: V32LayerConfig[];           // 3 bundled layer groups, staggered per song
+  thresholds: number[];               // Per-layer doubt thresholds (length 3)
+  tempos: number[];                   // Per-layer BPM (length 3)
+  auditionBars: number[];             // Bars per option during audition (length 3)
+  auditionCycles: number[];           // Number of A/B cycles per layer (length 3)
 }
 
-interface FinaleConfig {
-  assemblyTimerMs: number;             // Duration of group assembly phase
-  assemblyGracePeriodMs: number;       // Grace period after assignment before deliberation
-  deliberationTimerMs: number;         // Duration of group deliberation phase
-  ambassadorVolunteerTimerMs: number;  // Duration of ambassador volunteering window
-  bothOptionsSurvive: boolean;         // When true, both options from voted layers are available in finale
-  ceremonyLayerOrder: LayerType[];     // Fixed order for ambassador call-ups (length 6, was 7)
-  audioPreviewPath: string;            // Base URL path for preview audio files
-  layerLabels: Map<LayerType, string>; // Configurable display labels for assembly cards (e.g., "The Heartbeat")
-  npcMessages: NpcMessageConfig[];     // Event-driven NPC messages (event key → text)
+interface V32LayerConfig {
+  index: number;
+  group: LayerGroupId;                // 'bones' | 'flesh' | 'spark'
+  optionA: TrackBundle;
+  optionB: TrackBundle;
+  labelA: string;
+  labelB: string;
+}
+
+interface TrackBundle {
+  tracks: GranularTrackRef[];
+}
+
+interface GranularTrackRef {
+  granularType: string;               // e.g., 'bass', 'drums', 'melody'
+  trackIndex: number;                 // Ableton track index (config-driven)
+}
+
+interface LiveSeedConfig {
+  trackIndices: number[];
+  label: string;
+}
+
+interface LayerGroupConfig {
+  id: LayerGroupId;
+  label: string;                      // e.g., "The Foundation"
+  granularTypes: string[];            // e.g., ['bass', 'drums']
+}
+
+interface GranularType {
+  id: string;
+  label: string;                      // e.g., "The Ground"
+  color: string;
+  symbol: string;                     // e.g., "■"
+}
+
+interface V32FinaleConfig {
+  assignmentMode: 'auto' | 'self_select';  // How users are assigned to granular types
+  assignmentTimerMs: number;               // Only used when assignmentMode === 'self_select'
+  bothOptionsSurvive: boolean;             // When true, both options from voted layers are available in finale
+  crossSongConstraint: boolean;            // When false, each group picks independently across songs
+  audioPreviewPath: string;                // Base URL path for preview audio files
+  npcMessages: NpcMessageConfig[];         // Event-driven NPC messages (event key -> text)
 }
 
 interface NpcMessageConfig {
@@ -112,17 +149,16 @@ interface GainConfig {
   stepsPerBeat: number;
 }
 
-interface Fragment {
+interface GranularFragment {
   id: string;
   songIndex: number;                   // 0, 1, 2
-  layerIndex: number;
+  layerGroupId: string;               // Which bundle ('bones', 'flesh', 'spark')
+  granularType: string;               // Which specific type ('bass', 'drums', etc.)
   option: 'A' | 'B';
   chapter: Chapter;
-  layerType: LayerType;
-  displayLabel: string;               // Emotional tagline from layer config
-  audioRef: AudioReference;           // Ableton track index
-  previewAudioPath: string;           // URL path to preview audio file
+  trackIndex: number;                 // Ableton track index (config-driven)
   wonVote: boolean;                   // true if this option won the blind vote
+  previewAudioPath: string;           // URL path to preview audio file
 }
 ```
 
@@ -156,45 +192,22 @@ type ConductorCommand =
   // Song Rejection
   | { type: 'TRIGGER_REJECTION' }
 
-  // Finale — Setup
+  // Finale — Setup & NPC
   | { type: 'SETUP_FINALE' }
-
-  // Finale — Assembly
-  | { type: 'START_ASSEMBLY' }
-  | { type: 'JOIN_GROUP'; userId: UserId; layerType: LayerType }
-  | { type: 'ASSEMBLY_TIMER_EXPIRED' }
-  | { type: 'FORCE_ASSIGN_USER'; userId: UserId; layerType: LayerType }
-  | { type: 'EXTEND_ASSEMBLY_TIMER'; additionalMs: number }
-  | { type: 'FORCE_END_ASSEMBLY' }
-
-  // Finale — Deliberation
-  | { type: 'START_DELIBERATION' }
-  | { type: 'SUBMIT_GROUP_VOTE'; userId: UserId; layerType: LayerType; fragmentId: string }
-  | { type: 'DELIBERATION_TIMER_EXPIRED' }
-  | { type: 'VOLUNTEER_AS_AMBASSADOR'; userId: UserId; layerType: LayerType }
-  | { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED'; layerType: LayerType }
-  | { type: 'FORCE_FRAGMENT_SELECTION'; layerType: LayerType; fragmentId: string }
-  | { type: 'EXTEND_DELIBERATION_TIMER'; additionalMs: number }
-  | { type: 'FORCE_END_DELIBERATION' }
-
-  // Finale — Ceremony
-  | { type: 'START_CEREMONY' }
-  | { type: 'CALL_NEXT_AMBASSADOR' }
-  | { type: 'ALTAR_LOCK_IN'; userId: UserId; layerType: LayerType }
-  | { type: 'FORCE_LOCK_IN'; layerType: LayerType }
-  | { type: 'FORFEIT_LAYER'; layerType: LayerType }
-  | { type: 'SKIP_TO_LAYER'; layerType: LayerType }
-
-  // Finale — NPC
   | { type: 'SEND_NPC_MESSAGE'; message: string }
 
-  // Finale — Performer Mix
-  | { type: 'START_PERFORMER_MIX' }
-  | { type: 'QUEUE_FRAGMENT'; layerType: LayerType; fragmentId: string | null }
-  | { type: 'CANCEL_PENDING'; layerType: LayerType }
-  | { type: 'FIRE_PENDING_CHANGES' }
-  | { type: 'LOAD_SNAPSHOT'; snapshot: Map<LayerType, string | null> }
-  | { type: 'TOGGLE_LIVE_TRACK'; trackId: string }
+  // Finale — Assignment
+  | { type: 'START_ASSIGNMENT' }
+  | { type: 'SELECT_GRANULAR_TYPE'; userId: UserId; granularType: string }
+  | { type: 'ASSIGNMENT_COMPLETE' }
+
+  // Finale — Live Mix
+  | { type: 'START_LIVE_MIX' }
+  | { type: 'SET_LIVE_MIX_PREFERENCE'; userId: UserId; granularType: string; fragmentId: string }
+  | { type: 'LOCK_GRANULAR_TYPE'; granularType: string }
+  | { type: 'UNLOCK_GRANULAR_TYPE'; granularType: string }
+  | { type: 'OVERRIDE_FRAGMENT'; granularType: string; fragmentId: string }
+  | { type: 'CLEAR_OVERRIDE'; granularType: string }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
@@ -231,38 +244,19 @@ type ConductorEvent =
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
-  // Finale — Setup
-  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: Fragment[]; lockedFragments: Fragment[] }
-
-  // Finale — Assembly
-  | { type: 'ASSEMBLY_STARTED'; timerDuration: number }
-  | { type: 'GROUP_MEMBERSHIP_CHANGED'; groups: Map<LayerType, UserId[]>; undecidedCount: number }
-  | { type: 'ASSEMBLY_COMPLETE'; groups: Map<LayerType, UserId[]>; emptyGroups: LayerType[] }
-
-  // Finale — Deliberation
-  | { type: 'DELIBERATION_STARTED'; timerDuration: number }
-  | { type: 'GROUP_VOTE_UPDATED'; layerType: LayerType; votes: Map<string, number> }
-  | { type: 'FRAGMENT_CHOSEN'; layerType: LayerType; fragmentId: string }
-  | { type: 'AMBASSADOR_VOLUNTEERED'; layerType: LayerType; userId: UserId }
-  | { type: 'AMBASSADOR_SELECTED'; layerType: LayerType; userId: UserId }
-  | { type: 'LAYER_FORFEITED'; layerType: LayerType }
-  | { type: 'DELIBERATION_COMPLETE' }
-
-  // Finale — Ceremony
-  | { type: 'CEREMONY_STARTED'; layerOrder: LayerType[] }
-  | { type: 'AMBASSADOR_CALLED'; layerType: LayerType; userId: UserId }
-  | { type: 'ALTAR_LOCK_IN_DETECTED'; layerType: LayerType; fragmentId: string }
-  | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
-  | { type: 'CEREMONY_LAYER_SKIPPED'; layerType: LayerType }
-  | { type: 'CEREMONY_COMPLETE'; lockedLayers: Map<LayerType, string> }
-
-  // Finale — NPC
+  // Finale — Setup & NPC
+  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: GranularFragment[]; allFragments: GranularFragment[] }
   | { type: 'NPC_MESSAGE'; message: string }
 
-  // Finale — Performer Mix
-  | { type: 'PERFORMER_MIX_STARTED' }
-  | { type: 'PENDING_CHANGES_FIRED'; changes: PendingChange[] }
-  | { type: 'MIX_STATE_UPDATED'; activeLayers: Map<LayerType, string | null> }
+  // Finale — Assignment
+  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
+  | { type: 'GROUPS_ASSIGNED'; groups: Map<string, UserId[]> }
+
+  // Finale — Live Mix
+  | { type: 'LIVE_MIX_STARTED'; initialFragments: Map<string, string> }
+  | { type: 'ACTIVE_FRAGMENT_CHANGED'; granularType: string; fragmentId: string; previousFragmentId: string }
+  | { type: 'GRANULAR_TYPE_LOCKED'; granularType: string }
+  | { type: 'GRANULAR_TYPE_UNLOCKED'; granularType: string }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
@@ -272,13 +266,15 @@ type ConductorEvent =
 
 type AudioCue =
   | { type: 'set_tempo'; bpm: number; attemptIndex: number; layerIndex: number }
-  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; audioRef: AudioReference; otherAudioRef: AudioReference }
-  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
-  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
+  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; trackBundle: TrackBundle; otherTrackBundle: TrackBundle }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; trackBundle?: TrackBundle }
+  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerTrackBundle: TrackBundle; loserTrackBundle: TrackBundle }
+  | { type: 'live_seed_start'; attemptIndex: number; trackIndices: number[] }
+  | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'rejection_gesture'; attemptIndex: number }
-  | { type: 'ceremony_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
-  | { type: 'mix_update'; changes: PendingChange[] }
+  | { type: 'live_mix_crossfade'; granularType: string; incomingTrackIndex: number; outgoingTrackIndex: number }
+  | { type: 'live_mix_start'; activeTrackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }
   | { type: 'reset_utilities' };

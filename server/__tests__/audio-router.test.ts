@@ -23,11 +23,11 @@ import type { TimingEngine, BeatPosition } from '../timing';
 import type {
   ShowState,
   ShowConfig,
-  AttemptConfig,
-  LayerConfig,
-  AudioReference,
+  V32AttemptConfig,
+  V32LayerConfig,
+  TrackBundle,
   Fragment,
-  FinaleState,
+  V32FinaleState,
   GainConfig,
 } from '../../conductor/types';
 
@@ -56,32 +56,30 @@ const TEST_LAYOUT: AbletonLayoutConfig = {
   utilityGainParamName: 'Gain',
 };
 
-/** Track device info for tests: Utility device at index 3, Gain at param 0 */
-const TEST_DEVICE = { utilityDeviceIndex: 3, gainParamIndex: 0 };
-
-function makeAudioRef(index: number, effectIndices?: number[]): AudioReference {
-  return effectIndices ? { trackIndex: index, effectIndices } : { trackIndex: index };
+function makeTrackBundle(trackIndex: number): TrackBundle {
+  return { tracks: [{ granularType: 'bass', trackIndex }] };
 }
 
-function makeLayerConfig(index: number): LayerConfig {
+function makeLayerConfig(index: number): V32LayerConfig {
   return {
     index,
-    type: 'melody',
-    optionA: makeAudioRef(index * 2),
-    optionB: makeAudioRef(index * 2 + 1),
+    group: ['bones', 'flesh', 'spark'][index % 3],
+    optionA: makeTrackBundle(index * 2),
+    optionB: makeTrackBundle(index * 2 + 1),
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
   };
 }
 
-function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): AttemptConfig {
+function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig {
   return {
     chapter,
     title: chapter,
-    thresholds: [0.5, 0.5, 0.65, 0.78, 0.88, 0.95],
-    tempos: [120, 120, 130, 140, 155, 170],
-    auditionBars: [4, 4, 4, 2, 2, 2],
-    auditionCycles: [1, 1, 1, 1, 1, 1],
+    liveSeed: { trackIndices: [99], label: 'seed' },
+    thresholds: [0.5, 0.5, 0.65],
+    tempos: [120, 120, 130],
+    auditionBars: [4, 4, 4],
+    auditionCycles: [1, 1, 1],
     layers: [0, 1, 2].map(i => makeLayerConfig(i)),
   };
 }
@@ -95,13 +93,11 @@ function createTestConfig(): ShowConfig {
       makeAttemptConfig('avoidance'),
     ],
     finale: {
-      assemblyTimerMs: 60000,
-      assemblyGracePeriodMs: 15000,
-      deliberationTimerMs: 120000,
-      ambassadorVolunteerTimerMs: 15000,
-      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'] as any,
+      assignmentMode: 'auto' as const,
+      assignmentTimerMs: 30000,
+      bothOptionsSurvive: true,
+      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
-      layerLabels: new Map(),
       npcMessages: [],
     },
     timing: {
@@ -129,48 +125,32 @@ function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B
     chapter: 'ambition',
     layerType: 'melody',
     displayLabel: `Fragment ${attemptIndex}.${layerIndex}.${option}`,
+    wonVote: true,
     audioRef: { trackIndex },
     previewAudioPath: `/audio/previews/preview-${attemptIndex}-${layerIndex}-${option}.mp3`,
   };
 }
 
-function makeFinaleState(allFragments: Fragment[] = []): FinaleState {
+function makeFinaleState(allFragments: Fragment[] = []): V32FinaleState {
   return {
-    phase: 'assembly',
-    availableFragments: allFragments,
-    allFragments,
-    lockedFragments: [],
-    assembly: {
+    phase: 'assignment',
+    availableFragments: allFragments as any,
+    allFragments: allFragments as any,
+    assignment: {
+      mode: 'auto',
       groups: new Map(),
-      undecidedUsers: [],
-      timerRemaining: 0,
-      timerDuration: 60000,
+      timerRemaining: null,
     },
-    deliberation: {
-      groupVotes: new Map(),
-      chosenFragments: new Map(),
-      ambassadorVolunteers: new Map(),
-      ambassadors: new Map(),
-      timerRemaining: 0,
-      volunteerTimerRemaining: null,
-    },
-    ceremony: {
-      layerOrder: [],
-      currentIndex: -1,
-      currentAmbassador: null,
-      altarReady: false,
-      lockedLayers: new Map(),
-      forfeitedLayers: [],
-      ceremonyComplete: false,
-    },
-    npc: { currentMessage: null },
-    performerMix: {
-      activeLayers: new Map(),
-      pendingChanges: [],
+    liveMix: {
+      votes: new Map(),
+      activeFragments: new Map(),
+      lockedTypes: [],
+      performerOverrides: new Map(),
+      liveTracksActive: [],
       loopPosition: 0,
       loopCount: 0,
-      liveTracksActive: [],
     },
+    npc: { currentMessage: null },
   };
 }
 
@@ -231,6 +211,7 @@ function createMockTimingEngine() {
     onOSCMessage: jest.fn(),
     isRunning: jest.fn<() => boolean>().mockReturnValue(true),
     getBeatDurationMs: jest.fn<() => number>().mockReturnValue(500),
+    recoverTimers: jest.fn(),
     fireBeat,
   };
 
@@ -299,8 +280,8 @@ describe('AudioRouter', () => {
       jest.useFakeTimers();
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
 
       // Advance past waitForOSC timeout (1000ms) and flush promise microtasks
@@ -314,8 +295,8 @@ describe('AudioRouter', () => {
     test('unmutes the specified option track', () => {
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
@@ -325,122 +306,22 @@ describe('AudioRouter', () => {
       // First unmute A (track 0)
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
       // Switch to B — should fade out A (instant = mute) and unmute B
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
-        audioRef: makeAudioRef(1),
-        otherAudioRef: makeAudioRef(0),
+        trackBundle: makeTrackBundle(1),
+        otherTrackBundle: makeTrackBundle(0),
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1); // mute A (fade out)
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 1, 0); // unmute B
     });
 
-  });
-
-  // --------------------------------------------------------------------------
-  // audition_start — effect-based options
-  // --------------------------------------------------------------------------
-
-  describe('audition_start (effect-based)', () => {
-    test('enables effects on this option', () => {
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0, [2, 3]),
-        otherAudioRef: makeAudioRef(1, [4, 5]),
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 0, 2, 0, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 0, 3, 0, 1);
-    });
-
-    test('disables effects on the other option', () => {
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0, [2, 3]),
-        otherAudioRef: makeAudioRef(1, [4, 5]),
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 4, 0, 0);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 5, 0, 0);
-    });
-
-    test('does not mute track when both options share the same track', () => {
-      // First audition A on track 5
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(5, [1]),
-        otherAudioRef: makeAudioRef(5, [2]),
-      });
-      mockSend.mockClear();
-
-      // Switch to B on same track — no mute (unmutes may occur since guard removed)
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
-        audioRef: makeAudioRef(5, [2]),
-        otherAudioRef: makeAudioRef(5, [1]),
-      });
-
-      // Track 5 must not be muted — the important invariant
-      const muteCalls = mockSend.mock.calls.filter(
-        (c: any[]) => c[0] === '/live/track/set/mute' && c[1] === 5 && c[2] === 1,
-      );
-      expect(muteCalls.length).toBe(0);
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 5, 1, 0, 0); // disable A's effect
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 5, 2, 0, 1); // enable B's effect
-    });
-
-    test('still mutes/unmutes tracks when options are on different tracks', () => {
-      // First unmute track 2 (B's track)
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
-        audioRef: makeAudioRef(2, [3]),
-        otherAudioRef: makeAudioRef(0, [1]),
-      });
-      mockSend.mockClear();
-
-      // Switch to A — should mute track 2, unmute track 0
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0, [1]),
-        otherAudioRef: makeAudioRef(2, [3]),
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // mute other track
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0); // unmute this track
-    });
-
-    test('handles multiple effects per option', () => {
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
-        audioRef: makeAudioRef(1, [0, 1, 2]),
-        otherAudioRef: makeAudioRef(0),
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 0, 0, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 1, 0, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 2, 0, 1);
-    });
-
-    test('no device calls when neither option has effects', () => {
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
-      });
-
-      // Only effect-related device calls should be absent
-      const effectCalls = mockSend.mock.calls.filter(
-        (c: any[]) => c[0] === '/live/device/set/parameter/value' && (c[4] === 0 || c[4] === 1),
-      );
-      expect(effectCalls.length).toBe(0);
-    });
   });
 
   // --------------------------------------------------------------------------
@@ -452,38 +333,21 @@ describe('AudioRouter', () => {
       // First unmute it
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
       sendCue(router, state, {
         type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
+        trackBundle: makeTrackBundle(0),
       });
 
       // Instant fade (no timing engine) → setGain(0) → muteTrack
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
     });
 
-    test('disables effects when stopping an effect option', () => {
-      sendCue(router, state, {
-        type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0, [3, 4]),
-        otherAudioRef: makeAudioRef(1),
-      });
-      mockSend.mockClear();
-
-      sendCue(router, state, {
-        type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0, [3, 4]),
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 0, 3, 0, 0);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 0, 4, 0, 0);
-    });
-
-    test('does nothing when no audioRef (no active audition)', () => {
+    test('does nothing when no trackBundle (no active audition)', () => {
       sendCue(router, state, {
         type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: null,
       });
@@ -496,7 +360,7 @@ describe('AudioRouter', () => {
       // Track 0 was never unmuted
       sendCue(router, state, {
         type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
+        trackBundle: makeTrackBundle(0),
       });
 
       // setGain(0, 0) → muteTrack(0) → always sends (no idempotency guard)
@@ -513,15 +377,15 @@ describe('AudioRouter', () => {
       // Setup: audition B so it's unmuted
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'B',
-        audioRef: makeAudioRef(1),
-        otherAudioRef: makeAudioRef(0),
+        trackBundle: makeTrackBundle(1),
+        otherTrackBundle: makeTrackBundle(0),
       });
       mockSend.mockClear();
 
       sendCue(router, state, {
         type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
-        winnerAudioRef: makeAudioRef(0),
-        loserAudioRef: makeAudioRef(1),
+        winnerTrackBundle: makeTrackBundle(0),
+        loserTrackBundle: makeTrackBundle(1),
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0); // unmute winner A
@@ -532,66 +396,32 @@ describe('AudioRouter', () => {
       // Lock layer 0 with winner A (track 0)
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       sendCue(router, state, {
         type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
-        winnerAudioRef: makeAudioRef(0),
-        loserAudioRef: makeAudioRef(1),
+        winnerTrackBundle: makeTrackBundle(0),
+        loserTrackBundle: makeTrackBundle(1),
       });
 
       // Start layer 1
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 1, option: 'A',
-        audioRef: makeAudioRef(2),
-        otherAudioRef: makeAudioRef(3),
+        trackBundle: makeTrackBundle(2),
+        otherTrackBundle: makeTrackBundle(3),
       });
       mockSend.mockClear();
 
       sendCue(router, state, {
         type: 'lock_in', attemptIndex: 0, layerIndex: 1, winner: 'A',
-        winnerAudioRef: makeAudioRef(2),
-        loserAudioRef: makeAudioRef(3),
+        winnerTrackBundle: makeTrackBundle(2),
+        loserTrackBundle: makeTrackBundle(3),
       });
 
       // Layer 0 tracks (0, 1) should NOT be touched
       expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 0, expect.anything());
       expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', 1, expect.anything());
-    });
-  });
-
-  describe('lock_in (effect-based)', () => {
-    test('enables winner effects and disables loser effects', () => {
-      sendCue(router, state, {
-        type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
-        winnerAudioRef: makeAudioRef(0, [2, 3]),
-        loserAudioRef: makeAudioRef(1, [4, 5]),
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 0, 2, 0, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 0, 3, 0, 1);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 4, 0, 0);
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 1, 5, 0, 0);
-    });
-
-    test('does not mute loser track when winner and loser share the same track', () => {
-      sendCue(router, state, {
-        type: 'lock_in', attemptIndex: 0, layerIndex: 0, winner: 'A',
-        winnerAudioRef: makeAudioRef(5, [1]),
-        loserAudioRef: makeAudioRef(5, [2]),
-      });
-
-      // Track 5 unmuted for winner
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
-      // Track 5 NOT muted for loser (same track as winner)
-      const muteCalls = mockSend.mock.calls.filter(
-        (c: any[]) => c[0] === '/live/track/set/mute' && c[1] === 5 && c[2] === 1,
-      );
-      expect(muteCalls.length).toBe(0);
-
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 5, 1, 0, 1); // winner effect
-      expect(mockSend).toHaveBeenCalledWith('/live/device/set/parameter/value', 5, 2, 0, 0); // loser effect
     });
   });
 
@@ -619,8 +449,8 @@ describe('AudioRouter', () => {
       // Unmute track 0 first
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
@@ -671,8 +501,8 @@ describe('AudioRouter', () => {
     test('immediately fades all attempt tracks to 0 (no timing engine = instant mute)', () => {
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
@@ -692,19 +522,35 @@ describe('AudioRouter', () => {
   });
 
   // --------------------------------------------------------------------------
-  // ceremony_activate
+  // live_mix_crossfade
   // --------------------------------------------------------------------------
 
-  describe('ceremony_activate', () => {
-    test('starts transport and unmutes fragment track', async () => {
+  describe('live_mix_crossfade', () => {
+    test('fades out outgoing track and fades in incoming track', () => {
+      sendCue(router, state, {
+        type: 'live_mix_crossfade',
+        granularType: 'bass',
+        incomingTrackIndex: 4,
+        outgoingTrackIndex: 2,
+      });
+
+      // Outgoing faded out (instant = muted), incoming unmuted
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // fade out
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0); // bring in
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // live_mix_start
+  // --------------------------------------------------------------------------
+
+  describe('live_mix_start', () => {
+    test('unmutes all active tracks', async () => {
       jest.useFakeTimers();
-      const fragment = makeFragment(0, 2, 'B'); // track 5
 
       sendCue(router, state, {
-        type: 'ceremony_activate',
-        layerType: 'melody',
-        fragmentId: fragment.id,
-        audioRef: fragment.audioRef,
+        type: 'live_mix_start',
+        activeTrackIndices: [0, 4, 8],
       });
 
       // Advance past waitForOSC timeout and flush microtasks
@@ -712,79 +558,10 @@ describe('AudioRouter', () => {
       await Promise.resolve();
 
       expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 8, 0);
       jest.useRealTimers();
-    });
-
-  });
-
-  // --------------------------------------------------------------------------
-  // mix_update
-  // --------------------------------------------------------------------------
-
-  describe('mix_update', () => {
-    test('fades out old fragment track and brings in new fragment track', () => {
-      const fragA = makeFragment(0, 0, 'A'); // track 0
-      const fragB = makeFragment(0, 1, 'A'); // track 2
-
-      // First activate fragA via ceremony_activate
-      sendCue(router, state, {
-        type: 'ceremony_activate',
-        layerType: 'melody',
-        fragmentId: fragA.id,
-        audioRef: fragA.audioRef,
-      });
-      mockSend.mockClear();
-
-      state.finaleState = makeFinaleState([fragA, fragB]);
-
-      sendCue(router, state, {
-        type: 'mix_update',
-        changes: [{ layerType: 'melody', fragmentId: fragB.id, queuedAt: 0 }],
-      });
-
-      // Old track faded out (instant = muted), new track unmuted
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1); // fade out fragA
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 0); // bring in fragB
-    });
-
-    test('fades out layer when fragmentId is null', () => {
-      const fragA = makeFragment(0, 0, 'A'); // track 0
-
-      sendCue(router, state, {
-        type: 'ceremony_activate',
-        layerType: 'melody',
-        fragmentId: fragA.id,
-        audioRef: fragA.audioRef,
-      });
-      mockSend.mockClear();
-
-      state.finaleState = makeFinaleState([fragA]);
-
-      sendCue(router, state, {
-        type: 'mix_update',
-        changes: [{ layerType: 'melody', fragmentId: null, queuedAt: 0 }],
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 1);
-    });
-
-    test('handles multiple simultaneous changes', () => {
-      const fragMelody = makeFragment(0, 0, 'A'); // track 0
-      const fragDrums = makeFragment(0, 1, 'B');  // track 3
-
-      state.finaleState = makeFinaleState([fragMelody, fragDrums]);
-
-      sendCue(router, state, {
-        type: 'mix_update',
-        changes: [
-          { layerType: 'melody', fragmentId: fragMelody.id, queuedAt: 0 },
-          { layerType: 'drums', fragmentId: fragDrums.id, queuedAt: 0 },
-        ],
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0); // unmute melody
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 0); // unmute drums
     });
   });
 
@@ -823,8 +600,8 @@ describe('AudioRouter', () => {
       // Unmute a track first
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
@@ -834,8 +611,8 @@ describe('AudioRouter', () => {
       // (proves internal state was cleared)
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
     });
@@ -873,8 +650,8 @@ describe('AudioRouter', () => {
     test('silences tracks and keeps transport running', () => {
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
@@ -893,8 +670,8 @@ describe('AudioRouter', () => {
     test('silences tracks and stops transport', () => {
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
@@ -931,16 +708,16 @@ describe('AudioRouter', () => {
     test('unmuting an already-unmuted track sends OSC again (no guard)', () => {
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
       mockSend.mockClear();
 
       // Audition same track again — unmuteTrack always sends (Ableton handles idempotency)
       sendCue(router, state, {
         type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-        audioRef: makeAudioRef(0),
-        otherAudioRef: makeAudioRef(1),
+        trackBundle: makeTrackBundle(0),
+        otherTrackBundle: makeTrackBundle(1),
       });
 
       // Unmute is sent again — Ableton is the source of truth
@@ -1017,8 +794,8 @@ describe('AudioRouter with device cache', () => {
 
     sendCue(gainRouter, state, {
       type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-      audioRef: makeAudioRef(0),
-      otherAudioRef: makeAudioRef(1),
+      trackBundle: makeTrackBundle(0),
+      otherTrackBundle: makeTrackBundle(1),
     });
 
     // After audition_start: unmuteTrack(0) fires immediately (no device = mute/unmute fallback)
@@ -1042,15 +819,15 @@ describe('AudioRouter with device cache', () => {
     // Setup: unmute track 0 via audition_start
     sendCue(router, state, {
       type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-      audioRef: makeAudioRef(0),
-      otherAudioRef: makeAudioRef(1),
+      trackBundle: makeTrackBundle(0),
+      otherTrackBundle: makeTrackBundle(1),
     });
     mockSend.mockClear();
 
     // Now trigger audition_stop which schedules exitFadeBeats=4 beat fade to 0
     sendCue(router, state, {
       type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
-      audioRef: makeAudioRef(0),
+      trackBundle: makeTrackBundle(0),
     });
 
     // With mock timing engine: fade is scheduled starting at beat 1
@@ -1071,14 +848,14 @@ describe('AudioRouter with device cache', () => {
     // Unmute track 0
     sendCue(router, state, {
       type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-      audioRef: makeAudioRef(0),
-      otherAudioRef: makeAudioRef(1),
+      trackBundle: makeTrackBundle(0),
+      otherTrackBundle: makeTrackBundle(1),
     });
 
     // Start fade-out
     sendCue(router, state, {
       type: 'audition_stop', attemptIndex: 0, layerIndex: 0, option: 'A',
-      audioRef: makeAudioRef(0),
+      trackBundle: makeTrackBundle(0),
     });
 
     // Fire first 2 beats of the 4-beat fade
@@ -1089,8 +866,8 @@ describe('AudioRouter with device cache', () => {
     // Now send audition_start for same track — cancels the fade-out, starts fade-in
     sendCue(router, state, {
       type: 'audition_start', attemptIndex: 0, layerIndex: 0, option: 'A',
-      audioRef: makeAudioRef(0),
-      otherAudioRef: makeAudioRef(1),
+      trackBundle: makeTrackBundle(0),
+      otherTrackBundle: makeTrackBundle(1),
     });
 
     // After the new audition_start cancels the fade:

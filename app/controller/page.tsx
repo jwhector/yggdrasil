@@ -16,17 +16,14 @@ import { useShowState } from '@/hooks/useShowState';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
-import { AssemblyControls } from '@/components/controller/AssemblyControls';
-import { DeliberationControls } from '@/components/controller/DeliberationControls';
-import { CeremonyControls } from '@/components/controller/CeremonyControls';
+import { LiveMixControls } from '@/components/controller/LiveMixControls';
 import { NpcControls } from '@/components/controller/NpcControls';
-import { MixingSurface } from '@/components/finale/MixingSurface';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
 
 const SHOW_ID = 'default-show';
 const PASSCODE = process.env.NEXT_PUBLIC_CONTROLLER_PASSCODE ?? '';
 
-const FINALE_PHASES = new Set(['finale_elegy', 'finale_assembly', 'finale_deliberation', 'finale_ceremony', 'finale_performer_mix']);
+const FINALE_PHASES = new Set(['finale_elegy', 'finale_assignment', 'finale_live_mix']);
 
 // ---------------------------------------------------------------------------
 // Entry point — passcode gate
@@ -90,21 +87,27 @@ function ControllerContent() {
         <VotingControls fullState={fullState} sendCommand={sendCommand} />
       )}
 
-      {/* Finale controls — only during finale phases */}
-      {isFinale && phase === 'finale_assembly' && (
-        <AssemblyControls fullState={fullState} sendCommand={sendCommand} />
-      )}
-      {isFinale && phase === 'finale_deliberation' && (
-        <DeliberationControls fullState={fullState} sendCommand={sendCommand} />
-      )}
-      {isFinale && phase === 'finale_ceremony' && (
-        <CeremonyControls fullState={fullState} sendCommand={sendCommand} />
-      )}
-      {isFinale && (phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
+      {/* Finale controls */}
+      {isFinale && (
         <NpcControls fullState={fullState} sendCommand={sendCommand} />
       )}
-      {isFinale && phase === 'finale_performer_mix' && (
-        <MixingSurface fullState={fullState} sendCommand={sendCommand} />
+
+      {/* Live mix controls — per-type overrides, locks, vote distributions */}
+      {phase === 'finale_live_mix' && fullState.finaleState && (
+        <LiveMixControls
+          granularTypes={fullState.config.granularTypes ?? []}
+          allFragments={fullState.finaleState.allFragments ?? []}
+          activeFragments={(() => {
+            const af = fullState.finaleState.liveMix?.activeFragments;
+            if (!af) return [];
+            // Serialized format: [string, string][] tuple array
+            const arr = Array.isArray(af) ? af : Array.from((af as Map<string, string>).entries());
+            return arr.map(([granularType, fragmentId]: [string, string]) => ({ granularType, fragmentId }));
+          })()}
+          lockedTypes={fullState.finaleState.liveMix?.lockedTypes ?? []}
+          sendCommand={sendCommand}
+          socket={socket}
+        />
       )}
 
       {/* Emergency + audio — always visible */}

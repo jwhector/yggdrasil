@@ -9,9 +9,9 @@
 
 ### State Sync Strategy
 Full state syncs on every mutation:
-- **Controller**: Full serialized state (including per-group vote distributions, ambassador status, altar state)
-- **Projector**: Public filtered state (group sizes, vote distributions, ceremony progress — no individual user data)
-- **Audience**: Personalized state (their group assignment, their group's votes, their ambassador status, their altar-ready state)
+- **Controller**: Full serialized state (all Maps converted to arrays)
+- **Projector**: Public filtered state (group sizes, active fragments, vote distributions — no individual user data)
+- **Audience**: Personalized state (their granular type assignment, their group's vote distribution, their current vote)
 
 ### Client → Server Events
 
@@ -20,10 +20,8 @@ Full state syncs on every mutation:
 | `join` | `{ userId?, seatId?, mode }` | All |
 | `reconnect` | `{ userId, showId, lastVersion }` | All |
 | `vote` | `{ choice: 'A' \| 'B' }` | Audience (song-building) |
-| `join_group` | `{ layerType }` | Audience (assembly phase) |
-| `group_vote` | `{ fragmentId }` | Audience (deliberation phase) |
-| `volunteer_ambassador` | `{}` | Audience (deliberation phase, after fragment chosen) |
-| `altar_lock_in` | `{}` | Audience (ceremony phase, ambassador only) |
+| `select_type` | `{ granularType }` | Audience (self-select assignment) |
+| `set_preference` | `{ fragmentId }` | Audience (live mix) |
 | `command` | `ConductorCommand` | Controller |
 
 ### Server → Client Events
@@ -32,14 +30,14 @@ Full state syncs on every mutation:
 |-------|---------|------------|
 | `state_sync` | `ShowState` (filtered per client type) | All |
 | `identity` | `{ userId }` | New audience members |
-| `group_update` | `{ groups: Map<LayerType, number>, undecided: number }` | Audience + Projector (during assembly, ~2 Hz) |
+| `group_update` | `{ groupSizes: Array<{ granularType, count }> }` | Audience + Projector (during assignment, ~2 Hz) |
+| `assigned` | `{ granularType, groupSize }` | Individual audience member (after assignment) |
 | `npc_message` | `{ message: string }` | Audience + Projector |
-| `ambassador_called` | `{ layerType, userId }` | All (during ceremony) |
-| `altar_ready` | `{}` | Single audience member (the called ambassador) |
-| `altar_confirmed` | `{ layerType, fragmentId }` | All (after successful altar lock-in) |
+| `mix_state` | `{ activeFragments, votes }` | Audience (live mix, ~4 Hz) |
+| `type_locked` | `{ granularType }` | Audience (performer locked a type) |
 | `error` | `{ message }` | Controller |
 
-**Note on group updates:** Sent as a separate event during assembly at ~2 Hz for responsive group size displays, NOT as part of state_sync.
+**Note on group updates:** Sent as a separate event during assignment at ~2 Hz for responsive group size displays, NOT as part of state_sync. The `mix_state` event is high-frequency during live mix to keep the UI responsive.
 
 ---
 
@@ -80,47 +78,24 @@ CREATE TABLE votes (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE TABLE finale_groups (
+CREATE TABLE finale_assignments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  layer_type TEXT NOT NULL,
-  auto_assigned BOOLEAN NOT NULL DEFAULT 0,     -- TRUE if randomly assigned at timer expiry
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (show_id) REFERENCES shows(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE finale_group_votes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  show_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  layer_type TEXT NOT NULL,
-  fragment_id TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (show_id) REFERENCES shows(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE ceremony_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  show_id TEXT NOT NULL,
-  layer_type TEXT NOT NULL,
-  ambassador_user_id TEXT,                       -- NULL if forfeited
-  fragment_id TEXT,                               -- NULL if forfeited
-  event_type TEXT NOT NULL CHECK(event_type IN ('locked', 'forfeited')),
+  granular_type TEXT NOT NULL,
+  auto_assigned BOOLEAN NOT NULL DEFAULT 1,     -- TRUE if auto-assigned or timer-expired
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 ```
 
-**Removed from V2:** `consensus_rounds` table.
+**Removed in V3.2:** `finale_groups`, `finale_group_votes`, `ceremony_events` tables (deprecated, kept in schema for historical data).
 
 ### Persistence Strategy & Recovery
 
 Unchanged from V1. Persist after EVERY state change. Atomic SQLite transactions. Stateless clients. Automatic reconnection with exponential backoff.
 
 **Finale-specific recovery notes:**
-- If an ambassador disconnects during the ceremony, the controller can force-lock-in or forfeit the layer
-- If assembly or deliberation timers expire during a server restart, the system should recover to the post-timer state (groups assigned, fragments chosen by majority of recorded votes)
+- If the assignment timer expires during a server restart, the system fires ASSIGNMENT_COMPLETE to assign remaining users
+- Live mix state (votes, active fragments) is held in memory and broadcast at ~4 Hz — not persisted per-vote
 - Audio preview files are static assets and require no server state

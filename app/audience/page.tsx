@@ -8,13 +8,15 @@ import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
 import { UrgencyEffects } from '@/components/song-building/UrgencyEffects';
+import { AuditionProgress } from '@/components/song-building/AuditionProgress';
+import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { AssemblyCards } from '@/components/finale/AssemblyCards';
-import { GroupIdentity } from '@/components/finale/GroupIdentity';
-import { DeliberationBoard } from '@/components/finale/DeliberationBoard';
-import { AltarReady } from '@/components/finale/AltarReady';
-import { CeremonyView } from '@/components/finale/CeremonyView';
-import type { AudienceFinaleView, LayerType } from '@/conductor/types';
+import { AssignmentCards } from '@/components/finale/AssignmentCards';
+import { AssignmentIdentity } from '@/components/finale/AssignmentIdentity';
+import { LiveMixController } from '@/components/finale/LiveMixController';
+import { LiveMixSpectator } from '@/components/finale/LiveMixSpectator';
+import { useLiveMix } from '@/hooks/useLiveMix';
+import type { AudienceFinaleView, GranularType } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -46,6 +48,12 @@ function AudienceContent() {
   });
 
   const { state, isLoading, currentAttempt } = useShowState(socket, 'audience', userId);
+
+  const auditionProgress = useAuditionProgress(
+    socket,
+    state?.phase,
+    currentAttempt?.currentLayerPhase,
+  );
 
   const handleVote = (choice: 'A' | 'B') => {
     emit('vote', { choice });
@@ -109,6 +117,11 @@ function AudienceContent() {
             chapter={currentAttempt.chapter}
           />
 
+          {/* Audition progress (during auditioning phase) */}
+          {currentAttempt.currentLayerPhase === 'auditioning' && auditionProgress && (
+            <AuditionProgress progress={auditionProgress} />
+          )}
+
           {/* Reveal sequence (during revealing phase) */}
           {currentAttempt.currentLayerPhase === 'revealing'
             && currentAttempt.currentVoteResult
@@ -155,9 +168,9 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {(phase === 'finale_elegy' || phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix') && (
+      {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix') && (
         state.myFinale
-          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} userId={userId ?? ''} />
+          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} granularTypes={state.config.granularTypes ?? []} />
           : <DarkListenScreen />
       )}
 
@@ -169,7 +182,7 @@ function AudienceContent() {
 }
 
 // ---------------------------------------------------------------------------
-// Finale audience view (V3)
+// Finale audience view (V3.2)
 // ---------------------------------------------------------------------------
 
 function FinaleAudienceView({
@@ -177,13 +190,13 @@ function FinaleAudienceView({
   phase,
   socket,
   emit,
-  userId,
+  granularTypes,
 }: {
   myFinale: AudienceFinaleView;
   phase: string;
   socket: Socket | null;
   emit: (event: string, data: unknown) => void;
-  userId: string;
+  granularTypes: GranularType[];
 }) {
   // --- Elegy phase: show all fragments non-interactively ---
   if (phase === 'finale_elegy') {
@@ -217,95 +230,84 @@ function FinaleAudienceView({
     );
   }
 
-  // --- Assembly phase ---
-  if (phase === 'finale_assembly') {
-    // Grace period: timer expired and user has been assigned a group
-    if (myFinale.assemblyTimerRemaining <= 0 && myFinale.myGroup !== null) {
-      return <GroupIdentity layerType={myFinale.myGroup} />;
+  // --- Assignment phase (V3.2) ---
+  if (phase === 'finale_assignment') {
+    // After assignment completes, show identity
+    if (myFinale.assignmentTimerRemaining != null && myFinale.assignmentTimerRemaining <= 0 && myFinale.myGranularType !== null) {
+      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
+      if (gt) return <AssignmentIdentity granularType={gt} />;
+    }
+    // Auto-assignment: show identity immediately
+    if (myFinale.assignmentMode === 'auto' && myFinale.myGranularType !== null) {
+      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
+      if (gt) return <AssignmentIdentity granularType={gt} />;
     }
     return (
-      <AssemblyCards
-        myGroup={myFinale.myGroup}
+      <AssignmentCards
+        myGranularType={myFinale.myGranularType}
+        granularTypes={granularTypes}
         groupSizes={myFinale.groupSizes}
-        timerRemaining={myFinale.assemblyTimerRemaining}
-        onJoinGroup={(layerType) => emit('join_group', { layerType })}
+        timerRemaining={myFinale.assignmentTimerRemaining ?? 0}
+        onSelect={(granularType) => emit('select_type', { granularType })}
         socket={socket}
       />
     );
   }
 
-  // --- Deliberation phase ---
-  if (phase === 'finale_deliberation') {
-    if (!myFinale.myGroup) return <DarkListenScreen />;
+  // --- Live mix phase (V3.2) ---
+  if (phase === 'finale_live_mix') {
     return (
-      <DeliberationBoard
-        myGroup={myFinale.myGroup}
-        myGroupFragments={myFinale.myGroupFragments}
-        groupVoteCounts={myFinale.groupVoteCounts}
-        myGroupVote={myFinale.myGroupVote}
-        chosenFragment={myFinale.chosenFragment}
-        isAmbassadorVolunteer={myFinale.isAmbassadorVolunteer}
-        myAmbassadorStatus={myFinale.myAmbassadorStatus}
-        deliberationTimerRemaining={myFinale.deliberationTimerRemaining}
-        volunteerTimerRemaining={myFinale.volunteerTimerRemaining}
-        onVote={(fragmentId) => emit('group_vote', { layerType: myFinale.myGroup, fragmentId })}
-        onVolunteer={() => emit('volunteer_ambassador', { layerType: myFinale.myGroup })}
-        userId={userId}
+      <LiveMixView
+        myFinale={myFinale}
+        socket={socket}
       />
-    );
-  }
-
-  // --- Ceremony phase ---
-  if (phase === 'finale_ceremony') {
-    // Find current layer type from ceremony progress
-    const currentLayer = myFinale.ceremonyProgress.find(p => p.status === 'current');
-    const currentLayerType = currentLayer?.layerType as LayerType | undefined;
-    const ceremonyComplete = myFinale.ceremonyProgress.every(
-      p => p.status === 'locked' || p.status === 'forfeited'
-    );
-
-    // Ambassador sees AltarReady; everyone else sees CeremonyView
-    if (myFinale.isCurrentAmbassador && currentLayerType) {
-      return (
-        <AltarReady
-          layerType={currentLayerType}
-          onLockIn={() => emit('altar_lock_in', { layerType: currentLayerType })}
-        />
-      );
-    }
-
-    return (
-      <CeremonyView
-        ceremonyProgress={myFinale.ceremonyProgress}
-        npcMessage={myFinale.npcMessage}
-        ceremonyComplete={ceremonyComplete}
-      />
-    );
-  }
-
-  // --- Performer mix phase: passive dark screen ---
-  if (phase === 'finale_performer_mix') {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100%',
-          minHeight: '100vh',
-          gap: '16px',
-        }}
-      >
-        <PulsingDot />
-        <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
-          FINALE IN PROGRESS
-        </p>
-      </div>
     );
   }
 
   return <DarkListenScreen />;
+}
+
+// ---------------------------------------------------------------------------
+// Live mix wrapper (needs hook call, so must be its own component)
+// ---------------------------------------------------------------------------
+
+function LiveMixView({
+  myFinale,
+  socket,
+}: {
+  myFinale: AudienceFinaleView;
+  socket: Socket | null;
+}) {
+  const liveMix = useLiveMix(socket, myFinale);
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        minHeight: '100vh',
+        overflowY: 'auto',
+        padding: '24px 16px 48px',
+        boxSizing: 'border-box',
+      }}
+    >
+      {myFinale.myGranularType && (
+        <LiveMixController
+          fragments={liveMix.myGroupFragments}
+          myVote={liveMix.myVote}
+          activeFragment={liveMix.activeFragment}
+          voteDistribution={liveMix.voteDistribution}
+          totalVotes={liveMix.totalVotes}
+          isLocked={liveMix.isLocked}
+          granularType={myFinale.myGranularType}
+          onSelectFragment={liveMix.setPreference}
+        />
+      )}
+
+      <LiveMixSpectator
+        activeFragments={liveMix.otherTypesActive}
+      />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

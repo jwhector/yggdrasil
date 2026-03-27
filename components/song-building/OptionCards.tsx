@@ -12,19 +12,21 @@
  * - RevealSequence takes over during the revealing phase
  */
 
-import type { LayerConfig } from '@/conductor/types';
-import { getLayerIdentity } from '@/lib/identity';
+import type { V32LayerConfig, LayerGroupConfig, GranularType } from '@/conductor/types';
+import { getLayerGroupIdentity } from '@/lib/identity';
 
 export interface OptionCardsProps {
-  layerConfig: LayerConfig;
+  layerConfig: V32LayerConfig;
   myVote: 'A' | 'B' | null;
   disabled: boolean;
   onVote: (choice: 'A' | 'B') => void;
   currentAuditionOption?: 'A' | 'B' | null;
+  layerGroups?: LayerGroupConfig[];
+  granularTypes?: GranularType[];
 }
 
-export function OptionCards({ layerConfig, myVote, disabled, onVote, currentAuditionOption }: OptionCardsProps) {
-  const identity = getLayerIdentity(layerConfig.type);
+export function OptionCards({ layerConfig, myVote, disabled, onVote, currentAuditionOption, layerGroups = [], granularTypes = [] }: OptionCardsProps) {
+  const identity = getLayerGroupIdentity(layerConfig.group, layerGroups, granularTypes);
 
   return (
     <div

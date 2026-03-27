@@ -22,10 +22,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_build: 'Song Building',
   attempt_resolve: 'Resolve',
   finale_elegy: 'Finale — Elegy',
-  finale_assembly: 'Finale — Assembly',
-  finale_deliberation: 'Finale — Deliberation',
-  finale_ceremony: 'Finale — Ceremony',
-  finale_performer_mix: 'Finale — Mix',
+  finale_assignment: 'Finale — Assignment',
+  finale_live_mix: 'Finale — Live Mix',
   ended: 'Ended',
 };
 
@@ -36,10 +34,8 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   attempt_build: '#d97706',
   attempt_resolve: '#92400e',
   finale_elegy: '#0e7490',
-  finale_assembly: '#0f766e',
-  finale_deliberation: '#0369a1',
-  finale_ceremony: '#7c3aed',
-  finale_performer_mix: '#5b21b6',
+  finale_assignment: '#0f766e',
+  finale_live_mix: '#5b21b6',
   ended: '#374151',
 };
 
@@ -64,7 +60,7 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
     : connectionState === 'connecting' || connectionState === 'reconnecting' ? '#fbbf24'
     : '#f87171';
 
-  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_assembly' || phase === 'finale_deliberation' || phase === 'finale_ceremony' || phase === 'finale_performer_mix';
+  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix';
 
   return (
     <div style={styles.panel}>
@@ -118,32 +114,23 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
       {isFinalePhase && finaleState && (
         <div style={styles.row}>
           <StatCard label="Finale Phase" value={finaleState.phase} />
-          {finaleState.phase === 'assembly' && (
+          {finaleState.phase === 'assignment' && (
             <>
-              <StatCard label="Undecided" value={String(finaleState.assembly.undecidedUsers.length)} />
-              <StatCard label="Timer" value={`${Math.ceil(finaleState.assembly.timerRemaining / 1000)}s`} />
-            </>
-          )}
-          {finaleState.phase === 'deliberation' && (
-            <>
+              <StatCard label="Mode" value={finaleState.assignment.mode} />
               <StatCard
-                label="Ambassadors"
-                value={`${Array.from(finaleState.deliberation.ambassadors.values()).filter(v => v !== null).length} / 7`}
+                label="Groups"
+                value={String(finaleState.assignment.groups.size)}
               />
-              <StatCard label="Timer" value={`${Math.ceil(finaleState.deliberation.timerRemaining / 1000)}s`} />
+              {finaleState.assignment.timerRemaining !== null && (
+                <StatCard label="Timer" value={`${Math.ceil(finaleState.assignment.timerRemaining / 1000)}s`} />
+              )}
             </>
           )}
-          {finaleState.phase === 'ceremony' && (
+          {finaleState.phase === 'live_mix' && (
             <>
-              <StatCard
-                label="Locked"
-                value={`${finaleState.ceremony.lockedLayers.size} / ${7 - finaleState.ceremony.forfeitedLayers.length}`}
-                color={finaleState.ceremony.ceremonyComplete ? '#4ade80' : '#888'}
-              />
+              <StatCard label="Locked Types" value={String(finaleState.liveMix.lockedTypes.length)} />
+              <StatCard label="Loop" value={String(finaleState.liveMix.loopCount)} />
             </>
-          )}
-          {finaleState.phase === 'performer_mix' && (
-            <StatCard label="Loop" value={String(finaleState.performerMix.loopCount)} />
           )}
         </div>
       )}

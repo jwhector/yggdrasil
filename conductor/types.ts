@@ -1,5 +1,5 @@
 /**
- * Solo Show — Core Type Definitions (V3.1)
+ * Solo Show — Core Type Definitions (V3.2)
  *
  * This file defines the shared language for the entire system.
  * Changes here affect conductor, server, and client packages.
@@ -9,8 +9,8 @@
  * Self-contained: no imports from other project files.
  */
 
-/** Number of layers per song attempt. */
-export const LAYERS_PER_ATTEMPT = 6;
+/** Number of audience-facing layer groups per song attempt (V3.2). */
+export const LAYERS_PER_ATTEMPT = 3;
 
 // ============================================================================
 // Primitive Types
@@ -74,7 +74,10 @@ export interface LayerConfig {
 /** Result of a resolved layer. */
 export interface LayerResult {
   layerIndex: number;
-  type: LayerType;
+  /** V3.2: layer group id (e.g. 'bones', 'flesh', 'spark'). */
+  group?: string | null;
+  /** V3.1 compat: granular layer type. Null in V3.2 conductor. */
+  type?: LayerType;
   status: 'locked_in' | 'collapsed' | 'unreached';  // collapsed = threshold failed here
   chosenOption: 'A' | 'B' | null;      // null if unreached
   winningProportion: number | null;    // max(votesA, votesB) / total; null if unreached
@@ -111,7 +114,7 @@ export interface VoteResult {
 export interface AttemptState {
   index: number;                        // 0, 1, 2
   chapter: Chapter;
-  layerPlan: LayerConfig[];
+  layerPlan: V32LayerConfig[];
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerResults: LayerResult[];          // Populated as layers resolve
@@ -166,17 +169,6 @@ export interface Fragment {
 }
 
 // ============================================================================
-// Pending Change (Performer Mix)
-// ============================================================================
-
-/** A queued fragment activation or mute for the performer mixing surface. */
-export interface PendingChange {
-  layerType: LayerType;
-  fragmentId: string | null;           // null = mute this layer
-  queuedAt: number;
-}
-
-// ============================================================================
 // NPC
 // ============================================================================
 
@@ -207,60 +199,10 @@ export interface AbletonParamRef {
 }
 
 // ============================================================================
-// Finale State
+// Finale State (V3.2)
 // ============================================================================
 
-export interface FinaleState {
-  phase: 'elegy' | 'assembly' | 'deliberation' | 'ceremony' | 'performer_mix';
-
-  // Fragment availability (computed from song-building results)
-  availableFragments: Fragment[];       // Winners only (for group deliberation)
-  allFragments: Fragment[];             // All 36 (for performer mixing surface)
-  lockedFragments: Fragment[];          // Losers + unreached (for elegy display)
-
-  // Group assembly state
-  assembly: {
-    groups: Map<LayerType, UserId[]>;       // layerType → array of user IDs
-    undecidedUsers: UserId[];               // Users who haven't chosen yet
-    timerRemaining: number;                 // ms
-    timerDuration: number;                  // ms (total)
-  };
-
-  // Deliberation state
-  deliberation: {
-    groupVotes: Map<LayerType, Map<UserId, string>>;  // layerType → (userId → fragmentId)
-    chosenFragments: Map<LayerType, string | null>;    // layerType → fragmentId or null (after timer)
-    ambassadorVolunteers: Map<LayerType, UserId[]>;    // layerType → volunteer user IDs
-    ambassadors: Map<LayerType, UserId | null>;        // layerType → chosen ambassador or null
-    timerRemaining: number;                            // ms (deliberation timer)
-    volunteerTimerRemaining: number | null;            // ms (ambassador volunteering timer, null if not active)
-  };
-
-  // Ceremony state
-  ceremony: {
-    layerOrder: LayerType[];                    // Fixed configurable order
-    currentIndex: number;                       // Index into layerOrder
-    currentAmbassador: UserId | null;           // Ambassador currently called
-    altarReady: boolean;                        // Whether current ambassador's phone is in altar-ready mode
-    lockedLayers: Map<LayerType, string>;       // layerType → fragmentId (locked in at altar)
-    forfeitedLayers: LayerType[];               // Layers with no ambassador
-    ceremonyComplete: boolean;
-  };
-
-  // NPC state
-  npc: {
-    currentMessage: string | null;
-  };
-
-  // Performer mix state
-  performerMix: {
-    activeLayers: Map<LayerType, string | null>;  // layerType → fragmentId or null (muted)
-    pendingChanges: PendingChange[];
-    loopPosition: number;               // 0.0 to 1.0 within current loop (length from config.timing.loopBoundaryBeats)
-    loopCount: number;                  // Total loops since finale started
-    liveTracksActive: string[];         // IDs of active live performance tracks
-  };
-}
+// Old FinaleState removed in V3.2. See V32FinaleState below.
 
 // ============================================================================
 // User
@@ -280,7 +222,7 @@ export interface User {
 /**
  * Show phase progression:
  * lobby → opener → attempt_story → attempt_build → attempt_resolve → ... (×3) →
- * finale_elegy → finale_assembly → finale_deliberation → finale_ceremony → finale_performer_mix → ended
+ * finale_elegy → finale_assignment → finale_live_mix → ended
  */
 export type ShowPhase =
   | 'lobby'                   // Audience joining, waiting
@@ -289,10 +231,8 @@ export type ShowPhase =
   | 'attempt_build'           // Active song-building with audience voting
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
   | 'finale_elegy'            // Elegy display of all fragments (available and locked)
-  | 'finale_assembly'         // Audience self-selects into 6 layer-type groups
-  | 'finale_deliberation'     // Groups preview audio, vote on fragments, select ambassadors
-  | 'finale_ceremony'         // Ambassadors lock fragments at the altar via accelerometer
-  | 'finale_performer_mix'    // Performer live-mixes the activated fragments
+  | 'finale_assignment'       // Auto or self-select assignment to granular type groups
+  | 'finale_live_mix'         // Incredibox-style live collaborative mixing
   | 'ended';                  // Show complete
 
 // ============================================================================
@@ -305,7 +245,7 @@ export interface ShowState {
   currentAttemptIndex: number;          // 0, 1, 2
   attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: FinaleState | null;      // Populated at finale_elegy
+  finaleState: V32FinaleState | null;    // Populated at finale_elegy
   config: ShowConfig;
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
@@ -317,9 +257,11 @@ export interface ShowState {
 // ============================================================================
 
 export interface ShowConfig {
-  layersPerAttempt: number;             // Always 6; used for track index calculation
-  attempts: AttemptConfig[];            // Length 3
-  finale: FinaleConfig;
+  layersPerAttempt: number;             // 3 in V3.2 (was 6)
+  granularTypes?: GranularType[];       // V3.2: master registry of granular types
+  layerGroups?: LayerGroupConfig[];     // V3.2: layer group definitions (bones/flesh/spark)
+  attempts: V32AttemptConfig[];         // Length 3; V3.2 structure with TrackBundles + liveSeed
+  finale: V32FinaleConfig;
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;             // Text displayed while waiting
@@ -327,17 +269,7 @@ export interface ShowConfig {
   seatIds: SeatId[];                    // Known seats for QR code generation
 }
 
-export interface FinaleConfig {
-  bothOptionsSurvive: boolean;          // When true, both winner and loser are available in deliberation
-  assemblyTimerMs: number;
-  assemblyGracePeriodMs: number;
-  deliberationTimerMs: number;
-  ambassadorVolunteerTimerMs: number;
-  ceremonyLayerOrder: LayerType[];      // Length 6
-  audioPreviewPath: string;
-  layerLabels: Map<LayerType, string>;
-  npcMessages: NpcMessageConfig[];
-}
+// Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.
 
 /**
  * Configuration for Utility device gain transitions.
@@ -370,14 +302,21 @@ export interface TimingConfig {
 // ============================================================================
 
 export type AudioCue =
-  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; audioRef: AudioReference; otherAudioRef: AudioReference }
-  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
-  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
+  /** V3.2: trackBundle = option being brought in; otherTrackBundle = option being faded out */
+  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; trackBundle: TrackBundle; otherTrackBundle: TrackBundle }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; trackBundle?: TrackBundle }
+  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerTrackBundle: TrackBundle; loserTrackBundle: TrackBundle }
   | { type: 'set_tempo'; bpm: number; attemptIndex: number; layerIndex: number }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'rejection_gesture'; attemptIndex: number }
-  | { type: 'ceremony_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
-  | { type: 'mix_update'; changes: PendingChange[] }
+  /** V3.2: unmute live seed tracks at attempt_build start */
+  | { type: 'live_seed_start'; attemptIndex: number; trackIndices: number[] }
+  /** V3.2: mute live seed tracks on collapse or rejection */
+  | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
+  /** V3.2: crossfade a granular track during live mix */
+  | { type: 'live_mix_crossfade'; granularType: string; incomingTrackIndex: number; outgoingTrackIndex: number }
+  /** V3.2: initial unmute of active fragments when live mix starts */
+  | { type: 'live_mix_start'; activeTrackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
   | { type: 'reset_utilities' };        // Emergency: set all Utility gains to 0 dB, unmute all tracks
@@ -411,39 +350,18 @@ export type ConductorCommand =
   | { type: 'SETUP_FINALE' }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
 
-  // Finale — Assembly
-  | { type: 'START_ASSEMBLY' }
-  | { type: 'JOIN_GROUP'; userId: UserId; layerType: LayerType }
-  | { type: 'ASSEMBLY_TIMER_EXPIRED' }
-  | { type: 'FORCE_ASSIGN_USER'; userId: UserId; layerType: LayerType }
-  | { type: 'EXTEND_ASSEMBLY_TIMER'; additionalMs: number }
-  | { type: 'FORCE_END_ASSEMBLY' }
+  // Finale — Assignment
+  | { type: 'START_ASSIGNMENT' }
+  | { type: 'SELECT_GRANULAR_TYPE'; userId: UserId; granularType: string }
+  | { type: 'ASSIGNMENT_COMPLETE' }
 
-  // Finale — Deliberation
-  | { type: 'START_DELIBERATION' }
-  | { type: 'SUBMIT_GROUP_VOTE'; userId: UserId; layerType: LayerType; fragmentId: string }
-  | { type: 'DELIBERATION_TIMER_EXPIRED' }
-  | { type: 'VOLUNTEER_AS_AMBASSADOR'; userId: UserId; layerType: LayerType }
-  | { type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED'; layerType: LayerType }
-  | { type: 'FORCE_FRAGMENT_SELECTION'; layerType: LayerType; fragmentId: string }
-  | { type: 'EXTEND_DELIBERATION_TIMER'; additionalMs: number }
-  | { type: 'FORCE_END_DELIBERATION' }
-
-  // Finale — Ceremony
-  | { type: 'START_CEREMONY' }
-  | { type: 'CALL_NEXT_AMBASSADOR' }
-  | { type: 'ALTAR_LOCK_IN'; userId: UserId; layerType: LayerType }
-  | { type: 'FORCE_LOCK_IN'; layerType: LayerType }
-  | { type: 'FORFEIT_LAYER'; layerType: LayerType }
-  | { type: 'SKIP_TO_LAYER'; layerType: LayerType }
-
-  // Finale — Performer Mix
-  | { type: 'START_PERFORMER_MIX' }
-  | { type: 'QUEUE_FRAGMENT'; layerType: LayerType; fragmentId: string | null }
-  | { type: 'CANCEL_PENDING'; layerType: LayerType }
-  | { type: 'FIRE_PENDING_CHANGES' }
-  | { type: 'LOAD_SNAPSHOT'; snapshot: Map<LayerType, string | null> }
-  | { type: 'TOGGLE_LIVE_TRACK'; trackId: string }
+  // Finale — Live Mix
+  | { type: 'START_LIVE_MIX' }
+  | { type: 'SET_LIVE_MIX_PREFERENCE'; userId: UserId; granularType: string; fragmentId: string }
+  | { type: 'LOCK_GRANULAR_TYPE'; granularType: string }
+  | { type: 'UNLOCK_GRANULAR_TYPE'; granularType: string }
+  | { type: 'OVERRIDE_FRAGMENT'; granularType: string; fragmentId: string }
+  | { type: 'CLEAR_OVERRIDE'; granularType: string }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
@@ -483,34 +401,18 @@ export type ConductorEvent =
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
   // Finale — Setup
-  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: Fragment[]; lockedFragments: Fragment[] }
+  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: GranularFragment[]; allFragments: GranularFragment[] }
   | { type: 'NPC_MESSAGE'; message: string }
 
-  // Finale — Assembly
-  | { type: 'ASSEMBLY_STARTED'; timerDuration: number }
-  | { type: 'GROUP_MEMBERSHIP_CHANGED'; groups: Map<LayerType, UserId[]>; undecidedCount: number }
-  | { type: 'ASSEMBLY_COMPLETE'; groups: Map<LayerType, UserId[]>; emptyGroups: LayerType[] }
+  // Finale — Assignment
+  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
+  | { type: 'GROUPS_ASSIGNED'; groups: Map<string, UserId[]> }
 
-  // Finale — Deliberation
-  | { type: 'DELIBERATION_STARTED'; timerDuration: number }
-  | { type: 'GROUP_VOTE_UPDATED'; layerType: LayerType; votes: Map<string, number> }
-  | { type: 'FRAGMENT_CHOSEN'; layerType: LayerType; fragmentId: string }
-  | { type: 'AMBASSADOR_VOLUNTEERED'; layerType: LayerType; userId: UserId }
-  | { type: 'AMBASSADOR_SELECTED'; layerType: LayerType; userId: UserId }
-  | { type: 'LAYER_FORFEITED'; layerType: LayerType }
-  | { type: 'DELIBERATION_COMPLETE' }
-
-  // Finale — Ceremony
-  | { type: 'CEREMONY_STARTED'; layerOrder: LayerType[] }
-  | { type: 'AMBASSADOR_CALLED'; layerType: LayerType; userId: UserId }
-  | { type: 'ALTAR_LOCK_IN_DETECTED'; layerType: LayerType; fragmentId: string }
-  | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
-  | { type: 'CEREMONY_LAYER_SKIPPED'; layerType: LayerType }
-  | { type: 'CEREMONY_COMPLETE'; lockedLayers: Map<LayerType, string> }
-
-  | { type: 'PERFORMER_MIX_STARTED' }
-  | { type: 'PENDING_CHANGES_FIRED'; changes: PendingChange[] }
-  | { type: 'MIX_STATE_UPDATED'; activeLayers: Map<LayerType, string | null> }
+  // Finale — Live Mix
+  | { type: 'LIVE_MIX_STARTED'; initialFragments: Map<string, string> }
+  | { type: 'ACTIVE_FRAGMENT_CHANGED'; granularType: string; fragmentId: string; previousFragmentId: string }
+  | { type: 'GRANULAR_TYPE_LOCKED'; granularType: string }
+  | { type: 'GRANULAR_TYPE_UNLOCKED'; granularType: string }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
@@ -547,6 +449,7 @@ export interface GranularType {
 export interface GranularTrackRef {
   granularType: string;   // e.g., 'bass'
   trackIndex: number;     // Ableton track index
+  alwaysAvailable?: boolean;  // When true, generates a fragment regardless of vote outcome or layer reach
 }
 
 /** A collection of granular tracks for one option (A or B) of a layer group. */
@@ -644,7 +547,7 @@ export interface AuditionProgress {
   elapsedMs: number;            // Time since audition started
 }
 
-/** V3.2 finale config — replaces FinaleConfig when conductor is updated. */
+/** Finale config (V3.2). */
 export interface V32FinaleConfig {
   assignmentMode: 'auto' | 'self_select';
   assignmentTimerMs: number;    // Only used when assignmentMode === 'self_select'
@@ -654,7 +557,7 @@ export interface V32FinaleConfig {
   npcMessages: NpcMessageConfig[];
 }
 
-/** V3.2 show config — parallel to ShowConfig, used after conductor is updated. */
+/** V3.2 show config — full V3.2 shape (for reference; ShowConfig is the active type). */
 export interface V32ShowConfig {
   granularTypes: GranularType[];          // Master registry of granular types
   layerGroups: LayerGroupConfig[];        // Layer group definitions (bones, flesh, spark)
@@ -667,8 +570,8 @@ export interface V32ShowConfig {
 }
 
 /**
- * V3.2 finale state — replaces FinaleState when conductor is updated.
- * Phases: elegy → assignment → live_mix (no deliberation/ceremony/performer_mix).
+ * Finale state (V3.2).
+ * Phases: elegy → assignment → live_mix.
  */
 export interface V32FinaleState {
   phase: 'elegy' | 'assignment' | 'live_mix';
@@ -724,7 +627,7 @@ export interface AudienceAttemptView {
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerCount: number;
-  currentLayerConfig: LayerConfig | null;
+  currentLayerConfig: V32LayerConfig | null;
   layerResults: LayerResult[];
   myVote: 'A' | 'B' | null;
   currentAuditionOption: 'A' | 'B' | null;
@@ -735,32 +638,26 @@ export interface AudienceAttemptView {
 }
 
 /**
- * Finale view sent to audience clients during assembly/deliberation/ceremony/mix phases.
- * Personalized: includes group assignment, votes, ambassador status.
+ * Finale view sent to audience clients during assignment/live_mix phases.
+ * Personalized: includes granular type assignment, own group's vote state.
  */
 export interface AudienceFinaleView {
-  finalePhase: FinaleState['phase'];
-  // Assembly
-  myGroup: LayerType | null;                          // which group the user has joined
-  groupSizes: Array<{ layerType: LayerType; count: number }>;  // all group sizes
-  assemblyTimerRemaining: number;
-  // Deliberation
-  myGroupFragments: Fragment[];                       // fragments available for user's group
-  groupVoteCounts: Array<{ fragmentId: string; count: number }>;  // vote distribution for user's group
-  myGroupVote: string | null;                         // fragmentId user voted for
-  chosenFragment: string | null;                      // after timer: winning fragmentId for user's group
-  isAmbassadorVolunteer: boolean;                     // whether user has volunteered
-  myAmbassadorStatus: UserId | null;                  // selected ambassador for user's group
-  deliberationTimerRemaining: number;
-  volunteerTimerRemaining: number | null;
-  // Ceremony
-  ceremonyProgress: Array<{ layerType: LayerType; status: 'locked' | 'forfeited' | 'current' | 'upcoming' }>;
-  isCurrentAmbassador: boolean;                       // whether user is the currently called ambassador
-  altarReady: boolean;                                // whether altar lock-in is active for this user
+  finalePhase: V32FinaleState['phase'];
+  // Assignment
+  myGranularType: string | null;                      // which granular type the user is assigned to
+  groupSizes: Array<{ granularType: string; count: number }>;
+  assignmentMode: 'auto' | 'self_select';
+  assignmentTimerRemaining: number | null;
+  // Live mix (own group)
+  myGroupFragments: GranularFragment[];               // available fragments for user's granular type
+  myGroupActiveFragment: string | null;               // current majority fragment for user's type
+  myGroupVoteDistribution: Array<{ fragmentId: string; count: number }>;
+  myVote: string | null;                              // fragmentId user is voting for
+  // Live mix (all types — just active fragments)
+  activeFragments: Array<{ granularType: string; fragmentId: string }>;
+  lockedTypes: string[];
   // NPC
   npcMessage: string | null;
-  // Performer mix (audience observation only)
-  mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
 }
 
 /**
@@ -778,6 +675,7 @@ export interface AudienceClientState {
   myFinale: AudienceFinaleView | null;
   config: {
     lobby: { waitingMessage: string };
+    granularTypes: GranularType[];
   };
 }
 
@@ -785,31 +683,20 @@ export interface AudienceClientState {
  * Finale state sent to projector (public — no per-user data).
  */
 export interface ProjectorFinaleView {
-  finalePhase: FinaleState['phase'];
-  availableFragments: Fragment[];
-  lockedFragments: Fragment[];
-  // Assembly
-  groupSizes: Array<{ layerType: LayerType; count: number }>;
-  undecidedCount: number;
-  assemblyTimerRemaining: number;
-  // Deliberation
-  groupVoteDistributions: Array<{ layerType: LayerType; votes: Array<{ fragmentId: string; count: number }> }>;
-  chosenFragments: Array<{ layerType: LayerType; fragmentId: string | null }>;
-  ambassadors: Array<{ layerType: LayerType; userId: UserId | null }>;
-  deliberationTimerRemaining: number;
-  // Ceremony
-  ceremonyLayerOrder: LayerType[];
-  ceremonyLockedLayers: Array<{ layerType: LayerType; fragmentId: string }>;
-  ceremonyForfeitedLayers: LayerType[];
-  currentCeremonyLayer: LayerType | null;
-  currentAmbassador: UserId | null;
-  ceremonyComplete: boolean;
+  finalePhase: V32FinaleState['phase'];
+  availableFragments: GranularFragment[];
+  allFragments: GranularFragment[];
+  // Assignment
+  groupSizes: Array<{ granularType: string; count: number }>;
+  assignmentMode: 'auto' | 'self_select';
+  assignmentTimerRemaining: number | null;
+  // Live mix
+  activeFragments: Array<{ granularType: string; fragmentId: string }>;
+  voteDistributions: Array<{ granularType: string; votes: Array<{ fragmentId: string; count: number }> }>;
+  lockedTypes: string[];
+  loopPosition: number;
   // NPC
   npcMessage: string | null;
-  // Performer mix
-  mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
-  mixPendingChanges: PendingChange[];
-  loopPosition: number;
 }
 
 /**

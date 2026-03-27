@@ -3,19 +3,22 @@
 import { useMemo, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
+import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { MixingMirror } from '@/components/finale/MixingMirror';
-import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
+import { LiveMixProjector } from '@/components/finale/LiveMixProjector';
+import { AuditionProgress } from '@/components/song-building/AuditionProgress';
+import { getChapterIdentity } from '@/lib/identity';
 import { ThresholdDisplay } from '@/components/song-building/ThresholdDisplay';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
-import type { LayerResult, LayerType } from '@/conductor/types';
+import type { LayerResult } from '@/conductor/types';
 
 const SHOW_ID = 'default-show';
 
 export default function ProjectorPage() {
   const { socket, userId } = useSocket({ showId: SHOW_ID, mode: 'projector' });
   const { state, isLoading, currentAttempt } = useShowState(socket, 'projector', userId);
+  const auditionProgress = useAuditionProgress(socket, state?.phase, currentAttempt?.currentLayerPhase);
 
   // Current layer config
   const currentLayerConfig = useMemo(() => {
@@ -46,7 +49,7 @@ export default function ProjectorPage() {
       if (!currentAttempt || !currentLayerConfig) return <ProjectorDark />;
 
       const chapter = getChapterIdentity(currentAttempt.chapter);
-      const layer = getLayerIdentity(currentLayerConfig.type);
+      const layer = { symbol: currentLayerConfig.group?.[0]?.toUpperCase() ?? '?', color: '#6b7280', label: currentLayerConfig.group ?? '' };
       const attemptConfig = state.config.attempts[state.currentAttemptIndex];
       const allThresholds: number[] = attemptConfig?.thresholds ?? [];
       const threshold = allThresholds[currentAttempt.currentLayerIndex] ?? 0.5;
@@ -94,6 +97,11 @@ export default function ProjectorPage() {
             />
           )}
 
+          {/* Audition progress (during auditioning phase) */}
+          {currentAttempt.currentLayerPhase === 'auditioning' && auditionProgress && (
+            <AuditionProgress progress={auditionProgress} />
+          )}
+
           {/* Reveal sequence (during revealing phase) */}
           {currentAttempt.currentLayerPhase === 'revealing'
             && currentAttempt.currentVoteResult
@@ -137,6 +145,8 @@ export default function ProjectorPage() {
     case 'finale_elegy': {
       const fs = state.finaleState;
       if (!fs) return <ProjectorDark />;
+      const availableIds = new Set(fs.availableFragments.map(f => f.id));
+      const losers = fs.allFragments.filter(f => !availableIds.has(f.id));
       return (
         <main style={projectorMainStyle}>
           <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
@@ -144,148 +154,37 @@ export default function ProjectorPage() {
           </div>
           <ElegyGrid
             availableFragments={fs.availableFragments}
-            lockedFragments={fs.lockedFragments}
+            lockedFragments={losers}
             variant="projector"
           />
         </main>
       );
     }
 
-    case 'finale_assembly':
-    case 'finale_deliberation':
-      // TODO: V3 migration — implement projector views for assembly, deliberation
-      return <ProjectorDark />;
-
-    case 'finale_ceremony': {
-      const cfs = state.finaleState;
-      if (!cfs) return <ProjectorDark />;
-
-      const currentCeremonyLayerType = cfs.currentCeremonyLayer as LayerType | null;
-      const currentLayerIdentity = currentCeremonyLayerType
-        ? getLayerIdentity(currentCeremonyLayerType)
-        : null;
-
+    case 'finale_assignment': {
+      const fas = state.finaleState;
+      if (!fas) return <ProjectorDark />;
+      const assignmentTypes = state.config.granularTypes ?? [];
       return (
         <main style={projectorMainStyle}>
-          {/* NPC message */}
-          {cfs.npcMessage && (
-            <div style={{
-              textAlign: 'center',
-              fontSize: '1.1rem',
-              color: 'rgba(255,255,255,0.6)',
-              fontStyle: 'italic',
-              padding: '24px 40px 0',
-              maxWidth: '600px',
-              margin: '0 auto',
-            }}>
-              {cfs.npcMessage}
-            </div>
-          )}
-
-          {/* Current layer identity — large central display */}
-          {currentLayerIdentity && currentCeremonyLayerType && (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1,
-              gap: '16px',
-              padding: '40px',
-            }}>
-              <div style={{ fontSize: '6rem', color: currentLayerIdentity.color }}>
-                {currentLayerIdentity.symbol}
-              </div>
-              <div style={{
-                fontSize: '1.2rem',
-                color: currentLayerIdentity.color,
-                letterSpacing: '0.15em',
-                fontWeight: 600,
-              }}>
-                {currentLayerIdentity.label.toUpperCase()}
-              </div>
-              {cfs.currentAmbassador && (
-                <div style={{
-                  fontSize: '0.7rem',
-                  color: 'rgba(255,255,255,0.3)',
-                  letterSpacing: '0.12em',
-                  marginTop: '8px',
-                }}>
-                  AMBASSADOR CALLED
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* No current layer — ceremony complete or between layers */}
-          {!currentLayerIdentity && cfs.ceremonyComplete && (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1,
-              gap: '24px',
-              padding: '40px',
-            }}>
-              <div style={{
-                fontSize: '1rem',
-                color: 'rgba(255,255,255,0.5)',
-                letterSpacing: '0.2em',
-              }}>
-                THE SONG IS WHOLE
-              </div>
-            </div>
-          )}
-
-          {/* Layer stack — building from bottom */}
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            padding: '0 40px 40px',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexWrap: 'wrap',
-          }}>
-            {cfs.ceremonyLayerOrder.map((lt: LayerType) => {
-              const identity = getLayerIdentity(lt);
-              const isLocked = cfs.ceremonyLockedLayers.some(
-                (l: { layerType: LayerType; fragmentId: string }) => l.layerType === lt
-              );
-              const isForfeited = cfs.ceremonyForfeitedLayers.includes(lt);
-              const isCurrent = lt === currentCeremonyLayerType;
-
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const, padding: '40px 40px 0' }}>
+            Assignment
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', padding: '20px 40px' }}>
+            {assignmentTypes.map(gt => {
+              const size = fas.groupSizes.find(g => g.granularType === gt.id)?.count ?? 0;
               return (
-                <div
-                  key={lt}
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1.1rem',
-                    backgroundColor: isLocked
-                      ? `${identity.color}30`
-                      : isForfeited
-                      ? 'rgba(255,255,255,0.02)'
-                      : isCurrent
-                      ? `${identity.color}15`
-                      : 'rgba(255,255,255,0.03)',
-                    border: isLocked
-                      ? `2px solid ${identity.color}`
-                      : isCurrent
-                      ? `2px solid ${identity.color}80`
-                      : isForfeited
-                      ? '1px solid rgba(255,255,255,0.05)'
-                      : '1px solid rgba(255,255,255,0.06)',
-                    color: isForfeited ? 'rgba(255,255,255,0.1)' : identity.color,
-                    opacity: isForfeited ? 0.3 : isLocked || isCurrent ? 1 : 0.35,
-                    transition: 'all 0.5s ease',
-                  }}
-                >
-                  {identity.symbol}
+                <div key={gt.id} style={{
+                  padding: '16px 24px',
+                  borderRadius: '10px',
+                  backgroundColor: `${gt.color}10`,
+                  border: `1px solid ${gt.color}30`,
+                  textAlign: 'center',
+                  minWidth: '120px',
+                }}>
+                  <div style={{ fontSize: '1.5rem', color: gt.color }}>{gt.symbol}</div>
+                  <div style={{ fontSize: '0.7rem', color: gt.color, marginTop: '4px' }}>{gt.label}</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginTop: '8px' }}>{size}</div>
                 </div>
               );
             })}
@@ -294,19 +193,15 @@ export default function ProjectorPage() {
       );
     }
 
-    case 'finale_performer_mix': {
-      const fs = state.finaleState;
-      if (!fs) return <ProjectorDark />;
+    case 'finale_live_mix': {
+      const fls = state.finaleState;
+      if (!fls) return <ProjectorDark />;
       return (
-        <main style={projectorMainStyle}>
-          <MixingMirror
-            activeLayers={fs.mixActiveLayers as Array<{ layerType: LayerType; fragmentId: string | null }>}
-            pendingChanges={fs.mixPendingChanges}
-            loopPosition={fs.loopPosition}
-            loopCount={0}
-            allFragments={fs.availableFragments}
-          />
-        </main>
+        <LiveMixProjector
+          finaleState={fls}
+          granularTypes={state.config.granularTypes ?? []}
+          socket={socket}
+        />
       );
     }
 
@@ -496,12 +391,13 @@ function ProjectorStackHistory({ results }: { results: LayerResult[] }) {
         BUILT
       </span>
       {resolved.map((result) => {
-        const identity = getLayerIdentity(result.type);
+        const groupLabel = result.group ?? result.type ?? '?';
+        const symbol = groupLabel[0]?.toUpperCase() ?? '?';
         const isA = result.chosenOption === 'A';
         return (
           <div
             key={result.layerIndex}
-            title={`Layer ${result.layerIndex + 1}: ${result.type} (${result.chosenOption})`}
+            title={`Layer ${result.layerIndex + 1}: ${groupLabel} (${result.chosenOption})`}
             style={{
               width: '28px',
               height: '28px',
@@ -510,12 +406,12 @@ function ProjectorStackHistory({ results }: { results: LayerResult[] }) {
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '0.85rem',
-              backgroundColor: isA ? identity.color : 'transparent',
-              border: isA ? 'none' : `2px solid ${identity.color}`,
-              color: isA ? '#000' : identity.color,
+              backgroundColor: isA ? '#6b7280' : 'transparent',
+              border: isA ? 'none' : '2px solid #6b7280',
+              color: isA ? '#000' : '#6b7280',
             }}
           >
-            {identity.symbol}
+            {symbol}
           </div>
         );
       })}

@@ -9,31 +9,25 @@ import { createInitialState, processCommand } from '../conductor';
 import type {
   ShowState,
   ShowConfig,
-  AttemptConfig,
-  LayerConfig,
+  V32AttemptConfig,
+  V32LayerConfig,
   ConductorEvent,
-  AudioReference,
-  LayerType,
 } from '../types';
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
 
-function makeAudioRef(index: number): AudioReference {
-  return { trackIndex: index };
-}
+const LAYER_GROUPS = ['bones', 'flesh', 'spark'] as const;
 
-const LAYER_TYPES: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
-
-function makeLayerConfig(index: number): LayerConfig {
+function makeV32LayerConfig(index: number): V32LayerConfig {
   return {
     index,
-    type: LAYER_TYPES[index % LAYER_TYPES.length],
-    optionA: makeAudioRef(index * 2),
-    optionB: makeAudioRef(index * 2 + 1),
+    group: LAYER_GROUPS[index % LAYER_GROUPS.length],
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
+    optionA: { tracks: [{ granularType: 'bass', trackIndex: index * 2 }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndex: index * 2 + 1 }] },
   };
 }
 
@@ -41,11 +35,12 @@ function makeAttemptConfig(
   chapter: 'ambition' | 'love' | 'avoidance',
   layerCount = 3,
   thresholds?: number[],
-): AttemptConfig {
+): V32AttemptConfig {
   return {
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
-    layers: Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i)),
+    liveSeed: { trackIndices: [99], label: 'seed' },
+    layers: Array.from({ length: layerCount }, (_, i) => makeV32LayerConfig(i)),
     thresholds: thresholds ?? Array(layerCount).fill(0.5),
     tempos: Array(layerCount).fill(120),
     auditionBars: Array(layerCount).fill(4),
@@ -65,16 +60,21 @@ function createTestConfig(
       makeAttemptConfig('avoidance', layerCount, thresholds),
     ],
     finale: {
-      assemblyTimerMs: 60000,
-      assemblyGracePeriodMs: 15000,
-      deliberationTimerMs: 120000,
-      ambassadorVolunteerTimerMs: 15000,
-      ceremonyLayerOrder: ['bass', 'drums', 'pad', 'melody', 'harmony', 'fx'],
-      audioPreviewPath: '/audio/previews',
-      layerLabels: new Map(),
-      npcMessages: [],
+      assignmentMode: 'auto',
+      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
+      crossSongConstraint: false,
+      audioPreviewPath: '/audio/previews',
+      npcMessages: [],
     },
+    granularTypes: [
+      { id: 'bass', label: 'Bass', color: '#000', symbol: '■' },
+      { id: 'drums', label: 'Drums', color: '#000', symbol: '▲' },
+      { id: 'pad', label: 'Pad', color: '#000', symbol: '◆' },
+      { id: 'melody', label: 'Melody', color: '#000', symbol: '✦' },
+      { id: 'harmony', label: 'Harmony', color: '#000', symbol: '●' },
+      { id: 'fx', label: 'FX', color: '#000', symbol: '~' },
+    ],
     timing: {
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 3000,
@@ -158,7 +158,7 @@ describe('Show Phase Transitions', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 14; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -176,10 +176,8 @@ describe('Show Phase Transitions', () => {
       'attempt_build',       // attempt 2
       'attempt_resolve',     // attempt 2
       'finale_elegy',
-      'finale_assembly',
-      'finale_deliberation',
-      'finale_ceremony',
-      'finale_performer_mix',
+      'finale_assignment',
+      'finale_live_mix',
       'ended',
     ]);
   });
@@ -950,6 +948,170 @@ describe('Audio Commands', () => {
     const cue = events.find(e => e.type === 'AUDIO_CUE');
     expect(cue).toBeDefined();
     expect((cue as any).cue.type).toBe('panic');
+  });
+});
+
+// ============================================================================
+// V3.2: 3 Bundled Layer Groups + Live Seed
+// ============================================================================
+
+describe('V3.2: 3 Bundled Layer Groups', () => {
+  test('3 layers per attempt with thresholds [0.50, 0.66, 0.99]', () => {
+    const config = createTestConfig(3, [0.50, 0.66, 0.99]);
+    const state = createTestState(config);
+    advanceToBuild(state);
+
+    expect(state.attempts[0].layerPlan).toHaveLength(3);
+    expect(state.config.attempts[0].thresholds).toEqual([0.50, 0.66, 0.99]);
+  });
+
+  test('layer 0 passes with exactly 50/50 split at threshold 0.50', () => {
+    // threshold=0.50: winningProportion=0.5 >= 0.50 → passes
+    const config = createTestConfig(1, [0.50]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+
+    expect(state.attempts[0].layerResults[0].status).toBe('locked_in');
+    expect(state.attempts[0].layerResults[0].passed).toBe(true);
+  });
+
+  test('layer 1 passes when winning proportion >= 0.66', () => {
+    // 2 voters vote A, 1 votes B: winningProportion=0.667 >= 0.66 → passes
+    const config = createTestConfig(1, [0.66]);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    connectUser(state, 'u3');
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u3', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+
+    expect(state.attempts[0].layerResults[0].passed).toBe(true);
+  });
+
+  test('layer 2 collapses on any non-unanimous vote at threshold 0.99', () => {
+    // 9/10 for A: winningProportion=0.9 < 0.99 → collapses
+    const config = createTestConfig(1, [0.99]);
+    const state = createTestState(config);
+    for (let i = 0; i < 10; i++) connectUser(state, `u${i}`);
+    advanceToBuild(state);
+
+    processCommand(state, { type: 'START_AUDITION' });
+    for (let i = 0; i < 9; i++) processCommand(state, { type: 'SUBMIT_VOTE', userId: `u${i}`, choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u9', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+
+    expect(state.attempts[0].status).toBe('collapsed');
+  });
+
+  test('ADVANCE_PHASE to attempt_build emits live_seed_start cue', () => {
+    const state = createTestState();
+    // advance to attempt_build (3 ADVANCE_PHASE calls)
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // opener
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story
+    const events = processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_build
+
+    const liveSeedCue = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'live_seed_start'
+    );
+    expect(liveSeedCue).toBeDefined();
+    expect((liveSeedCue as any).cue.attemptIndex).toBe(0);
+    expect((liveSeedCue as any).cue.trackIndices).toEqual([99]);
+  });
+
+  test('collapse emits live_seed_stop cue', () => {
+    const config = createCollapseConfig(1);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    connectUser(state, 'u2');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    const events = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+
+    const liveSeedStop = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'live_seed_stop'
+    );
+    expect(liveSeedStop).toBeDefined();
+    expect((liveSeedStop as any).cue.attemptIndex).toBe(0);
+  });
+
+  test('song rejection emits live_seed_stop cue', () => {
+    const config = createTestConfig(1);
+    const state = createTestState(config);
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+    completeSingleLayer(state, ['u1'], 'A');
+    // now in attempt_resolve
+    const events = processCommand(state, { type: 'TRIGGER_REJECTION' });
+
+    const liveSeedStop = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'live_seed_stop'
+    );
+    expect(liveSeedStop).toBeDefined();
+  });
+
+  test('audition_start cue carries trackBundle with all tracks in layer group', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+
+    const events = processCommand(state, { type: 'START_AUDITION' });
+    const auditionCue = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'audition_start'
+    );
+
+    expect(auditionCue).toBeDefined();
+    const cue = (auditionCue as any).cue;
+    expect(cue.trackBundle).toBeDefined();
+    expect(Array.isArray(cue.trackBundle.tracks)).toBe(true);
+    expect(cue.trackBundle.tracks.length).toBeGreaterThan(0);
+    expect(cue.otherTrackBundle).toBeDefined();
+    expect(Array.isArray(cue.otherTrackBundle.tracks)).toBe(true);
+  });
+
+  test('lock_in cue carries winnerTrackBundle and loserTrackBundle', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+
+    const events = completeSingleLayer(state, ['u1'], 'A');
+    const lockInCue = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'lock_in'
+    );
+
+    expect(lockInCue).toBeDefined();
+    const cue = (lockInCue as any).cue;
+    expect(cue.winnerTrackBundle).toBeDefined();
+    expect(Array.isArray(cue.winnerTrackBundle.tracks)).toBe(true);
+    expect(cue.loserTrackBundle).toBeDefined();
+    expect(Array.isArray(cue.loserTrackBundle.tracks)).toBe(true);
+  });
+
+  test('layer results carry group identity from V32LayerConfig', () => {
+    const state = createTestState();
+    connectUser(state, 'u1');
+    advanceToBuild(state);
+    completeSingleLayer(state, ['u1'], 'A');
+
+    const result = state.attempts[0].layerResults[0];
+    expect(result.group).toBe('bones'); // first layer group in makeV32LayerConfig
   });
 });
 

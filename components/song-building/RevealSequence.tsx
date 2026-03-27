@@ -17,8 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { LayerConfig } from '@/conductor/types';
-import { getLayerIdentity } from '@/lib/identity';
+import type { V32LayerConfig } from '@/conductor/types';
 
 export interface RevealSequenceProps {
   voteResult: {
@@ -32,7 +31,7 @@ export interface RevealSequenceProps {
     threshold: number;
     passed: boolean;
   };
-  layerConfig: LayerConfig;
+  layerConfig: V32LayerConfig;
   variant: 'audience' | 'projector';
 }
 
@@ -79,7 +78,7 @@ export function RevealSequence({
     };
   }, [thresholdCheck.passed, thresholdCheck.winningProportion]);
 
-  const identity = getLayerIdentity(layerConfig.type);
+  const identity = { symbol: layerConfig.group?.[0]?.toUpperCase() ?? '?', color: '#6b7280', label: layerConfig.group ?? '' };
   const winner = voteResult.winner;
   const consensus = voteResult.consensus; // 0.5–1.0
 

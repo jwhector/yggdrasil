@@ -3,28 +3,27 @@
  */
 
 import { describe, test, expect } from '@jest/globals';
-import { generateFragments, extractAttemptResult } from '../fragments';
-import type { AttemptState, AttemptConfig, LayerConfig, AudioReference } from '../types';
+import { generateFragments, generateGranularFragments, extractAttemptResult } from '../fragments';
+import type { AttemptState, V32AttemptConfig, V32LayerConfig } from '../types';
 
-function makeAudioRef(index: number): AudioReference {
-  return { trackIndex: index };
-}
+const LAYER_GROUPS = ['bones', 'flesh', 'spark'] as const;
 
-function makeLayerConfig(index: number, threshold: number | null = null): LayerConfig {
+function makeLayerConfig(index: number): V32LayerConfig {
   return {
     index,
-    type: 'melody',
-    optionA: makeAudioRef(index * 2),
-    optionB: makeAudioRef(index * 2 + 1),
+    group: LAYER_GROUPS[index % LAYER_GROUPS.length],
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
+    optionA: { tracks: [{ granularType: 'melody', trackIndex: index * 2 }] },
+    optionB: { tracks: [{ granularType: 'melody', trackIndex: index * 2 + 1 }] },
   };
 }
 
-function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCount: number): AttemptConfig {
+function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCount: number): V32AttemptConfig {
   return {
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
+    liveSeed: { trackIndices: [99], label: 'seed' },
     layers: Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i)),
     thresholds: Array(layerCount).fill(0.5),
     tempos: Array(layerCount).fill(120),
@@ -43,7 +42,7 @@ function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     currentLayerPhase: 'locked_in',
     layerResults: layers.map((l, i) => ({
       layerIndex: i,
-      type: l.type,
+      group: l.group,
       status: 'locked_in' as const,
       chosenOption: i % 2 === 0 ? 'A' as const : 'B' as const,
       winningProportion: 0.8,
@@ -71,7 +70,7 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
       // Layers before collapse are locked in
       ...Array.from({ length: collapseAt }, (_, i) => ({
         layerIndex: i,
-        type: layers[i].type,
+        group: layers[i].group,
         status: 'locked_in' as const,
         chosenOption: 'A' as const,
         winningProportion: 0.8,
@@ -81,7 +80,7 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
       // Collapsed layer and beyond are unreached
       ...Array.from({ length: layerCount - collapseAt }, (_, i) => ({
         layerIndex: collapseAt + i,
-        type: layers[collapseAt + i].type,
+        group: layers[collapseAt + i].group,
         status: 'unreached' as const,
         chosenOption: null,
         winningProportion: null,
@@ -251,7 +250,7 @@ describe('generateFragments — bothOptionsSurvive', () => {
     // Give the collapsed layer a vote result
     attempt.layerResults[2] = {
       layerIndex: 2,
-      type: 'melody',
+      group: 'spark',
       status: 'collapsed',
       chosenOption: 'A',
       winningProportion: 0.6,
@@ -299,5 +298,345 @@ describe('generateFragments — bothOptionsSurvive', () => {
     const layer1Loser = fragments.find(f => f.fragment.layerIndex === 1 && f.fragment.option === 'A');
     expect(layer1Winner?.fragment.wonVote).toBe(true);
     expect(layer1Loser?.fragment.wonVote).toBe(false);
+  });
+});
+
+// ============================================================================
+// V3.2 Granular Fragment Generation
+// ============================================================================
+
+// Realistic V3.2 layer configs: bones(bass+drums), flesh(melody+pad+harmony), spark(fx)
+function makeV32LayerConfig(index: number, group: string): V32LayerConfig {
+  const trackBundles: Record<string, { a: { granularType: string; trackIndex: number }[]; b: { granularType: string; trackIndex: number }[] }> = {
+    bones: {
+      a: [{ granularType: 'bass', trackIndex: index * 10 + 1 }, { granularType: 'drums', trackIndex: index * 10 + 2 }],
+      b: [{ granularType: 'bass', trackIndex: index * 10 + 3 }, { granularType: 'drums', trackIndex: index * 10 + 4 }],
+    },
+    flesh: {
+      a: [{ granularType: 'melody', trackIndex: index * 10 + 1 }, { granularType: 'pad', trackIndex: index * 10 + 2 }, { granularType: 'harmony', trackIndex: index * 10 + 3 }],
+      b: [{ granularType: 'melody', trackIndex: index * 10 + 4 }, { granularType: 'pad', trackIndex: index * 10 + 5 }, { granularType: 'harmony', trackIndex: index * 10 + 6 }],
+    },
+    spark: {
+      a: [{ granularType: 'fx', trackIndex: index * 10 + 1 }],
+      b: [{ granularType: 'fx', trackIndex: index * 10 + 2 }],
+    },
+  };
+  const bundle = trackBundles[group];
+  return {
+    index,
+    group,
+    labelA: `${group} A`,
+    labelB: `${group} B`,
+    optionA: { tracks: bundle.a },
+    optionB: { tracks: bundle.b },
+  };
+}
+
+function makeV32AttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig {
+  return {
+    chapter,
+    title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
+    liveSeed: { trackIndices: [99], label: 'seed' },
+    layers: [
+      makeV32LayerConfig(0, 'bones'),
+      makeV32LayerConfig(1, 'flesh'),
+      makeV32LayerConfig(2, 'spark'),
+    ],
+    thresholds: [0.50, 0.66, 0.99],
+    tempos: [120, 120, 120],
+    auditionBars: [4, 4, 2],
+    auditionCycles: [2, 2, 2],
+  };
+}
+
+function makeV32CompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avoidance'): AttemptState {
+  const config = makeV32AttemptConfig(chapter);
+  return {
+    index,
+    chapter,
+    layerPlan: config.layers,
+    currentLayerIndex: 2,
+    currentLayerPhase: 'locked_in',
+    layerResults: config.layers.map((l, i) => ({
+      layerIndex: i,
+      group: l.group,
+      status: 'locked_in' as const,
+      chosenOption: i % 2 === 0 ? 'A' as const : 'B' as const,
+      winningProportion: 0.8,
+      thresholdRequired: config.thresholds[i],
+      passed: true,
+    })),
+    votes: [],
+    status: 'completed',
+    collapsedAtLayer: null,
+    currentAuditionOption: null,
+    auditionLoopIndex: 0,
+    currentVoteResult: null,
+  };
+}
+
+function makeV32CollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avoidance', collapseAt: number): AttemptState {
+  const config = makeV32AttemptConfig(chapter);
+  return {
+    index,
+    chapter,
+    layerPlan: config.layers,
+    currentLayerIndex: collapseAt,
+    currentLayerPhase: 'collapsed',
+    layerResults: [
+      ...Array.from({ length: collapseAt }, (_, i) => ({
+        layerIndex: i,
+        group: config.layers[i].group,
+        status: 'locked_in' as const,
+        chosenOption: 'A' as const,
+        winningProportion: 0.8,
+        thresholdRequired: config.thresholds[i],
+        passed: true,
+      })),
+      // Collapsed layer has a vote but failed threshold
+      {
+        layerIndex: collapseAt,
+        group: config.layers[collapseAt].group,
+        status: 'collapsed' as const,
+        chosenOption: 'A' as const,
+        winningProportion: 0.55,
+        thresholdRequired: config.thresholds[collapseAt],
+        passed: false,
+      },
+      ...Array.from({ length: config.layers.length - collapseAt - 1 }, (_, i) => ({
+        layerIndex: collapseAt + 1 + i,
+        group: config.layers[collapseAt + 1 + i].group,
+        status: 'unreached' as const,
+        chosenOption: null,
+        winningProportion: null,
+        thresholdRequired: null,
+        passed: null,
+      })),
+    ],
+    votes: [],
+    status: 'collapsed',
+    collapsedAtLayer: collapseAt,
+    currentAuditionOption: null,
+    auditionLoopIndex: 0,
+    currentVoteResult: null,
+  };
+}
+
+describe('generateGranularFragments', () => {
+  test('voted layer with bothOptionsSurvive=false produces 1 GranularFragment per granular type (winner only)', () => {
+    const attempt = makeV32CompletedAttempt(0, 'ambition');
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio', false);
+
+    // Layer 0 (bones, chose A): 2 tracks (bass, drums) = 2 fragments
+    // Layer 1 (flesh, chose B): 3 tracks (melody, pad, harmony) = 3 fragments
+    // Layer 2 (spark, chose A): 1 track (fx) = 1 fragment
+    // Total: 6 winner-only fragments
+    expect(fragments).toHaveLength(6);
+    expect(fragments.every(f => f.wonVote)).toBe(true);
+  });
+
+  test('voted layer with bothOptionsSurvive=true produces 2 GranularFragments per granular type', () => {
+    const attempt = makeV32CompletedAttempt(0, 'ambition');
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio', true);
+
+    // Each granular type gets winner + loser: 6 types × 2 = 12
+    expect(fragments).toHaveLength(12);
+
+    const winners = fragments.filter(f => f.wonVote);
+    const losers = fragments.filter(f => !f.wonVote);
+    expect(winners).toHaveLength(6);
+    expect(losers).toHaveLength(6);
+  });
+
+  test('collapsed layer still produces winners fragments', () => {
+    // Collapse at layer 1 (flesh): layers 0 locked_in, layer 1 collapsed (voted), layer 2 unreached
+    const attempt = makeV32CollapsedAttempt(0, 'ambition', 1);
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio', false);
+
+    // Layer 0 (bones, locked_in, chose A): 2 winner fragments
+    // Layer 1 (flesh, collapsed, chose A): 3 winner fragments
+    // Layer 2 (spark, unreached): 0 fragments
+    expect(fragments).toHaveLength(5);
+
+    const fleshFragments = fragments.filter(f => f.layerGroupId === 'flesh');
+    expect(fleshFragments).toHaveLength(3);
+    expect(fleshFragments.every(f => f.wonVote)).toBe(true);
+  });
+
+  test('unreached layer produces no fragments', () => {
+    const attempt = makeV32CollapsedAttempt(0, 'ambition', 1);
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio', true);
+
+    // Layer 2 (spark) is unreached — no fragments regardless of bothOptionsSurvive
+    const sparkFragments = fragments.filter(f => f.layerGroupId === 'spark');
+    expect(sparkFragments).toHaveLength(0);
+  });
+
+  test('fragment count across full show with bothOptionsSurvive=true', () => {
+    const attempt0 = makeV32CompletedAttempt(0, 'ambition');
+    const attempt1 = makeV32CompletedAttempt(1, 'love');
+    const attempt2 = makeV32CompletedAttempt(2, 'avoidance');
+    const configs = [
+      makeV32AttemptConfig('ambition'),
+      makeV32AttemptConfig('love'),
+      makeV32AttemptConfig('avoidance'),
+    ];
+    const fragments = generateGranularFragments([attempt0, attempt1, attempt2], configs, '/audio', true);
+
+    // Per song: bones(2) + flesh(3) + spark(1) = 6 types × 2 options = 12
+    // 3 songs × 12 = 36
+    expect(fragments).toHaveLength(36);
+  });
+
+  test('fragment count across full show with bothOptionsSurvive=false', () => {
+    const attempt0 = makeV32CompletedAttempt(0, 'ambition');
+    const attempt1 = makeV32CompletedAttempt(1, 'love');
+    const attempt2 = makeV32CompletedAttempt(2, 'avoidance');
+    const configs = [
+      makeV32AttemptConfig('ambition'),
+      makeV32AttemptConfig('love'),
+      makeV32AttemptConfig('avoidance'),
+    ];
+    const fragments = generateGranularFragments([attempt0, attempt1, attempt2], configs, '/audio', false);
+
+    // Per song: bones(2) + flesh(3) + spark(1) = 6 winners only
+    // 3 songs × 6 = 18
+    expect(fragments).toHaveLength(18);
+  });
+
+  test('fragment IDs are unique and follow songIndex-group-type-option format', () => {
+    const attempt = makeV32CompletedAttempt(0, 'ambition');
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio', true);
+
+    const ids = fragments.map(f => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // Spot-check format
+    expect(ids).toContain('0-bones-bass-A');
+    expect(ids).toContain('0-bones-drums-A');
+    expect(ids).toContain('0-flesh-melody-B');
+    expect(ids).toContain('0-spark-fx-A');
+  });
+
+  test('previewAudioPath follows naming convention', () => {
+    const attempt = makeV32CompletedAttempt(0, 'ambition');
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio/previews', true);
+
+    const bassA = fragments.find(f => f.granularType === 'bass' && f.option === 'A');
+    expect(bassA?.previewAudioPath).toBe('/audio/previews/preview-0-bass-A.mp3');
+
+    const melodyB = fragments.find(f => f.granularType === 'melody' && f.option === 'B');
+    expect(melodyB?.previewAudioPath).toBe('/audio/previews/preview-0-melody-B.mp3');
+  });
+
+  test('skips pending attempts', () => {
+    const pending: AttemptState = {
+      index: 0,
+      chapter: 'ambition',
+      layerPlan: makeV32AttemptConfig('ambition').layers,
+      currentLayerIndex: 0,
+      currentLayerPhase: 'locked',
+      layerResults: [],
+      votes: [],
+      status: 'pending',
+      collapsedAtLayer: null,
+      currentAuditionOption: null,
+      auditionLoopIndex: 0,
+      currentVoteResult: null,
+    };
+    const configs = [makeV32AttemptConfig('ambition')];
+    const fragments = generateGranularFragments([pending], configs, '/audio', true);
+    expect(fragments).toHaveLength(0);
+  });
+
+  test('chapter is correctly assigned from the attempt', () => {
+    const attempt = makeV32CompletedAttempt(1, 'love');
+    const configs = [undefined as any, makeV32AttemptConfig('love')];
+    const fragments = generateGranularFragments([attempt], configs, '/audio', false);
+
+    expect(fragments.every(f => f.chapter === 'love')).toBe(true);
+    expect(fragments.every(f => f.songIndex === 1)).toBe(true);
+  });
+});
+
+describe('generateGranularFragments — alwaysAvailable', () => {
+  test('alwaysAvailable track on losing option produces fragment even when bothOptionsSurvive=false', () => {
+    const config = makeV32AttemptConfig('ambition');
+    // Mark the bass track on option B as alwaysAvailable
+    config.layers[0].optionB.tracks[0] = { granularType: 'bass', trackIndex: 3, alwaysAvailable: true };
+
+    const attempt = makeV32CompletedAttempt(0, 'ambition');
+    // Layer 0 (bones) chose A — so B is the loser
+    const fragments = generateGranularFragments([attempt], [config], '/audio', false);
+
+    // Winners: bones A(bass, drums) + flesh B(melody, pad, harmony) + spark A(fx) = 6
+    // Plus: bones B bass (alwaysAvailable) = 1
+    // But drums on B is NOT alwaysAvailable, so excluded
+    expect(fragments).toHaveLength(7);
+
+    const loserBass = fragments.find(f => f.layerGroupId === 'bones' && f.granularType === 'bass' && f.option === 'B');
+    expect(loserBass).toBeDefined();
+    expect(loserBass!.wonVote).toBe(false);
+
+    // Loser drums should not be present
+    const loserDrums = fragments.find(f => f.layerGroupId === 'bones' && f.granularType === 'drums' && f.option === 'B');
+    expect(loserDrums).toBeUndefined();
+  });
+
+  test('alwaysAvailable track on unreached layer produces fragment', () => {
+    const config = makeV32AttemptConfig('ambition');
+    // Mark fx track on option A of spark (layer 2) as alwaysAvailable
+    config.layers[2].optionA.tracks[0] = { granularType: 'fx', trackIndex: 21, alwaysAvailable: true };
+
+    // Collapse at layer 1, so layer 2 (spark) is unreached
+    const attempt = makeV32CollapsedAttempt(0, 'ambition', 1);
+    const fragments = generateGranularFragments([attempt], [config], '/audio', false);
+
+    // Layer 0 (bones, locked_in): 2 winners
+    // Layer 1 (flesh, collapsed): 3 winners
+    // Layer 2 (spark, unreached): 1 alwaysAvailable fragment from option A
+    expect(fragments).toHaveLength(6);
+
+    const sparkFragment = fragments.find(f => f.layerGroupId === 'spark');
+    expect(sparkFragment).toBeDefined();
+    expect(sparkFragment!.wonVote).toBe(false);
+    expect(sparkFragment!.option).toBe('A');
+    expect(sparkFragment!.trackIndex).toBe(21);
+  });
+
+  test('alwaysAvailable tracks on both options of unreached layer produce two fragments', () => {
+    const config = makeV32AttemptConfig('ambition');
+    config.layers[2].optionA.tracks[0] = { granularType: 'fx', trackIndex: 21, alwaysAvailable: true };
+    config.layers[2].optionB.tracks[0] = { granularType: 'fx', trackIndex: 22, alwaysAvailable: true };
+
+    const attempt = makeV32CollapsedAttempt(0, 'ambition', 1);
+    const fragments = generateGranularFragments([attempt], [config], '/audio', false);
+
+    const sparkFragments = fragments.filter(f => f.layerGroupId === 'spark');
+    expect(sparkFragments).toHaveLength(2);
+    expect(sparkFragments.find(f => f.option === 'A')).toBeDefined();
+    expect(sparkFragments.find(f => f.option === 'B')).toBeDefined();
+    expect(sparkFragments.every(f => f.wonVote === false)).toBe(true);
+  });
+
+  test('alwaysAvailable does not duplicate winner fragments that would already be included', () => {
+    const config = makeV32AttemptConfig('ambition');
+    // Mark the bass track on option A as alwaysAvailable — but it's already the winner
+    config.layers[0].optionA.tracks[0] = { granularType: 'bass', trackIndex: 1, alwaysAvailable: true };
+
+    const attempt = makeV32CompletedAttempt(0, 'ambition');
+    // Layer 0 chose A — bass A is already a winner
+    const fragments = generateGranularFragments([attempt], [config], '/audio', false);
+
+    // Should still be 6 (no duplicate for bass A)
+    expect(fragments).toHaveLength(6);
+    const bassA = fragments.filter(f => f.layerGroupId === 'bones' && f.granularType === 'bass' && f.option === 'A');
+    expect(bassA).toHaveLength(1);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Conductor — Pure State Machine (V3)
+ * Conductor — Pure State Machine (V3.2)
  *
  * The conductor is the heart of the system. It receives commands, validates them,
  * updates state, and emits events. It has no I/O — all side effects are handled
@@ -9,7 +9,7 @@
  *
  * Show flow:
  *   lobby → opener → (attempt_story → attempt_build → attempt_resolve) ×3 →
- *   finale_elegy → finale_assembly → finale_deliberation → finale_ceremony → finale_performer_mix → ended
+ *   finale_elegy → finale_assignment → finale_live_mix → ended
  *
  * Song-building layer flow:
  *   locked → auditioning → revealing → locked_in | collapsed
@@ -33,18 +33,18 @@ import type {
   UserId,
   SeatId,
   User,
-  AudioReference,
-  LayerType,
-  FinaleState,
+  V32FinaleState,
+  V32LayerConfig,
+  TrackBundle,
+  GranularType,
+  LiveMixVote,
 } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
-import { generateFragments } from './fragments';
-import { queueChange, cancelPending, firePendingChanges } from './performer-mix';
+import { generateGranularFragments } from './fragments';
 import { getNpcMessage } from './npc';
-import { initializeAssembly, joinGroup, assignUndecided, getEmptyGroups } from './assembly';
-import { initializeDeliberation, submitGroupVote, getGroupVoteCounts, resolveDeliberation, volunteerAsAmbassador, resolveAmbassadors } from './deliberation';
-import { initializeCeremony, callNextAmbassador, processAltarLockIn, isCeremonyComplete, forceLockIn, forfeitLayer, skipToLayer } from './ceremony';
+import { autoAssign, initializeSelfSelect, selectGranularType, assignUndecided } from './assignment';
+import { getActiveFragment, computeInitialFragments } from './live-mix';
 
 // ============================================================================
 // State Initialization
@@ -156,65 +156,29 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Finale
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
-    // Assembly
-    case 'START_ASSEMBLY':
-      return handleStartAssembly(state);
-    case 'JOIN_GROUP':
-      return handleJoinGroup(state, command.userId, command.layerType);
-    case 'ASSEMBLY_TIMER_EXPIRED':
-      return handleAssemblyTimerExpired(state);
-    case 'FORCE_ASSIGN_USER':
-      return handleJoinGroup(state, command.userId, command.layerType);
-    case 'EXTEND_ASSEMBLY_TIMER':
-      return handleExtendAssemblyTimer(state, command.additionalMs);
-    case 'FORCE_END_ASSEMBLY':
-      return handleAssemblyTimerExpired(state);
-
-    // Deliberation
-    case 'START_DELIBERATION':
-      return handleStartDeliberation(state);
-    case 'SUBMIT_GROUP_VOTE':
-      return handleSubmitGroupVote(state, command.userId, command.layerType, command.fragmentId);
-    case 'DELIBERATION_TIMER_EXPIRED':
-      return handleDeliberationTimerExpired(state);
-    case 'VOLUNTEER_AS_AMBASSADOR':
-      return handleVolunteerAsAmbassador(state, command.userId, command.layerType);
-    case 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED':
-      return handleAmbassadorVolunteerTimerExpired(state, command.layerType);
-    case 'FORCE_FRAGMENT_SELECTION':
-      return handleForceFragmentSelection(state, command.layerType, command.fragmentId);
-    case 'EXTEND_DELIBERATION_TIMER':
-      return handleExtendDeliberationTimer(state, command.additionalMs);
-    case 'FORCE_END_DELIBERATION':
-      return handleDeliberationTimerExpired(state);
-
-    // Ceremony
-    case 'START_CEREMONY':
-      return handleStartCeremony(state);
-    case 'CALL_NEXT_AMBASSADOR':
-      return handleCallNextAmbassador(state);
-    case 'ALTAR_LOCK_IN':
-      return handleAltarLockIn(state, command.userId, command.layerType);
-    case 'FORCE_LOCK_IN':
-      return handleForceLockIn(state, command.layerType);
-    case 'FORFEIT_LAYER':
-      return handleForfeitLayer(state, command.layerType);
-    case 'SKIP_TO_LAYER':
-      return handleSkipToLayer(state, command.layerType);
+    // Assignment
+    case 'START_ASSIGNMENT':
+      return handleStartAssignment(state);
+    case 'SELECT_GRANULAR_TYPE':
+      return handleSelectGranularType(state, command.userId, command.granularType);
+    case 'ASSIGNMENT_COMPLETE':
+      return handleAssignmentComplete(state);
     case 'SEND_NPC_MESSAGE':
       return handleSendNpcMessage(state, command.message);
-    case 'START_PERFORMER_MIX':
-      return handleStartPerformerMix(state);
-    case 'QUEUE_FRAGMENT':
-      return handleQueueFragment(state, command.layerType, command.fragmentId);
-    case 'CANCEL_PENDING':
-      return handleCancelPending(state, command.layerType);
-    case 'FIRE_PENDING_CHANGES':
-      return handleFirePendingChanges(state);
-    case 'LOAD_SNAPSHOT':
-      return handleLoadSnapshot(state, command.snapshot);
-    case 'TOGGLE_LIVE_TRACK':
-      return handleToggleLiveTrack(state, command.trackId);
+
+    // Live Mix
+    case 'START_LIVE_MIX':
+      return handleStartLiveMix(state);
+    case 'SET_LIVE_MIX_PREFERENCE':
+      return handleSetLiveMixPreference(state, command.userId, command.granularType, command.fragmentId);
+    case 'LOCK_GRANULAR_TYPE':
+      return handleLockGranularType(state, command.granularType);
+    case 'UNLOCK_GRANULAR_TYPE':
+      return handleUnlockGranularType(state, command.granularType);
+    case 'OVERRIDE_FRAGMENT':
+      return handleOverrideFragment(state, command.granularType, command.fragmentId);
+    case 'CLEAR_OVERRIDE':
+      return handleClearOverride(state, command.granularType);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -271,10 +235,8 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'attempt_build',       // attempt 2
   'attempt_resolve',     // attempt 2
   'finale_elegy',
-  'finale_assembly',
-  'finale_deliberation',
-  'finale_ceremony',
-  'finale_performer_mix',
+  'finale_assignment',
+  'finale_live_mix',
   'ended',
 ];
 
@@ -317,11 +279,9 @@ function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number 
     case 'attempt_build': return 3 + attemptIndex * 3;
     case 'attempt_resolve': return 4 + attemptIndex * 3;
     case 'finale_elegy': return 11;
-    case 'finale_assembly': return 12;
-    case 'finale_deliberation': return 13;
-    case 'finale_ceremony': return 14;
-    case 'finale_performer_mix': return 15;
-    case 'ended': return 16;
+    case 'finale_assignment': return 12;
+    case 'finale_live_mix': return 13;
+    case 'ended': return 14;
     default: return -1;
   }
 }
@@ -352,6 +312,14 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
       attempt.currentLayerIndex = 0;
       attempt.currentLayerPhase = 'locked';
     }
+    // Unmute live seed tracks for this attempt
+    const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+    if (attemptConfig?.liveSeed?.trackIndices?.length) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'live_seed_start', attemptIndex: state.currentAttemptIndex, trackIndices: attemptConfig.liveSeed.trackIndices },
+      });
+    }
   }
 
   if (nextPhase === 'finale_elegy') {
@@ -360,20 +328,12 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     events.push(...handleSetupFinale(state));
   }
 
-  if (nextPhase === 'finale_assembly' && state.finaleState) {
-    events.push(...handleStartAssembly(state));
+  if (nextPhase === 'finale_assignment' && state.finaleState) {
+    events.push(...handleStartAssignment(state));
   }
 
-  if (nextPhase === 'finale_deliberation' && state.finaleState) {
-    events.push(...handleStartDeliberation(state));
-  }
-
-  if (nextPhase === 'finale_ceremony' && state.finaleState) {
-    events.push(...handleStartCeremony(state));
-  }
-
-  if (nextPhase === 'finale_performer_mix' && state.finaleState) {
-    events.push(...handleStartPerformerMix(state));
+  if (nextPhase === 'finale_live_mix' && state.finaleState) {
+    events.push(...handleStartLiveMix(state));
   }
 
   events.push({
@@ -456,8 +416,8 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: 'A',
-        audioRef: getLayerAudioRef(attempt, 'A'),
-        otherAudioRef: getLayerAudioRef(attempt, 'B'),
+        trackBundle: getLayerTrackBundle(attempt, 'A'),
+        otherTrackBundle: getLayerTrackBundle(attempt, 'B'),
       },
     },
     {
@@ -498,7 +458,7 @@ function handleToggleAudition(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: prevOption,
-        audioRef: getLayerAudioRef(attempt, prevOption),
+        trackBundle: getLayerTrackBundle(attempt, prevOption),
       },
     },
     {
@@ -508,8 +468,8 @@ function handleToggleAudition(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: nextOption,
-        audioRef: getLayerAudioRef(attempt, nextOption),
-        otherAudioRef: getLayerAudioRef(attempt, prevOption),
+        trackBundle: getLayerTrackBundle(attempt, nextOption),
+        otherTrackBundle: getLayerTrackBundle(attempt, prevOption),
       },
     },
     {
@@ -641,8 +601,8 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: 'A',
-        audioRef: getLayerAudioRef(attempt, 'A'),
-        otherAudioRef: getLayerAudioRef(attempt, 'B'),
+        trackBundle: getLayerTrackBundle(attempt, 'A'),
+        otherTrackBundle: getLayerTrackBundle(attempt, 'B'),
       },
     },
     {
@@ -683,10 +643,21 @@ function handleTriggerRejection(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
-  return [
+  const events: ConductorEvent[] = [
     { type: 'SONG_REJECTED', attemptIndex: attempt.index },
     { type: 'AUDIO_CUE', cue: { type: 'rejection_gesture', attemptIndex: attempt.index } },
   ];
+
+  // Stop live seed on rejection
+  const attemptCfg = state.config.attempts[attempt.index];
+  if (attemptCfg?.liveSeed?.trackIndices?.length) {
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: { type: 'live_seed_stop', attemptIndex: attempt.index, trackIndices: attemptCfg.liveSeed.trackIndices },
+    });
+  }
+
+  return events;
 }
 
 // ============================================================================
@@ -712,7 +683,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
         attemptIndex: attempt.index,
         layerIndex: attempt.currentLayerIndex,
         option: attempt.currentAuditionOption,
-        audioRef: getLayerAudioRef(attempt, attempt.currentAuditionOption),
+        trackBundle: getLayerTrackBundle(attempt, attempt.currentAuditionOption),
       },
     });
     attempt.currentAuditionOption = null;
@@ -730,7 +701,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   // 3. Record the layer result
   attempt.layerResults.push({
     layerIndex,
-    type: layerConfig?.type ?? 'melody',
+    group: layerConfig?.group ?? null,
     status: passed ? 'locked_in' : 'collapsed',
     chosenOption: voteResult.winner,
     winningProportion,
@@ -828,7 +799,7 @@ function lockInLayer(
     const { winningProportion } = calculateConsensus(layerVotes);
     attempt.layerResults.push({
       layerIndex,
-      type: layerConfig?.type ?? 'melody',
+      group: layerConfig?.group ?? null,
       status: 'locked_in',
       chosenOption: winner,
       winningProportion,
@@ -857,8 +828,6 @@ function lockInLayer(
   });
 
   const loser: 'A' | 'B' = winner === 'A' ? 'B' : 'A';
-  const winnerAudioRef = winner === 'A' ? layerConfig?.optionA : layerConfig?.optionB;
-  const loserAudioRef = loser === 'A' ? layerConfig?.optionA : layerConfig?.optionB;
   events.push({
     type: 'AUDIO_CUE',
     cue: {
@@ -866,8 +835,12 @@ function lockInLayer(
       attemptIndex: attempt.index,
       layerIndex,
       winner,
-      winnerAudioRef: winnerAudioRef ?? { trackIndex: 0 },
-      loserAudioRef: loserAudioRef ?? { trackIndex: 0 },
+      winnerTrackBundle: layerConfig?.optionA && layerConfig?.optionB
+        ? (winner === 'A' ? layerConfig.optionA : layerConfig.optionB)
+        : EMPTY_TRACK_BUNDLE,
+      loserTrackBundle: layerConfig?.optionA && layerConfig?.optionB
+        ? (loser === 'A' ? layerConfig.optionA : layerConfig.optionB)
+        : EMPTY_TRACK_BUNDLE,
     },
   });
 
@@ -909,7 +882,7 @@ function collapseAttempt(state: ShowState, attempt: AttemptState): ConductorEven
   if (!existingResult) {
     attempt.layerResults.push({
       layerIndex: attempt.currentLayerIndex,
-      type: attempt.layerPlan[attempt.currentLayerIndex]?.type ?? 'melody',
+      group: attempt.layerPlan[attempt.currentLayerIndex]?.group ?? null,
       status: 'unreached',
       chosenOption: null,
       winningProportion: null,
@@ -939,6 +912,15 @@ function collapseAttempt(state: ShowState, attempt: AttemptState): ConductorEven
     cue: { type: 'collapse_gesture', attemptIndex: attempt.index },
   });
 
+  // Stop live seed on collapse
+  const attemptCfg = state.config.attempts[attempt.index];
+  if (attemptCfg?.liveSeed?.trackIndices?.length) {
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: { type: 'live_seed_stop', attemptIndex: attempt.index, trackIndices: attemptCfg.liveSeed.trackIndices },
+    });
+  }
+
   // Auto-advance (except Song 3)
   events.push(...autoAdvanceAfterCollapse(state));
 
@@ -954,7 +936,7 @@ function markUnreachedLayers(attempt: AttemptState): void {
     if (!existing) {
       attempt.layerResults.push({
         layerIndex: layerConfig.index,
-        type: layerConfig.type,
+        group: layerConfig.group,
         status: 'unreached',
         chosenOption: null,
         winningProportion: null,
@@ -1061,275 +1043,99 @@ function handleImportState(state: ShowState, importedState: ShowState): Conducto
 // ============================================================================
 
 function handleSetupFinale(state: ShowState): ConductorEvent[] {
-  const allFragmentAvailability = generateFragments(state.attempts, state.config.attempts, state.config.finale.audioPreviewPath, state.config.finale.bothOptionsSurvive);
-  const availableFragments = allFragmentAvailability.filter(fa => fa.selectable).map(fa => fa.fragment);
-  const lockedFragments = allFragmentAvailability.filter(fa => !fa.selectable).map(fa => fa.fragment);
-  const allFragments = allFragmentAvailability.map(fa => fa.fragment);
+  const config = state.config.finale;
+  const allFragments = generateGranularFragments(
+    state.attempts,
+    state.config.attempts,
+    config.audioPreviewPath,
+    config.bothOptionsSurvive,
+  );
+  const availableFragments = allFragments.filter(f => f.wonVote);
 
   state.finaleState = {
     phase: 'elegy',
     availableFragments,
     allFragments,
-    lockedFragments,
-    assembly: {
+    assignment: {
+      mode: config.assignmentMode,
       groups: new Map(),
-      undecidedUsers: [],
-      timerRemaining: 0,
-      timerDuration: 0,
+      timerRemaining: null,
     },
-    deliberation: {
-      groupVotes: new Map(),
-      chosenFragments: new Map(),
-      ambassadorVolunteers: new Map(),
-      ambassadors: new Map(),
-      timerRemaining: 0,
-      volunteerTimerRemaining: null,
-    },
-    ceremony: {
-      layerOrder: state.config.finale.ceremonyLayerOrder,
-      currentIndex: 0,
-      currentAmbassador: null,
-      altarReady: false,
-      lockedLayers: new Map(),
-      forfeitedLayers: [],
-      ceremonyComplete: false,
-    },
-    npc: {
-      currentMessage: null,
-    },
-    performerMix: {
-      activeLayers: new Map(),
-      pendingChanges: [],
+    liveMix: {
+      votes: new Map(),
+      activeFragments: new Map(),
+      lockedTypes: [],
+      performerOverrides: new Map(),
+      liveTracksActive: [],
       loopPosition: 0,
       loopCount: 0,
-      liveTracksActive: [],
     },
+    npc: { currentMessage: null },
   };
 
-  return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments, lockedFragments }];
+  return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments, allFragments }];
 }
 
 // ============================================================================
-// Assembly Handlers
+// Assignment Handlers
 // ============================================================================
 
-function handleStartAssembly(state: ShowState): ConductorEvent[] {
+function handleStartAssignment(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const assembly = initializeAssembly(state.users, state.config.finale);
-  state.finaleState.assembly = assembly;
-  state.finaleState.phase = 'assembly';
-  const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'assembly_start');
-  const events: ConductorEvent[] = [{ type: 'ASSEMBLY_STARTED', timerDuration: assembly.timerDuration }];
-  if (npcMsg) {
-    state.finaleState.npc.currentMessage = npcMsg;
-    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-  }
-  return events;
-}
 
-function handleJoinGroup(state: ShowState, userId: UserId, layerType: LayerType): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  joinGroup(state.finaleState.assembly, userId, layerType);
-  const { groups, undecidedUsers } = state.finaleState.assembly;
-  return [{ type: 'GROUP_MEMBERSHIP_CHANGED', groups, undecidedCount: undecidedUsers.length }];
-}
+  const config = state.config.finale;
+  const granularTypes = state.config.granularTypes ?? [];
 
-function handleAssemblyTimerExpired(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  assignUndecided(state.finaleState.assembly);
-  const { groups } = state.finaleState.assembly;
-  const emptyGroups = getEmptyGroups(state.finaleState.assembly);
-  return [{ type: 'ASSEMBLY_COMPLETE', groups, emptyGroups }];
-}
+  if (config.assignmentMode === 'auto') {
+    const groups = autoAssign(state.users, granularTypes);
+    state.finaleState.assignment = { mode: 'auto', groups, timerRemaining: null };
+    state.finaleState.phase = 'assignment';
 
-function handleExtendAssemblyTimer(state: ShowState, additionalMs: number): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.assembly.timerRemaining += additionalMs;
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
-// ============================================================================
-// Deliberation Handlers
-// ============================================================================
-
-function handleStartDeliberation(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const deliberation = initializeDeliberation(
-    state.finaleState.assembly.groups,
-    state.finaleState.availableFragments,
-    state.config.finale,
-  );
-  state.finaleState.deliberation = deliberation;
-  state.finaleState.phase = 'deliberation';
-  return [{ type: 'DELIBERATION_STARTED', timerDuration: deliberation.timerRemaining }];
-}
-
-function handleSubmitGroupVote(state: ShowState, userId: UserId, layerType: LayerType, fragmentId: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { accepted } = submitGroupVote(
-    state.finaleState.deliberation,
-    state.finaleState.assembly.groups,
-    userId, layerType, fragmentId,
-  );
-  if (!accepted) return [];
-  const votes = getGroupVoteCounts(state.finaleState.deliberation, layerType);
-  return [{ type: 'GROUP_VOTE_UPDATED', layerType, votes }];
-}
-
-function handleDeliberationTimerExpired(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  resolveDeliberation(
-    state.finaleState.deliberation,
-    state.finaleState.assembly.groups,
-    state.finaleState.availableFragments,
-  );
-  const events: ConductorEvent[] = [];
-  for (const [layerType, fragmentId] of state.finaleState.deliberation.chosenFragments) {
-    if (fragmentId) events.push({ type: 'FRAGMENT_CHOSEN', layerType, fragmentId });
-  }
-  // Start ambassador volunteering timer
-  state.finaleState.deliberation.volunteerTimerRemaining = state.config.finale.ambassadorVolunteerTimerMs;
-  return events;
-}
-
-function handleVolunteerAsAmbassador(state: ShowState, userId: UserId, layerType: LayerType): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { accepted } = volunteerAsAmbassador(
-    state.finaleState.deliberation,
-    state.finaleState.assembly.groups,
-    userId, layerType,
-  );
-  if (!accepted) return [];
-  return [{ type: 'AMBASSADOR_VOLUNTEERED', layerType, userId }];
-}
-
-function handleAmbassadorVolunteerTimerExpired(state: ShowState, _layerType: LayerType): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { forfeitedLayers } = resolveAmbassadors(
-    state.finaleState.deliberation,
-    state.finaleState.assembly.groups,
-  );
-  const events: ConductorEvent[] = [];
-  for (const [layerType, userId] of state.finaleState.deliberation.ambassadors) {
-    if (userId) events.push({ type: 'AMBASSADOR_SELECTED', layerType, userId });
-  }
-  for (const layerType of forfeitedLayers) {
-    events.push({ type: 'LAYER_FORFEITED', layerType });
-  }
-  state.finaleState.deliberation.volunteerTimerRemaining = null;
-  events.push({ type: 'DELIBERATION_COMPLETE' });
-  return events;
-}
-
-function handleForceFragmentSelection(state: ShowState, layerType: LayerType, fragmentId: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.deliberation.chosenFragments.set(layerType, fragmentId);
-  return [{ type: 'FRAGMENT_CHOSEN', layerType, fragmentId }];
-}
-
-function handleExtendDeliberationTimer(state: ShowState, additionalMs: number): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.deliberation.timerRemaining += additionalMs;
-  return [{ type: 'STATE_UPDATED', version: state.version }];
-}
-
-function handleForceEndDeliberation(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const timerEvents = handleDeliberationTimerExpired(state);
-  // Also immediately resolve ambassadors
-  const ambassadorEvents = handleAmbassadorVolunteerTimerExpired(state, 'melody');
-  return [...timerEvents, ...ambassadorEvents];
-}
-
-// ============================================================================
-// Ceremony Handlers
-// ============================================================================
-
-function handleStartCeremony(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { deliberation } = state.finaleState;
-  // Collect forfeited layers (empty groups + no ambassador)
-  const forfeitedLayers: LayerType[] = [];
-  for (const [layerType, userId] of deliberation.ambassadors) {
-    if (!userId) forfeitedLayers.push(layerType);
-  }
-  const ceremony = initializeCeremony(
-    state.config.finale.ceremonyLayerOrder,
-    deliberation.chosenFragments,
-    deliberation.ambassadors,
-    forfeitedLayers,
-  );
-  state.finaleState.ceremony = ceremony;
-  state.finaleState.phase = 'ceremony';
-  return [{ type: 'CEREMONY_STARTED', layerOrder: ceremony.layerOrder }];
-}
-
-function handleCallNextAmbassador(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { ceremony, deliberation } = state.finaleState;
-  const { layerType, ambassador, skipped } = callNextAmbassador(ceremony, deliberation.ambassadors);
-  const events: ConductorEvent[] = [];
-  for (const s of skipped) {
-    events.push({ type: 'CEREMONY_LAYER_SKIPPED', layerType: s });
-  }
-  if (layerType === null) {
-    ceremony.ceremonyComplete = true;
-    events.push({ type: 'CEREMONY_COMPLETE', lockedLayers: ceremony.lockedLayers });
-  } else if (ambassador) {
-    events.push({ type: 'AMBASSADOR_CALLED', layerType, userId: ambassador });
-  }
-  return events;
-}
-
-function handleAltarLockIn(state: ShowState, userId: UserId, layerType: LayerType): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { ceremony, deliberation } = state.finaleState;
-  const { accepted, fragmentId } = processAltarLockIn(ceremony, deliberation.chosenFragments, userId, layerType);
-  if (!accepted) return [];
-  const events: ConductorEvent[] = [{ type: 'ALTAR_LOCK_IN_DETECTED', layerType, fragmentId: fragmentId ?? '' }];
-  if (fragmentId) {
-    const fragment = state.finaleState.availableFragments.find(f => f.id === fragmentId);
-    events.push({ type: 'CEREMONY_LAYER_LOCKED', layerType, fragmentId });
-    if (fragment) {
-      events.push({ type: 'AUDIO_CUE', cue: { type: 'ceremony_activate', layerType, fragmentId, audioRef: fragment.audioRef } });
+    const events: ConductorEvent[] = [
+      { type: 'ASSIGNMENT_STARTED', mode: 'auto' },
+      { type: 'GROUPS_ASSIGNED', groups },
+    ];
+    const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
+    if (npcMsg) {
+      state.finaleState.npc.currentMessage = npcMsg;
+      events.push({ type: 'NPC_MESSAGE', message: npcMsg });
     }
-  }
-  if (isCeremonyComplete(ceremony)) {
-    ceremony.ceremonyComplete = true;
-    events.push({ type: 'CEREMONY_COMPLETE', lockedLayers: ceremony.lockedLayers });
-  }
-  return events;
-}
+    return events;
+  } else {
+    const assignment = initializeSelfSelect(granularTypes, config.assignmentTimerMs);
+    state.finaleState.assignment = assignment;
+    state.finaleState.phase = 'assignment';
 
-function handleForceLockIn(state: ShowState, layerType: LayerType): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { ceremony, deliberation } = state.finaleState;
-  const { fragmentId } = forceLockIn(ceremony, deliberation.chosenFragments, layerType);
-  const events: ConductorEvent[] = [];
-  if (fragmentId) {
-    const fragment = state.finaleState.availableFragments.find(f => f.id === fragmentId);
-    events.push({ type: 'CEREMONY_LAYER_LOCKED', layerType, fragmentId });
-    if (fragment) {
-      events.push({ type: 'AUDIO_CUE', cue: { type: 'ceremony_activate', layerType, fragmentId, audioRef: fragment.audioRef } });
+    const events: ConductorEvent[] = [{ type: 'ASSIGNMENT_STARTED', mode: 'self_select' }];
+    const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
+    if (npcMsg) {
+      state.finaleState.npc.currentMessage = npcMsg;
+      events.push({ type: 'NPC_MESSAGE', message: npcMsg });
     }
+    return events;
   }
-  if (isCeremonyComplete(ceremony)) {
-    ceremony.ceremonyComplete = true;
-    events.push({ type: 'CEREMONY_COMPLETE', lockedLayers: ceremony.lockedLayers });
-  }
-  return events;
 }
 
-function handleForfeitLayer(state: ShowState, layerType: LayerType): ConductorEvent[] {
+function handleSelectGranularType(state: ShowState, userId: UserId, granularType: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  forfeitLayer(state.finaleState.ceremony, layerType);
-  return [{ type: 'CEREMONY_LAYER_SKIPPED', layerType }];
+  if (state.finaleState.assignment.mode !== 'self_select') {
+    return [{ type: 'ERROR', message: 'Cannot select type in auto-assignment mode' }];
+  }
+  selectGranularType(state.finaleState.assignment, userId, granularType);
+  return [{ type: 'GROUPS_ASSIGNED', groups: state.finaleState.assignment.groups }];
 }
 
-function handleSkipToLayer(state: ShowState, layerType: LayerType): ConductorEvent[] {
+function handleAssignmentComplete(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  skipToLayer(state.finaleState.ceremony, layerType);
-  return [{ type: 'STATE_UPDATED', version: state.version }];
+  if (state.finaleState.assignment.mode === 'self_select') {
+    const connectedUserIds: UserId[] = [];
+    for (const [userId, user] of state.users) {
+      if (user.connected) connectedUserIds.push(userId);
+    }
+    const granularTypes = state.config.granularTypes ?? [];
+    assignUndecided(state.finaleState.assignment, connectedUserIds, granularTypes);
+  }
+  return [{ type: 'GROUPS_ASSIGNED', groups: state.finaleState.assignment.groups }];
 }
 
 function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent[] {
@@ -1338,71 +1144,239 @@ function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent
   return [{ type: 'NPC_MESSAGE', message }];
 }
 
-function handleStartPerformerMix(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { finaleState } = state;
-  finaleState.phase = 'performer_mix';
-  finaleState.performerMix.activeLayers = new Map(finaleState.ceremony.lockedLayers);
+// ============================================================================
+// Live Mix Handlers
+// ============================================================================
 
-  return [{ type: 'PERFORMER_MIX_STARTED' }];
-}
-
-function handleQueueFragment(state: ShowState, layerType: LayerType, fragmentId: string | null): ConductorEvent[] {
+function handleStartLiveMix(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.performerMix.pendingChanges = queueChange(
-    state.finaleState.performerMix.pendingChanges,
-    layerType,
-    fragmentId,
+  state.finaleState.phase = 'live_mix';
+
+  // Compute initial fragments — pick highest winning proportion per granular type
+  const initialFragments = computeInitialFragments(
+    state.finaleState.availableFragments,
+    state.attempts,
   );
-  return [];
-}
+  state.finaleState.liveMix.activeFragments = initialFragments;
 
-function handleCancelPending(state: ShowState, layerType: LayerType): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.performerMix.pendingChanges = cancelPending(
-    state.finaleState.performerMix.pendingChanges,
-    layerType,
-  );
-  return [];
-}
+  // Initialize votes: each user starts with preference set to auto-selected fragment
+  for (const [granularType, members] of state.finaleState.assignment.groups) {
+    const fragmentId = initialFragments.get(granularType);
+    if (!fragmentId) continue;
+    const typeVotes = new Map<UserId, LiveMixVote>();
+    for (const userId of members) {
+      typeVotes.set(userId, { fragmentId, timestamp: Date.now() });
+    }
+    state.finaleState.liveMix.votes.set(granularType, typeVotes);
+  }
 
-function handleFirePendingChanges(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { performerMix } = state.finaleState;
-  const { activeLayers, firedChanges } = firePendingChanges(
-    performerMix.activeLayers,
-    performerMix.pendingChanges,
-  );
-  performerMix.activeLayers = activeLayers;
-  performerMix.pendingChanges = [];
+  // Collect track indices for initial unmute
+  const activeTrackIndices: number[] = [];
+  for (const [, fragmentId] of initialFragments) {
+    const frag = state.finaleState.availableFragments.find(f => f.id === fragmentId)
+      ?? state.finaleState.allFragments.find(f => f.id === fragmentId);
+    if (frag) activeTrackIndices.push(frag.trackIndex);
+  }
 
-  return [
-    { type: 'PENDING_CHANGES_FIRED', changes: firedChanges },
-    { type: 'AUDIO_CUE', cue: { type: 'mix_update', changes: firedChanges } },
-    { type: 'MIX_STATE_UPDATED', activeLayers },
+  const events: ConductorEvent[] = [
+    { type: 'LIVE_MIX_STARTED', initialFragments },
   ];
+
+  if (activeTrackIndices.length > 0) {
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'live_mix_start', activeTrackIndices } });
+  }
+
+  const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'live_mix_start');
+  if (npcMsg) {
+    state.finaleState.npc.currentMessage = npcMsg;
+    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
+  }
+
+  return events;
 }
 
-function handleLoadSnapshot(state: ShowState, snapshot: Map<LayerType, string | null>): ConductorEvent[] {
+function handleSetLiveMixPreference(
+  state: ShowState,
+  userId: UserId,
+  granularType: string,
+  fragmentId: string,
+): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  let pending = state.finaleState.performerMix.pendingChanges;
-  for (const [layerType, fragmentId] of snapshot) {
-    pending = queueChange(pending, layerType, fragmentId);
+  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
+
+  const fs = state.finaleState;
+
+  // Validate: user is assigned to this granular type
+  const members = fs.assignment.groups.get(granularType);
+  if (!members || !members.includes(userId)) {
+    return [{ type: 'ERROR', message: `User ${userId} is not assigned to ${granularType}` }];
   }
-  state.finaleState.performerMix.pendingChanges = pending;
-  return [];
+
+  // Validate: type is not locked
+  if (fs.liveMix.lockedTypes.includes(granularType)) {
+    return [{ type: 'ERROR', message: `${granularType} is locked` }];
+  }
+
+  // Validate: fragment exists in available fragments for this type
+  const validFragment = fs.availableFragments.some(f => f.id === fragmentId && f.granularType === granularType)
+    || (state.config.finale.bothOptionsSurvive && fs.allFragments.some(f => f.id === fragmentId && f.granularType === granularType));
+  if (!validFragment) {
+    return [{ type: 'ERROR', message: `Fragment ${fragmentId} not available for ${granularType}` }];
+  }
+
+  // Update vote
+  let typeVotes = fs.liveMix.votes.get(granularType);
+  if (!typeVotes) {
+    typeVotes = new Map();
+    fs.liveMix.votes.set(granularType, typeVotes);
+  }
+  typeVotes.set(userId, { fragmentId, timestamp: Date.now() });
+
+  // Recalculate active fragment for this type (skip if overridden)
+  if (fs.liveMix.performerOverrides.has(granularType)) {
+    return []; // Override takes precedence, vote is recorded but doesn't change audio
+  }
+
+  const newActive = getActiveFragment(typeVotes);
+  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
+
+  if (newActive && newActive !== previousActive) {
+    fs.liveMix.activeFragments.set(granularType, newActive);
+
+    const events: ConductorEvent[] = [
+      { type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' },
+    ];
+
+    // Emit audio crossfade cue
+    const outFrag = previousActive
+      ? (fs.allFragments.find(f => f.id === previousActive))
+      : null;
+    const inFrag = fs.allFragments.find(f => f.id === newActive);
+    if (inFrag) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: {
+          type: 'live_mix_crossfade',
+          granularType,
+          incomingTrackIndex: inFrag.trackIndex,
+          outgoingTrackIndex: outFrag?.trackIndex ?? -1,
+        },
+      });
+    }
+
+    return events;
+  }
+
+  return []; // Vote recorded, no majority shift
 }
 
-function handleToggleLiveTrack(state: ShowState, trackId: string): ConductorEvent[] {
+function handleLockGranularType(state: ShowState, granularType: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  const { liveTracksActive } = state.finaleState.performerMix;
-  const idx = liveTracksActive.indexOf(trackId);
-  if (idx === -1) {
-    liveTracksActive.push(trackId);
-  } else {
-    liveTracksActive.splice(idx, 1);
+  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
+
+  const fs = state.finaleState;
+  if (fs.liveMix.lockedTypes.includes(granularType)) {
+    return []; // Already locked
   }
-  return [];
+
+  fs.liveMix.lockedTypes.push(granularType);
+  return [{ type: 'GRANULAR_TYPE_LOCKED', granularType }];
+}
+
+function handleUnlockGranularType(state: ShowState, granularType: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
+
+  const fs = state.finaleState;
+  const idx = fs.liveMix.lockedTypes.indexOf(granularType);
+  if (idx === -1) return []; // Not locked
+
+  fs.liveMix.lockedTypes.splice(idx, 1);
+  const events: ConductorEvent[] = [{ type: 'GRANULAR_TYPE_UNLOCKED', granularType }];
+
+  // Recalculate — audience votes may have shifted while locked
+  if (!fs.liveMix.performerOverrides.has(granularType)) {
+    const typeVotes = fs.liveMix.votes.get(granularType);
+    if (typeVotes) {
+      const newActive = getActiveFragment(typeVotes);
+      const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
+
+      if (newActive && newActive !== previousActive) {
+        fs.liveMix.activeFragments.set(granularType, newActive);
+        events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' });
+
+        const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
+        const inFrag = fs.allFragments.find(f => f.id === newActive);
+        if (inFrag) {
+          events.push({
+            type: 'AUDIO_CUE',
+            cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndex: inFrag.trackIndex, outgoingTrackIndex: outFrag?.trackIndex ?? -1 },
+          });
+        }
+      }
+    }
+  }
+
+  return events;
+}
+
+function handleOverrideFragment(state: ShowState, granularType: string, fragmentId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
+
+  const fs = state.finaleState;
+  fs.liveMix.performerOverrides.set(granularType, fragmentId);
+
+  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
+  const events: ConductorEvent[] = [];
+
+  if (fragmentId !== previousActive) {
+    fs.liveMix.activeFragments.set(granularType, fragmentId);
+    events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId, previousFragmentId: previousActive ?? '' });
+
+    const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
+    const inFrag = fs.allFragments.find(f => f.id === fragmentId);
+    if (inFrag) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndex: inFrag.trackIndex, outgoingTrackIndex: outFrag?.trackIndex ?? -1 },
+      });
+    }
+  }
+
+  return events;
+}
+
+function handleClearOverride(state: ShowState, granularType: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
+
+  const fs = state.finaleState;
+  if (!fs.liveMix.performerOverrides.has(granularType)) return [];
+
+  fs.liveMix.performerOverrides.delete(granularType);
+
+  // Recalculate from votes
+  const typeVotes = fs.liveMix.votes.get(granularType);
+  const newActive = typeVotes ? getActiveFragment(typeVotes) : null;
+  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
+  const events: ConductorEvent[] = [];
+
+  if (newActive && newActive !== previousActive) {
+    fs.liveMix.activeFragments.set(granularType, newActive);
+    events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' });
+
+    const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
+    const inFrag = fs.allFragments.find(f => f.id === newActive);
+    if (inFrag) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndex: inFrag.trackIndex, outgoingTrackIndex: outFrag?.trackIndex ?? -1 },
+      });
+    }
+  }
+
+  return events;
 }
 
 // ============================================================================
@@ -1414,8 +1388,11 @@ function currentAttempt(state: ShowState): AttemptState | null {
   return state.attempts[state.currentAttemptIndex] ?? null;
 }
 
-/** Get the AudioReference for the given option on the current layer. */
-function getLayerAudioRef(attempt: AttemptState, option: 'A' | 'B'): AudioReference {
+/** Get the TrackBundle for the given option on the current layer. */
+function getLayerTrackBundle(attempt: AttemptState, option: 'A' | 'B'): TrackBundle {
   const layerConfig = attempt.layerPlan[attempt.currentLayerIndex];
   return option === 'A' ? layerConfig.optionA : layerConfig.optionB;
 }
+
+/** Empty TrackBundle fallback for edge cases. */
+const EMPTY_TRACK_BUNDLE: TrackBundle = { tracks: [] };

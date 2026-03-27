@@ -11,7 +11,7 @@
 
 All fragments across all three songs share:
 - **Key:** B minor (B natural minor scale: B, C#, D, E, F#, G, A)
-- **BPM:** Escalates per layer per song (configurable in `default-show.json`; default curve: 120 → 120 → 130 → 140 → 155 → 170). All fragments must sound good across their song's full tempo range.
+- **BPM:** Configurable per layer per song in `default-show.json` (default: 120 BPM for all 3 layers). All fragments must sound good across their song's full tempo range.
 - **Loop length:** Exactly 8 bars
 - **Time signature:** 4/4
 - **Chord progression:** Same progression across all songs
@@ -59,37 +59,46 @@ Each layer type occupies a designated frequency range. EQ cuts on each track rem
 
 ### Audio Preview Production
 
-Each of the 36 fragment clips must be exported as a standalone audio file for in-browser preview:
+Each fragment clip must be exported as a standalone audio file for in-browser preview:
 - **Format:** mp3, 128kbps (adequate quality for phone speakers; small file size for fast loading)
 - **Duration:** 4–8 bars recommended. Full 8-bar loop acceptable. Shorter excerpts encourage turn-taking during group deliberation.
 - **Naming:** `preview-{songIndex}-{layerIndex}-{option}.mp3` (e.g., `preview-0-2-A.mp3`)
 - **Content:** Should start cleanly on bar 1 and ideally loop well, though looping is not required for preview purposes
-- **Total file count:** Up to 36 files (3 songs × 6 layers × 2 options), though only available fragments will be loaded by clients
+- **Total file count:** Up to 18 files (3 songs × 3 layer groups × 2 options), though only available fragments will be loaded by clients
 
 ---
 
 ## Audio Engine & Ableton Integration
 
-### Track Layout
+### Track Layout (V3.2 — Config-Driven)
 
-**Song-building tracks** (3 songs × 6 layers × 2 options = 36 tracks):
-- Track index: `songIndex * (layersPerSong * 2) + layerIndex * 2 + optionOffset`
-  - `optionOffset`: 0 for Option A, 1 for Option B
-- With 6 layers per song: tracks 0–35
-- Example: Song 0, Layer 2, Option B = `0 * 12 + 2 * 2 + 1 = track 5`
-- Example: Song 1, Layer 0, Option A = `1 * 12 + 0 * 2 + 0 = track 12`
-- Example: Song 2, Layer 3, Option A = `2 * 12 + 3 * 2 + 0 = track 30`
+**No formula.** Track indices are defined explicitly per option per granular type in `config/default-show.json`. Each layer group option is a `TrackBundle` containing one or more `GranularTrackRef` entries with explicit `trackIndex` values.
 
-**Live performance tracks** (beyond index 35): vocal mic, live synth, etc. Not part of the fragment system. Controlled only by the performer.
+**Song-building tracks:** Each song has:
+- **Live seed tracks**: 3 tracks per song (e.g., Song 0 = tracks 0–2)
+- **Layer group tracks**: Multiple tracks per option per group (e.g., bones option A = bass track + drums track)
+- Total track count depends on the Ableton session layout
 
-**Song rejection effect:** A return track with configurable effects (filter sweep, distortion, reverb tail) triggered via OSC. All song-building tracks route through this return.
+**Example from default config** (Song 1):
+- Live seed: tracks 0, 1, 2
+- bones/optionA: bass=track 3, drums=track 4
+- bones/optionB: bass=track 5, drums=track 6
+- flesh/optionA: melody=track 7, pad=track 8, harmony=track 9
+- flesh/optionB: melody=track 10, pad=track 11, harmony=track 12
+- spark/optionA: fx=track 13
+- spark/optionB: fx=track 14
+
+**Live performance tracks** (beyond song-building indices): vocal mic, live synth, etc. Not part of the fragment system. Controlled only by the performer.
+
+**Collapse/rejection effects:** Return tracks with configurable effects triggered via OSC. Index configured in `config/ableton-layout.json`.
 
 ### Playback Modes
 
-**Song-building:**
-- Audition: briefly unmute/solo Option A, then Option B (quantized transitions)
-- Lock-in: unmute chosen option's track, mute unchosen
-- Stack accumulates: previously locked layers stay unmuted
+**Song-building (V3.2 — TrackBundle):**
+- Live seed: unmute seed tracks at `attempt_build` start; mute on collapse/rejection
+- Audition: iterate all tracks in the TrackBundle — unmute/swell current option, fade/mute other option
+- Lock-in: swell all tracks in winner TrackBundle, fade all tracks in loser TrackBundle
+- Stack accumulates: previously locked layer group tracks stay unmuted
 
 **Collapse:**
 - Triggered when doubt threshold is not met
@@ -152,7 +161,7 @@ Unchanged from V1. Timing engine uses JS timers; audio cues are logged but not s
 
 ### Static Audio Preview Files
 
-Pre-rendered audio files (mp3/ogg) for each of the 36 fragment clips, exported from Ableton and served statically by the Next.js server. Used during the deliberation phase for in-browser playback on audience phones.
+Pre-rendered audio files (mp3/ogg) for each fragment clip, exported from Ableton and served statically by the Next.js server. Used during the finale for in-browser playback on audience phones.
 
 **File naming convention:** `preview-{songIndex}-{layerIndex}-{option}.mp3` (e.g., `preview-0-2-A.mp3`)
 

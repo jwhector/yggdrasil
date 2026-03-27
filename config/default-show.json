@@ -1,217 +1,402 @@
 {
   "name": "Default Show Configuration",
-  "description": "Template configuration for the V3.1 show — replace audio references and labels with actual content",
-
-  "layersPerAttempt": 6,
-
+  "description": "V3.2 configuration — 3 bundled layer groups per attempt, live seed tracks, Incredibox-style finale. Replace placeholder track indices with actual Ableton layout.",
+  "layersPerAttempt": 3,
   "attempts": [
     {
       "chapter": "ambition",
-      "title": "Ambition",
-      "thresholds": [0.50, 0.50, 0.65, 0.78, 0.88, 0.95],
-      "tempos": [120, 120, 120, 120, 120, 120],
-      "auditionBars": [4, 4, 4, 2, 2, 2],
-      "auditionCycles": [2, 2, 2, 2, 2, 2],
+      "title": "Song 1",
+      "thresholds": [
+        0.5,
+        0.66,
+        0.99
+      ],
+      "tempos": [
+        120,
+        120,
+        120
+      ],
+      "auditionBars": [
+        4,
+        4,
+        2
+      ],
+      "auditionCycles": [
+        2,
+        2,
+        2
+      ],
+      "liveSeed": {
+        "trackIndices": [
+          0,
+          1,
+          2
+        ],
+        "label": "The seed"
+      },
       "layers": [
         {
           "index": 0,
-          "type": "bass",
-          "optionA": { "trackIndex": 31, "clipSlot": 0 },
-          "optionB": { "trackIndex": 33, "clipSlot": 0 },
-          "labelA": "Grounded",
-          "labelB": "Restless"
+          "group": "bones",
+          "labelA": "Heavy. Driving.",
+          "labelB": "Light. Floating.",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "bass",
+                "trackIndex": 3
+              },
+              {
+                "granularType": "drums",
+                "trackIndex": 4
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "bass",
+                "trackIndex": 5
+              },
+              {
+                "granularType": "drums",
+                "trackIndex": 6
+              }
+            ]
+          }
         },
         {
           "index": 1,
-          "type": "drums",
-          "optionA": { "trackIndex": 18, "clipSlot": 0 },
-          "optionB": { "trackIndex": 19, "clipSlot": 0 },
-          "labelA": "Steady",
-          "labelB": "Urgent"
+          "group": "flesh",
+          "labelA": "Warm. Open.",
+          "labelB": "Cool. Guarded.",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "melody",
+                "trackIndex": 7
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 8
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 9
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "melody",
+                "trackIndex": 10
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 11
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 12
+              }
+            ]
+          }
         },
         {
           "index": 2,
-          "type": "melody",
-          "optionA": { "trackIndex": 5, "clipSlot": 0 },
-          "optionB": { "trackIndex": 2, "clipSlot": 0 },
-          "labelA": "Rising",
-          "labelB": "Falling"
-        },
-        {
-          "index": 3,
-          "type": "harmony",
-          "optionA": { "trackIndex": 11, "clipSlot": 0 },
-          "optionB": { "trackIndex": 13, "clipSlot": 0 },
-          "labelA": "Open",
-          "labelB": "Tight"
-        },
-        {
-          "index": 4,
-          "type": "pad",
-          "optionA": { "trackIndex": 28, "clipSlot": 0 },
-          "optionB": { "trackIndex": 29, "clipSlot": 0 },
-          "labelA": "Warm",
-          "labelB": "Cold"
-        },
-        {
-          "index": 5,
-          "type": "fx",
-          "optionA": { "trackIndex": 39, "clipSlot": 0 },
-          "optionB": { "trackIndex": 40, "clipSlot": 0 },
-          "labelA": "Bright",
-          "labelB": "Dark"
+          "group": "spark",
+          "labelA": "Bright. Sharp.",
+          "labelB": "Dark. Soft.",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 13
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 14
+              }
+            ]
+          }
         }
       ]
     },
     {
       "chapter": "love",
-      "title": "Love",
-      "thresholds": [0.50, 0.50, 0.65, 0.78, 0.88, 0.95],
-      "tempos": [120, 120, 120, 120, 120, 120],
-      "auditionBars": [4, 4, 4, 2, 2, 2],
-      "auditionCycles": [2, 2, 2, 2, 2, 2],
+      "title": "Song 2",
+      "thresholds": [
+        0.5,
+        0.66,
+        0.99
+      ],
+      "tempos": [
+        120,
+        120,
+        120
+      ],
+      "auditionBars": [
+        4,
+        4,
+        2
+      ],
+      "auditionCycles": [
+        2,
+        2,
+        2
+      ],
+      "liveSeed": {
+        "trackIndices": [
+          15,
+          16,
+          17
+        ],
+        "label": "The seed"
+      },
       "layers": [
         {
           "index": 0,
-          "type": "melody",
-          "optionA": { "trackIndex": 12, "clipSlot": 0 },
-          "optionB": { "trackIndex": 13, "clipSlot": 0 },
+          "group": "flesh",
           "labelA": "Tender",
-          "labelB": "Electric"
+          "labelB": "Electric",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "melody",
+                "trackIndex": 18
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 19
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 20
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "melody",
+                "trackIndex": 21
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 22
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 23
+              }
+            ]
+          }
         },
         {
           "index": 1,
-          "type": "harmony",
-          "optionA": { "trackIndex": 14, "clipSlot": 0 },
-          "optionB": { "trackIndex": 15, "clipSlot": 0 },
-          "labelA": "Close",
-          "labelB": "Reaching"
+          "group": "spark",
+          "labelA": "Open",
+          "labelB": "Guarded",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 24
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 25
+              }
+            ]
+          }
         },
         {
           "index": 2,
-          "type": "fx",
-          "optionA": { "trackIndex": 16, "clipSlot": 0 },
-          "optionB": { "trackIndex": 17, "clipSlot": 0 },
-          "labelA": "Open",
-          "labelB": "Guarded"
-        },
-        {
-          "index": 3,
-          "type": "bass",
-          "optionA": { "trackIndex": 18, "clipSlot": 0 },
-          "optionB": { "trackIndex": 19, "clipSlot": 0 },
+          "group": "bones",
           "labelA": "Rooted",
-          "labelB": "Drifting"
-        },
-        {
-          "index": 4,
-          "type": "pad",
-          "optionA": { "trackIndex": 20, "clipSlot": 0 },
-          "optionB": { "trackIndex": 21, "clipSlot": 0 },
-          "labelA": "Flowing",
-          "labelB": "Tangled"
-        },
-        {
-          "index": 5,
-          "type": "drums",
-          "optionA": { "trackIndex": 22, "clipSlot": 0 },
-          "optionB": { "trackIndex": 23, "clipSlot": 0 },
-          "labelA": "Patient",
-          "labelB": "Aching"
+          "labelB": "Drifting",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "bass",
+                "trackIndex": 26
+              },
+              {
+                "granularType": "drums",
+                "trackIndex": 27
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "bass",
+                "trackIndex": 28
+              },
+              {
+                "granularType": "drums",
+                "trackIndex": 29
+              }
+            ]
+          }
         }
       ]
     },
     {
       "chapter": "avoidance",
-      "title": "Avoidance",
-      "thresholds": [0.50, 0.50, 0.65, 0.78, 0.88, 0.95],
-      "tempos": [120, 120, 120, 120, 120, 120],
-      "auditionBars": [4, 4, 4, 2, 2, 2],
-      "auditionCycles": [2, 2, 2, 2, 2, 2],
+      "title": "Song 3",
+      "thresholds": [
+        0.5,
+        0.66,
+        0.99
+      ],
+      "tempos": [
+        120,
+        120,
+        120
+      ],
+      "auditionBars": [
+        4,
+        4,
+        2
+      ],
+      "auditionCycles": [
+        2,
+        2,
+        2
+      ],
+      "liveSeed": {
+        "trackIndices": [
+          30,
+          31,
+          32
+        ],
+        "label": "The seed"
+      },
       "layers": [
         {
           "index": 0,
-          "type": "pad",
-          "optionA": { "trackIndex": 24, "clipSlot": 0 },
-          "optionB": { "trackIndex": 25, "clipSlot": 0 },
+          "group": "spark",
           "labelA": "Numb",
-          "labelB": "Buzzing"
+          "labelB": "Buzzing",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 33
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndex": 34
+              }
+            ]
+          }
         },
         {
           "index": 1,
-          "type": "fx",
-          "optionA": { "trackIndex": 26, "clipSlot": 0 },
-          "optionB": { "trackIndex": 27, "clipSlot": 0 },
-          "labelA": "Flat",
-          "labelB": "Manic"
+          "group": "bones",
+          "labelA": "Sealed",
+          "labelB": "Spiraling",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "bass",
+                "trackIndex": 35
+              },
+              {
+                "granularType": "drums",
+                "trackIndex": 36
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "bass",
+                "trackIndex": 37
+              },
+              {
+                "granularType": "drums",
+                "trackIndex": 38
+              }
+            ]
+          }
         },
         {
           "index": 2,
-          "type": "drums",
-          "optionA": { "trackIndex": 28, "clipSlot": 0 },
-          "optionB": { "trackIndex": 29, "clipSlot": 0 },
-          "labelA": "Grey",
-          "labelB": "Neon"
-        },
-        {
-          "index": 3,
-          "type": "bass",
-          "optionA": { "trackIndex": 30, "clipSlot": 0 },
-          "optionB": { "trackIndex": 31, "clipSlot": 0 },
-          "labelA": "Sealed",
-          "labelB": "Spiraling"
-        },
-        {
-          "index": 4,
-          "type": "melody",
-          "optionA": { "trackIndex": 32, "clipSlot": 0 },
-          "optionB": { "trackIndex": 33, "clipSlot": 0 },
+          "group": "flesh",
           "labelA": "Silenced",
-          "labelB": "Screaming"
-        },
-        {
-          "index": 5,
-          "type": "harmony",
-          "optionA": { "trackIndex": 34, "clipSlot": 0 },
-          "optionB": { "trackIndex": 35, "clipSlot": 0 },
-          "labelA": "Dissolving",
-          "labelB": "Shattering"
+          "labelB": "Screaming",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "melody",
+                "trackIndex": 39
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 40
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 41
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "melody",
+                "trackIndex": 42
+              },
+              {
+                "granularType": "pad",
+                "trackIndex": 43
+              },
+              {
+                "granularType": "harmony",
+                "trackIndex": 44
+              }
+            ]
+          }
         }
       ]
     }
   ],
-
   "finale": {
+    "assignmentMode": "auto",
+    "assignmentTimerMs": 30000,
     "bothOptionsSurvive": true,
-    "assemblyTimerMs": 60000,
-    "assemblyGracePeriodMs": 15000,
-    "deliberationTimerMs": 120000,
-    "ambassadorVolunteerTimerMs": 15000,
-    "ceremonyLayerOrder": ["bass", "drums", "pad", "melody", "harmony", "fx"],
+    "crossSongConstraint": false,
     "audioPreviewPath": "/audio/previews",
-    "layerLabels": {
-      "melody": "The Voice",
-      "drums": "The Heartbeat",
-      "pad": "The Warmth",
-      "bass": "The Ground",
-      "harmony": "The Color",
-      "fx": "The Shimmer"
-    },
     "npcMessages": [
-      { "event": "performer_abandonment", "text": "He's gone. We need to do this ourselves." },
-      { "event": "assembly_start", "text": "Choose your role. Find each other." },
-      { "event": "assembly_timer_warning", "text": "Decide now." },
-      { "event": "deliberation_start", "text": "Listen. Decide together." },
-      { "event": "empty_group", "text": "No one chose {layerLabel}. We'll go without it." },
-      { "event": "ambassador_selected", "text": "{layerLabel} has its voice." },
-      { "event": "layer_forfeited", "text": "{layerLabel} goes silent. Not every part survives." },
-      { "event": "ceremony_start", "text": "One by one. Bring it forward." },
-      { "event": "layer_locked", "text": "" },
-      { "event": "final_layer_locked", "text": "That's all of us." },
-      { "event": "ceremony_complete", "text": "He's back. Show him what we built." }
+      {
+        "event": "performer_abandonment",
+        "text": "He's gone. We need to do this ourselves."
+      },
+      {
+        "event": "assignment_start",
+        "text": "Find your voice."
+      },
+      {
+        "event": "live_mix_start",
+        "text": "It's yours. Shape it."
+      }
     ]
   },
-
   "timing": {
     "loopBoundaryBeats": 32,
     "revealSequenceDurationMs": 10000,
@@ -228,160 +413,79 @@
       "stepsPerBeat": 3
     }
   },
-
   "lobby": {
     "waitingMessage": "The show will begin shortly."
   },
-
   "seatIds": [],
-
-  "_v32": "V3.2 config below — not consumed by current (V3.1) code. Used when conductor is updated to V3.2.",
-
   "granularTypes": [
-    { "id": "bass",    "label": "The Ground",    "color": "#TBD", "symbol": "■" },
-    { "id": "drums",   "label": "The Heartbeat", "color": "#TBD", "symbol": "▲" },
-    { "id": "pad",     "label": "The Warmth",    "color": "#TBD", "symbol": "◆" },
-    { "id": "melody",  "label": "The Voice",     "color": "#TBD", "symbol": "✦" },
-    { "id": "harmony", "label": "The Color",     "color": "#TBD", "symbol": "●" },
-    { "id": "fx",      "label": "The Shimmer",   "color": "#TBD", "symbol": "~" }
+    {
+      "id": "bass",
+      "label": "The Ground",
+      "color": "#TBD",
+      "symbol": "■"
+    },
+    {
+      "id": "drums",
+      "label": "The Heartbeat",
+      "color": "#TBD",
+      "symbol": "▲"
+    },
+    {
+      "id": "pad",
+      "label": "The Warmth",
+      "color": "#TBD",
+      "symbol": "◆"
+    },
+    {
+      "id": "melody",
+      "label": "The Voice",
+      "color": "#TBD",
+      "symbol": "✦"
+    },
+    {
+      "id": "harmony",
+      "label": "The Color",
+      "color": "#TBD",
+      "symbol": "●"
+    },
+    {
+      "id": "fx",
+      "label": "The Shimmer",
+      "color": "#TBD",
+      "symbol": "~"
+    }
   ],
-
   "layerGroups": [
-    { "id": "bones", "label": "The Foundation", "granularTypes": ["bass", "drums"] },
-    { "id": "flesh", "label": "The Character",  "granularTypes": ["melody", "harmony", "pad"] },
-    { "id": "spark", "label": "The Edge",        "granularTypes": ["fx"] }
-  ],
-
-  "v32Attempts": [
     {
-      "chapter": "ambition",
-      "title": "Song 1",
-      "thresholds": [0.50, 0.66, 0.99],
-      "tempos": [120, 120, 120],
-      "auditionBars": [4, 4, 2],
-      "auditionCycles": [2, 2, 2],
-      "liveSeed": { "trackIndices": [0, 1, 2], "label": "The seed" },
-      "layers": [
-        {
-          "index": 0,
-          "group": "bones",
-          "labelA": "Heavy. Driving.",
-          "labelB": "Light. Floating.",
-          "optionA": { "tracks": [{ "granularType": "bass", "trackIndex": 3 }, { "granularType": "drums", "trackIndex": 4 }] },
-          "optionB": { "tracks": [{ "granularType": "bass", "trackIndex": 5 }, { "granularType": "drums", "trackIndex": 6 }] }
-        },
-        {
-          "index": 1,
-          "group": "flesh",
-          "labelA": "Warm. Open.",
-          "labelB": "Cool. Guarded.",
-          "optionA": { "tracks": [{ "granularType": "melody", "trackIndex": 7 }, { "granularType": "pad", "trackIndex": 8 }, { "granularType": "harmony", "trackIndex": 9 }] },
-          "optionB": { "tracks": [{ "granularType": "melody", "trackIndex": 10 }, { "granularType": "pad", "trackIndex": 11 }, { "granularType": "harmony", "trackIndex": 12 }] }
-        },
-        {
-          "index": 2,
-          "group": "spark",
-          "labelA": "Bright. Sharp.",
-          "labelB": "Dark. Soft.",
-          "optionA": { "tracks": [{ "granularType": "fx", "trackIndex": 13 }] },
-          "optionB": { "tracks": [{ "granularType": "fx", "trackIndex": 14 }] }
-        }
+      "id": "bones",
+      "label": "The Foundation",
+      "granularTypes": [
+        "bass",
+        "drums"
       ]
     },
     {
-      "chapter": "love",
-      "title": "Song 2",
-      "thresholds": [0.50, 0.66, 0.99],
-      "tempos": [120, 120, 120],
-      "auditionBars": [4, 4, 2],
-      "auditionCycles": [2, 2, 2],
-      "liveSeed": { "trackIndices": [15, 16, 17], "label": "The seed" },
-      "layers": [
-        {
-          "index": 0,
-          "group": "flesh",
-          "labelA": "Tender",
-          "labelB": "Electric",
-          "optionA": { "tracks": [{ "granularType": "melody", "trackIndex": 18 }, { "granularType": "pad", "trackIndex": 19 }, { "granularType": "harmony", "trackIndex": 20 }] },
-          "optionB": { "tracks": [{ "granularType": "melody", "trackIndex": 21 }, { "granularType": "pad", "trackIndex": 22 }, { "granularType": "harmony", "trackIndex": 23 }] }
-        },
-        {
-          "index": 1,
-          "group": "spark",
-          "labelA": "Open",
-          "labelB": "Guarded",
-          "optionA": { "tracks": [{ "granularType": "fx", "trackIndex": 24 }] },
-          "optionB": { "tracks": [{ "granularType": "fx", "trackIndex": 25 }] }
-        },
-        {
-          "index": 2,
-          "group": "bones",
-          "labelA": "Rooted",
-          "labelB": "Drifting",
-          "optionA": { "tracks": [{ "granularType": "bass", "trackIndex": 26 }, { "granularType": "drums", "trackIndex": 27 }] },
-          "optionB": { "tracks": [{ "granularType": "bass", "trackIndex": 28 }, { "granularType": "drums", "trackIndex": 29 }] }
-        }
+      "id": "flesh",
+      "label": "The Character",
+      "granularTypes": [
+        "melody",
+        "harmony",
+        "pad"
       ]
     },
     {
-      "chapter": "avoidance",
-      "title": "Song 3",
-      "thresholds": [0.50, 0.66, 0.99],
-      "tempos": [120, 120, 120],
-      "auditionBars": [4, 4, 2],
-      "auditionCycles": [2, 2, 2],
-      "liveSeed": { "trackIndices": [30, 31, 32], "label": "The seed" },
-      "layers": [
-        {
-          "index": 0,
-          "group": "spark",
-          "labelA": "Numb",
-          "labelB": "Buzzing",
-          "optionA": { "tracks": [{ "granularType": "fx", "trackIndex": 33 }] },
-          "optionB": { "tracks": [{ "granularType": "fx", "trackIndex": 34 }] }
-        },
-        {
-          "index": 1,
-          "group": "bones",
-          "labelA": "Sealed",
-          "labelB": "Spiraling",
-          "optionA": { "tracks": [{ "granularType": "bass", "trackIndex": 35 }, { "granularType": "drums", "trackIndex": 36 }] },
-          "optionB": { "tracks": [{ "granularType": "bass", "trackIndex": 37 }, { "granularType": "drums", "trackIndex": 38 }] }
-        },
-        {
-          "index": 2,
-          "group": "flesh",
-          "labelA": "Silenced",
-          "labelB": "Screaming",
-          "optionA": { "tracks": [{ "granularType": "melody", "trackIndex": 39 }, { "granularType": "pad", "trackIndex": 40 }, { "granularType": "harmony", "trackIndex": 41 }] },
-          "optionB": { "tracks": [{ "granularType": "melody", "trackIndex": 42 }, { "granularType": "pad", "trackIndex": 43 }, { "granularType": "harmony", "trackIndex": 44 }] }
-        }
+      "id": "spark",
+      "label": "The Edge",
+      "granularTypes": [
+        "fx"
       ]
     }
   ],
-
-  "v32Finale": {
-    "assignmentMode": "auto",
-    "assignmentTimerMs": 30000,
-    "bothOptionsSurvive": true,
-    "crossSongConstraint": false,
-    "audioPreviewPath": "/audio/previews",
-    "npcMessages": [
-      { "event": "performer_abandonment", "text": "He's gone. We need to do this ourselves." },
-      { "event": "assignment_start", "text": "Find your voice." },
-      { "event": "live_mix_start", "text": "It's yours. Shape it." }
-    ]
-  },
-
   "_comments": {
-    "trackIndexFormula": "songIndex * 12 + layerIndex * 2 + optionOffset. With 6 layers: Song 0 = tracks 0-11, Song 1 = tracks 12-23, Song 2 = tracks 24-35. Option A = even index, Option B = odd index.",
-    "layerOrdering": "Layers are staggered across songs so different types unlock first. Song 1 (ambition): bass/drums/melody/harmony/pad/fx. Song 2 (love): melody/harmony/fx/bass/pad/drums. Song 3 (avoidance): pad/fx/drums/bass/melody/harmony.",
-    "thresholds": "Per-layer doubt thresholds. winningProportion must meet or exceed threshold to pass. Layer 0-1: 0.50 (any majority passes). Layer 5: 0.95 (near-perfect alignment required).",
-    "tempos": "Per-layer BPM. Increases each layer to create urgency. Layer 0: 120 BPM (relaxed), Layer 5: 170 BPM (desperate).",
-    "auditionBars": "Bars per option per cycle (A and B each get this many bars per cycle). Total voting window = auditionBars * 2 * auditionCycles * barsToMs(1, tempo).",
-    "auditionCycles": "Number of A-B cycles per layer. 1 = A then B (default). 2 = A-B-A-B. Each cycle plays option A for auditionBars bars, then option B for auditionBars bars.",
-    "audioReferences": "trackIndex values follow the formula above. clipSlot is 0-indexed. Replace with actual Ableton layout.",
-    "optionLabels": "Emotional taglines are placeholders. Replace with labels that match actual musical content.",
+    "stagger": "Each layer group appears at position 0 of one song: Song 1 bones/flesh/spark, Song 2 flesh/spark/bones, Song 3 spark/bones/flesh.",
+    "thresholds": "V3.2 threshold curve [0.50, 0.66, 0.99]. Layer 0 always passes. Layer 1 needs ~2/3 majority. Layer 2 almost always collapses.",
+    "trackIndices": "Placeholder indices — replace with actual Ableton layout. Live seed: songs 0/1/2 use tracks 0-2, 15-17, 30-32 respectively.",
+    "auditionBars": "Bars per option per cycle. Total voting window = auditionBars * 2 * auditionCycles * barsToMs(1, tempo).",
     "collapseReturnTrackIndex": "The Ableton return track index for collapse effects is configured in config/ableton-layout.json."
   }
 }

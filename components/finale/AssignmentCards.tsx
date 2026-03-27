@@ -1,42 +1,49 @@
+/**
+ * AssignmentCards (V3.2)
+ *
+ * Self-select assignment UI. Shows tappable cards for each granular type
+ * with live member counts. Config-driven — reads types from props, not hardcoded.
+ *
+ * Replaces V3.1 AssemblyCards.tsx which used hardcoded LayerType + getLayerIdentity.
+ */
+
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { getLayerIdentity } from '@/lib/identity';
-import type { LayerType } from '@/conductor/types';
+import type { GranularType } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
-
-interface AssemblyCardsProps {
-  myGroup: LayerType | null;
-  groupSizes: Array<{ layerType: LayerType; count: number }>;
+interface AssignmentCardsProps {
+  myGranularType: string | null;
+  granularTypes: GranularType[];
+  groupSizes: Array<{ granularType: string; count: number }>;
   timerRemaining: number;
-  onJoinGroup: (layerType: LayerType) => void;
+  onSelect: (granularType: string) => void;
   socket: Socket | null;
 }
 
-export function AssemblyCards({
-  myGroup,
+export function AssignmentCards({
+  myGranularType,
+  granularTypes,
   groupSizes: initialSizes,
   timerRemaining,
-  onJoinGroup,
+  onSelect,
   socket,
-}: AssemblyCardsProps) {
-  // Capture the initial timer value as the duration reference for the progress bar
+}: AssignmentCardsProps) {
   const timerDurationRef = useRef(timerRemaining);
-  const [liveSizes, setLiveSizes] = useState<Array<{ layerType: LayerType; count: number }>>(initialSizes);
+  const [liveSizes, setLiveSizes] = useState(initialSizes);
 
-  // Subscribe to high-frequency group_update events (~2 Hz during assembly)
+  // Subscribe to high-frequency group_update events (~2 Hz during assignment)
   useEffect(() => {
     if (!socket) return;
-    const handler = (data: { groupSizes: Array<{ layerType: LayerType; count: number }>; undecidedCount: number }) => {
+    const handler = (data: { groupSizes: Array<{ granularType: string; count: number }> }) => {
       setLiveSizes(data.groupSizes);
     };
     socket.on('group_update', handler);
     return () => { socket.off('group_update', handler); };
   }, [socket]);
 
-  // Keep initial sizes in sync with state_sync updates when no socket events arrive
+  // Keep in sync with state_sync updates
   useEffect(() => {
     setLiveSizes(initialSizes);
   }, [initialSizes]);
@@ -45,8 +52,8 @@ export function AssemblyCards({
   const timerDuration = timerDurationRef.current;
   const timerPct = timerDuration > 0 ? Math.max(0, timerRemaining / timerDuration) : 0;
 
-  const countFor = (type: LayerType) =>
-    liveSizes.find(s => s.layerType === type)?.count ?? 0;
+  const countFor = (typeId: string) =>
+    liveSizes.find(s => s.granularType === typeId)?.count ?? 0;
 
   return (
     <div style={{ width: '100%', minHeight: '100vh', display: 'flex', flexDirection: 'column', paddingBottom: '24px', boxSizing: 'border-box' }}>
@@ -78,23 +85,22 @@ export function AssemblyCards({
         gap: '10px',
         padding: '0 16px',
       }}>
-        {LAYER_ORDER.map((type) => {
-          const identity = getLayerIdentity(type);
-          const count = countFor(type);
-          const selected = myGroup === type;
+        {granularTypes.map((gt) => {
+          const count = countFor(gt.id);
+          const selected = myGranularType === gt.id;
 
           return (
             <button
-              key={type}
-              onClick={() => onJoinGroup(type)}
+              key={gt.id}
+              onClick={() => onSelect(gt.id)}
               aria-pressed={selected}
               style={{
                 flex: '1 1 calc(50% - 5px)',
                 minWidth: 0,
                 padding: '18px 12px',
-                backgroundColor: selected ? `${identity.color}18` : '#0d0d0d',
+                backgroundColor: selected ? `${gt.color}18` : '#0d0d0d',
                 border: selected
-                  ? `2px solid ${identity.color}`
+                  ? `2px solid ${gt.color}`
                   : '2px solid #222',
                 borderRadius: '10px',
                 cursor: 'pointer',
@@ -102,7 +108,7 @@ export function AssemblyCards({
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: selected ? `0 0 16px ${identity.color}40` : 'none',
+                boxShadow: selected ? `0 0 16px ${gt.color}40` : 'none',
                 transition: 'border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease',
                 WebkitTapHighlightColor: 'transparent',
                 userSelect: 'none',
@@ -111,19 +117,19 @@ export function AssemblyCards({
               <span style={{
                 fontSize: '2rem',
                 lineHeight: 1,
-                color: identity.color,
-                filter: selected ? `drop-shadow(0 0 8px ${identity.color}80)` : 'none',
+                color: gt.color,
+                filter: selected ? `drop-shadow(0 0 8px ${gt.color}80)` : 'none',
               }}>
-                {identity.symbol}
+                {gt.symbol}
               </span>
               <span style={{
                 fontSize: '0.8rem',
                 fontWeight: 600,
-                color: selected ? identity.color : 'rgba(255,255,255,0.7)',
+                color: selected ? gt.color : 'rgba(255,255,255,0.7)',
                 textAlign: 'center',
                 letterSpacing: '0.02em',
               }}>
-                {identity.label}
+                {gt.label}
               </span>
               <span style={{
                 fontSize: '0.75rem',

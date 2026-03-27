@@ -1,5 +1,5 @@
 /**
- * State Serialization Utilities
+ * State Serialization Utilities (V3.2)
  *
  * Handles proper serialization/deserialization of ShowState for Socket.IO
  * and backup/persistence.
@@ -8,16 +8,12 @@
  * Solution: Convert Maps to [key, value][] arrays before sending,
  *           reconstruct after receiving.
  *
- * Maps in ShowState (V3):
+ * Maps in ShowState (V3.2):
  *   - ShowState.users: Map<UserId, User>
- *   - ShowState.config.finale.layerLabels: Map<LayerType, string>
- *   - FinaleState.assembly.groups: Map<LayerType, UserId[]>
- *   - FinaleState.deliberation.groupVotes: Map<LayerType, Map<UserId, string>>
- *   - FinaleState.deliberation.chosenFragments: Map<LayerType, string | null>
- *   - FinaleState.deliberation.ambassadorVolunteers: Map<LayerType, UserId[]>
- *   - FinaleState.deliberation.ambassadors: Map<LayerType, UserId | null>
- *   - FinaleState.ceremony.lockedLayers: Map<LayerType, string>
- *   - FinaleState.performerMix.activeLayers: Map<LayerType, string | null>
+ *   - V32FinaleState.assignment.groups: Map<string, UserId[]>
+ *   - V32FinaleState.liveMix.votes: Map<string, Map<UserId, LiveMixVote>>
+ *   - V32FinaleState.liveMix.activeFragments: Map<string, string>
+ *   - V32FinaleState.liveMix.performerOverrides: Map<string, string>
  *
  * Usage:
  *   Server: socket.emit('state_sync', serializeState(state))
@@ -28,58 +24,37 @@ import type {
   ShowState,
   UserId,
   User,
-  LayerType,
-  FinaleState,
+  V32FinaleState,
+  LiveMixVote,
 } from '@/conductor/types';
 
 // ============================================================================
 // Serialized Types
 // ============================================================================
 
-export interface SerializedAssembly {
-  groups: [LayerType, UserId[]][];
-  undecidedUsers: UserId[];
-  timerRemaining: number;
-  timerDuration: number;
+export interface SerializedAssignment {
+  mode: 'auto' | 'self_select';
+  groups: [string, UserId[]][];
+  timerRemaining: number | null;
 }
 
-export interface SerializedDeliberation {
-  groupVotes: [LayerType, [UserId, string][]][];
-  chosenFragments: [LayerType, string | null][];
-  ambassadorVolunteers: [LayerType, UserId[]][];
-  ambassadors: [LayerType, UserId | null][];
-  timerRemaining: number;
-  volunteerTimerRemaining: number | null;
-}
-
-export interface SerializedCeremony {
-  layerOrder: LayerType[];
-  currentIndex: number;
-  currentAmbassador: UserId | null;
-  altarReady: boolean;
-  lockedLayers: [LayerType, string][];
-  forfeitedLayers: LayerType[];
-  ceremonyComplete: boolean;
-}
-
-export interface SerializedPerformerMix {
-  activeLayers: [LayerType, string | null][];
-  pendingChanges: FinaleState['performerMix']['pendingChanges'];
+export interface SerializedLiveMix {
+  votes: [string, [UserId, LiveMixVote][]][];
+  activeFragments: [string, string][];
+  lockedTypes: string[];
+  performerOverrides: [string, string][];
+  liveTracksActive: string[];
   loopPosition: number;
   loopCount: number;
-  liveTracksActive: string[];
 }
 
 export interface SerializedFinaleState {
-  phase: FinaleState['phase'];
-  availableFragments: FinaleState['availableFragments'];
-  allFragments: FinaleState['allFragments'];
-  lockedFragments: FinaleState['lockedFragments'];
-  assembly: SerializedAssembly;
-  deliberation: SerializedDeliberation;
-  ceremony: SerializedCeremony;
-  npc: FinaleState['npc'];
-  performerMix: SerializedPerformerMix;
+  phase: V32FinaleState['phase'];
+  availableFragments: V32FinaleState['availableFragments'];
+  allFragments: V32FinaleState['allFragments'];
+  assignment: SerializedAssignment;
+  liveMix: SerializedLiveMix;
+  npc: V32FinaleState['npc'];
 }
 
 export interface SerializedShowState {
@@ -99,87 +74,53 @@ export interface SerializedShowState {
 // Finale State Serialize / Deserialize
 // ============================================================================
 
-export function serializeFinaleState(finaleState: FinaleState): SerializedFinaleState {
+export function serializeFinaleState(fs: V32FinaleState): SerializedFinaleState {
   return {
-    phase: finaleState.phase,
-    availableFragments: finaleState.availableFragments,
-    allFragments: finaleState.allFragments,
-    lockedFragments: finaleState.lockedFragments,
-    assembly: {
-      groups: Array.from(finaleState.assembly.groups.entries()),
-      undecidedUsers: finaleState.assembly.undecidedUsers,
-      timerRemaining: finaleState.assembly.timerRemaining,
-      timerDuration: finaleState.assembly.timerDuration,
+    phase: fs.phase,
+    availableFragments: fs.availableFragments,
+    allFragments: fs.allFragments,
+    assignment: {
+      mode: fs.assignment.mode,
+      groups: Array.from(fs.assignment.groups.entries()),
+      timerRemaining: fs.assignment.timerRemaining,
     },
-    deliberation: {
-      groupVotes: Array.from(finaleState.deliberation.groupVotes.entries()).map(
-        ([lt, votes]) => [lt, Array.from(votes.entries())] as [LayerType, [UserId, string][]],
+    liveMix: {
+      votes: Array.from(fs.liveMix.votes.entries()).map(
+        ([gt, userVotes]) => [gt, Array.from(userVotes.entries())] as [string, [UserId, LiveMixVote][]],
       ),
-      chosenFragments: Array.from(finaleState.deliberation.chosenFragments.entries()),
-      ambassadorVolunteers: Array.from(finaleState.deliberation.ambassadorVolunteers.entries()),
-      ambassadors: Array.from(finaleState.deliberation.ambassadors.entries()),
-      timerRemaining: finaleState.deliberation.timerRemaining,
-      volunteerTimerRemaining: finaleState.deliberation.volunteerTimerRemaining,
+      activeFragments: Array.from(fs.liveMix.activeFragments.entries()),
+      lockedTypes: fs.liveMix.lockedTypes,
+      performerOverrides: Array.from(fs.liveMix.performerOverrides.entries()),
+      liveTracksActive: fs.liveMix.liveTracksActive,
+      loopPosition: fs.liveMix.loopPosition,
+      loopCount: fs.liveMix.loopCount,
     },
-    ceremony: {
-      layerOrder: finaleState.ceremony.layerOrder,
-      currentIndex: finaleState.ceremony.currentIndex,
-      currentAmbassador: finaleState.ceremony.currentAmbassador,
-      altarReady: finaleState.ceremony.altarReady,
-      lockedLayers: Array.from(finaleState.ceremony.lockedLayers.entries()),
-      forfeitedLayers: finaleState.ceremony.forfeitedLayers,
-      ceremonyComplete: finaleState.ceremony.ceremonyComplete,
-    },
-    npc: finaleState.npc,
-    performerMix: {
-      activeLayers: Array.from(finaleState.performerMix.activeLayers.entries()),
-      pendingChanges: finaleState.performerMix.pendingChanges,
-      loopPosition: finaleState.performerMix.loopPosition,
-      loopCount: finaleState.performerMix.loopCount,
-      liveTracksActive: finaleState.performerMix.liveTracksActive,
-    },
+    npc: fs.npc,
   };
 }
 
-export function deserializeFinaleState(data: SerializedFinaleState): FinaleState {
+export function deserializeFinaleState(data: SerializedFinaleState): V32FinaleState {
   return {
     phase: data.phase,
     availableFragments: data.availableFragments,
     allFragments: data.allFragments,
-    lockedFragments: data.lockedFragments,
-    assembly: {
-      groups: new Map(data.assembly.groups),
-      undecidedUsers: data.assembly.undecidedUsers,
-      timerRemaining: data.assembly.timerRemaining,
-      timerDuration: data.assembly.timerDuration,
+    assignment: {
+      mode: data.assignment.mode,
+      groups: new Map(data.assignment.groups),
+      timerRemaining: data.assignment.timerRemaining,
     },
-    deliberation: {
-      groupVotes: new Map(
-        data.deliberation.groupVotes.map(([lt, votes]) => [lt, new Map(votes)]),
+    liveMix: {
+      votes: new Map(
+        data.liveMix.votes.map(([gt, userVotes]) => [gt, new Map(userVotes)]),
       ),
-      chosenFragments: new Map(data.deliberation.chosenFragments),
-      ambassadorVolunteers: new Map(data.deliberation.ambassadorVolunteers),
-      ambassadors: new Map(data.deliberation.ambassadors),
-      timerRemaining: data.deliberation.timerRemaining,
-      volunteerTimerRemaining: data.deliberation.volunteerTimerRemaining,
-    },
-    ceremony: {
-      layerOrder: data.ceremony.layerOrder,
-      currentIndex: data.ceremony.currentIndex,
-      currentAmbassador: data.ceremony.currentAmbassador,
-      altarReady: data.ceremony.altarReady,
-      lockedLayers: new Map(data.ceremony.lockedLayers),
-      forfeitedLayers: data.ceremony.forfeitedLayers,
-      ceremonyComplete: data.ceremony.ceremonyComplete,
+      activeFragments: new Map(data.liveMix.activeFragments),
+      lockedTypes: data.liveMix.lockedTypes,
+      performerOverrides: new Map(data.liveMix.performerOverrides),
+      liveTracksActive: data.liveMix.liveTracksActive,
+      loopPosition: data.liveMix.loopPosition,
+      loopCount: data.liveMix.loopCount,
     },
     npc: data.npc,
-    performerMix: {
-      activeLayers: new Map(data.performerMix.activeLayers),
-      pendingChanges: data.performerMix.pendingChanges,
-      loopPosition: data.performerMix.loopPosition,
-      loopCount: data.performerMix.loopCount,
-      liveTracksActive: data.performerMix.liveTracksActive,
-    },
   };
 }
 
@@ -192,17 +133,6 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
  * Converts all Maps to [key, value][] arrays.
  */
 export function serializeState(state: ShowState): SerializedShowState {
-  // Serialize config.finale.layerLabels Map to entries array for JSON safety
-  const serializedConfig = {
-    ...state.config,
-    finale: {
-      ...state.config.finale,
-      layerLabels: state.config.finale.layerLabels instanceof Map
-        ? Array.from(state.config.finale.layerLabels.entries())
-        : state.config.finale.layerLabels,
-    },
-  };
-
   return {
     id: state.id,
     phase: state.phase,
@@ -210,7 +140,7 @@ export function serializeState(state: ShowState): SerializedShowState {
     attempts: state.attempts,
     users: Array.from(state.users.entries()),
     finaleState: state.finaleState ? serializeFinaleState(state.finaleState) : null,
-    config: serializedConfig as unknown as ShowState['config'],
+    config: state.config,
     version: state.version,
     lastUpdated: state.lastUpdated,
     paused: state.paused,
@@ -222,19 +152,6 @@ export function serializeState(state: ShowState): SerializedShowState {
  * Reconstructs all Maps from [key, value][] arrays.
  */
 export function deserializeState(data: SerializedShowState): ShowState {
-  // Reconstruct config.finale.layerLabels Map from serialized form
-  const config = {
-    ...data.config,
-    finale: {
-      ...data.config.finale,
-      layerLabels: data.config.finale.layerLabels instanceof Map
-        ? data.config.finale.layerLabels
-        : Array.isArray(data.config.finale.layerLabels)
-          ? new Map(data.config.finale.layerLabels as [LayerType, string][])
-          : new Map(Object.entries(data.config.finale.layerLabels ?? {}) as [LayerType, string][]),
-    },
-  };
-
   return {
     id: data.id,
     phase: data.phase,
@@ -242,7 +159,7 @@ export function deserializeState(data: SerializedShowState): ShowState {
     attempts: data.attempts,
     users: new Map(data.users),
     finaleState: data.finaleState ? deserializeFinaleState(data.finaleState) : null,
-    config: config as ShowState['config'],
+    config: data.config,
     version: data.version,
     lastUpdated: data.lastUpdated,
     paused: data.paused,

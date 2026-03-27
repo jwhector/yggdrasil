@@ -7,7 +7,7 @@
  * TODO: See DECISIONS.md O3 — chapter + layer color/symbol assignments TBD
  */
 
-import type { Chapter, LayerType } from '@/conductor/types';
+import type { Chapter, LayerType, LayerGroupId, LayerGroupConfig, GranularType } from '@/conductor/types';
 
 export interface ChapterIdentity {
   color: string;   // CSS color
@@ -52,4 +52,20 @@ export function getLayerIdentity(type: LayerType): LayerIdentity {
 /** Get chapter identity. All chapters are known. */
 export function getChapterIdentity(chapter: Chapter): ChapterIdentity {
   return CHAPTER_IDENTITY[chapter];
+}
+
+/** Get symbol, label, and color for a V3.2 layer group, derived from its first granular type. */
+export function getLayerGroupIdentity(
+  groupId: LayerGroupId,
+  layerGroups: LayerGroupConfig[],
+  granularTypes: GranularType[],
+): { symbol: string; label: string; color: string } {
+  const group = layerGroups.find((g) => g.id === groupId);
+  const firstTypeId = group?.granularTypes[0];
+  const granularType = granularTypes.find((t) => t.id === firstTypeId);
+  return {
+    symbol: granularType?.symbol ?? groupId[0].toUpperCase(),
+    label: group?.label ?? groupId,
+    color: granularType?.color ?? '#6b7280',
+  };
 }

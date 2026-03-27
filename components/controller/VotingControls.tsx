@@ -8,7 +8,6 @@
 'use client';
 
 import type { ShowState, ConductorCommand, LayerPhase } from '@/conductor/types';
-import { getLayerIdentity } from '@/lib/identity';
 
 interface VotingControlsProps {
   fullState: ShowState;
@@ -22,7 +21,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
 
   const { currentLayerIndex, currentLayerPhase, layerPlan, votes, currentAuditionOption } = attempt;
   const currentLayer = layerPlan[currentLayerIndex];
-  const layerIdentity = currentLayer ? getLayerIdentity(currentLayer.type) : null;
+  const layerGroup = currentLayer?.group ?? null;
 
   const layerVotes = votes.filter(v => v.layerIndex === currentLayerIndex);
   const votesA = layerVotes.filter(v => v.choice === 'A').length;
@@ -46,8 +45,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
             index={currentLayerIndex}
             total={layerPlan.length}
             phase={currentLayerPhase}
-            type={currentLayer?.type}
-            color={layerIdentity?.color}
+            type={layerGroup ?? undefined}
           />
           {isAuditioning && currentAuditionOption && (
             <span style={{

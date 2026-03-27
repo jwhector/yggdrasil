@@ -27,6 +27,7 @@ import type {
   ConductorCommand,
   ConductorEvent,
   LayerPhase,
+  AuditionProgress,
 } from '../conductor/types';
 import type { OSCBridge } from './osc';
 
@@ -44,6 +45,8 @@ export interface TimingEngineConfig {
   oscBridge: OSCBridge | null;
   /** BPM for fallback timing (default: 120) */
   fallbackBpm: number;
+  /** Callback for audition progress updates (~4 Hz during auditioning) */
+  onAuditionProgress?: (progress: AuditionProgress) => void;
 }
 
 /** Beat position within the current musical context. */
@@ -169,9 +172,7 @@ export function createTimingEngine(
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let assemblyTimer: NodeJS.Timeout | null = null;
-  let deliberationTimer: NodeJS.Timeout | null = null;
-  let ambassadorVolunteerTimer: NodeJS.Timeout | null = null;
+  let assignmentTimer: NodeJS.Timeout | null = null;
   let auditionState: AuditionTrackingState | null = null;
   let fallbackAuditionInterval: NodeJS.Timeout | null = null;
   let fallbackAuditionLoopIndex = 0;
@@ -196,6 +197,10 @@ export function createTimingEngine(
 
   // BPM from Ableton (for sub-beat interpolation in audio router)
   let currentBpm: number = engineConfig.fallbackBpm;
+
+  // Audition progress emission (~4 Hz)
+  let auditionProgressInterval: NodeJS.Timeout | null = null;
+  let auditionStartTime: number = 0;
 
   // --------------------------------------------------------------------------
   // Timer Management
@@ -293,82 +298,114 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
-  // Finale Timers (Assembly, Deliberation, Ambassador Volunteer)
+  // Finale Timers (Assignment — self-select mode only)
   // --------------------------------------------------------------------------
 
-  function startAssemblyTimer(durationMs: number): void {
-    clearAssemblyTimer();
-    console.log(`[Timing] Assembly timer: ${durationMs}ms`);
-    assemblyTimer = setTimeout(() => {
+  function startAssignmentTimer(durationMs: number): void {
+    clearAssignmentTimer();
+    console.log(`[Timing] Assignment timer: ${durationMs}ms`);
+    assignmentTimer = setTimeout(() => {
       if (!running) return;
       const state = getState();
-      if (state.phase === 'finale_assembly') {
-        console.log('[Timing] Assembly timer expired → ASSEMBLY_TIMER_EXPIRED');
-        sendCommand({ type: 'ASSEMBLY_TIMER_EXPIRED' });
+      if (state.phase === 'finale_assignment') {
+        console.log('[Timing] Assignment timer expired → ASSIGNMENT_COMPLETE');
+        sendCommand({ type: 'ASSIGNMENT_COMPLETE' });
       }
-      assemblyTimer = null;
+      assignmentTimer = null;
     }, durationMs);
   }
 
-  function clearAssemblyTimer(): void {
-    if (assemblyTimer) {
-      clearTimeout(assemblyTimer);
-      assemblyTimer = null;
-    }
-  }
-
-  function startDeliberationTimer(durationMs: number): void {
-    clearDeliberationTimer();
-    console.log(`[Timing] Deliberation timer: ${durationMs}ms`);
-    deliberationTimer = setTimeout(() => {
-      if (!running) return;
-      const state = getState();
-      if (state.phase === 'finale_deliberation') {
-        console.log('[Timing] Deliberation timer expired → DELIBERATION_TIMER_EXPIRED');
-        sendCommand({ type: 'DELIBERATION_TIMER_EXPIRED' });
-      }
-      deliberationTimer = null;
-    }, durationMs);
-  }
-
-  function clearDeliberationTimer(): void {
-    if (deliberationTimer) {
-      clearTimeout(deliberationTimer);
-      deliberationTimer = null;
-    }
-  }
-
-  function startAmbassadorVolunteerTimer(durationMs: number): void {
-    clearAmbassadorVolunteerTimer();
-    console.log(`[Timing] Ambassador volunteer timer: ${durationMs}ms`);
-    ambassadorVolunteerTimer = setTimeout(() => {
-      if (!running) return;
-      const state = getState();
-      if (state.phase === 'finale_deliberation') {
-        console.log('[Timing] Ambassador volunteer timer expired → AMBASSADOR_VOLUNTEER_TIMER_EXPIRED');
-        // Conductor resolves all groups in one pass when this fires
-        sendCommand({ type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
-      }
-      ambassadorVolunteerTimer = null;
-    }, durationMs);
-  }
-
-  function clearAmbassadorVolunteerTimer(): void {
-    if (ambassadorVolunteerTimer) {
-      clearTimeout(ambassadorVolunteerTimer);
-      ambassadorVolunteerTimer = null;
+  function clearAssignmentTimer(): void {
+    if (assignmentTimer) {
+      clearTimeout(assignmentTimer);
+      assignmentTimer = null;
     }
   }
 
   function clearAllFinaleTimers(): void {
-    clearAssemblyTimer();
-    clearDeliberationTimer();
-    clearAmbassadorVolunteerTimer();
+    clearAssignmentTimer();
   }
 
   // --------------------------------------------------------------------------
   // Layer Phase Handlers
   // --------------------------------------------------------------------------
+
+  // --------------------------------------------------------------------------
+  // Audition Progress Emission (~4 Hz)
+  // --------------------------------------------------------------------------
+
+  const AUDITION_PROGRESS_INTERVAL_MS = 250; // ~4 Hz
+
+  function startAuditionProgressEmission(): void {
+    stopAuditionProgressEmission();
+    if (!engineConfig.onAuditionProgress) return;
+
+    auditionStartTime = Date.now();
+
+    auditionProgressInterval = setInterval(() => {
+      if (!running) return;
+      const progress = computeAuditionProgress();
+      if (progress && engineConfig.onAuditionProgress) {
+        engineConfig.onAuditionProgress(progress);
+      }
+    }, AUDITION_PROGRESS_INTERVAL_MS);
+  }
+
+  function stopAuditionProgressEmission(): void {
+    if (auditionProgressInterval) {
+      clearInterval(auditionProgressInterval);
+      auditionProgressInterval = null;
+    }
+  }
+
+  function computeAuditionProgress(): AuditionProgress | null {
+    const state = getState();
+    if (state.phase !== 'attempt_build') return null;
+
+    const attempt = state.attempts[state.currentAttemptIndex];
+    if (!attempt || attempt.currentLayerPhase !== 'auditioning') return null;
+
+    const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+    const layerIndex = attempt.currentLayerIndex;
+    const auditionBars = attemptConfig?.auditionBars?.[layerIndex] ?? 4;
+    const tempo = attemptConfig?.tempos?.[layerIndex] ?? engineConfig.fallbackBpm;
+    const auditionCycles = attemptConfig?.auditionCycles?.[layerIndex] ?? 1;
+    const currentOption = attempt.currentAuditionOption ?? 'A';
+
+    const optionDurationMs = barsToMs(auditionBars, tempo);
+    const votingWindowMs = optionDurationMs * auditionCycles * 2;
+    const elapsedMs = Date.now() - auditionStartTime;
+
+    // Compute bar progress within the current option's audition
+    let barProgress: number;
+    if (engineConfig.oscBridge && auditionState) {
+      // OSC mode: derive from beat position
+      const beatsSinceToggle = auditionState.lastToggleBeat >= 0
+        ? currentAbsoluteBeat - auditionState.lastToggleBeat
+        : 0;
+      barProgress = Math.min(beatsSinceToggle / auditionState.beatsPerLoop, 1.0);
+    } else {
+      // Fallback mode: derive from elapsed time within current option
+      const timeInCurrentOption = elapsedMs % optionDurationMs;
+      // After first option switch, use modular position
+      if (elapsedMs < optionDurationMs) {
+        barProgress = elapsedMs / optionDurationMs;
+      } else {
+        barProgress = timeInCurrentOption / optionDurationMs;
+      }
+      barProgress = Math.min(Math.max(barProgress, 0), 1.0);
+    }
+
+    return {
+      layerIndex,
+      currentOption,
+      barProgress,
+      totalBars: auditionBars,
+      tempo,
+      votingWindowMs,
+      elapsedMs,
+    };
+  }
 
   /**
    * Start audition tracking for the current layer.
@@ -389,6 +426,9 @@ export function createTimingEngine(
     const beatsPerLoop = auditionBars * BEATS_PER_BAR;
     const auditionCycles = attemptConfig?.auditionCycles?.[layerIndex] ?? 1;
     const totalLoops = auditionCycles * 2; // Each cycle = A + B
+
+    // Start progress emission (~4 Hz)
+    startAuditionProgressEmission();
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats; first beat sets the baseline in handleBeatEvent
@@ -443,6 +483,7 @@ export function createTimingEngine(
    */
   function stopAuditionTracking(): void {
     auditionState = null;
+    stopAuditionProgressEmission();
     if (fallbackAuditionInterval) {
       clearInterval(fallbackAuditionInterval);
       fallbackAuditionInterval = null;
@@ -479,12 +520,12 @@ export function createTimingEngine(
       fallbackLoopInterval = setInterval(() => {
         if (!running) return;
         const state = getState();
-        if (state.phase !== 'finale_performer_mix') {
+        if (state.phase !== 'finale_live_mix') {
           stopLoopTracking();
           return;
         }
-        console.log('[Timing] Loop boundary → FIRE_PENDING_CHANGES');
-        sendCommand({ type: 'FIRE_PENDING_CHANGES' });
+        // TODO: Live mix loop boundary handling (V3.2 live mix task)
+        console.log('[Timing] Loop boundary (live mix)');
       }, intervalMs);
 
       console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
@@ -626,9 +667,9 @@ export function createTimingEngine(
       }
     }
 
-    // --- Loop boundary tracking (performer mix) ---
+    // --- Loop boundary tracking (live mix) ---
     if (!loopState) return;
-    if (state.phase !== 'finale_performer_mix') return;
+    if (state.phase !== 'finale_live_mix') return;
 
     // Initialize baseline on first beat
     if (loopState.lastBoundaryBeat < 0) {
@@ -638,8 +679,8 @@ export function createTimingEngine(
     const beatsSinceBoundary = monotonicBeat - loopState.lastBoundaryBeat;
     if (beatsSinceBoundary >= loopState.loopBeats) {
       loopState.lastBoundaryBeat = monotonicBeat;
-      console.log(`[Timing] Loop boundary at monotonic beat ${monotonicBeat} → FIRE_PENDING_CHANGES`);
-      sendCommand({ type: 'FIRE_PENDING_CHANGES' });
+      // TODO: Live mix loop boundary handling (V3.2 live mix task)
+      console.log(`[Timing] Loop boundary at monotonic beat ${monotonicBeat} (live mix)`);
     }
   }
 
@@ -731,45 +772,25 @@ export function createTimingEngine(
       stopLoopTracking();
       clearAllFinaleTimers();
 
-      if (showPhaseEvent.phase === 'finale_performer_mix') {
+      if (showPhaseEvent.phase === 'finale_live_mix') {
         startLoopTracking();
       }
     }
 
-    // Assembly started → start assembly timer
-    const assemblyStartedEvent = events.find(e => e.type === 'ASSEMBLY_STARTED') as
-      | { type: 'ASSEMBLY_STARTED'; timerDuration: number }
+    // Assignment started (self-select mode) → start assignment timer
+    const assignmentStartedEvent = events.find(e => e.type === 'ASSIGNMENT_STARTED') as
+      | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
       | undefined;
-    if (assemblyStartedEvent) {
-      startAssemblyTimer(assemblyStartedEvent.timerDuration);
-    }
-
-    // Assembly complete → clear assembly timer
-    if (events.some(e => e.type === 'ASSEMBLY_COMPLETE')) {
-      clearAssemblyTimer();
-    }
-
-    // Deliberation started → start deliberation timer
-    const deliberationStartedEvent = events.find(e => e.type === 'DELIBERATION_STARTED') as
-      | { type: 'DELIBERATION_STARTED'; timerDuration: number }
-      | undefined;
-    if (deliberationStartedEvent) {
-      startDeliberationTimer(deliberationStartedEvent.timerDuration);
-    }
-
-    // Deliberation timer resolved → clear main timer, start volunteer timer if set
-    if (events.some(e => e.type === 'FRAGMENT_CHOSEN')) {
-      clearDeliberationTimer();
-      const volunteerMs = state.finaleState?.deliberation.volunteerTimerRemaining;
-      if (volunteerMs && volunteerMs > 0) {
-        startAmbassadorVolunteerTimer(volunteerMs);
+    if (assignmentStartedEvent && assignmentStartedEvent.mode === 'self_select') {
+      const timerMs = state.config.finale.assignmentTimerMs;
+      if (timerMs > 0) {
+        startAssignmentTimer(timerMs);
       }
     }
 
-    // Deliberation complete → clear all deliberation timers
-    if (events.some(e => e.type === 'DELIBERATION_COMPLETE')) {
-      clearDeliberationTimer();
-      clearAmbassadorVolunteerTimer();
+    // Groups assigned → clear assignment timer
+    if (events.some(e => e.type === 'GROUPS_ASSIGNED')) {
+      clearAssignmentTimer();
     }
   }
 
@@ -832,7 +853,7 @@ export function createTimingEngine(
           },
         ]);
       }
-    } else if (state.phase === 'finale_performer_mix') {
+    } else if (state.phase === 'finale_live_mix') {
       startLoopTracking();
     }
   }
@@ -846,7 +867,7 @@ export function createTimingEngine(
     running = false;
     cancelCurrentTimer();
     clearAllFinaleTimers();
-    stopAuditionTracking();
+    stopAuditionTracking(); // Also stops progress emission
     stopLoopTracking();
     stopFallbackBeatTicker();
     beatCallbacks = [];
@@ -889,35 +910,16 @@ export function createTimingEngine(
 
     const elapsed = Date.now() - state.lastUpdated;
 
-    if (state.phase === 'finale_assembly') {
-      const remaining = state.finaleState.assembly.timerRemaining - elapsed;
-      if (remaining > 0) {
-        console.log(`[Timing] Recovering assembly timer: ${remaining}ms remaining`);
-        startAssemblyTimer(remaining);
-      } else {
-        console.log('[Timing] Assembly timer already expired on recovery → firing ASSEMBLY_TIMER_EXPIRED');
-        sendCommand({ type: 'ASSEMBLY_TIMER_EXPIRED' });
-      }
-    } else if (state.phase === 'finale_deliberation') {
-      const volunteerMs = state.finaleState.deliberation.volunteerTimerRemaining;
-      if (volunteerMs !== null) {
-        // Volunteer timer was active
-        const remaining = volunteerMs - elapsed;
+    if (state.phase === 'finale_assignment' && state.finaleState.assignment.mode === 'self_select') {
+      const timerRemaining = state.finaleState.assignment.timerRemaining;
+      if (timerRemaining !== null) {
+        const remaining = timerRemaining - elapsed;
         if (remaining > 0) {
-          console.log(`[Timing] Recovering ambassador volunteer timer: ${remaining}ms remaining`);
-          startAmbassadorVolunteerTimer(remaining);
+          console.log(`[Timing] Recovering assignment timer: ${remaining}ms remaining`);
+          startAssignmentTimer(remaining);
         } else {
-          console.log('[Timing] Volunteer timer already expired on recovery → firing AMBASSADOR_VOLUNTEER_TIMER_EXPIRED');
-          sendCommand({ type: 'AMBASSADOR_VOLUNTEER_TIMER_EXPIRED', layerType: 'melody' });
-        }
-      } else {
-        const remaining = state.finaleState.deliberation.timerRemaining - elapsed;
-        if (remaining > 0) {
-          console.log(`[Timing] Recovering deliberation timer: ${remaining}ms remaining`);
-          startDeliberationTimer(remaining);
-        } else {
-          console.log('[Timing] Deliberation timer already expired on recovery → firing DELIBERATION_TIMER_EXPIRED');
-          sendCommand({ type: 'DELIBERATION_TIMER_EXPIRED' });
+          console.log('[Timing] Assignment timer already expired on recovery → firing ASSIGNMENT_COMPLETE');
+          sendCommand({ type: 'ASSIGNMENT_COMPLETE' });
         }
       }
     }

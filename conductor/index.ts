@@ -21,36 +21,25 @@ export { calculateConsensus, calculateVoteResult } from './voting';
 export { checkThreshold } from './threshold';
 
 // Export fragment functions
-export { generateFragments, extractAttemptResult } from './fragments';
+export { generateFragments, generateGranularFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
 
-// Export performer mix functions
-export { queueChange, cancelPending, firePendingChanges } from './performer-mix';
-
-// Export assembly functions
-export { initializeAssembly, joinGroup, assignUndecided, getGroupSizes, getEmptyGroups } from './assembly';
-
-// Export deliberation functions
+// Export assignment functions
 export {
-  initializeDeliberation,
-  submitGroupVote,
-  getGroupVoteCounts,
-  resolveDeliberation,
-  volunteerAsAmbassador,
-  resolveAmbassadors,
-  getAvailableFragmentsForLayer,
-} from './deliberation';
+  autoAssign,
+  initializeSelfSelect,
+  selectGranularType,
+  assignUndecided,
+  getUndecidedUsers,
+  getGroupSizes,
+} from './assignment';
 
-// Export ceremony functions
+// Export live mix functions
 export {
-  initializeCeremony,
-  callNextAmbassador,
-  processAltarLockIn,
-  isCeremonyComplete,
-  forceLockIn,
-  forfeitLayer,
-  skipToLayer,
-} from './ceremony';
+  getActiveFragment,
+  recalculateActiveFragments,
+  computeInitialFragments,
+} from './live-mix';
 
 // Export NPC functions
 export { getNpcMessage } from './npc';

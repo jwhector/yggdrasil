@@ -1,5 +1,67 @@
 # CHANGELOG
 
+## 2026-03-26 — V3.2 Migration Phase 4: UI Components + Dead Code Cleanup
+
+**Context:** Completes the client layer of the V3.2 migration. Replaces V3.1 components with config-driven V3.2 equivalents, adds missing projector and controller UIs for the live mix phase, and removes all dead V3.1 code.
+
+**Key changes:**
+- Created `components/finale/AssignmentCards.tsx` — config-driven replacement for V3.1 AssemblyCards, uses `GranularType` props instead of hardcoded `LayerType` + `LAYER_ORDER`
+- Created `components/finale/AssignmentIdentity.tsx` — replaces GroupIdentity with `GranularType`
+- Created `components/finale/LiveMixProjector.tsx` — projector visualization with per-type rows, consensus bars, chapter colors, lock indicators; subscribes to `mix_state` at ~4 Hz
+- Created `components/controller/LiveMixControls.tsx` — performer controls with per-type override dropdowns, lock toggles, vote distribution bars; subscribes to `mix_state` at ~4 Hz
+- `app/audience/page.tsx`: Replaced AssemblyCards/GroupIdentity with AssignmentCards/AssignmentIdentity, threads `granularTypes` from config
+- `app/projector/page.tsx`: Added assignment visualization (type cards with live counts) + LiveMixProjector for `finale_live_mix`
+- `app/controller/page.tsx`: Added LiveMixControls during `finale_live_mix`
+- `conductor/types.ts`: Added `granularTypes` to `AudienceClientState.config`
+- `server/socket.ts`: Added `granularTypes` to audience config in `filterStateForClient`
+- Deleted 12 V3.1 files: AssemblyCards, GroupIdentity, DeliberationBoard, AudioPreview, CeremonyView, AltarReady, MixingMirror, MixingSurface, AssemblyControls, DeliberationControls, CeremonyControls, useAltarDetection
+
+**Tests:** 296 passing (unchanged). 2 pre-existing audio-router flakes.
+**Type check:** Clean (zero errors).
+
+**Remaining:** Manual walkthrough testing, ARCHITECTURE.md/docs update to remove V3.1 references.
+
+## 2026-03-26 — V3.2 Migration Phase 3: Live Mix Conductor Logic + Server Wiring
+
+**Context:** Implements the core Incredibox-style live mix mechanics — the finale's central interaction where audience members collaboratively control granular audio fragments in real time via majority voting with recency tiebreak.
+
+**Key changes:**
+- Created `conductor/live-mix.ts`: `getActiveFragment()` (majority + recency tiebreak), `recalculateActiveFragments()` (respects locks/overrides), `computeInitialFragments()` (picks highest winning proportion per type)
+- `conductor/conductor.ts`: Replaced 5 stub handlers with full implementations — `handleSetLiveMixPreference` (validates assignment/lock, updates votes, emits crossfade), `handleLockGranularType`, `handleUnlockGranularType` (recalculates on unlock), `handleOverrideFragment`, `handleClearOverride` (reverts to vote-based). Updated `handleStartLiveMix` to compute initial fragments, initialize all user votes, and emit `live_mix_start` audio cue.
+- `conductor/index.ts`: Exports live-mix functions
+- `server/socket.ts`: Added `set_preference` handler (derives granularType from assignment), `mix_state` broadcast at ~4 Hz during live mix (audience gets own-type detail, projector/controller get full distributions), `type_locked`/`type_unlocked` broadcast on lock/unlock events, persistence for lock/unlock/override commands
+- `db/schema.sql`: Added `finale_mix_events` table + index
+- `server/persistence.ts`: Migration v5, `saveMixEvent()`/`getMixEvents()` methods, updated `PersistenceLayer` interface
+
+**Tests:** 296 passing across 12 suites. 19 new live-mix tests (unit + integration). 2 pre-existing audio-router flakes unchanged.
+
+**Type check:** Clean (`npx tsc --noEmit` — zero errors)
+
+**Remaining (P2-P4):** See `MIGRATION-V3.2-TODO.md` — UI components (LiveMixProjector, LiveMixControls, AssignmentCards replacement), dead code cleanup.
+
+## 2026-03-26 — V3.2 Migration Phase 2: Assignment Phase & Finale Pipeline Rewrite
+
+**Context:** Replaces the V3.1 four-phase finale pipeline (assembly/deliberation/ceremony/performer_mix) with the V3.2 two-phase design (assignment/live_mix). Removes ambassador, altar, and ceremony mechanics. Introduces granular type assignment (auto or self-select) with live mix stubs for the next task.
+
+**Key changes:**
+- `conductor/types.ts`: Replaced `ShowPhase` (4 old finale phases -> 2 new), removed `FinaleState`/`FinaleConfig`/`PendingChange` (replaced by `V32FinaleState`/`V32FinaleConfig`), replaced ~24 old finale commands with 8 new (assignment + live mix), replaced ~18 old events with 6 new, updated `AudioCue` (`ceremony_activate`/`mix_update` -> `live_mix_crossfade`/`live_mix_start`), updated `AudienceFinaleView`/`ProjectorFinaleView` for V3.2
+- Created `conductor/assignment.ts`: `autoAssign()` (Fisher-Yates + round-robin), `initializeSelfSelect()`, `selectGranularType()`, `assignUndecided()`
+- `conductor/conductor.ts`: Updated phase sequence (15 phases, was 17), replaced `handleSetupFinale` to use `generateGranularFragments()` + `V32FinaleState`, added assignment handlers, live mix handlers are stubs
+- Deleted: `conductor/assembly.ts`, `deliberation.ts`, `ceremony.ts`, `performer-mix.ts` + 5 test files
+- `lib/serialization.ts`: Rewritten for `V32FinaleState` Maps (assignment.groups, liveMix.votes/activeFragments/performerOverrides)
+- `server/socket.ts`: Replaced `join_group`/`group_vote`/`volunteer_ambassador`/`altar_lock_in` with `select_type`, updated `filterStateForClient` for V3.2, updated `broadcastEvents` (removed ceremony events, added `GROUPS_ASSIGNED` handler)
+- `server/persistence.ts`: Added v4 migration (`finale_assignments` table), replaced old persistence methods with `saveFinaleAssignment`/`getFinaleAssignments`
+- `server/timing.ts`: Replaced assembly/deliberation/ambassador timers with assignment timer, updated loop boundary tracking for `finale_live_mix` (stub)
+- `server/audio-router.ts`: Replaced `ceremony_activate`/`mix_update` handlers with `live_mix_crossfade`/`live_mix_start`
+- `config/default-show.json`: Replaced `finale` contents with V3.2 shape (`assignmentMode`, `assignmentTimerMs`, etc.), removed `v32Finale` key
+- `db/schema.sql`: Added `finale_assignments` table, marked old tables as deprecated
+
+**Tests:** 270 passing across 10 suites. 19 new assignment tests. 2 pre-existing audio-router timing flakes unchanged.
+
+**Docs updated:** ARCHITECTURE.md (phase diagram, folder structure, open questions), docs/finale.md (full rewrite), docs/data-models.md (FinaleConfig, commands, events, AudioCue), docs/server-protocol.md (WebSocket events, schema, recovery)
+
+**Not included (separate tasks):** Client UI components (app pages, finale components, controller components still reference old types — tsc errors expected in client files). Live mix conductor logic (handlers are stubs).
+
 ## 2026-03-26 — V3.2 Migration Phase 1: Type System Foundation
 
 **Context:** First phase of the V3.2 migration (bundled layer groups + Incredibox-style finale). Adds all new V3.2 type definitions alongside existing V3.1 types. No conductor logic, server, or UI changes — purely additive type groundwork.

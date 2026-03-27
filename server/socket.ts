@@ -10,7 +10,7 @@
  * - 'controller'  — Performer controller
  *
  * High-frequency channels (NOT via state_sync):
- * - 'group_update' → audience + projector at ~2 Hz (during assembly phase)
+ * - 'group_update' → audience + projector at ~2 Hz (during assignment phase)
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -20,8 +20,7 @@ import type {
   ConductorEvent,
   UserId,
   AttemptState,
-  LayerConfig,
-  LayerType,
+  V32LayerConfig,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
 import type { PersistenceLayer } from './persistence';
@@ -47,7 +46,8 @@ interface ClientHeartbeat {
 const HEARTBEAT_INTERVAL_MS = 15000;            // Ping every 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 seconds
 const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
-const GROUP_UPDATE_BROADCAST_INTERVAL_MS = 500; // ~2 Hz during assembly
+const GROUP_UPDATE_BROADCAST_INTERVAL_MS = 500; // ~2 Hz during assignment
+const MIX_STATE_BROADCAST_INTERVAL_MS = 250;    // ~4 Hz during live mix
 
 // ============================================================================
 // Setup
@@ -103,19 +103,82 @@ export function setupSocketHandlers(
   }, HEARTBEAT_INTERVAL_MS);
 
   // ============================================================================
-  // Group update broadcast (throttled ~2 Hz during assembly phase)
+  // Group update broadcast (throttled ~2 Hz during assignment phase)
   // ============================================================================
 
   const groupUpdateInterval = setInterval(() => {
     const state = getState();
-    if (state.phase === 'finale_assembly' && state.finaleState?.phase === 'assembly') {
-      const groupSizes = Array.from(state.finaleState.assembly.groups.entries())
-        .map(([layerType, members]) => ({ layerType, count: members.length }));
-      const undecidedCount = state.finaleState.assembly.undecidedUsers.length;
-      io.to('audience').emit('group_update', { groupSizes, undecidedCount });
-      io.to('projector').emit('group_update', { groupSizes, undecidedCount });
+    if (state.phase === 'finale_assignment' && state.finaleState?.phase === 'assignment') {
+      const groupSizes = Array.from(state.finaleState.assignment.groups.entries())
+        .map(([granularType, members]) => ({ granularType, count: members.length }));
+      io.to('audience').emit('group_update', { groupSizes });
+      io.to('projector').emit('group_update', { groupSizes });
     }
   }, GROUP_UPDATE_BROADCAST_INTERVAL_MS);
+
+  // ============================================================================
+  // Mix state broadcast (throttled ~4 Hz during live mix phase)
+  // ============================================================================
+
+  const mixStateBroadcastInterval = setInterval(async () => {
+    const state = getState();
+    if (state.phase !== 'finale_live_mix' || !state.finaleState || state.finaleState.phase !== 'live_mix') return;
+
+    const fs = state.finaleState;
+
+    // Per-type active fragments (shared with all clients)
+    const activeFragments = Array.from(fs.liveMix.activeFragments.entries())
+      .map(([granularType, fragmentId]) => ({ granularType, fragmentId }));
+
+    // Per-type vote distributions
+    const voteDistributions = Array.from(fs.liveMix.votes.entries()).map(([granularType, userVotes]) => {
+      const counts = new Map<string, number>();
+      for (const vote of userVotes.values()) counts.set(vote.fragmentId, (counts.get(vote.fragmentId) ?? 0) + 1);
+      return {
+        granularType,
+        votes: Array.from(counts.entries()).map(([fragmentId, count]) => ({ fragmentId, count })),
+      };
+    });
+
+    // Projector gets full data
+    io.to('projector').emit('mix_state', {
+      activeFragments,
+      voteDistributions,
+      lockedTypes: fs.liveMix.lockedTypes,
+      loopPosition: fs.liveMix.loopPosition,
+    });
+
+    // Controller gets full data
+    io.to('controller').emit('mix_state', {
+      activeFragments,
+      voteDistributions,
+      lockedTypes: fs.liveMix.lockedTypes,
+      loopPosition: fs.liveMix.loopPosition,
+    });
+
+    // Each audience member gets: full active fragments, but only detailed votes for their own type
+    const audienceSockets = await io.in('audience').fetchSockets();
+    for (const socket of audienceSockets) {
+      const userId = (socket as any).userId as UserId | undefined;
+      if (!userId) continue;
+
+      // Find user's assigned type
+      let myType: string | null = null;
+      for (const [gt, members] of fs.assignment.groups) {
+        if (members.includes(userId)) { myType = gt; break; }
+      }
+
+      const myVoteDistribution = myType
+        ? voteDistributions.find(d => d.granularType === myType)?.votes ?? []
+        : [];
+
+      socket.emit('mix_state', {
+        activeFragments,
+        myVoteDistribution,
+        lockedTypes: fs.liveMix.lockedTypes,
+      });
+    }
+  }, MIX_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
   // Cleanup
@@ -124,6 +187,7 @@ export function setupSocketHandlers(
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
     clearInterval(groupUpdateInterval);
+    clearInterval(mixStateBroadcastInterval);
   });
 
   // ============================================================================
@@ -309,111 +373,69 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // join_group — audience selects a layer-type group during assembly
+    // select_type — audience selects a granular type during self-select assignment
     //
-    // Payload: { layerType: LayerType }
+    // Payload: { granularType: string }
     // ------------------------------------------------------------------
-    socket.on('join_group', async (data: { layerType: LayerType }) => {
+    socket.on('select_type', async (data: { granularType: string }) => {
       const userId = (socket as any).userId as UserId;
       if (!userId) {
-        console.warn('[Socket] join_group rejected: no userId on socket');
+        console.warn('[Socket] select_type rejected: no userId on socket');
         return;
       }
 
-      console.log(`[Socket] join_group from ${userId}: ${data.layerType}`);
+      console.log(`[Socket] select_type from ${userId}: ${data.granularType}`);
 
       const state = getState();
-      const events = processCommand(state, { type: 'JOIN_GROUP', userId, layerType: data.layerType });
+      const events = processCommand(state, {
+        type: 'SELECT_GRANULAR_TYPE',
+        userId,
+        granularType: data.granularType,
+      });
       setState(state, events);
       persistence.saveState(state);
-      persistence.saveGroupAssignment(state.id, userId, data.layerType, false);
+      persistence.saveFinaleAssignment(state.id, userId, data.granularType, false);
 
       await broadcastEvents(io, events, state);
     });
 
     // ------------------------------------------------------------------
-    // group_vote — audience votes for a fragment within their group
+    // set_preference — audience sets live mix fragment preference
     //
-    // Payload: { layerType: LayerType; fragmentId: string }
+    // Payload: { fragmentId: string }
+    // granularType is derived from the user's assignment (not sent by client)
     // ------------------------------------------------------------------
-    socket.on('group_vote', async (data: { layerType: LayerType; fragmentId: string }) => {
+    socket.on('set_preference', async (data: { fragmentId: string }) => {
       const userId = (socket as any).userId as UserId;
       if (!userId) {
-        console.warn('[Socket] group_vote rejected: no userId on socket');
+        console.warn('[Socket] set_preference rejected: no userId on socket');
         return;
       }
 
-      console.log(`[Socket] group_vote from ${userId}: ${data.layerType} → ${data.fragmentId}`);
-
       const state = getState();
+      if (!state.finaleState || state.finaleState.phase !== 'live_mix') return;
+
+      // Determine user's assigned granular type
+      let granularType: string | null = null;
+      for (const [gt, members] of state.finaleState.assignment.groups) {
+        if (members.includes(userId)) { granularType = gt; break; }
+      }
+      if (!granularType) {
+        console.warn(`[Socket] set_preference rejected: ${userId} has no granular type assignment`);
+        return;
+      }
+
       const events = processCommand(state, {
-        type: 'SUBMIT_GROUP_VOTE',
+        type: 'SET_LIVE_MIX_PREFERENCE',
         userId,
-        layerType: data.layerType,
+        granularType,
         fragmentId: data.fragmentId,
       });
+
       setState(state, events);
-      persistence.saveState(state);
-      persistence.saveGroupVote(state.id, userId, data.layerType, data.fragmentId);
 
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // volunteer_ambassador — audience volunteers as ambassador
-    //
-    // Payload: { layerType: LayerType }
-    // ------------------------------------------------------------------
-    socket.on('volunteer_ambassador', async (data: { layerType: LayerType }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) {
-        console.warn('[Socket] volunteer_ambassador rejected: no userId on socket');
-        return;
-      }
-
-      console.log(`[Socket] volunteer_ambassador from ${userId}: ${data.layerType}`);
-
-      const state = getState();
-      const events = processCommand(state, {
-        type: 'VOLUNTEER_AS_AMBASSADOR',
-        userId,
-        layerType: data.layerType,
-      });
-      setState(state, events);
-      persistence.saveState(state);
-
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // altar_lock_in — ambassador confirms lock-in at the altar
-    //
-    // Payload: { layerType: LayerType }
-    // ------------------------------------------------------------------
-    socket.on('altar_lock_in', async (data: { layerType: LayerType }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) {
-        console.warn('[Socket] altar_lock_in rejected: no userId on socket');
-        return;
-      }
-
-      console.log(`[Socket] altar_lock_in from ${userId}: ${data.layerType}`);
-
-      const state = getState();
-      const events = processCommand(state, {
-        type: 'ALTAR_LOCK_IN',
-        userId,
-        layerType: data.layerType,
-      });
-      setState(state, events);
-      persistence.saveState(state);
-
-      const lockEvent = events.find(e => e.type === 'CEREMONY_LAYER_LOCKED') as
-        | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
-        | undefined;
-      if (lockEvent) {
-        persistence.saveCeremonyEvent(state.id, data.layerType, userId, lockEvent.fragmentId, 'locked');
-      }
+      // Persist preference event
+      persistence.saveMixEvent(state.id, userId, granularType, data.fragmentId, 'preference');
 
       await broadcastEvents(io, events, state);
     });
@@ -455,38 +477,27 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      // Persist auto-assigned group members when assembly ends via timer or force
-      if (processedCommand.type === 'ASSEMBLY_TIMER_EXPIRED' || processedCommand.type === 'FORCE_END_ASSEMBLY') {
-        const assemblyComplete = events.find(e => e.type === 'ASSEMBLY_COMPLETE') as
-          | { type: 'ASSEMBLY_COMPLETE'; groups: Map<LayerType, UserId[]>; emptyGroups: LayerType[] }
+      // Persist all group assignments when assignment completes
+      if (processedCommand.type === 'ASSIGNMENT_COMPLETE') {
+        const groupsEvent = events.find(e => e.type === 'GROUPS_ASSIGNED') as
+          | { type: 'GROUPS_ASSIGNED'; groups: Map<string, UserId[]> }
           | undefined;
-        if (assemblyComplete) {
-          for (const [layerType, members] of assemblyComplete.groups) {
+        if (groupsEvent) {
+          for (const [granularType, members] of groupsEvent.groups) {
             for (const memberId of members) {
-              persistence.saveGroupAssignment(state.id, memberId, layerType, true);
+              persistence.saveFinaleAssignment(state.id, memberId, granularType, true);
             }
           }
         }
       }
 
-      // Persist ceremony lock-in for controller-driven FORCE_LOCK_IN
-      if (processedCommand.type === 'FORCE_LOCK_IN') {
-        const lockEvent = events.find(e => e.type === 'CEREMONY_LAYER_LOCKED') as
-          | { type: 'CEREMONY_LAYER_LOCKED'; layerType: LayerType; fragmentId: string }
-          | undefined;
-        if (lockEvent) {
-          persistence.saveCeremonyEvent(state.id, lockEvent.layerType, null, lockEvent.fragmentId, 'locked');
-        }
-      }
-
-      // Persist ceremony forfeit for controller-driven FORFEIT_LAYER
-      if (processedCommand.type === 'FORFEIT_LAYER') {
-        const forfeitEvent = events.find(e => e.type === 'CEREMONY_LAYER_SKIPPED') as
-          | { type: 'CEREMONY_LAYER_SKIPPED'; layerType: LayerType }
-          | undefined;
-        if (forfeitEvent) {
-          persistence.saveCeremonyEvent(state.id, forfeitEvent.layerType, null, null, 'forfeited');
-        }
+      // Persist lock/unlock/override mix events
+      if (processedCommand.type === 'LOCK_GRANULAR_TYPE') {
+        persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, '', 'lock');
+      } else if (processedCommand.type === 'UNLOCK_GRANULAR_TYPE') {
+        persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, '', 'unlock');
+      } else if (processedCommand.type === 'OVERRIDE_FRAGMENT') {
+        persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, processedCommand.fragmentId, 'override');
       }
 
       await broadcastEvents(io, events, state);
@@ -556,24 +567,30 @@ export async function broadcastEvents(
         io.to('projector').emit('npc_message', { message: event.message });
         break;
 
-      case 'AMBASSADOR_CALLED': {
-        // Emit altar_ready only to the called ambassador's socket
-        const calledSockets = await io.in('audience').fetchSockets();
-        for (const s of calledSockets) {
-          if ((s as any).userId === event.userId) {
-            s.emit('altar_ready', { layerType: event.layerType });
-            break;
+      case 'GROUPS_ASSIGNED': {
+        // Notify each audience member of their assignment
+        const assignedSockets = await io.in('audience').fetchSockets();
+        for (const s of assignedSockets) {
+          const uid = (s as any).userId as UserId | undefined;
+          if (!uid) continue;
+          for (const [granularType, members] of event.groups) {
+            if (members.includes(uid)) {
+              s.emit('assigned', { granularType, groupSize: members.length });
+              break;
+            }
           }
         }
-        // Notify all about who was called (for projector + audience awareness)
-        io.to('projector').emit('ambassador_called', { layerType: event.layerType, userId: event.userId });
-        io.to('audience').emit('ambassador_called', { layerType: event.layerType, userId: event.userId });
         break;
       }
 
-      case 'CEREMONY_LAYER_LOCKED':
-        io.to('audience').emit('altar_confirmed', { layerType: event.layerType, fragmentId: event.fragmentId });
-        io.to('projector').emit('altar_confirmed', { layerType: event.layerType, fragmentId: event.fragmentId });
+      case 'GRANULAR_TYPE_LOCKED':
+        io.to('audience').emit('type_locked', { granularType: event.granularType });
+        io.to('projector').emit('type_locked', { granularType: event.granularType });
+        break;
+
+      case 'GRANULAR_TYPE_UNLOCKED':
+        io.to('audience').emit('type_unlocked', { granularType: event.granularType });
+        io.to('projector').emit('type_unlocked', { granularType: event.granularType });
         break;
 
       case 'ERROR':
@@ -621,43 +638,27 @@ export function filterStateForClient(
         finaleState: fs ? {
           finalePhase: fs.phase,
           availableFragments: fs.availableFragments,
-          lockedFragments: fs.lockedFragments,
-          // Assembly
-          groupSizes: Array.from(fs.assembly.groups.entries())
-            .map(([layerType, members]) => ({ layerType, count: members.length })),
-          undecidedCount: fs.assembly.undecidedUsers.length,
-          assemblyTimerRemaining: fs.assembly.timerRemaining,
-          // Deliberation
-          groupVoteDistributions: Array.from(fs.deliberation.groupVotes.entries()).map(([layerType, votes]) => {
+          allFragments: fs.allFragments,
+          // Assignment
+          groupSizes: Array.from(fs.assignment.groups.entries())
+            .map(([granularType, members]) => ({ granularType, count: members.length })),
+          assignmentMode: fs.assignment.mode,
+          assignmentTimerRemaining: fs.assignment.timerRemaining,
+          // Live mix
+          activeFragments: Array.from(fs.liveMix.activeFragments.entries())
+            .map(([granularType, fragmentId]) => ({ granularType, fragmentId })),
+          voteDistributions: Array.from(fs.liveMix.votes.entries()).map(([granularType, userVotes]) => {
             const counts = new Map<string, number>();
-            for (const fId of votes.values()) counts.set(fId, (counts.get(fId) ?? 0) + 1);
+            for (const vote of userVotes.values()) counts.set(vote.fragmentId, (counts.get(vote.fragmentId) ?? 0) + 1);
             return {
-              layerType,
+              granularType,
               votes: Array.from(counts.entries()).map(([fragmentId, count]) => ({ fragmentId, count })),
             };
           }),
-          chosenFragments: Array.from(fs.deliberation.chosenFragments.entries())
-            .map(([layerType, fragmentId]) => ({ layerType, fragmentId })),
-          ambassadors: Array.from(fs.deliberation.ambassadors.entries())
-            .map(([layerType, userId]) => ({ layerType, userId })),
-          deliberationTimerRemaining: fs.deliberation.timerRemaining,
-          // Ceremony
-          ceremonyLayerOrder: fs.ceremony.layerOrder,
-          ceremonyLockedLayers: Array.from(fs.ceremony.lockedLayers.entries())
-            .map(([layerType, fragmentId]) => ({ layerType, fragmentId })),
-          ceremonyForfeitedLayers: fs.ceremony.forfeitedLayers,
-          currentCeremonyLayer: fs.ceremony.currentIndex >= 0
-            ? (fs.ceremony.layerOrder[fs.ceremony.currentIndex] ?? null)
-            : null,
-          currentAmbassador: fs.ceremony.currentAmbassador,
-          ceremonyComplete: fs.ceremony.ceremonyComplete,
+          lockedTypes: fs.liveMix.lockedTypes,
+          loopPosition: fs.liveMix.loopPosition,
           // NPC
           npcMessage: fs.npc.currentMessage,
-          // Performer mix
-          mixActiveLayers: Array.from(fs.performerMix.activeLayers.entries())
-            .map(([layerType, fragmentId]) => ({ layerType, fragmentId })),
-          mixPendingChanges: fs.performerMix.pendingChanges,
-          loopPosition: fs.performerMix.loopPosition,
         } : null,
         config: state.config,
       };
@@ -684,95 +685,66 @@ export function filterStateForClient(
       }
 
       // Current layer config (for label display)
-      const currentLayerConfig: LayerConfig | null =
+      const currentLayerConfig: V32LayerConfig | null =
         attempt?.layerPlan[attempt.currentLayerIndex] ?? null;
 
       // Finale personalization
       let myFinale: object | null = null;
       const fs = state.finaleState;
       if (fs) {
-        // Determine user's group assignment
-        let myGroup: LayerType | null = null;
-        for (const [layerType, members] of fs.assembly.groups) {
-          if (members.includes(userId)) { myGroup = layerType; break; }
+        // Determine user's granular type assignment
+        let myGranularType: string | null = null;
+        for (const [granularType, members] of fs.assignment.groups) {
+          if (members.includes(userId)) { myGranularType = granularType; break; }
         }
 
         // All group sizes
-        const groupSizes = Array.from(fs.assembly.groups.entries())
-          .map(([layerType, members]) => ({ layerType, count: members.length }));
+        const groupSizes = Array.from(fs.assignment.groups.entries())
+          .map(([granularType, members]) => ({ granularType, count: members.length }));
 
-        // Deliberation: fragments available to user's group
-        const myGroupFragments = myGroup
-          ? fs.availableFragments.filter(f => f.layerType === myGroup)
+        // Fragments available for user's granular type
+        const myGroupFragments = myGranularType
+          ? fs.availableFragments.filter(f => f.granularType === myGranularType)
           : [];
 
-        // Vote counts for user's group
-        const groupVoteCounts: Array<{ fragmentId: string; count: number }> = [];
-        if (myGroup) {
-          const votes = fs.deliberation.groupVotes.get(myGroup);
+        // User's own live mix vote
+        const myVoteData = myGranularType
+          ? (fs.liveMix.votes.get(myGranularType)?.get(userId) ?? null)
+          : null;
+
+        // Active fragment for user's group
+        const myGroupActiveFragment = myGranularType
+          ? (fs.liveMix.activeFragments.get(myGranularType) ?? null)
+          : null;
+
+        // Vote distribution for user's group
+        const myGroupVoteDistribution: Array<{ fragmentId: string; count: number }> = [];
+        if (myGranularType) {
+          const votes = fs.liveMix.votes.get(myGranularType);
           if (votes) {
             const counts = new Map<string, number>();
-            for (const fId of votes.values()) counts.set(fId, (counts.get(fId) ?? 0) + 1);
-            for (const [fragmentId, count] of counts) groupVoteCounts.push({ fragmentId, count });
+            for (const vote of votes.values()) counts.set(vote.fragmentId, (counts.get(vote.fragmentId) ?? 0) + 1);
+            for (const [fragmentId, count] of counts) myGroupVoteDistribution.push({ fragmentId, count });
           }
         }
 
-        // User's own vote in deliberation
-        const myGroupVote = myGroup
-          ? (fs.deliberation.groupVotes.get(myGroup)?.get(userId) ?? null)
-          : null;
-
-        // Chosen fragment for user's group
-        const chosenFragment = myGroup
-          ? (fs.deliberation.chosenFragments.get(myGroup) ?? null)
-          : null;
-
-        // Ambassador volunteer status
-        const isAmbassadorVolunteer = myGroup
-          ? (fs.deliberation.ambassadorVolunteers.get(myGroup)?.includes(userId) ?? false)
-          : false;
-
-        // Selected ambassador for user's group
-        const myAmbassadorStatus = myGroup
-          ? (fs.deliberation.ambassadors.get(myGroup) ?? null)
-          : null;
-
-        // Ceremony progress for display
-        const ceremonyProgress = fs.ceremony.layerOrder.map(lt => {
-          if (fs.ceremony.lockedLayers.has(lt)) return { layerType: lt, status: 'locked' as const };
-          if (fs.ceremony.forfeitedLayers.includes(lt)) return { layerType: lt, status: 'forfeited' as const };
-          const currentLayer = fs.ceremony.currentIndex >= 0
-            ? fs.ceremony.layerOrder[fs.ceremony.currentIndex]
-            : null;
-          if (currentLayer === lt) return { layerType: lt, status: 'current' as const };
-          return { layerType: lt, status: 'upcoming' as const };
-        });
-
-        const isCurrentAmbassador = fs.ceremony.currentAmbassador === userId;
-        const altarReady = isCurrentAmbassador && fs.ceremony.altarReady;
-
-        // Performer mix layers
-        const mixActiveLayers = Array.from(fs.performerMix.activeLayers.entries())
-          .map(([layerType, fragmentId]) => ({ layerType, fragmentId }));
+        // All active fragments (read-only overview for other types)
+        const activeFragments = Array.from(fs.liveMix.activeFragments.entries())
+          .map(([granularType, fragmentId]) => ({ granularType, fragmentId }));
 
         myFinale = {
           finalePhase: fs.phase,
-          myGroup,
+          myGranularType,
           groupSizes,
-          assemblyTimerRemaining: fs.assembly.timerRemaining,
+          assignmentMode: fs.assignment.mode,
+          assignmentTimerRemaining: fs.assignment.timerRemaining,
           myGroupFragments,
-          groupVoteCounts,
-          myGroupVote,
-          chosenFragment,
-          isAmbassadorVolunteer,
-          myAmbassadorStatus,
-          deliberationTimerRemaining: fs.deliberation.timerRemaining,
-          volunteerTimerRemaining: fs.deliberation.volunteerTimerRemaining,
-          ceremonyProgress,
-          isCurrentAmbassador,
-          altarReady,
+          myGroupActiveFragment,
+          myGroupVoteDistribution,
+          myVote: myVoteData?.fragmentId ?? null,
+          activeFragments,
+          lockedTypes: fs.liveMix.lockedTypes,
           npcMessage: fs.npc.currentMessage,
-          mixActiveLayers,
         };
       }
 
@@ -809,6 +781,7 @@ export function filterStateForClient(
         myFinale,
         config: {
           lobby: state.config.lobby,
+          granularTypes: state.config.granularTypes ?? [],
         },
       };
     }

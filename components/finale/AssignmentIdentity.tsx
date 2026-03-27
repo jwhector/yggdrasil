@@ -1,15 +1,21 @@
+/**
+ * AssignmentIdentity (V3.2)
+ *
+ * Full-screen display showing the user's assigned granular type after
+ * assignment completes. Uses config-driven GranularType, not hardcoded LayerType.
+ *
+ * Replaces V3.1 GroupIdentity.tsx.
+ */
+
 'use client';
 
-import { getLayerIdentity } from '@/lib/identity';
-import type { LayerType } from '@/conductor/types';
+import type { GranularType } from '@/conductor/types';
 
-interface GroupIdentityProps {
-  layerType: LayerType;
+interface AssignmentIdentityProps {
+  granularType: GranularType;
 }
 
-export function GroupIdentity({ layerType }: GroupIdentityProps) {
-  const identity = getLayerIdentity(layerType);
-
+export function AssignmentIdentity({ granularType }: AssignmentIdentityProps) {
   return (
     <div style={{
       display: 'flex',
@@ -19,15 +25,15 @@ export function GroupIdentity({ layerType }: GroupIdentityProps) {
       width: '100%',
       minHeight: '100vh',
       gap: '16px',
-      background: `radial-gradient(ellipse at center, ${identity.color}18 0%, #000 70%)`,
+      background: `radial-gradient(ellipse at center, ${granularType.color}18 0%, #000 70%)`,
     }}>
       <div style={{
         fontSize: '4rem',
         lineHeight: 1,
-        color: identity.color,
-        filter: `drop-shadow(0 0 24px ${identity.color}80)`,
+        color: granularType.color,
+        filter: `drop-shadow(0 0 24px ${granularType.color}80)`,
       }}>
-        {identity.symbol}
+        {granularType.symbol}
       </div>
 
       <p style={{
@@ -43,11 +49,11 @@ export function GroupIdentity({ layerType }: GroupIdentityProps) {
       <p style={{
         fontSize: '1.6rem',
         fontWeight: 700,
-        color: identity.color,
+        color: granularType.color,
         margin: 0,
         letterSpacing: '0.04em',
       }}>
-        {identity.label}
+        {granularType.label}
       </p>
 
       <p style={{
