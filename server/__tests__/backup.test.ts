@@ -26,8 +26,8 @@ function createTestConfig(): ShowConfig {
     group: ['bones', 'flesh', 'spark'][i % 3],
     labelA: 'A',
     labelB: 'B',
-    optionA: { tracks: [{ granularType: 'bass', trackIndex: i * 2 }] },
-    optionB: { tracks: [{ granularType: 'bass', trackIndex: i * 2 + 1 }] },
+    optionA: { tracks: [{ granularType: 'bass', trackIndices: [i * 2] }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndices: [i * 2 + 1] }] },
   });
   const makeAttempt = (chapter: 'ambition' | 'love' | 'avoidance') => ({
     chapter,

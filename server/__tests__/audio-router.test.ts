@@ -57,7 +57,7 @@ const TEST_LAYOUT: AbletonLayoutConfig = {
 };
 
 function makeTrackBundle(trackIndex: number): TrackBundle {
-  return { tracks: [{ granularType: 'bass', trackIndex }] };
+  return { tracks: [{ granularType: 'bass', trackIndices: [trackIndex] }] };
 }
 
 function makeLayerConfig(index: number): V32LayerConfig {
@@ -530,8 +530,8 @@ describe('AudioRouter', () => {
       sendCue(router, state, {
         type: 'live_mix_crossfade',
         granularType: 'bass',
-        incomingTrackIndex: 4,
-        outgoingTrackIndex: 2,
+        incomingTrackIndices: [4],
+        outgoingTrackIndices: [2],
       });
 
       // Outgoing faded out (instant = muted), incoming unmuted

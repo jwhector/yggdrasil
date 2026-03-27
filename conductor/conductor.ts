@@ -1172,12 +1172,12 @@ function handleStartLiveMix(state: ShowState): ConductorEvent[] {
     state.finaleState.liveMix.votes.set(granularType, typeVotes);
   }
 
-  // Collect track indices for initial unmute
+  // Collect track indices for initial unmute (flatten multi-track fragments)
   const activeTrackIndices: number[] = [];
   for (const [, fragmentId] of initialFragments) {
     const frag = state.finaleState.availableFragments.find(f => f.id === fragmentId)
       ?? state.finaleState.allFragments.find(f => f.id === fragmentId);
-    if (frag) activeTrackIndices.push(frag.trackIndex);
+    if (frag) activeTrackIndices.push(...frag.trackIndices);
   }
 
   const events: ConductorEvent[] = [
@@ -1260,8 +1260,8 @@ function handleSetLiveMixPreference(
         cue: {
           type: 'live_mix_crossfade',
           granularType,
-          incomingTrackIndex: inFrag.trackIndex,
-          outgoingTrackIndex: outFrag?.trackIndex ?? -1,
+          incomingTrackIndices: inFrag.trackIndices,
+          outgoingTrackIndices: outFrag?.trackIndices ?? [],
         },
       });
     }
@@ -1312,7 +1312,7 @@ function handleUnlockGranularType(state: ShowState, granularType: string): Condu
         if (inFrag) {
           events.push({
             type: 'AUDIO_CUE',
-            cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndex: inFrag.trackIndex, outgoingTrackIndex: outFrag?.trackIndex ?? -1 },
+            cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
           });
         }
       }
@@ -1341,7 +1341,7 @@ function handleOverrideFragment(state: ShowState, granularType: string, fragment
     if (inFrag) {
       events.push({
         type: 'AUDIO_CUE',
-        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndex: inFrag.trackIndex, outgoingTrackIndex: outFrag?.trackIndex ?? -1 },
+        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
       });
     }
   }
@@ -1373,7 +1373,7 @@ function handleClearOverride(state: ShowState, granularType: string): ConductorE
     if (inFrag) {
       events.push({
         type: 'AUDIO_CUE',
-        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndex: inFrag.trackIndex, outgoingTrackIndex: outFrag?.trackIndex ?? -1 },
+        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
       });
     }
   }

@@ -40,8 +40,8 @@ function makeV32LayerConfig(index: number): V32LayerConfig {
     group: LAYER_GROUPS[index % LAYER_GROUPS.length],
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
-    optionA: { tracks: [{ granularType: 'bass', trackIndex: index * 4 }, { granularType: 'drums', trackIndex: index * 4 + 1 }] },
-    optionB: { tracks: [{ granularType: 'bass', trackIndex: index * 4 + 2 }, { granularType: 'drums', trackIndex: index * 4 + 3 }] },
+    optionA: { tracks: [{ granularType: 'bass', trackIndices: [index * 4] }, { granularType: 'drums', trackIndices: [index * 4 + 1] }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndices: [index * 4 + 2] }, { granularType: 'drums', trackIndices: [index * 4 + 3] }] },
   };
 }
 
@@ -487,8 +487,8 @@ describe('Live Mix conductor handlers', () => {
 describe('computeInitialFragments', () => {
   test('picks fragment with highest winning proportion per type', () => {
     const fragments: GranularFragment[] = [
-      { id: 'f1', songIndex: 0, layerGroupId: 'bones', granularType: 'bass', option: 'A', chapter: 'ambition', trackIndex: 0, wonVote: true, previewAudioPath: '' },
-      { id: 'f2', songIndex: 1, layerGroupId: 'bones', granularType: 'bass', option: 'B', chapter: 'love', trackIndex: 1, wonVote: true, previewAudioPath: '' },
+      { id: 'f1', songIndex: 0, layerGroupId: 'bones', granularType: 'bass', option: 'A', chapter: 'ambition', trackIndices: [0], wonVote: true, previewAudioPath: '' },
+      { id: 'f2', songIndex: 1, layerGroupId: 'bones', granularType: 'bass', option: 'B', chapter: 'love', trackIndices: [1], wonVote: true, previewAudioPath: '' },
     ];
 
     const attempts: AttemptState[] = [
@@ -515,7 +515,7 @@ describe('computeInitialFragments', () => {
 
   test('falls back to first fragment when no vote data', () => {
     const fragments: GranularFragment[] = [
-      { id: 'f1', songIndex: 0, layerGroupId: 'bones', granularType: 'bass', option: 'A', chapter: 'ambition', trackIndex: 0, wonVote: true, previewAudioPath: '' },
+      { id: 'f1', songIndex: 0, layerGroupId: 'bones', granularType: 'bass', option: 'A', chapter: 'ambition', trackIndices: [0], wonVote: true, previewAudioPath: '' },
     ];
 
     const result = computeInitialFragments(fragments, []);

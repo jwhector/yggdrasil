@@ -26,8 +26,8 @@ function makeV32LayerConfig(index: number): V32LayerConfig {
     group: LAYER_GROUPS[index % LAYER_GROUPS.length],
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
-    optionA: { tracks: [{ granularType: 'bass', trackIndex: index * 2 }] },
-    optionB: { tracks: [{ granularType: 'bass', trackIndex: index * 2 + 1 }] },
+    optionA: { tracks: [{ granularType: 'bass', trackIndices: [index * 2] }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndices: [index * 2 + 1] }] },
   };
 }
 

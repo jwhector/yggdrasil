@@ -453,10 +453,10 @@ export function createAudioRouter(
       for (const layer of attempt.layerPlan) {
         // V3.2: layers have TrackBundles (multiple tracks per option)
         for (const track of layer.optionA.tracks) {
-          routerState.fragmentTrackIndices.add(track.trackIndex);
+          for (const idx of track.trackIndices) routerState.fragmentTrackIndices.add(idx);
         }
         for (const track of layer.optionB.tracks) {
-          routerState.fragmentTrackIndices.add(track.trackIndex);
+          for (const idx of track.trackIndices) routerState.fragmentTrackIndices.add(idx);
         }
       }
       // Also register live seed tracks
@@ -467,7 +467,7 @@ export function createAudioRouter(
     }
     if (state.finaleState) {
       for (const fragment of state.finaleState.allFragments) {
-        routerState.fragmentTrackIndices.add(fragment.trackIndex);
+        for (const idx of fragment.trackIndices) routerState.fragmentTrackIndices.add(idx);
       }
     }
   }
@@ -644,14 +644,16 @@ export function createAudioRouter(
 
     // Fade out all tracks in the outgoing bundle
     for (const track of otherTrackBundle.tracks) {
-      fadeGain(track.trackIndex, 0, currentGainConfig.exitFadeBeats);
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.exitFadeBeats);
     }
 
     // Bring in all tracks in the incoming bundle: unmute, snap to entryGain, swell to unity
     for (const track of trackBundle.tracks) {
-      unmuteTrack(track.trackIndex);
-      setGain(track.trackIndex, currentGainConfig.entryGain);
-      fadeGain(track.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+      for (const idx of track.trackIndices) {
+        unmuteTrack(idx);
+        setGain(idx, currentGainConfig.entryGain);
+        fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
+      }
     }
   }
 
@@ -661,7 +663,7 @@ export function createAudioRouter(
       return;
     }
     for (const track of cue.trackBundle.tracks) {
-      fadeGain(track.trackIndex, 0, currentGainConfig.exitFadeBeats);
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.exitFadeBeats);
     }
     // Note: transport continues running; clips keep looping silently
   }
@@ -671,18 +673,20 @@ export function createAudioRouter(
 
     // Winner tracks: cancel in-flight fades, snap to full gain
     for (const track of winnerTrackBundle.tracks) {
-      const gs = getOrCreateTrackGainState(track.trackIndex);
-      if (gs.activeFadeId) {
-        timingEngine?.cancelCallbacks(gs.activeFadeId);
-        gs.activeFadeId = null;
+      for (const idx of track.trackIndices) {
+        const gs = getOrCreateTrackGainState(idx);
+        if (gs.activeFadeId) {
+          timingEngine?.cancelCallbacks(gs.activeFadeId);
+          gs.activeFadeId = null;
+        }
+        unmuteTrack(idx);
+        fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
       }
-      unmuteTrack(track.trackIndex);
-      fadeGain(track.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
     }
 
     // Loser tracks: fade to silent
     for (const track of loserTrackBundle.tracks) {
-      fadeGain(track.trackIndex, 0, currentGainConfig.lockInFadeBeats);
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
     }
   }
 
@@ -782,8 +786,8 @@ export function createAudioRouter(
     // Collect all track indices for the collapsing attempt (V3.2: iterate TrackBundle tracks)
     const collapseTrackIndices: number[] = [];
     for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      for (const track of layer.optionA.tracks) collapseTrackIndices.push(track.trackIndex);
-      for (const track of layer.optionB.tracks) collapseTrackIndices.push(track.trackIndex);
+      for (const track of layer.optionA.tracks) collapseTrackIndices.push(...track.trackIndices);
+      for (const track of layer.optionB.tracks) collapseTrackIndices.push(...track.trackIndices);
     }
     // Include live seed tracks
     const liveSeedIndices = state.config.attempts[cue.attemptIndex]?.liveSeed?.trackIndices ?? [];
@@ -833,8 +837,12 @@ export function createAudioRouter(
 
     // Fade all tracks in the rejected attempt to 0 (V3.2: iterate TrackBundle tracks)
     for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      for (const track of layer.optionA.tracks) fadeGain(track.trackIndex, 0, currentGainConfig.collapseFadeBeats);
-      for (const track of layer.optionB.tracks) fadeGain(track.trackIndex, 0, currentGainConfig.collapseFadeBeats);
+      for (const track of layer.optionA.tracks) {
+        for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.collapseFadeBeats);
+      }
+      for (const track of layer.optionB.tracks) {
+        for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.collapseFadeBeats);
+      }
     }
     // Live seed faded by the separate live_seed_stop cue emitted by the conductor
 
@@ -852,11 +860,15 @@ export function createAudioRouter(
   // V3.2 live mix crossfade handler (stub — full implementation in live mix task)
   function handleLiveMixCrossfade(cue: Extract<AudioCue, { type: 'live_mix_crossfade' }>): void {
     ensureTransportStarted();
-    // Fade out outgoing, fade in incoming
-    fadeGain(cue.outgoingTrackIndex, 0, currentGainConfig.lockInFadeBeats);
-    unmuteTrack(cue.incomingTrackIndex);
-    setGain(cue.incomingTrackIndex, currentGainConfig.entryGain);
-    fadeGain(cue.incomingTrackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
+    // Fade out outgoing, fade in incoming (iterate all tracks in multi-track fragments)
+    for (const idx of cue.outgoingTrackIndices) {
+      fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
+    }
+    for (const idx of cue.incomingTrackIndices) {
+      unmuteTrack(idx);
+      setGain(idx, currentGainConfig.entryGain);
+      fadeGain(idx, 1.0, currentGainConfig.ceremonySwellBeats);
+    }
   }
 
   // V3.2 live mix start handler (stub — full implementation in live mix task)

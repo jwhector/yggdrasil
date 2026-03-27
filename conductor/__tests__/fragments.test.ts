@@ -14,8 +14,8 @@ function makeLayerConfig(index: number): V32LayerConfig {
     group: LAYER_GROUPS[index % LAYER_GROUPS.length],
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
-    optionA: { tracks: [{ granularType: 'melody', trackIndex: index * 2 }] },
-    optionB: { tracks: [{ granularType: 'melody', trackIndex: index * 2 + 1 }] },
+    optionA: { tracks: [{ granularType: 'melody', trackIndices: [index * 2] }] },
+    optionB: { tracks: [{ granularType: 'melody', trackIndices: [index * 2 + 1] }] },
   };
 }
 
@@ -307,18 +307,18 @@ describe('generateFragments — bothOptionsSurvive', () => {
 
 // Realistic V3.2 layer configs: bones(bass+drums), flesh(melody+pad+harmony), spark(fx)
 function makeV32LayerConfig(index: number, group: string): V32LayerConfig {
-  const trackBundles: Record<string, { a: { granularType: string; trackIndex: number }[]; b: { granularType: string; trackIndex: number }[] }> = {
+  const trackBundles: Record<string, { a: { granularType: string; trackIndices: number[] }[]; b: { granularType: string; trackIndices: number[] }[] }> = {
     bones: {
-      a: [{ granularType: 'bass', trackIndex: index * 10 + 1 }, { granularType: 'drums', trackIndex: index * 10 + 2 }],
-      b: [{ granularType: 'bass', trackIndex: index * 10 + 3 }, { granularType: 'drums', trackIndex: index * 10 + 4 }],
+      a: [{ granularType: 'bass', trackIndices: [index * 10 + 1] }, { granularType: 'drums', trackIndices: [index * 10 + 2] }],
+      b: [{ granularType: 'bass', trackIndices: [index * 10 + 3] }, { granularType: 'drums', trackIndices: [index * 10 + 4] }],
     },
     flesh: {
-      a: [{ granularType: 'melody', trackIndex: index * 10 + 1 }, { granularType: 'pad', trackIndex: index * 10 + 2 }, { granularType: 'harmony', trackIndex: index * 10 + 3 }],
-      b: [{ granularType: 'melody', trackIndex: index * 10 + 4 }, { granularType: 'pad', trackIndex: index * 10 + 5 }, { granularType: 'harmony', trackIndex: index * 10 + 6 }],
+      a: [{ granularType: 'melody', trackIndices: [index * 10 + 1] }, { granularType: 'pad', trackIndices: [index * 10 + 2] }, { granularType: 'harmony', trackIndices: [index * 10 + 3] }],
+      b: [{ granularType: 'melody', trackIndices: [index * 10 + 4] }, { granularType: 'pad', trackIndices: [index * 10 + 5] }, { granularType: 'harmony', trackIndices: [index * 10 + 6] }],
     },
     spark: {
-      a: [{ granularType: 'fx', trackIndex: index * 10 + 1 }],
-      b: [{ granularType: 'fx', trackIndex: index * 10 + 2 }],
+      a: [{ granularType: 'fx', trackIndices: [index * 10 + 1] }],
+      b: [{ granularType: 'fx', trackIndices: [index * 10 + 2] }],
     },
   };
   const bundle = trackBundles[group];
@@ -569,7 +569,7 @@ describe('generateGranularFragments — alwaysAvailable', () => {
   test('alwaysAvailable track on losing option produces fragment even when bothOptionsSurvive=false', () => {
     const config = makeV32AttemptConfig('ambition');
     // Mark the bass track on option B as alwaysAvailable
-    config.layers[0].optionB.tracks[0] = { granularType: 'bass', trackIndex: 3, alwaysAvailable: true };
+    config.layers[0].optionB.tracks[0] = { granularType: 'bass', trackIndices: [3], alwaysAvailable: true };
 
     const attempt = makeV32CompletedAttempt(0, 'ambition');
     // Layer 0 (bones) chose A — so B is the loser
@@ -592,7 +592,7 @@ describe('generateGranularFragments — alwaysAvailable', () => {
   test('alwaysAvailable track on unreached layer produces fragment', () => {
     const config = makeV32AttemptConfig('ambition');
     // Mark fx track on option A of spark (layer 2) as alwaysAvailable
-    config.layers[2].optionA.tracks[0] = { granularType: 'fx', trackIndex: 21, alwaysAvailable: true };
+    config.layers[2].optionA.tracks[0] = { granularType: 'fx', trackIndices: [21], alwaysAvailable: true };
 
     // Collapse at layer 1, so layer 2 (spark) is unreached
     const attempt = makeV32CollapsedAttempt(0, 'ambition', 1);
@@ -607,13 +607,13 @@ describe('generateGranularFragments — alwaysAvailable', () => {
     expect(sparkFragment).toBeDefined();
     expect(sparkFragment!.wonVote).toBe(false);
     expect(sparkFragment!.option).toBe('A');
-    expect(sparkFragment!.trackIndex).toBe(21);
+    expect(sparkFragment!.trackIndices).toEqual([21]);
   });
 
   test('alwaysAvailable tracks on both options of unreached layer produce two fragments', () => {
     const config = makeV32AttemptConfig('ambition');
-    config.layers[2].optionA.tracks[0] = { granularType: 'fx', trackIndex: 21, alwaysAvailable: true };
-    config.layers[2].optionB.tracks[0] = { granularType: 'fx', trackIndex: 22, alwaysAvailable: true };
+    config.layers[2].optionA.tracks[0] = { granularType: 'fx', trackIndices: [21], alwaysAvailable: true };
+    config.layers[2].optionB.tracks[0] = { granularType: 'fx', trackIndices: [22], alwaysAvailable: true };
 
     const attempt = makeV32CollapsedAttempt(0, 'ambition', 1);
     const fragments = generateGranularFragments([attempt], [config], '/audio', false);
@@ -628,7 +628,7 @@ describe('generateGranularFragments — alwaysAvailable', () => {
   test('alwaysAvailable does not duplicate winner fragments that would already be included', () => {
     const config = makeV32AttemptConfig('ambition');
     // Mark the bass track on option A as alwaysAvailable — but it's already the winner
-    config.layers[0].optionA.tracks[0] = { granularType: 'bass', trackIndex: 1, alwaysAvailable: true };
+    config.layers[0].optionA.tracks[0] = { granularType: 'bass', trackIndices: [1], alwaysAvailable: true };
 
     const attempt = makeV32CompletedAttempt(0, 'ambition');
     // Layer 0 chose A — bass A is already a winner

@@ -31,8 +31,8 @@ function makeLayerConfig(index: number): V32LayerConfig {
   return {
     index,
     group: ['bones', 'flesh', 'spark'][index % 3],
-    optionA: { tracks: [{ granularType: 'bass', trackIndex: index * 2 }] },
-    optionB: { tracks: [{ granularType: 'bass', trackIndex: index * 2 + 1 }] },
+    optionA: { tracks: [{ granularType: 'bass', trackIndices: [index * 2] }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndices: [index * 2 + 1] }] },
     labelA: `Layer ${index} A`,
     labelB: `Layer ${index} B`,
   };

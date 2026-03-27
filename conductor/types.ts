@@ -313,8 +313,8 @@ export type AudioCue =
   | { type: 'live_seed_start'; attemptIndex: number; trackIndices: number[] }
   /** V3.2: mute live seed tracks on collapse or rejection */
   | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
-  /** V3.2: crossfade a granular track during live mix */
-  | { type: 'live_mix_crossfade'; granularType: string; incomingTrackIndex: number; outgoingTrackIndex: number }
+  /** V3.2: crossfade granular tracks during live mix (arrays for multi-track fragments) */
+  | { type: 'live_mix_crossfade'; granularType: string; incomingTrackIndices: number[]; outgoingTrackIndices: number[] }
   /** V3.2: initial unmute of active fragments when live mix starts */
   | { type: 'live_mix_start'; activeTrackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
@@ -447,10 +447,10 @@ export interface GranularType {
   symbol: string;       // For finale UI
 }
 
-/** Reference to a single Ableton track within a bundle, tagged with its granular type. */
+/** Reference to one or more Ableton tracks within a bundle, tagged with its granular type. */
 export interface GranularTrackRef {
   granularType: string;   // e.g., 'bass'
-  trackIndex: number;     // Ableton track index
+  trackIndices: number[]; // Ableton track indices (multiple tracks played as one unit)
   alwaysAvailable?: boolean;  // When true, generates a fragment regardless of vote outcome or layer reach
 }
 
@@ -527,7 +527,7 @@ export interface GranularFragment {
   granularType: string;         // Which specific type ('bass', 'drums', etc.)
   option: 'A' | 'B';
   chapter: Chapter;
-  trackIndex: number;           // Ableton track index for this specific granular track
+  trackIndices: number[];       // Ableton track indices (multiple tracks played as one unit)
   wonVote: boolean;
   previewAudioPath: string;
 }
