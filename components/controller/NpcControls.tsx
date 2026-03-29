@@ -61,7 +61,6 @@ export function NpcControls({ fullState, sendCommand }: NpcControlsProps) {
   if (!finaleState) return null;
 
   const currentMessage = finaleState.npc.currentMessage;
-  const autoEnabled = finaleState.npc.autoTriggersEnabled;
 
   const sendMessage = (message: string) => {
     if (!message.trim()) return;
@@ -79,24 +78,6 @@ export function NpcControls({ fullState, sendCommand }: NpcControlsProps) {
           <span style={styles.currentMessageText}>{currentMessage}</span>
         </div>
       )}
-
-      {/* Auto-trigger toggle */}
-      <div style={styles.toggleRow}>
-        <label style={styles.toggleLabel}>
-          <input
-            type="checkbox"
-            checked={autoEnabled}
-            onChange={e =>
-              sendCommand({
-                type: 'TOGGLE_NPC_AUTO_TRIGGERS' as ConductorCommand['type'],
-                enabled: e.target.checked,
-              } as unknown as ConductorCommand)
-            }
-            style={{ marginRight: '8px' }}
-          />
-          Auto-triggers {autoEnabled ? 'ON' : 'OFF'}
-        </label>
-      </div>
 
       {/* Line bank */}
       <div style={styles.lineBankGrid}>

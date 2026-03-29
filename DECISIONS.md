@@ -89,30 +89,55 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 
 ### R16: Revealing phase — Two-command split (CLOSE_VOTING + ADVANCE_FROM_REVEAL)
 **Date:** 2026-03-06
-**Decision:** `CLOSE_VOTING` resolves the vote and pauses at `revealing` phase; a separate `ADVANCE_FROM_REVEAL` command (auto-fired by the timing engine after `revealSequenceDurationMs`) advances to `locked_in` or `collapsed`. Vote result and drain are stored on `AttemptState` (`currentVoteResult`, `currentDrain`) during the revealing window.
+**Decision:** `CLOSE_VOTING` resolves the vote and pauses at `revealing` phase; a separate `ADVANCE_FROM_REVEAL` command (auto-fired by the timing engine after `revealSequenceDurationMs`) advances to `locked_in` or `collapsed`. Vote result and drain are stored on `AttemptState` (`currentVoteResult`) during the revealing window.
 **Rationale:** The RevealSequence UI (~5s animation) requires the conductor to hold at `revealing` as a true resting state so clients can observe it. The previous atomic `resolveCurrentLayer()` processed `revealing` → `locked_in` in one step, making the UI impossible. Splitting into two commands also makes the timing engine's role explicit and keeps conductor logic pure.
-**Impact:** `ConductorCommand` gained `ADVANCE_FROM_REVEAL`. `AttemptState` gained `currentVoteResult` and `currentDrain`. All test helpers that call `CLOSE_VOTING` must also call `ADVANCE_FROM_REVEAL`.
+**Impact:** `ConductorCommand` gained `ADVANCE_FROM_REVEAL`. `AttemptState` gained `currentVoteResult`. All test helpers that call `CLOSE_VOTING` must also call `ADVANCE_FROM_REVEAL`.
 
 ### R17: Reveal beat durations
 **Date:** 2026-03-06
-**Decision:** Tension: 900ms, Split: 2000ms, Drain: 1500ms, Lock-in: 500ms (total ~4.9s). Client-side only (useState + useEffect timeouts); no server clock.
-**Rationale:** Total matches `revealSequenceDurationMs` (~5s). Drain gets more time than lock-in because the health bar animation is the primary tension moment. Audience and projector run independent timers — slight drift is acceptable since they're decorative, not mechanically coupled.
+**Decision:** Tension: 900ms, Split: 2000ms, Threshold check: 1500ms, Lock-in: 500ms (total ~4.9s). Client-side only (useState + useEffect timeouts); no server clock.
+**Rationale:** Total matches `revealSequenceDurationMs` (~5s). Threshold check gets more time than lock-in because the pass/fail moment is the primary tension beat. Audience and projector run independent timers — slight drift is acceptable since they're decorative, not mechanically coupled.
+
+### R18: Layer count — 6 layers per attempt
+**Date:** 2026-03-19
+**Decision:** Each attempt has exactly 6 layers. Layer types: melody, drums, pad, bass, harmony, fx. FX2 removed; FX1 renamed to FX.
+**Rationale:** 7 layers made the build phase too long and FX2 was rarely musically distinct from FX1. 6 layers keeps the build tight, reduces the fragment pool to a manageable size for deliberation, and ensures every layer type can appear early (position 0 or 1) in at least one song via the stagger table.
+**Impact:** `LAYERS_PER_ATTEMPT = 6`. All arrays (thresholds, tempos, auditionBars, ceremonyLayerOrder) length 6. Track count 42 → 36. Mixing surface 7x6 → 6x6.
+
+### R19: Doubt threshold schedule — per-layer, per-song configurable
+**Date:** 2026-03-19
+**Decision:** Default threshold curve: `[0.50, 0.50, 0.65, 0.78, 0.88, 0.95]`. Each song can have an independent curve via `default-show.json`. Replaces cumulative health bar drain mechanic.
+**Rationale:** Layers 0-1 at 0.50 are guaranteed to pass (any majority wins). The curve escalates: layer 2 filters out 50/50 rooms, layer 5 requires near-unanimity. Per-song tuning allows Song 1 to be forgiving while Song 3 is harsh. Per-layer independence (no cumulative state) makes collapse feel like a dramatic threshold moment rather than slow attrition.
+**Impact:** `AttemptConfig.thresholds: number[]` (length 6). Health bar deleted entirely. `HealthBarState`, `HealthBarDrain`, `drainFactor`, `layerMultipliers` removed.
+
+### R20: Merged auditioning + voting phase
+**Date:** 2026-03-19
+**Decision:** Kept `'auditioning'` as the LayerPhase name rather than renaming to `'auditioning_and_voting'` as MIGRATION-v3.1.md specified. Similarly kept `START_AUDITION` command rather than `START_LAYER`.
+**Rationale:** The behavioral change (voting open during auditioning) was already implemented in V3 (see CHANGELOG 2026-03-18). The names accurately describe the primary activity. Renaming would churn all references for no behavioral change.
+
+### R21: V3.2 type migration strategy — additive V32-prefixed types
+**Date:** 2026-03-26
+**Decision:** V3.2 types are added as new exports with `V32` prefix (e.g., `V32AttemptConfig`, `V32FinaleState`) alongside existing V3.1 types. Existing types are not modified. Config additions use separate JSON keys (`v32Attempts`, `v32Finale`).
+**Rationale:** 48+ files import from `conductor/types.ts`. Modifying existing types would cascade compilation errors into conductor logic, server, and UI code — contradicting the phased migration strategy. Additive types let the conductor logic phase swap references one module at a time, then cleanup removes the V3.1 types and V32 prefixes.
+**Impact:** `conductor/types.ts` has both V3.1 and V3.2 type definitions temporarily. `default-show.json` has both `attempts`/`finale` (V3.1) and `v32Attempts`/`v32Finale` (V3.2) keys.
+
+### R22: LayerGroupId is string, not a fixed union
+**Date:** 2026-03-26
+**Decision:** `LayerGroupId = string` rather than `'bones' | 'flesh' | 'spark'`. Similarly, `GranularType.id` is `string` rather than the fixed `LayerType` union.
+**Rationale:** The V3.2 design makes groupings configurable — different shows or songs could have different group names and different granular type counts. A string type allows config-driven flexibility. The existing `LayerType` union remains for V3.1 code that still needs it.
+
+### R23: Layer count — 3 audience-facing groups per attempt (V3.2)
+**Date:** 2026-03-26
+**Decision:** Song-building has 3 audience-facing layer groups (bones/flesh/spark) with thresholds `[0.50, 0.66, 0.99]`. Each group bundles 1-3 granular Ableton tracks. Supersedes R18 (6 layers) for V3.2.
+**Rationale:** 3 choices per song makes each choice a dramatic shift (choosing between full musical identities, not individual instruments). The 0.99 threshold at layer 2 means songs almost always collapse — the doubt wins, which is the narrative point. See MIGRATION-V3.2.md Change 2.
+**Impact:** `V32_LAYERS_PER_ATTEMPT = 3`. Existing `LAYERS_PER_ATTEMPT = 6` remains for V3.1 code.
 
 ---
 
 ## Open Decisions
 
-### O1: Exact layer count per attempt
-**Status:** Open
-**Options:** 5, 6, or 7 layers per attempt
-**Considerations:** More layers = more fragments for finale but higher collapse risk and longer build phases. 6 layers (12 squares on phone) is the current working assumption.
-**Blocked by:** Musical content design
-
-### O2: Exact doubt threshold schedule
-**Status:** Open
-**Current assumption:** Layers 0-1 no threshold, Layer 2 = 65%, Layer 3 = 75%, Layer 4 = 85%, Layer 5+ = 90%
-**Considerations:** Should thresholds be identical across all 3 attempts, or escalate? (e.g., Song 3 has higher base thresholds)
-**Blocked by:** Playtesting
+### O1: ~~Exact layer count per attempt~~ → Resolved as R18
+### O2: ~~Exact doubt threshold schedule~~ → Resolved as R19
 
 ### O3: Chapter + layer color/symbol assignments
 **Status:** Open

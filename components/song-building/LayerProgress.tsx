@@ -10,8 +10,8 @@
  * - Collapsed: red-tinted
  */
 
-import type { LayerResult, LayerPhase, Chapter, LayerConfig } from '@/conductor/types';
-import { getLayerIdentity, getChapterIdentity } from '@/lib/identity';
+import type { LayerResult, LayerPhase, Chapter, V32LayerConfig, LayerGroupConfig, GranularType } from '@/conductor/types';
+import { getLayerGroupIdentity, getChapterIdentity } from '@/lib/identity';
 
 export interface LayerProgressProps {
   layerResults: LayerResult[];
@@ -19,8 +19,10 @@ export interface LayerProgressProps {
   currentLayerPhase: LayerPhase;
   layerCount: number;
   chapter: Chapter;
-  /** Full layer plan needed to show layer type icons for upcoming layers */
-  layerPlan?: LayerConfig[];
+  /** Full layer plan needed to show layer group icons for upcoming layers */
+  layerPlan?: V32LayerConfig[];
+  layerGroups?: LayerGroupConfig[];
+  granularTypes?: GranularType[];
 }
 
 export function LayerProgress({
@@ -30,6 +32,8 @@ export function LayerProgress({
   layerCount,
   chapter,
   layerPlan,
+  layerGroups = [],
+  granularTypes = [],
 }: LayerProgressProps) {
   const chapterIdentity = getChapterIdentity(chapter);
   const slots = Array.from({ length: layerCount }, (_, i) => i);
@@ -47,7 +51,7 @@ export function LayerProgress({
       {slots.map((slotIndex) => {
         const result = layerResults.find((r) => r.layerIndex === slotIndex);
         const layerConfig = layerPlan?.[slotIndex];
-        const identity = layerConfig ? getLayerIdentity(layerConfig.type) : null;
+        const identity = layerConfig ? getLayerGroupIdentity(layerConfig.group, layerGroups, granularTypes) : null;
         const isCurrent = slotIndex === currentLayerIndex;
         const isCompleted = result?.status === 'locked_in';
         const isCollapsed = result?.status === 'unreached' && slotIndex < currentLayerIndex;
@@ -75,12 +79,12 @@ export function LayerProgress({
           textColor = 'rgba(255,255,255,0.8)';
         }
 
-        const isPulsing = isCurrent && (currentLayerPhase === 'voting' || currentLayerPhase === 'auditioning');
+        const isPulsing = isCurrent && currentLayerPhase === 'auditioning';
 
         return (
           <div
             key={slotIndex}
-            title={layerConfig ? `${layerConfig.type} (layer ${slotIndex + 1})` : `Layer ${slotIndex + 1}`}
+            title={layerConfig ? `${layerConfig.group} (layer ${slotIndex + 1})` : `Layer ${slotIndex + 1}`}
             style={{
               width: size,
               height: size,

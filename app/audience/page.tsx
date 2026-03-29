@@ -1,20 +1,22 @@
 'use client';
 
-import { useState } from 'react';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { HealthBar } from '@/components/song-building/HealthBar';
 import { LayerProgress } from '@/components/song-building/LayerProgress';
 import { OptionCards } from '@/components/song-building/OptionCards';
 import { RevealSequence } from '@/components/song-building/RevealSequence';
+import { UrgencyEffects } from '@/components/song-building/UrgencyEffects';
+import { AuditionProgress } from '@/components/song-building/AuditionProgress';
+import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { ConvergenceMeter } from '@/components/finale/ConvergenceMeter';
-import { ConsensusBoard } from '@/components/finale/ConsensusBoard';
-import { NpcDisplay } from '@/components/finale/NpcDisplay';
-import { useConvergence } from '@/hooks/useConvergence';
-import type { AudienceFinaleView, LayerType } from '@/conductor/types';
+import { AssignmentCards } from '@/components/finale/AssignmentCards';
+import { AssignmentIdentity } from '@/components/finale/AssignmentIdentity';
+import { LiveMixController } from '@/components/finale/LiveMixController';
+import { LiveMixSpectator } from '@/components/finale/LiveMixSpectator';
+import { useLiveMix } from '@/hooks/useLiveMix';
+import type { AudienceFinaleView, GranularType } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -46,6 +48,12 @@ function AudienceContent() {
   });
 
   const { state, isLoading, currentAttempt } = useShowState(socket, 'audience', userId);
+
+  const auditionProgress = useAuditionProgress(
+    socket,
+    state?.phase,
+    currentAttempt?.currentLayerPhase,
+  );
 
   const handleVote = (choice: 'A' | 'B') => {
     emit('vote', { choice });
@@ -100,17 +108,6 @@ function AudienceContent() {
           {/* Chapter label */}
           <ChapterLabel chapter={currentAttempt.chapter} attemptIndex={state.currentAttemptIndex} />
 
-          {/* Health bar */}
-          <HealthBar
-            health={currentAttempt.healthBar.current}
-            drainShadow={
-              currentAttempt.currentLayerPhase === 'revealing' && currentAttempt.currentDrain
-                ? currentAttempt.currentDrain.drainAmount
-                : 0
-            }
-            variant="audience"
-          />
-
           {/* Layer progress strip */}
           <LayerProgress
             layerResults={currentAttempt.layerResults}
@@ -120,32 +117,50 @@ function AudienceContent() {
             chapter={currentAttempt.chapter}
           />
 
-          {/* Voting cards OR reveal sequence */}
-          {currentAttempt.currentLayerPhase === 'revealing' &&
-            currentAttempt.currentVoteResult &&
-            currentAttempt.currentDrain &&
-            currentAttempt.currentLayerConfig ? (
+          {/* Audition progress (during auditioning phase) */}
+          {currentAttempt.currentLayerPhase === 'auditioning' && auditionProgress && (
+            <AuditionProgress progress={auditionProgress} />
+          )}
+
+          {/* Reveal sequence (during revealing phase) */}
+          {currentAttempt.currentLayerPhase === 'revealing'
+            && currentAttempt.currentVoteResult
+            && currentAttempt.lastThresholdCheck
+            && currentAttempt.currentLayerConfig ? (
             <RevealSequence
-              voteResult={currentAttempt.currentVoteResult}
-              drain={currentAttempt.currentDrain}
-              healthBefore={currentAttempt.healthBar.current + currentAttempt.currentDrain.drainAmount}
+              voteResult={{
+                winner: currentAttempt.currentVoteResult.winner,
+                consensus: currentAttempt.currentVoteResult.winningProportion,
+              }}
+              thresholdCheck={currentAttempt.lastThresholdCheck}
               layerConfig={currentAttempt.currentLayerConfig}
               variant="audience"
             />
-          ) : currentAttempt.currentLayerConfig ? (
-            <OptionCards
-              layerConfig={currentAttempt.currentLayerConfig}
-              myVote={currentAttempt.myVote}
-              disabled={
-                (currentAttempt.currentLayerPhase !== 'auditioning' && currentAttempt.currentLayerPhase !== 'voting')
-              }
-              onVote={handleVote}
-              currentAuditionOption={currentAttempt.currentAuditionOption}
-            />
           ) : null}
 
-          {/* Phase hint */}
-          <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+          {/* Voting cards (during auditioning phase) */}
+          {currentAttempt.currentLayerPhase !== 'revealing' && currentAttempt.currentLayerConfig ? (
+            <UrgencyEffects
+              layerIndex={currentAttempt.currentLayerIndex}
+              collapsed={currentAttempt.status === 'collapsed'}
+            >
+              <div className="urgency-cards">
+                <OptionCards
+                  layerConfig={currentAttempt.currentLayerConfig}
+                  myVote={currentAttempt.myVote}
+                  disabled={currentAttempt.currentLayerPhase !== 'auditioning'}
+                  onVote={handleVote}
+                  currentAuditionOption={currentAttempt.currentAuditionOption}
+                />
+              </div>
+              <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+            </UrgencyEffects>
+          ) : null}
+
+          {/* Phase hint outside urgency wrapper (only during reveal) */}
+          {currentAttempt.currentLayerPhase === 'revealing' && (
+            <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
+          )}
         </div>
       )}
 
@@ -153,9 +168,9 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {(phase === 'finale_elegy' || phase === 'finale_consensus' || phase === 'finale_performer_mix') && (
+      {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix') && (
         state.myFinale
-          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} />
+          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} granularTypes={state.config.granularTypes ?? []} />
           : <DarkListenScreen />
       )}
 
@@ -167,7 +182,7 @@ function AudienceContent() {
 }
 
 // ---------------------------------------------------------------------------
-// Finale audience view (V2)
+// Finale audience view (V3.2)
 // ---------------------------------------------------------------------------
 
 function FinaleAudienceView({
@@ -175,35 +190,16 @@ function FinaleAudienceView({
   phase,
   socket,
   emit,
+  granularTypes,
 }: {
   myFinale: AudienceFinaleView;
   phase: string;
   socket: Socket | null;
   emit: (event: string, data: unknown) => void;
+  granularTypes: GranularType[];
 }) {
-  const { animatedValue } = useConvergence({
-    socket,
-    threshold: myFinale.threshold,
-    timeRemaining: myFinale.roundTimeRemaining,
-  });
-
-  console.log(phase);
-
-  const handleVote = (fragmentId: string) => {
-    emit('consensus_vote', { fragmentId });
-  };
-
   // --- Elegy phase: show all fragments non-interactively ---
   if (phase === 'finale_elegy') {
-    // Build available (winners) and locked (losers) lists from AudienceFinaleView
-    // AudienceFinaleView only provides availableFragments (winners only, with locked flag)
-    // We show them all in a simplified elegy grid
-    const winners = myFinale.availableFragments
-      .filter(a => !a.locked)
-      .map(a => a.fragment);
-    const locked = myFinale.availableFragments
-      .filter(a => a.locked)
-      .map(a => a.fragment);
     return (
       <div
         style={{
@@ -226,78 +222,93 @@ function FinaleAudienceView({
           What remains
         </div>
         <ElegyGrid
-          availableFragments={winners}
-          lockedFragments={locked}
+          availableFragments={myFinale.myGroupFragments}
+          lockedFragments={[]}
           variant="audience"
         />
       </div>
     );
   }
 
-  // --- Consensus game phase ---
-  if (phase === 'finale_consensus') {
-    const roundDurationMs = 15000; // default; ideally passed from config
+  // --- Assignment phase (V3.2) ---
+  if (phase === 'finale_assignment') {
+    // After assignment completes, show identity
+    if (myFinale.assignmentTimerRemaining != null && myFinale.assignmentTimerRemaining <= 0 && myFinale.myGranularType !== null) {
+      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
+      if (gt) return <AssignmentIdentity granularType={gt} />;
+    }
+    // Auto-assignment: show identity immediately
+    if (myFinale.assignmentMode === 'auto' && myFinale.myGranularType !== null) {
+      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
+      if (gt) return <AssignmentIdentity granularType={gt} />;
+    }
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: '100%',
-          minHeight: '100vh',
-          padding: '16px',
-          boxSizing: 'border-box',
-          gap: '12px',
-        }}
-      >
-        {/* Convergence meter — pinned at top */}
-        <ConvergenceMeter
-          animatedValue={animatedValue}
-          threshold={myFinale.threshold}
-          timeRemaining={myFinale.roundTimeRemaining}
-          roundDurationMs={roundDurationMs}
-          roundActive={myFinale.roundTimeRemaining > 0}
-        />
-
-        {/* NPC display */}
-        <NpcDisplay socket={socket} />
-
-        {/* Consensus board */}
-        <div style={{ flex: 1 }}>
-          <ConsensusBoard
-            availableFragments={myFinale.availableFragments}
-            myVote={myFinale.myVote}
-            lockedRoles={myFinale.lockedRoles as Array<{ layerType: LayerType; fragmentId: string }>}
-            roundActive={myFinale.roundTimeRemaining > 0}
-            onVote={handleVote}
-          />
-        </div>
-      </div>
+      <AssignmentCards
+        myGranularType={myFinale.myGranularType}
+        granularTypes={granularTypes}
+        groupSizes={myFinale.groupSizes}
+        timerRemaining={myFinale.assignmentTimerRemaining ?? 0}
+        onSelect={(granularType) => emit('select_type', { granularType })}
+        socket={socket}
+      />
     );
   }
 
-  // --- Performer mix phase: passive dark screen (TBD) ---
-  if (phase === 'finale_performer_mix') {
+  // --- Live mix phase (V3.2) ---
+  if (phase === 'finale_live_mix') {
     return (
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100%',
-          minHeight: '100vh',
-          gap: '16px',
-        }}
-      >
-        <PulsingDot />
-        <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
-          FINALE IN PROGRESS
-        </p>
-      </div>
+      <LiveMixView
+        myFinale={myFinale}
+        socket={socket}
+      />
     );
   }
 
   return <DarkListenScreen />;
+}
+
+// ---------------------------------------------------------------------------
+// Live mix wrapper (needs hook call, so must be its own component)
+// ---------------------------------------------------------------------------
+
+function LiveMixView({
+  myFinale,
+  socket,
+}: {
+  myFinale: AudienceFinaleView;
+  socket: Socket | null;
+}) {
+  const liveMix = useLiveMix(socket, myFinale);
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        minHeight: '100vh',
+        overflowY: 'auto',
+        padding: '24px 16px 48px',
+        boxSizing: 'border-box',
+      }}
+    >
+      {myFinale.myGranularType && (
+        <LiveMixController
+          fragments={liveMix.myGroupFragments}
+          myVote={liveMix.myVote}
+          activeFragment={liveMix.activeFragment}
+          voteDistribution={liveMix.voteDistribution}
+          totalVotes={liveMix.totalVotes}
+          isLocked={liveMix.isLocked}
+          isMuted={liveMix.isMuted}
+          granularType={myFinale.myGranularType}
+          onSelectFragment={liveMix.setPreference}
+        />
+      )}
+
+      <LiveMixSpectator
+        activeFragments={liveMix.otherTypesActive}
+      />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -392,7 +403,7 @@ function ChapterLabel({ chapter, attemptIndex }: { chapter: string; attemptIndex
 }
 
 function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean }) {
-  if (phase === 'voting' && !hasVoted) {
+  if (phase === 'auditioning' && !hasVoted) {
     return (
       <p
         style={{
@@ -407,7 +418,7 @@ function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean 
       </p>
     );
   }
-  if (phase === 'voting' && hasVoted) {
+  if (phase === 'auditioning' && hasVoted) {
     return (
       <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', marginTop: '16px' }}>
         Vote recorded

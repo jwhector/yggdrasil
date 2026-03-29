@@ -21,54 +21,39 @@ import type { ShowConfig } from '../../conductor/types';
 // ============================================================================
 
 function createTestConfig(): ShowConfig {
+  const makeLayer = (i: number) => ({
+    index: i,
+    group: ['bones', 'flesh', 'spark'][i % 3],
+    labelA: 'A',
+    labelB: 'B',
+    optionA: { tracks: [{ granularType: 'bass', trackIndices: [i * 2] }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndices: [i * 2 + 1] }] },
+  });
+  const makeAttempt = (chapter: 'ambition' | 'love' | 'avoidance') => ({
+    chapter,
+    title: chapter,
+    liveSeed: { trackIndices: [99] },
+    layers: [0, 1, 2].map(i => makeLayer(i)),
+    thresholds: [0.5, 0.66, 0.99],
+    tempos: [120, 120, 120],
+    auditionBars: [4, 4, 2],
+    auditionCycles: [1, 1, 1],
+  });
   return {
-    layersPerAttempt: 7,
-    attempts: [
-      {
-        chapter: 'ambition',
-        title: 'Ambition',
-        drainFactor: 0.5,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
-        layers: [
-          { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-      {
-        chapter: 'love',
-        title: 'Love',
-        drainFactor: 0.6,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
-        layers: [
-          { index: 0, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-      {
-        chapter: 'avoidance',
-        title: 'Avoidance',
-        drainFactor: 0.7,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
-        layers: [
-          { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-    ],
+    layersPerAttempt: 3,
+    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assignmentMode: 'auto',
+      assignmentTimerMs: 30000,
+      bothOptionsSurvive: true,
+      crossSongConstraint: false,
+      audioPreviewPath: '/audio/previews',
+      npcMessages: [],
     },
     timing: {
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 2000,
-      beatsPerLoop: 0,
-      auditionsPerLayer: 2,
+      loopBoundaryBeats: 32,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1'],
@@ -157,41 +142,40 @@ describe('loadBackup', () => {
     expect(loaded.finaleState).toBeNull();
   });
 
-  test('preserves finaleState Maps', () => {
+  test('preserves finaleState Maps (assignment groups, liveMix activeFragments)', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     state.finaleState = {
-      phase: 'consensus_game',
+      phase: 'assignment',
       availableFragments: [],
       allFragments: [],
-      lockedFragments: [],
-      consensusGame: {
-        active: true,
-        currentRound: 1,
-        roundTimeRemaining: 10000,
-        votes: new Map([['u1', 'frag-0-0-A'], ['u2', 'frag-0-1-B']]),
-        convergenceValue: 0.6,
-        threshold: 0.4,
-        consecutiveFailures: 0,
-        lockedRoles: new Map([['melody', 'frag-0-0-A']]),
+      assignment: {
+        mode: 'auto',
+        groups: new Map([['bass', ['u1', 'u2']], ['drums', ['u3']]]),
+        timerRemaining: null,
       },
-      npc: { currentMessage: null, autoTriggersEnabled: false },
-      performerMix: {
-        activeLayers: new Map([['melody', 'frag-0-0-A']]),
-        pendingChanges: [],
+      liveMix: {
+        votes: new Map([['bass', new Map([['u1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
+        activeFragments: new Map([['bass', 'frag-0-0-A']]),
+        lockedTypes: [],
+
+        performerOverrides: new Map(),
+        liveTracksActive: [],
+        transportStarted: false,
         loopPosition: 0,
         loopCount: 0,
-        liveTracksActive: [],
       },
+      npc: { currentMessage: null },
     };
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
-    expect(loaded.finaleState!.consensusGame.votes).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.consensusGame.votes.get('u1')).toBe('frag-0-0-A');
-    expect(loaded.finaleState!.consensusGame.lockedRoles).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.consensusGame.lockedRoles.get('melody')).toBe('frag-0-0-A');
-    expect(loaded.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.assignment.groups).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.assignment.groups.get('bass')).toEqual(['u1', 'u2']);
+    expect(loaded.finaleState!.liveMix.votes).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.liveMix.votes.get('bass')).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.liveMix.votes.get('bass')!.get('u1')!.fragmentId).toBe('frag-0-0-A');
+    expect(loaded.finaleState!.liveMix.activeFragments).toBeInstanceOf(Map);
+    expect(loaded.finaleState!.liveMix.activeFragments.get('bass')).toBe('frag-0-0-A');
   });
 
   test('throws for non-existent file', () => {

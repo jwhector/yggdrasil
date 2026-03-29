@@ -1,5 +1,5 @@
 /**
- * Solo Show — Core Type Definitions (V2)
+ * Solo Show — Core Type Definitions (V3.2)
  *
  * This file defines the shared language for the entire system.
  * Changes here affect conductor, server, and client packages.
@@ -8,6 +8,9 @@
  *
  * Self-contained: no imports from other project files.
  */
+
+/** Number of audience-facing layer groups per song attempt (V3.2). */
+export const LAYERS_PER_ATTEMPT = 3;
 
 // ============================================================================
 // Primitive Types
@@ -25,18 +28,20 @@ export type Timestamp = number;
 /** The three story chapters, each corresponding to one song-building attempt. */
 export type Chapter = 'ambition' | 'love' | 'avoidance';
 
+/** Sentinel fragment ID: when a type's active fragment is this, audio is muted. Voteable like any fragment. */
+export const MUTE_FRAGMENT_ID = '__mute__';
+
 /**
  * Layer types represent the musical role of each layer in a song.
- * 7 fixed types — one per layer slot per attempt.
+ * 6 fixed types — one per layer slot per attempt.
  */
 export type LayerType =
-  | 'melody'
+  | 'seed'
   | 'drums'
   | 'pad'
   | 'bass'
   | 'harmony'
-  | 'fx1'
-  | 'fx2';
+  | 'fx';
 
 // ============================================================================
 // Layer Phases & Config
@@ -45,18 +50,19 @@ export type LayerType =
 /**
  * Phase of a single layer within an attempt_build phase.
  *
- * locked → auditioning → voting → revealing → locked_in
- *                                     │
- *                                     ▼ (if health bar reaches zero)
- *                                 collapsed (attempt ends)
+ * locked → auditioning → revealing → locked_in
+ *                            │
+ *                            ▼ (if threshold fails)
+ *                        collapsed (attempt ends)
+ *
+ * Note: voting is open concurrently during 'auditioning' (no separate voting phase).
  */
 export type LayerPhase =
   | 'locked'        // Not yet reached; displayed as unexplored square
-  | 'auditioning'   // Playing A and B previews
-  | 'voting'        // Vote window open, audience selecting A or B (blind — no live split)
-  | 'revealing'     // Vote closed, showing split + health drain + winner lock-in
+  | 'auditioning'   // Playing A and B previews; vote is open simultaneously
+  | 'revealing'     // Vote closed, showing split + threshold check + winner lock-in
   | 'locked_in'     // Option chosen, layer committed to song stack
-  | 'collapsed';    // Attempt failed at this layer (health bar reached zero)
+  | 'collapsed';    // Attempt failed at this layer (threshold not met)
 
 /** Configuration for a single layer within an attempt. */
 export interface LayerConfig {
@@ -71,11 +77,15 @@ export interface LayerConfig {
 /** Result of a resolved layer. */
 export interface LayerResult {
   layerIndex: number;
-  type: LayerType;
-  status: 'locked_in' | 'unreached';   // unreached = never got to vote on this layer
+  /** V3.2: layer group id (e.g. 'bones', 'flesh', 'spark'). */
+  group?: string | null;
+  /** V3.1 compat: granular layer type. Null in V3.2 conductor. */
+  type?: LayerType;
+  status: 'locked_in' | 'collapsed' | 'unreached';  // collapsed = threshold failed here
   chosenOption: 'A' | 'B' | null;      // null if unreached
-  consensus: number | null;            // null if unreached
-  drainAmount: number | null;          // health bar drain from this layer; null if unreached
+  winningProportion: number | null;    // max(votesA, votesB) / total; null if unreached
+  thresholdRequired: number | null;    // doubt threshold for this layer; null if unreached
+  passed: boolean | null;             // null if unreached
 }
 
 /** A single audience member's vote on a layer. */
@@ -85,27 +95,6 @@ export interface LayerVote {
   layerIndex: number;
   choice: 'A' | 'B';
   timestamp: Timestamp;
-}
-
-// ============================================================================
-// Health Bar
-// ============================================================================
-
-/** Cumulative health bar state for a song-building attempt. */
-export interface HealthBarState {
-  current: number;                      // 0 = collapsed, 100 = full
-  drainFactor: number;                  // Base multiplier for this attempt
-  layerMultipliers: number[];           // Per-layer scaling (length 7, e.g. [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0])
-  history: HealthBarDrain[];            // One entry per resolved layer
-}
-
-/** A single drain event applied to the health bar after a vote resolves. */
-export interface HealthBarDrain {
-  layerIndex: number;
-  losingProportion: number;             // min(votesA, votesB) / total (0.0–0.5)
-  layerMultiplier: number;              // From layerMultipliers[layerIndex]
-  drainAmount: number;                  // losingProportion * 100 * drainFactor * layerMultiplier
-  healthAfter: number;                  // Health bar value after applying drain (floor 0)
 }
 
 // ============================================================================
@@ -128,7 +117,7 @@ export interface VoteResult {
 export interface AttemptState {
   index: number;                        // 0, 1, 2
   chapter: Chapter;
-  layerPlan: LayerConfig[];
+  layerPlan: V32LayerConfig[];
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerResults: LayerResult[];          // Populated as layers resolve
@@ -137,18 +126,18 @@ export interface AttemptState {
   collapsedAtLayer: number | null;
   currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing
   auditionLoopIndex: number;                  // 0-based count of loops completed
-  healthBar: HealthBarState;
   currentVoteResult: VoteResult | null;       // Set during revealing phase, cleared on lock-in
-  currentDrain: HealthBarDrain | null;        // Set during revealing phase, cleared on lock-in
 }
 
 /** Static configuration for a single attempt. */
 export interface AttemptConfig {
   chapter: Chapter;
   title: string;                        // Display name (e.g., "Ambition")
-  layers: LayerConfig[];                // 7 layers per attempt
-  drainFactor: number;                  // Health bar base drain multiplier for this attempt
-  layerMultipliers: number[];           // Per-layer scaling factors (length 7)
+  layers: LayerConfig[];                // 6 layers per attempt
+  thresholds: number[];                 // Per-layer doubt thresholds (length 6)
+  tempos: number[];                     // Per-layer BPM (length 6)
+  auditionBars: number[];               // Bars per option during audition (length 6)
+  auditionCycles: number[];             // A-B cycles per layer (1 = A then B, 2 = A-B-A-B) (length 6)
 }
 
 /** Recorded result of a completed/collapsed attempt, used for fragment generation. */
@@ -177,29 +166,20 @@ export interface Fragment {
   chapter: Chapter;
   layerType: LayerType;
   displayLabel: string;                 // Emotional tagline (e.g., "Distant Pulse")
+  wonVote: boolean;                     // true if this option won the blind vote
   audioRef: AudioReference;
-}
-
-// ============================================================================
-// Pending Change (Performer Mix)
-// ============================================================================
-
-/** A queued fragment activation or mute for the performer mixing surface. */
-export interface PendingChange {
-  layerType: LayerType;
-  fragmentId: string | null;           // null = mute this layer
-  queuedAt: number;
+  previewAudioPath: string;             // URL path to preview audio file (e.g. /audio/previews/preview-0-0-A.mp3)
 }
 
 // ============================================================================
 // NPC
 // ============================================================================
 
-/** Configuration for an NPC auto-trigger condition. */
-export interface NpcTriggerConfig {
-  condition: string;                   // Condition identifier (e.g., 'consecutive_failures', 'near_miss')
-  threshold?: number;                  // Numeric threshold for the condition, if applicable
-  message: string;                     // NPC line to display
+/** Configuration for an event-driven NPC message. */
+export interface NpcMessageConfig {
+  event: string;                       // Event key (e.g., 'performer_abandonment', 'assembly_start', 'layer_locked')
+  layerType?: LayerType;               // Optional: specific to a layer type
+  text: string;                        // The NPC message text (supports {layerLabel} template variable)
 }
 
 // ============================================================================
@@ -222,44 +202,10 @@ export interface AbletonParamRef {
 }
 
 // ============================================================================
-// Finale State
+// Finale State (V3.2)
 // ============================================================================
 
-export interface FinaleState {
-  phase: 'elegy' | 'consensus_game' | 'performer_mix';
-
-  // Fragment availability (computed from song-building results)
-  availableFragments: Fragment[];       // Winners only (for consensus game)
-  allFragments: Fragment[];             // All 42 (for performer mixing surface)
-  lockedFragments: Fragment[];          // Losers + unreached (for elegy display)
-
-  // Consensus game state
-  consensusGame: {
-    active: boolean;
-    currentRound: number;
-    roundTimeRemaining: number;         // ms
-    votes: Map<UserId, string>;         // userId → fragmentId
-    convergenceValue: number;           // 0.0 to 1.0
-    threshold: number;                  // Current threshold (may decrease after failures)
-    consecutiveFailures: number;
-    lockedRoles: Map<LayerType, string>;  // layerType → fragmentId (activated fragments)
-  };
-
-  // NPC state
-  npc: {
-    currentMessage: string | null;
-    autoTriggersEnabled: boolean;
-  };
-
-  // Performer mix state
-  performerMix: {
-    activeLayers: Map<LayerType, string | null>;  // layerType → fragmentId or null (muted)
-    pendingChanges: PendingChange[];
-    loopPosition: number;               // 0.0 to 1.0 within current 8-bar loop
-    loopCount: number;                  // Total loops since finale started
-    liveTracksActive: string[];         // IDs of active live performance tracks
-  };
-}
+// Old FinaleState removed in V3.2. See V32FinaleState below.
 
 // ============================================================================
 // User
@@ -279,7 +225,7 @@ export interface User {
 /**
  * Show phase progression:
  * lobby → opener → attempt_story → attempt_build → attempt_resolve → ... (×3) →
- * finale_elegy → finale_consensus → finale_performer_mix → ended
+ * finale_elegy → finale_assignment → finale_live_mix → ended
  */
 export type ShowPhase =
   | 'lobby'                   // Audience joining, waiting
@@ -288,8 +234,8 @@ export type ShowPhase =
   | 'attempt_build'           // Active song-building with audience voting
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
   | 'finale_elegy'            // Elegy display of all fragments (available and locked)
-  | 'finale_consensus'        // Audience consensus game to activate fragments
-  | 'finale_performer_mix'    // Performer live-mixes the activated fragments
+  | 'finale_assignment'       // Auto or self-select assignment to granular type groups
+  | 'finale_live_mix'         // Incredibox-style live collaborative mixing
   | 'ended';                  // Show complete
 
 // ============================================================================
@@ -302,7 +248,7 @@ export interface ShowState {
   currentAttemptIndex: number;          // 0, 1, 2
   attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: FinaleState | null;      // Populated at finale_elegy
+  finaleState: V32FinaleState | null;    // Populated at finale_elegy
   config: ShowConfig;
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
@@ -314,9 +260,11 @@ export interface ShowState {
 // ============================================================================
 
 export interface ShowConfig {
-  layersPerAttempt: number;             // Always 7; used for track index calculation
-  attempts: AttemptConfig[];            // Length 3
-  finale: FinaleConfig;
+  layersPerAttempt: number;             // 3 in V3.2 (was 6)
+  granularTypes?: GranularType[];       // V3.2: master registry of granular types
+  layerGroups?: LayerGroupConfig[];     // V3.2: layer group definitions (bones/flesh/spark)
+  attempts: V32AttemptConfig[];         // Length 3; V3.2 structure with TrackBundles + liveSeed
+  finale: V32FinaleConfig;
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;             // Text displayed while waiting
@@ -324,16 +272,7 @@ export interface ShowConfig {
   seatIds: SeatId[];                    // Known seats for QR code generation
 }
 
-export interface FinaleConfig {
-  consensusRoundDurationMs: number;
-  firstRoundDurationMs: number;
-  initialThreshold: number;
-  thresholdDecayPerFailure: number;
-  minThreshold: number;
-  interRoundDelayMs: number;
-  successCelebrationMs: number;
-  npcAutoTriggers: NpcTriggerConfig[];
-}
+// Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.
 
 /**
  * Configuration for Utility device gain transitions.
@@ -349,18 +288,15 @@ export interface GainConfig {
   exitFadeBeats: number;        // Beats to ramp to 0.0 on exit (default 4 = 1 bar)
   lockInFadeBeats: number;      // Beats to fade out the loser on lock-in (default 4)
   collapseFadeBeats: number;    // Beats to fade all attempt tracks on collapse (default 8)
-  consensusSwellBeats: number;  // Beats for consensus fragment swell-in (default 4)
+  ceremonySwellBeats: number;   // Beats for ceremony fragment swell-in (default 4)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
   stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
 }
 
 export interface TimingConfig {
-  auditionDurationMs: number;           // Fallback when OSC beat sync unavailable
-  votingWindowMs: number;               // How long voting stays open
   revealSequenceDurationMs: number;     // Duration of post-vote reveal animation
   rejectionEffectDurationMs: number;    // Duration of song rejection effect
-  beatsPerLoop: number;                 // Beats per audition A/B loop (OSC mode; 0 = use auditionDurationMs fallback)
-  auditionsPerLayer: number;            // Number of A/B cycles per layer before voting opens
+  loopBoundaryBeats: number;            // Beats per performer mix loop boundary (e.g. 32 = 8 bars)
   gain?: GainConfig;                    // Utility device gain transition configuration (uses defaults if absent)
 }
 
@@ -369,15 +305,24 @@ export interface TimingConfig {
 // ============================================================================
 
 export type AudioCue =
-  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; audioRef: AudioReference; otherAudioRef: AudioReference }
-  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; audioRef?: AudioReference }
-  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerAudioRef: AudioReference; loserAudioRef: AudioReference }
+  /** V3.2: trackBundle = option being brought in; otherTrackBundle = option being faded out */
+  | { type: 'audition_start'; attemptIndex: number; layerIndex: number; option: 'A' | 'B'; trackBundle: TrackBundle; otherTrackBundle: TrackBundle }
+  | { type: 'audition_stop'; attemptIndex: number; layerIndex: number; option: 'A' | 'B' | null; trackBundle?: TrackBundle }
+  | { type: 'lock_in'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B'; winnerTrackBundle: TrackBundle; loserTrackBundle: TrackBundle }
+  | { type: 'set_tempo'; bpm: number; attemptIndex: number; layerIndex: number }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'rejection_gesture'; attemptIndex: number }
-  | { type: 'consensus_activate'; layerType: LayerType; fragmentId: string; audioRef: AudioReference }
-  | { type: 'mix_update'; changes: PendingChange[] }
+  /** V3.2: unmute live seed tracks at attempt_build start */
+  | { type: 'live_seed_start'; attemptIndex: number; trackIndices: number[] }
+  /** V3.2: mute live seed tracks on collapse or rejection */
+  | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
+  /** V3.2: crossfade granular tracks during live mix (arrays for multi-track fragments) */
+  | { type: 'live_mix_crossfade'; granularType: string; incomingTrackIndices: number[]; outgoingTrackIndices: number[] }
+  /** V3.2: initial unmute of active fragments when live mix starts */
+  | { type: 'live_mix_start'; activeTrackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
+  | { type: 'master_panic' }            // Authoritative: query Ableton for all tracks, mute every non-foldable, reset gains
   | { type: 'reset_utilities' };        // Emergency: set all Utility gains to 0 dB, unmute all tracks
 
 // ============================================================================
@@ -394,41 +339,38 @@ export type ConductorCommand =
   // Song-building
   | { type: 'START_AUDITION' }
   | { type: 'TOGGLE_AUDITION' }
-  | { type: 'OPEN_VOTING' }
   | { type: 'CLOSE_VOTING' }
   | { type: 'ADVANCE_FROM_REVEAL' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
   | { type: 'RERUN_VOTE' }
-
-  // Health Bar
-  | { type: 'SET_DRAIN_FACTOR'; factor: number }
-  | { type: 'SET_HEALTH'; value: number }
   | { type: 'FORCE_COLLAPSE' }
 
   // Song Rejection
   | { type: 'TRIGGER_REJECTION' }
 
-  // Finale — Consensus Game
+  // Finale — Setup & NPC
   | { type: 'SETUP_FINALE' }
-  | { type: 'START_CONSENSUS_ROUND' }
-  | { type: 'SUBMIT_CONSENSUS_VOTE'; userId: UserId; fragmentId: string }
-  | { type: 'END_CONSENSUS_ROUND' }
-  | { type: 'SET_CONSENSUS_THRESHOLD'; threshold: number }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
 
-  // Finale — Performer Mix
-  | { type: 'START_PERFORMER_MIX' }
-  | { type: 'QUEUE_FRAGMENT'; layerType: LayerType; fragmentId: string | null }
-  | { type: 'CANCEL_PENDING'; layerType: LayerType }
-  | { type: 'FIRE_PENDING_CHANGES' }
-  | { type: 'LOAD_SNAPSHOT'; snapshot: Map<LayerType, string | null> }
-  | { type: 'TOGGLE_LIVE_TRACK'; trackId: string }
+  // Finale — Assignment
+  | { type: 'START_ASSIGNMENT' }
+  | { type: 'SELECT_GRANULAR_TYPE'; userId: UserId; granularType: string }
+  | { type: 'ASSIGNMENT_COMPLETE' }
+
+  // Finale — Live Mix
+  | { type: 'START_LIVE_MIX' }
+  | { type: 'SET_LIVE_MIX_PREFERENCE'; userId: UserId; granularType: string; fragmentId: string }
+  | { type: 'LOCK_GRANULAR_TYPE'; granularType: string }
+  | { type: 'UNLOCK_GRANULAR_TYPE'; granularType: string }
+  | { type: 'OVERRIDE_FRAGMENT'; granularType: string; fragmentId: string }
+  | { type: 'CLEAR_OVERRIDE'; granularType: string }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
   | { type: 'AUDIO_PANIC' }
+  | { type: 'MASTER_PANIC' }            // Authoritative: query Ableton, mute all non-foldable tracks
   | { type: 'RESET_UTILITIES' }         // Emergency: reset all Utility gains to 0 dB
 
   // Connection
@@ -458,22 +400,24 @@ export type ConductorEvent =
   | { type: 'VOTE_RECEIVED'; userId: UserId; attemptIndex: number; layerIndex: number }
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
-  | { type: 'HEALTH_BAR_DRAINED'; attemptIndex: number; layerIndex: number; drain: HealthBarDrain }
-  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number; healthBar: HealthBarState }
+  | { type: 'THRESHOLD_CHECK'; attemptIndex: number; layerIndex: number; winningProportion: number; threshold: number; passed: boolean }
+  | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number }
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }
 
-  // Finale
-  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: Fragment[]; lockedFragments: Fragment[] }
-  | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
-  | { type: 'CONSENSUS_VOTE_UPDATED'; convergenceValue: number }
-  | { type: 'CONSENSUS_ROUND_SUCCESS'; fragmentId: string; layerType: LayerType; convergence: number }
-  | { type: 'CONSENSUS_ROUND_FAILURE'; highestConvergence: number }
-  | { type: 'CONSENSUS_GAME_COMPLETE' }
+  // Finale — Setup
+  | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: GranularFragment[]; allFragments: GranularFragment[] }
   | { type: 'NPC_MESSAGE'; message: string }
-  | { type: 'PERFORMER_MIX_STARTED' }
-  | { type: 'PENDING_CHANGES_FIRED'; changes: PendingChange[] }
-  | { type: 'MIX_STATE_UPDATED'; activeLayers: Map<LayerType, string | null> }
+
+  // Finale — Assignment
+  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
+  | { type: 'GROUPS_ASSIGNED'; groups: Map<string, UserId[]> }
+
+  // Finale — Live Mix
+  | { type: 'LIVE_MIX_STARTED'; initialFragments: Map<string, string> }
+  | { type: 'ACTIVE_FRAGMENT_CHANGED'; granularType: string; fragmentId: string; previousFragmentId: string }
+  | { type: 'GRANULAR_TYPE_LOCKED'; granularType: string }
+  | { type: 'GRANULAR_TYPE_UNLOCKED'; granularType: string }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
@@ -487,6 +431,181 @@ export type ConductorEvent =
 
   // Errors
   | { type: 'ERROR'; message: string; command?: ConductorCommand };
+
+// ============================================================================
+// V3.2 Types — LayerGroup Abstraction & Incredibox Finale
+// ============================================================================
+
+/** Number of audience-facing layer groups per attempt in V3.2 (bones, flesh, spark). */
+export const V32_LAYERS_PER_ATTEMPT = 3;
+
+/**
+ * A single granular instrument type — the atomic unit of the finale.
+ * 6 types by default, configurable. These are the V3.2 equivalent of LayerType values.
+ */
+export interface GranularType {
+  id: string;           // e.g., 'bass', 'drums', 'seed'
+  label: string;        // Finale-facing name (e.g., 'The Ground')
+  color: string;        // For finale UI
+  symbol: string;       // For finale UI
+}
+
+/** Reference to one or more Ableton tracks within a bundle, tagged with its granular type. */
+export interface GranularTrackRef {
+  granularType: string;   // e.g., 'bass'
+  trackIndices: number[]; // Ableton track indices (multiple tracks played as one unit)
+  alwaysAvailable?: boolean;  // When true, generates a fragment regardless of vote outcome or layer reach
+}
+
+/** A collection of granular tracks for one option (A or B) of a layer group. */
+export interface TrackBundle {
+  tracks: GranularTrackRef[];
+}
+
+/**
+ * A layer group ID used during song-building.
+ * Configurable — defaults are 'bones' | 'flesh' | 'spark'.
+ */
+export type LayerGroupId = string;
+
+/**
+ * Config-level definition of a layer group within an attempt.
+ * The audience makes one A/B vote per LayerGroupConfig entry.
+ */
+export interface LayerGroupConfig {
+  id: LayerGroupId;
+  label: string;
+  granularTypes: string[];    // References to GranularType.id values in this bundle
+  optionA: TrackBundle;
+  optionB: TrackBundle;
+}
+
+/**
+ * Runtime-resolved layer group — GranularType values expanded from IDs.
+ * Used in conductor state where the full type objects are needed.
+ */
+export interface LayerGroup {
+  id: LayerGroupId;
+  label: string;
+  granularTypes: GranularType[];
+}
+
+/** Config for the live seed tracks that play throughout a song-building attempt. */
+export interface LiveSeedConfig {
+  trackIndices: number[];
+  label?: string;
+}
+
+/** V3.2 equivalent of LayerConfig — uses LayerGroupId + TrackBundle instead of LayerType + AudioReference. */
+export interface V32LayerConfig {
+  index: number;
+  group: LayerGroupId;
+  labelA: string;
+  labelB: string;
+  optionA: TrackBundle;
+  optionB: TrackBundle;
+}
+
+/** V3.2 attempt configuration — 3 layer groups + live seed per attempt. */
+export interface V32AttemptConfig {
+  chapter: Chapter;
+  title: string;
+  liveSeed: LiveSeedConfig;
+  layers: V32LayerConfig[];               // 3 entries (bones, flesh, spark)
+  thresholds: number[];                   // [0.50, 0.66, 0.99]
+  tempos: number[];                       // Per-layer BPM
+  auditionBars: number[];                 // Bars per option during audition
+  auditionCycles: number[];               // A-B cycles per layer
+}
+
+/**
+ * A granular fragment is the atomic unit of the V3.2 finale.
+ * Song-building produces LayerGroup results; those are decomposed into GranularFragments
+ * (one per granular track per option). Each finale group controls one granular type.
+ */
+export interface GranularFragment {
+  id: string;
+  songIndex: number;
+  layerGroupId: LayerGroupId;   // Which bundle this came from ('bones', 'flesh', 'spark')
+  granularType: string;         // Which specific type ('bass', 'drums', etc.)
+  option: 'A' | 'B';
+  chapter: Chapter;
+  trackIndices: number[];       // Ableton track indices (multiple tracks played as one unit)
+  wonVote: boolean;
+  previewAudioPath: string;
+}
+
+/** A single user's live mix vote — continuous preference for a fragment within their granular type's group. */
+export interface LiveMixVote {
+  fragmentId: string;
+  timestamp: number;            // For recency tiebreak on 50/50 splits
+}
+
+/** Bar-level audition progress emitted by the server at ~4 Hz during auditioning. */
+export interface AuditionProgress {
+  layerIndex: number;
+  currentOption: 'A' | 'B';
+  barProgress: number;          // 0.0 to 1.0 within current option's audition
+  totalBars: number;            // auditionBars for this layer
+  tempo: number;                // Current BPM
+  votingWindowMs: number;       // Derived total voting window for client timer
+  elapsedMs: number;            // Time since audition started
+}
+
+/** Finale config (V3.2). */
+export interface V32FinaleConfig {
+  assignmentMode: 'auto' | 'self_select';
+  assignmentTimerMs: number;    // Only used when assignmentMode === 'self_select'
+  bothOptionsSurvive: boolean;  // When true, both winner and loser tracks are available in finale
+  crossSongConstraint: boolean; // When false, each group picks independently across songs
+  audioPreviewPath: string;
+  npcMessages: NpcMessageConfig[];
+}
+
+/** V3.2 show config — full V3.2 shape (for reference; ShowConfig is the active type). */
+export interface V32ShowConfig {
+  granularTypes: GranularType[];          // Master registry of granular types
+  layerGroups: LayerGroupConfig[];        // Layer group definitions (bones, flesh, spark)
+  layersPerAttempt: number;               // 3 in V3.2
+  attempts: V32AttemptConfig[];
+  finale: V32FinaleConfig;
+  timing: TimingConfig;
+  lobby: { waitingMessage: string };
+  seatIds: SeatId[];
+}
+
+/**
+ * Finale state (V3.2).
+ * Phases: elegy → assignment → live_mix.
+ */
+export interface V32FinaleState {
+  phase: 'elegy' | 'assignment' | 'live_mix';
+
+  // Fragment availability (GranularFragments decomposed from layer group results)
+  availableFragments: GranularFragment[];   // Available to each granular group
+  allFragments: GranularFragment[];         // All fragments including locked (for performer)
+
+  // Assignment state
+  assignment: {
+    mode: 'auto' | 'self_select';
+    groups: Map<string, UserId[]>;          // granularTypeId → user IDs
+    timerRemaining: number | null;          // Only populated in self_select mode
+  };
+
+  // Live mix state
+  liveMix: {
+    votes: Map<string, Map<UserId, LiveMixVote>>;  // granularTypeId → (userId → vote)
+    activeFragments: Map<string, string>;           // granularTypeId → fragmentId (current majority)
+    lockedTypes: string[];                          // Performer-locked granular types
+    performerOverrides: Map<string, string>;        // granularTypeId → fragmentId (performer forced)
+    liveTracksActive: string[];                     // Live performance track IDs
+    transportStarted: boolean;                      // Whether Ableton transport has been triggered
+    loopPosition: number;                           // 0.0 to 1.0 within current loop
+    loopCount: number;
+  };
+
+  npc: { currentMessage: string | null };
+}
 
 // ============================================================================
 // Client Identity (stored in localStorage for reconnection)
@@ -514,39 +633,37 @@ export interface AudienceAttemptView {
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerCount: number;
-  currentLayerConfig: LayerConfig | null;
+  currentLayerConfig: V32LayerConfig | null;
   layerResults: LayerResult[];
   myVote: 'A' | 'B' | null;
   currentAuditionOption: 'A' | 'B' | null;
   auditionLoopIndex: number;
   auditionTotalLoops: number;
-  healthBar: {
-    current: number;
-    drainFactor: number;
-    history: HealthBarDrain[];
-  };
-  currentVoteResult: { winner: 'A' | 'B'; consensus: number } | null;
-  currentDrain: { drainAmount: number; healthAfter: number } | null;
+  currentVoteResult: { winner: 'A' | 'B'; winningProportion: number } | null;
+  lastThresholdCheck: { winningProportion: number; threshold: number; passed: boolean } | null;
 }
 
 /**
- * Finale view sent to audience clients during the consensus game phase.
- * Personalized: includes their current vote, convergence value, and available fragments.
+ * Finale view sent to audience clients during assignment/live_mix phases.
+ * Personalized: includes granular type assignment, own group's vote state.
  */
 export interface AudienceFinaleView {
-  finalePhase: FinaleState['phase'];
-  // Consensus game
-  availableFragments: Array<{ fragment: Fragment; locked: boolean }>;
-  myVote: string | null;                // fragmentId they voted for this round
-  convergenceValue: number;             // 0.0 to 1.0 (updated at ~4-5 Hz)
-  threshold: number;
-  roundTimeRemaining: number;
-  currentRound: number;
-  lockedRoles: Array<{ layerType: LayerType; fragmentId: string }>;
+  finalePhase: V32FinaleState['phase'];
+  // Assignment
+  myGranularType: string | null;                      // which granular type the user is assigned to
+  groupSizes: Array<{ granularType: string; count: number }>;
+  assignmentMode: 'auto' | 'self_select';
+  assignmentTimerRemaining: number | null;
+  // Live mix (own group)
+  myGroupFragments: GranularFragment[];               // available fragments for user's granular type
+  myGroupActiveFragment: string | null;               // current majority fragment for user's type
+  myGroupVoteDistribution: Array<{ fragmentId: string; count: number }>;
+  myVote: string | null;                              // fragmentId user is voting for
+  // Live mix (all types — just active fragments)
+  activeFragments: Array<{ granularType: string; fragmentId: string }>;
+  lockedTypes: string[];
   // NPC
   npcMessage: string | null;
-  // Performer mix (audience observation only)
-  mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
 }
 
 /**
@@ -564,6 +681,7 @@ export interface AudienceClientState {
   myFinale: AudienceFinaleView | null;
   config: {
     lobby: { waitingMessage: string };
+    granularTypes: GranularType[];
   };
 }
 
@@ -571,18 +689,20 @@ export interface AudienceClientState {
  * Finale state sent to projector (public — no per-user data).
  */
 export interface ProjectorFinaleView {
-  finalePhase: FinaleState['phase'];
-  availableFragments: Fragment[];
-  lockedFragments: Fragment[];
-  convergenceValue: number;
-  threshold: number;
-  roundTimeRemaining: number;
-  currentRound: number;
-  lockedRoles: Array<{ layerType: LayerType; fragmentId: string }>;
-  npcMessage: string | null;
-  mixActiveLayers: Array<{ layerType: LayerType; fragmentId: string | null }>;
-  mixPendingChanges: PendingChange[];
+  finalePhase: V32FinaleState['phase'];
+  availableFragments: GranularFragment[];
+  allFragments: GranularFragment[];
+  // Assignment
+  groupSizes: Array<{ granularType: string; count: number }>;
+  assignmentMode: 'auto' | 'self_select';
+  assignmentTimerRemaining: number | null;
+  // Live mix
+  activeFragments: Array<{ granularType: string; fragmentId: string }>;
+  voteDistributions: Array<{ granularType: string; votes: Array<{ fragmentId: string; count: number }> }>;
+  lockedTypes: string[];
   loopPosition: number;
+  // NPC
+  npcMessage: string | null;
 }
 
 /**

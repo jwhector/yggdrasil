@@ -17,19 +17,29 @@ export { createInitialState, processCommand } from './conductor';
 // Export voting functions
 export { calculateConsensus, calculateVoteResult } from './voting';
 
-// Export health bar functions
-export { createHealthBar, calculateDrain, applyDrain, isCollapsed } from './health-bar';
+// Export threshold functions
+export { checkThreshold } from './threshold';
 
 // Export fragment functions
-export { generateFragments, extractAttemptResult } from './fragments';
+export { generateFragments, generateGranularFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
 
-// Export consensus game functions
-export { calculateConvergence, resolveRound, adjustThreshold } from './consensus-game';
+// Export assignment functions
+export {
+  autoAssign,
+  initializeSelfSelect,
+  selectGranularType,
+  assignUndecided,
+  getUndecidedUsers,
+  getGroupSizes,
+} from './assignment';
 
-// Export performer mix functions
-export { queueChange, cancelPending, firePendingChanges } from './performer-mix';
+// Export live mix functions
+export {
+  getActiveFragment,
+  recalculateActiveFragments,
+  computeInitialFragments,
+} from './live-mix';
 
 // Export NPC functions
-export { evaluateAutoTriggers } from './npc';
-export type { NpcGameState } from './npc';
+export { getNpcMessage } from './npc';

@@ -30,4 +30,87 @@ body {
 }
 .audition-glow {
   animation: audition-pulse 1.5s ease-in-out infinite;
+  background-color: fuchsia !important;
+}
+
+/* ============================================================
+ * Urgency Effects — Atmospheric destabilization for attempt_build
+ * Levels 0-5 correspond to layerIndex. All tap targets remain
+ * mechanically unaffected. Reduce magnitude values if playtesters
+ * miss taps due to drift.
+ * ============================================================ */
+
+/* Level 0-1: No effects */
+.urgency-0,
+.urgency-1 {}
+
+/* Level 2: Timer text shifts toward red */
+.urgency-2 .urgency-timer {
+  color: #ef4444;
+}
+
+/* Level 3: Subtle card drift + faster timer pulse */
+@keyframes urgency-drift-subtle {
+  0%, 100% { transform: translate(0, 0); }
+  25%       { transform: translate(1px, -1px); }
+  75%       { transform: translate(-1px, 1px); }
+}
+@keyframes urgency-timer-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+.urgency-3 .urgency-cards {
+  animation: urgency-drift-subtle 2s ease-in-out infinite;
+}
+.urgency-3 .urgency-timer {
+  color: #ef4444;
+  animation: urgency-timer-pulse 0.5s ease-in-out infinite;
+}
+
+/* Level 4: Medium drift + desaturation + timer jitter */
+@keyframes urgency-drift-medium {
+  0%,  100% { transform: translate(0, 0); }
+  20%        { transform: translate(3px, -2px); }
+  40%        { transform: translate(-2px, 2px); }
+  60%        { transform: translate(2px, 3px); }
+  80%        { transform: translate(-3px, -1px); }
+}
+@keyframes urgency-jitter {
+  0%,  100% { transform: translateX(0); }
+  25%        { transform: translateX(-2px); }
+  75%        { transform: translateX(2px); }
+}
+.urgency-4 .urgency-cards {
+  animation: urgency-drift-medium 1.5s ease-in-out infinite;
+  filter: saturate(0.5);
+}
+.urgency-4 .urgency-timer {
+  color: #ef4444;
+  animation: urgency-jitter 0.15s linear infinite;
+}
+
+/* Level 5: Full destabilization */
+@keyframes urgency-drift-heavy {
+  0%,  100% { transform: translate(0, 0) rotate(0deg); }
+  15%        { transform: translate(4px, -3px) rotate(0.3deg); }
+  30%        { transform: translate(-3px, 2px) rotate(-0.2deg); }
+  45%        { transform: translate(2px, 4px) rotate(0.4deg); }
+  60%        { transform: translate(-4px, -2px) rotate(-0.3deg); }
+  75%        { transform: translate(3px, -4px) rotate(0.2deg); }
+  90%        { transform: translate(-2px, 3px) rotate(-0.4deg); }
+}
+@keyframes urgency-jitter-heavy {
+  0%,  100% { transform: translateX(0) skewX(0deg); }
+  20%        { transform: translateX(-3px) skewX(-0.5deg); }
+  40%        { transform: translateX(3px) skewX(0.5deg); }
+  60%        { transform: translateX(-2px) skewX(-0.3deg); }
+  80%        { transform: translateX(2px) skewX(0.3deg); }
+}
+.urgency-5 .urgency-cards {
+  animation: urgency-drift-heavy 0.8s ease-in-out infinite;
+  filter: saturate(0.15) contrast(1.1);
+}
+.urgency-5 .urgency-timer {
+  color: #ef4444;
+  animation: urgency-jitter-heavy 0.1s linear infinite;
 }

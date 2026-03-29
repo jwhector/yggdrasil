@@ -23,6 +23,7 @@ import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand } from '../conductor/types';
+import { LAYERS_PER_ATTEMPT } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
 import { setupSocketHandlers, broadcastEvents } from './socket';
@@ -54,19 +55,98 @@ const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '11000', 10);
 const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
 const ABLETON_HOST = process.env.ABLETON_HOST || process.env.OSC_HOST || '127.0.0.1';
 
-// Health Bar defaults (used as config overrides when not specified in show config)
-const _DEFAULT_DRAIN_FACTOR = parseFloat(process.env.DEFAULT_DRAIN_FACTOR || '0.5');
-const _DEFAULT_LAYER_MULTIPLIERS = (process.env.DEFAULT_LAYER_MULTIPLIERS || '0.5,0.6,0.8,1.0,1.3,1.6,2.0')
-  .split(',').map(Number);
+/**
+ * Parse show config JSON and apply environment variable overrides.
+ */
+function parseShowConfig(json: string): ShowConfig {
+  const config: ShowConfig = JSON.parse(json);
 
-// Consensus Game timing (used as config overrides when not specified in show config)
-const _CONSENSUS_ROUND_DURATION_MS = parseInt(process.env.CONSENSUS_ROUND_DURATION_MS || '15000', 10);
-const _CONSENSUS_FIRST_ROUND_DURATION_MS = parseInt(process.env.CONSENSUS_FIRST_ROUND_DURATION_MS || '20000', 10);
-const _CONSENSUS_INITIAL_THRESHOLD = parseFloat(process.env.CONSENSUS_INITIAL_THRESHOLD || '0.4');
-const _CONSENSUS_FAILURE_THRESHOLD_DECAY = parseFloat(process.env.CONSENSUS_FAILURE_THRESHOLD_DECAY || '0.05');
-const _CONSENSUS_MIN_THRESHOLD = parseFloat(process.env.CONSENSUS_MIN_THRESHOLD || '0.25');
-const _CONSENSUS_INTER_ROUND_DELAY_MS = parseInt(process.env.CONSENSUS_INTER_ROUND_DELAY_MS || '3000', 10);
-const _CONSENSUS_SUCCESS_CELEBRATION_MS = parseInt(process.env.CONSENSUS_SUCCESS_CELEBRATION_MS || '6000', 10);
+  // Apply environment variable overrides
+  if (process.env.AUDIO_PREVIEW_PATH) {
+    config.finale.audioPreviewPath = process.env.AUDIO_PREVIEW_PATH;
+  }
+
+  validateShowConfig(config);
+  return config;
+}
+
+function validateShowConfig(config: ShowConfig): void {
+  const errors: string[] = [];
+
+  for (let i = 0; i < config.attempts.length; i++) {
+    const attempt = config.attempts[i];
+    const prefix = `attempts[${i}]`;
+
+    // V3.2: array lengths expected to match LAYERS_PER_ATTEMPT (now 3)
+    if (attempt.layers.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.layers has length ${attempt.layers.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.thresholds.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.thresholds has length ${attempt.thresholds.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.tempos.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.tempos has length ${attempt.tempos.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.auditionBars.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.auditionBars has length ${attempt.auditionBars.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+    if (attempt.auditionCycles.length !== LAYERS_PER_ATTEMPT) {
+      errors.push(`${prefix}.auditionCycles has length ${attempt.auditionCycles.length}, expected ${LAYERS_PER_ATTEMPT}`);
+    }
+
+    // V3.2: liveSeed must be present with at least one track
+    if (!attempt.liveSeed || !Array.isArray(attempt.liveSeed.trackIndices) || attempt.liveSeed.trackIndices.length === 0) {
+      errors.push(`${prefix}.liveSeed.trackIndices must be a non-empty array`);
+    }
+
+    // V3.2: each layer must have a group id and non-empty track bundles
+    for (let j = 0; j < attempt.layers.length; j++) {
+      const layer = attempt.layers[j];
+      const lprefix = `${prefix}.layers[${j}]`;
+      if (!layer.group) {
+        errors.push(`${lprefix}.group must be a non-empty string`);
+      }
+      if (!layer.optionA?.tracks?.length) {
+        errors.push(`${lprefix}.optionA.tracks must be a non-empty array`);
+      }
+      if (!layer.optionB?.tracks?.length) {
+        errors.push(`${lprefix}.optionB.tracks must be a non-empty array`);
+      }
+    }
+
+    for (let j = 0; j < attempt.thresholds.length; j++) {
+      const t = attempt.thresholds[j];
+      if (typeof t !== 'number' || t < 0 || t > 1) {
+        errors.push(`${prefix}.thresholds[${j}] = ${t}, must be a number in [0, 1]`);
+      }
+    }
+    for (let j = 0; j < attempt.tempos.length; j++) {
+      if (typeof attempt.tempos[j] !== 'number' || attempt.tempos[j] <= 0) {
+        errors.push(`${prefix}.tempos[${j}] = ${attempt.tempos[j]}, must be a positive number`);
+      }
+    }
+    for (let j = 0; j < attempt.auditionBars.length; j++) {
+      const b = attempt.auditionBars[j];
+      if (!Number.isInteger(b) || b <= 0) {
+        errors.push(`${prefix}.auditionBars[${j}] = ${b}, must be a positive integer`);
+      }
+    }
+    for (let j = 0; j < attempt.auditionCycles.length; j++) {
+      const c = attempt.auditionCycles[j];
+      if (!Number.isInteger(c) || c <= 0) {
+        errors.push(`${prefix}.auditionCycles[${j}] = ${c}, must be a positive integer`);
+      }
+    }
+  }
+
+  if (typeof config.finale.bothOptionsSurvive !== 'boolean') {
+    errors.push(`finale.bothOptionsSurvive = ${config.finale.bothOptionsSurvive}, must be a boolean`);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Invalid show config:\n  - ${errors.join('\n  - ')}`);
+  }
+}
 
 async function main() {
   // Initialize Next.js
@@ -117,7 +197,7 @@ async function main() {
     // Load show configuration
     const configJson = readFileSync(path.resolve(__dirname, CONFIG_PATH), 'utf-8');
     console.log(`[Server] Loaded config: ${path.resolve(__dirname, CONFIG_PATH)}`);
-    const config: ShowConfig = JSON.parse(configJson);
+    const config = parseShowConfig(configJson);
 
     // Create initial state
     const showId = `show-${Date.now()}`;
@@ -167,16 +247,15 @@ async function main() {
   // Factory to create a fresh show from config
   function createNewShow(): ShowState {
     const configJson = readFileSync(path.resolve(__dirname, CONFIG_PATH), 'utf-8');
-    const config: ShowConfig = JSON.parse(configJson);
+    const config = parseShowConfig(configJson);
     const showId = `show-${Date.now()}`;
     const newState = createInitialState(config, showId);
     console.log(`[Server] Created new show from config: ${showId}`);
     return newState;
   }
 
-  // Setup socket handlers
-  console.log('[Server] Setting up Socket.IO handlers...');
-  setupSocketHandlers(io, getState, setState, persistence, createNewShow);
+  // Socket handlers are set up after audio router creation (below)
+  // so that masterPanic() can be wired directly.
 
   // ============================================================================
   // OSC Bridge and Timing Engine Setup
@@ -222,6 +301,9 @@ async function main() {
       {
         enabled: true,
         oscBridge: OSC_ENABLED ? oscBridge : null,
+        onAuditionProgress: (progress) => {
+          io.to('audience').to('projector').emit('audition_progress', progress);
+        },
       }
     );
   }
@@ -252,6 +334,10 @@ async function main() {
     audioRouter.handleStateChange(state, events);
   });
 
+  // Setup socket handlers (after audio router so masterPanic can be wired)
+  console.log('[Server] Setting up Socket.IO handlers...');
+  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter);
+
   // Start OSC bridge and timing engine
   try {
     await oscBridge.start();
@@ -264,6 +350,11 @@ async function main() {
   if (timingEngine) {
     timingEngine.start();
     console.log('[Server] Timing engine started');
+
+    // Recover any in-progress finale timers (assembly/deliberation) after restart
+    if (currentState.finaleState) {
+      timingEngine.recoverTimers(currentState);
+    }
   }
 
   // Discover Utility devices on all fragment tracks (after OSC is live)
@@ -283,7 +374,7 @@ async function main() {
       const state = getState();
 
       // Only backup during active show phases
-      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_consensus', 'finale_performer_mix'];
+      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assignment', 'finale_live_mix'];
       if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);

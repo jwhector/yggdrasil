@@ -7,7 +7,7 @@
  * TODO: See DECISIONS.md O3 — chapter + layer color/symbol assignments TBD
  */
 
-import type { Chapter, LayerType } from '@/conductor/types';
+import type { Chapter, LayerType, LayerGroupId, LayerGroupConfig, GranularType } from '@/conductor/types';
 
 export interface ChapterIdentity {
   color: string;   // CSS color
@@ -30,13 +30,12 @@ export const CHAPTER_IDENTITY: Record<Chapter, ChapterIdentity> = {
 
 // TODO: See DECISIONS.md O3
 export const LAYER_IDENTITY: Record<LayerType, LayerIdentity> = {
-  melody:  { color: '#e5e5e5', symbol: '\u2726', label: 'The voice' },      // ✦
+  seed:    { color: '#e5e5e5', symbol: '◎',      label: 'The seed' },
   drums:   { color: '#f5c542', symbol: '\u25B2', label: 'The heartbeat' },  // ▲
   pad:     { color: '#7b2d8b', symbol: '\u25C6', label: 'The warmth' },     // ◆
   bass:    { color: '#8b1a1a', symbol: '\u25A0', label: 'The ground' },     // ■
   harmony: { color: '#2563eb', symbol: '\u25CF', label: 'The color' },      // ●
-  fx1:     { color: '#22c55e', symbol: '~',      label: 'The shimmer' },
-  fx2:     { color: '#6b7280', symbol: '\u223F', label: 'The shadow' },     // ∿
+  fx:      { color: '#22c55e', symbol: '~',      label: 'The shimmer' },
 };
 
 const FALLBACK_LAYER: LayerIdentity = {
@@ -53,4 +52,20 @@ export function getLayerIdentity(type: LayerType): LayerIdentity {
 /** Get chapter identity. All chapters are known. */
 export function getChapterIdentity(chapter: Chapter): ChapterIdentity {
   return CHAPTER_IDENTITY[chapter];
+}
+
+/** Get symbol, label, and color for a V3.2 layer group, derived from its first granular type. */
+export function getLayerGroupIdentity(
+  groupId: LayerGroupId,
+  layerGroups: LayerGroupConfig[],
+  granularTypes: GranularType[],
+): { symbol: string; label: string; color: string } {
+  const group = layerGroups.find((g) => g.id === groupId);
+  const firstTypeId = group?.granularTypes[0];
+  const granularType = granularTypes.find((t) => t.id === firstTypeId);
+  return {
+    symbol: granularType?.symbol ?? groupId[0].toUpperCase(),
+    label: group?.label ?? groupId,
+    color: granularType?.color ?? '#6b7280',
+  };
 }

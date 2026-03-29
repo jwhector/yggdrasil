@@ -32,7 +32,7 @@ import type {
   ShowState,
   ConductorEvent,
   AudioCue,
-  AudioReference,
+  TrackBundle,
   LayerType,
   GainConfig,
 } from '../conductor/types';
@@ -42,7 +42,7 @@ import type {
 // ============================================================================
 
 export interface AbletonLayoutConfig {
-  maxLayersPerAttempt: number;         // Default: 7
+  maxLayersPerAttempt: number;         // Default: 6
   attemptCount: number;                // Default: 3
   collapseReturnTrackIndex: number;    // Return track index for collapse effects
   rejectionReturnTrackIndex: number;   // Return track index for rejection effects
@@ -51,7 +51,7 @@ export interface AbletonLayoutConfig {
 }
 
 const DEFAULT_LAYOUT: AbletonLayoutConfig = {
-  maxLayersPerAttempt: 7,
+  maxLayersPerAttempt: 6,
   attemptCount: 3,
   collapseReturnTrackIndex: 0,
   rejectionReturnTrackIndex: 1,
@@ -66,7 +66,7 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   exitFadeBeats: 4,
   lockInFadeBeats: 4,
   collapseFadeBeats: 8,
-  consensusSwellBeats: 4,
+  ceremonySwellBeats: 4,
   unityGainValue: 0,
   stepsPerBeat: 2,
 };
@@ -110,6 +110,8 @@ export interface AudioRouter {
   handleStateChange(state: ShowState, events: ConductorEvent[]): void;
   /** Discover Utility devices on fragment tracks. Pass ShowState to target only known tracks. */
   discoverDevices(state?: ShowState): Promise<void>;
+  /** Authoritative panic: query Ableton for all tracks, mute every non-foldable, reset gains */
+  masterPanic(): Promise<void>;
   /** Clean up resources */
   dispose(): void;
 }
@@ -158,6 +160,10 @@ interface AudioRouterState {
   activeLayerTracks: Map<LayerType, number>;
   /** Authoritative set of fragment track indices, built from ShowState */
   fragmentTrackIndices: Set<number>;
+  /** Base tempo derived from config (first attempt, first layer), used for resets */
+  baseTempo: number;
+  /** Track indices identified as foldable (group tracks) during discovery — never muted */
+  foldableTracks: Set<number>;
 }
 
 // ============================================================================
@@ -193,6 +199,8 @@ export function createAudioRouter(
     rejectionTimers: new Map(),
     activeLayerTracks: new Map(),
     fragmentTrackIndices: new Set(),
+    baseTempo: NOMINAL_TEMPO_BPM,
+    foldableTracks: new Set(),
   };
 
   // Last-seen gain config, updated at the top of handleStateChange
@@ -211,8 +219,9 @@ export function createAudioRouter(
     return gs;
   }
 
-  /** Low-level Ableton track mute (for session view legibility). Always sends OSC. */
+  /** Low-level Ableton track mute (for session view legibility). Skips foldable (group) tracks. */
   function muteTrack(trackIndex: number): void {
+    if (routerState.foldableTracks.has(trackIndex)) return;
     oscBridge.send('/live/track/set/mute', trackIndex, 1);
     routerState.unmutedTracks.delete(trackIndex);
   }
@@ -354,24 +363,15 @@ export function createAudioRouter(
     return fadeId;
   }
 
-  function muteAllTracks(): void {
-    for (const i of routerState.fragmentTrackIndices) {
-      oscBridge.send('/live/track/set/mute', i, 1);
-    }
-    oscBridge.send('/live/song/stop_playing');
-    routerState.unmutedTracks.clear();
-    routerState.activeLayerTracks.clear();
-  }
-
-
   /**
-   * Immediately silence all tracks:
+   * Immediately silence all known fragment tracks:
    * - Cancels all in-flight fades (synchronous)
-   * - Queries Ableton for the full track list, skipping foldable (group) tracks
-   * - Sets Utility device gains to 0 on non-foldable tracks (if device is cached)
-   * - Mutes all non-foldable tracks
+   * - Mutes every track in fragmentTrackIndices (built from ShowState — no Ableton query needed)
+   * - Sets Utility device gains to -1 on tracks with a cached device
+   *
+   * Does NOT stop transport — callers that need that should call stopPlayback() separately.
    */
-  async function silenceAllTracks(): Promise<void> {
+  function silenceAllTracks(): void {
     // Cancel all in-flight fades and sub-beat timers immediately
     for (const gs of routerState.trackGains.values()) {
       if (gs.activeFadeId) {
@@ -384,30 +384,8 @@ export function createAudioRouter(
     routerState.unmutedTracks.clear();
     routerState.activeLayerTracks.clear();
 
-    // Query total track count
-    oscBridge.send('/live/song/get/num_tracks');
-    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
-    if (!numTracksResp) {
-      console.warn('[AudioRouter] silenceAllTracks: no response for num_tracks');
-      return;
-    }
-    const numTracks = numTracksResp[0] as number;
-
-    // Bulk-query is_foldable for all tracks in one round-trip
-    oscBridge.send('/live/song/get/track_data', 0, numTracks, 'track.is_foldable');
-    const trackDataResp = await waitForOSC('/live/song/get/track_data', 3000);
-    if (!trackDataResp) {
-      console.warn('[AudioRouter] silenceAllTracks: no response for track_data');
-      return;
-    }
-
-    // Response is a flat array: [is_foldable_0, is_foldable_1, ...]
-    for (let i = 0; i < numTracks; i++) {
-      if (trackDataResp[i] === true) continue; // skip group tracks
-
-      const gs = getOrCreateTrackGainState(i);
-      gs.currentGain = 0;
-
+    for (const i of routerState.fragmentTrackIndices) {
+      if (routerState.foldableTracks.has(i)) continue;
       const deviceInfo = routerState.deviceCache.get(i);
       if (deviceInfo) {
         oscBridge.send(
@@ -418,24 +396,9 @@ export function createAudioRouter(
           -1,
         );
       }
-
+      const gs = getOrCreateTrackGainState(i);
+      gs.currentGain = 0;
       oscBridge.send('/live/track/set/mute', i, 1);
-    }
-  }
-
-  function enableEffects(audioRef: AudioReference): void {
-    if (audioRef.effectIndices) {
-      for (const deviceIndex of audioRef.effectIndices) {
-        oscBridge.send('/live/device/set/parameter/value', audioRef.trackIndex, deviceIndex, 0, 1);
-      }
-    }
-  }
-
-  function disableEffects(audioRef: AudioReference): void {
-    if (audioRef.effectIndices) {
-      for (const deviceIndex of audioRef.effectIndices) {
-        oscBridge.send('/live/device/set/parameter/value', audioRef.trackIndex, deviceIndex, 0, 0);
-      }
     }
   }
 
@@ -450,7 +413,7 @@ export function createAudioRouter(
       clearTimeout(routerState.collapseDelayTimer);
       routerState.collapseDelayTimer = null;
     }
-    oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
+    oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
     oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 0);
   }
 
@@ -488,13 +451,23 @@ export function createAudioRouter(
     routerState.fragmentTrackIndices.clear();
     for (const attempt of state.attempts) {
       for (const layer of attempt.layerPlan) {
-        routerState.fragmentTrackIndices.add(layer.optionA.trackIndex);
-        routerState.fragmentTrackIndices.add(layer.optionB.trackIndex);
+        // V3.2: layers have TrackBundles (multiple tracks per option)
+        for (const track of layer.optionA.tracks) {
+          for (const idx of track.trackIndices) routerState.fragmentTrackIndices.add(idx);
+        }
+        for (const track of layer.optionB.tracks) {
+          for (const idx of track.trackIndices) routerState.fragmentTrackIndices.add(idx);
+        }
+      }
+      // Also register live seed tracks
+      const attemptCfg = state.config.attempts[attempt.index];
+      for (const idx of (attemptCfg?.liveSeed?.trackIndices ?? [])) {
+        routerState.fragmentTrackIndices.add(idx);
       }
     }
     if (state.finaleState) {
       for (const fragment of state.finaleState.allFragments) {
-        routerState.fragmentTrackIndices.add(fragment.audioRef.trackIndex);
+        for (const idx of fragment.trackIndices) routerState.fragmentTrackIndices.add(idx);
       }
     }
   }
@@ -518,49 +491,95 @@ export function createAudioRouter(
   }
 
   /**
+   * Wait for an OSC response correlated by track index (first arg).
+   * Uses a persistent `on()` listener that resolves only when the first arg
+   * matches the expected trackId. Cleans up after match or timeout.
+   */
+  function waitForOSCCorrelated(
+    listenAddress: string,
+    trackId: number | "master",
+    timeoutMs: number = 2000,
+  ): Promise<any[] | null> {
+    return new Promise<any[] | null>((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          oscBridge.off(listenAddress, handler);
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      function handler(...args: any[]) {
+        if (resolved) return;
+        // AbletonOSC responses include track_id as first arg
+        if (args[0] === trackId) {
+          resolved = true;
+          clearTimeout(timer);
+          oscBridge.off(listenAddress, handler);
+          resolve(args);
+        }
+      }
+
+      oscBridge.on(listenAddress, handler);
+    });
+  }
+
+  /**
    * Discover and cache the Utility device info for a single track.
-   * Queries Ableton sequentially: num_devices → device names → param names.
+   * Uses bulk `/live/track/get/devices/name` to get all device names in one call,
+   * then queries only the Utility device's parameters.
    * If multiple Utility devices exist on a track, uses the LAST one
    * (the one closest to the output in the device chain).
    */
   async function discoverTrackDevice(trackIndex: number | "master"): Promise<void> {
-    oscBridge.send('/live/track/get/num_devices', trackIndex);
-    const numDevicesResp = await waitForOSC('/live/track/get/num_devices');
-    if (!numDevicesResp) {
-      console.warn(`[AudioRouter] discover: no response for track ${trackIndex} num_devices`);
+    // Check if this is a foldable (group) track — skip device discovery if so
+    if (trackIndex !== "master") {
+      oscBridge.send('/live/track/get/is_foldable', trackIndex);
+      const foldableResp = await waitForOSCCorrelated('/live/track/get/is_foldable', trackIndex);
+      if (foldableResp?.[1] === true) {
+        console.log(`[AudioRouter] foldable track: ${trackIndex} is foldable`);
+        routerState.foldableTracks.add(trackIndex);
+        return;
+      }
+    }
+
+    // Bulk query: get all device names on this track in one round-trip
+    oscBridge.send('/live/track/get/devices/name', trackIndex);
+    const namesResp = await waitForOSCCorrelated('/live/track/get/devices/name', trackIndex);
+    if (!namesResp) {
+      console.warn(`[AudioRouter] discover: no response for track ${trackIndex} devices/name`);
       return;
     }
 
-    // Response format: [trackIndex, numDevices]
-    const numDevices = numDevicesResp[1] as number ?? numDevicesResp[0] as number;
-    if (!numDevices || numDevices === 0) return;
+    // Response format: [trackIndex, name0, name1, ...]
+    const deviceNames = namesResp.slice(1) as string[];
+    if (deviceNames.length === 0) return;
 
-    for (let deviceIndex = 0; deviceIndex < numDevices; deviceIndex++) {
-      oscBridge.send('/live/device/get/name', trackIndex, deviceIndex);
-      const nameResp = await waitForOSC('/live/device/get/name');
-      if (!nameResp) continue;
-
-      // Response format: [trackIndex, deviceIndex, name]
-      const name = nameResp[2] as string ?? nameResp[0] as string;
-      if (name !== layout.utilityDeviceName) continue;
-
-      // Found a Utility device — get param names to find Gain
-      oscBridge.send('/live/device/get/parameters/name', trackIndex, deviceIndex);
-      const paramResp = await waitForOSC('/live/device/get/parameters/name');
-      if (!paramResp) continue;
-
-      // Response format: [trackIndex, deviceIndex, name0, name1, ...]
-      const paramNames = paramResp.slice(2) as string[];
-      const gainParamIndex = paramNames.indexOf(layout.utilityGainParamName);
-
-      if (gainParamIndex >= 0) {
-        // Overwrite any earlier match — we want the last Utility in the chain
-        routerState.deviceCache.set(trackIndex, { utilityDeviceIndex: deviceIndex, gainParamIndex });
-        console.log(`[AudioRouter] Track ${trackIndex}: Utility device ${deviceIndex}, Gain param ${gainParamIndex}`);
-      } else {
-        console.warn(`[AudioRouter] Track ${trackIndex}: Utility device found but no "${layout.utilityGainParamName}" param`);
+    // Find the LAST Utility device in the chain
+    let utilityDeviceIndex = -1;
+    for (let i = deviceNames.length - 1; i >= 0; i--) {
+      if (deviceNames[i] === layout.utilityDeviceName) {
+        utilityDeviceIndex = i;
+        break;
       }
-      // Continue scanning — use the last Utility device on the track
+    }
+    if (utilityDeviceIndex < 0) return;
+
+    // Query only the Utility device's parameter names
+    oscBridge.send('/live/device/get/parameters/name', trackIndex, utilityDeviceIndex);
+    const paramResp = await waitForOSCCorrelated('/live/device/get/parameters/name', trackIndex);
+    if (!paramResp) return;
+
+    // Response format: [trackIndex, deviceIndex, name0, name1, ...]
+    const paramNames = paramResp.slice(2) as string[];
+    const gainParamIndex = paramNames.indexOf(layout.utilityGainParamName);
+
+    if (gainParamIndex >= 0) {
+      routerState.deviceCache.set(trackIndex, { utilityDeviceIndex, gainParamIndex });
+      console.log(`[AudioRouter] Track ${trackIndex}: Utility device ${utilityDeviceIndex}, Gain param ${gainParamIndex}`);
+    } else {
+      console.warn(`[AudioRouter] Track ${trackIndex}: Utility device found but no "${layout.utilityGainParamName}" param`);
     }
   }
 
@@ -568,6 +587,7 @@ export function createAudioRouter(
    * Discover Utility devices on fragment tracks.
    * Call once after the OSC bridge starts.
    *
+   * Fires all track discovery queries in parallel for fast startup.
    * If state is provided, only discovers tracks in the show config (skips group tracks).
    * Otherwise falls back to querying Ableton for total track count.
    */
@@ -576,27 +596,31 @@ export function createAudioRouter(
       updateFragmentTrackSet(state);
     }
 
-    // const trackList = routerState.fragmentTrackIndices.size > 0
-    //   ? Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b)
-    //   : null;
+    // Build list of track indices to discover
+    let trackList: (number | "master")[];
 
-    // if (trackList) {
-    //   console.log(`[AudioRouter] Starting device discovery for ${trackList.length} fragment tracks...`);
-    //   for (const trackIndex of trackList) {
-    //     await discoverTrackDevice(trackIndex);
-    //   }
-    // } else {
+    if (routerState.fragmentTrackIndices.size > 0) {
+      trackList = Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b);
+      trackList.push("master");
+      console.log(`[AudioRouter] Starting device discovery for ${trackList.length} tracks (parallel)...`);
+    } else {
       // Fallback: query Ableton for total track count
       oscBridge.send('/live/song/get/num_tracks');
       const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
       const numTracks = numTracksResp?.[0] ?? 42;
-      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (fallback)...`);
-      for (let trackIndex = 0; trackIndex < numTracks; trackIndex++) {
-        await discoverTrackDevice(trackIndex);
-      }
-      await discoverTrackDevice("master");
-      oscBridge.send('/live/song/get/send_tracks');
-    // }
+      trackList = [];
+      for (let i = 0; i < numTracks; i++) trackList.push(i);
+      trackList.push("master");
+      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (parallel, fallback)...`);
+    }
+
+    // Fire all track discoveries in parallel
+    // Temporarily raise listener limit to avoid MaxListenersExceededWarning
+    // (each parallel discovery adds a listener on the same OSC response address)
+    const prevMax = oscBridge.getMaxListeners();
+    oscBridge.setMaxListeners(trackList.length * 3 + prevMax);
+    await Promise.all(trackList.map(trackIndex => discoverTrackDevice(trackIndex)));
+    oscBridge.setMaxListeners(prevMax);
 
     routerState.discoveryComplete = true;
     console.log(`[AudioRouter] Device discovery complete. ${routerState.deviceCache.size} tracks have Utility devices.`);
@@ -606,57 +630,63 @@ export function createAudioRouter(
   // AudioCue Handlers
   // --------------------------------------------------------------------------
 
+  function handleSetTempo(cue: Extract<AudioCue, { type: 'set_tempo' }>): void {
+    oscBridge.send('/live/song/set/tempo', cue.bpm);
+    console.log(`[AudioRouter] set_tempo: ${cue.bpm} BPM (attempt ${cue.attemptIndex}, layer ${cue.layerIndex})`);
+  }
+
   function handleAuditionStart(
     cue: Extract<AudioCue, { type: 'audition_start' }>,
   ): void {
     ensureTransportStarted();
 
-    const { audioRef, otherAudioRef } = cue;
+    const { trackBundle, otherTrackBundle } = cue;
 
-    disableEffects(otherAudioRef);
-
-    const sameTrack = otherAudioRef.trackIndex === audioRef.trackIndex;
-    if (!sameTrack) {
-      // Fade out the other option's track
-      fadeGain(otherAudioRef.trackIndex, 0, currentGainConfig.exitFadeBeats);
+    // Fade out all tracks in the outgoing bundle
+    for (const track of otherTrackBundle.tracks) {
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.exitFadeBeats);
     }
 
-    // Bring in the new option: unmute, snap to entryGain, swell to unity
-    unmuteTrack(audioRef.trackIndex);
-    setGain(audioRef.trackIndex, currentGainConfig.entryGain);
-    fadeGain(audioRef.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
-    enableEffects(audioRef);
+    // Bring in all tracks in the incoming bundle: unmute, snap to entryGain, swell to unity
+    for (const track of trackBundle.tracks) {
+      for (const idx of track.trackIndices) {
+        unmuteTrack(idx);
+        setGain(idx, currentGainConfig.entryGain);
+        fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
+      }
+    }
   }
 
   function handleAuditionStop(cue: Extract<AudioCue, { type: 'audition_stop' }>): void {
-    if (!cue.audioRef) {
+    if (!cue.trackBundle) {
       // No active audition — nothing to fade
       return;
     }
-    disableEffects(cue.audioRef);
-    fadeGain(cue.audioRef.trackIndex, 0, currentGainConfig.exitFadeBeats);
+    for (const track of cue.trackBundle.tracks) {
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.exitFadeBeats);
+    }
     // Note: transport continues running; clips keep looping silently
   }
 
   function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
-    const { winnerAudioRef, loserAudioRef } = cue;
+    const { winnerTrackBundle, loserTrackBundle } = cue;
 
-    // Cancel any in-flight fades on both tracks first
-    const winnerGs = getOrCreateTrackGainState(winnerAudioRef.trackIndex);
-    if (winnerGs.activeFadeId) {
-      timingEngine?.cancelCallbacks(winnerGs.activeFadeId);
-      winnerGs.activeFadeId = null;
+    // Winner tracks: cancel in-flight fades, snap to full gain
+    for (const track of winnerTrackBundle.tracks) {
+      for (const idx of track.trackIndices) {
+        const gs = getOrCreateTrackGainState(idx);
+        if (gs.activeFadeId) {
+          timingEngine?.cancelCallbacks(gs.activeFadeId);
+          gs.activeFadeId = null;
+        }
+        unmuteTrack(idx);
+        fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
+      }
     }
 
-    // Winner: snap to full gain
-    unmuteTrack(winnerAudioRef.trackIndex);
-    fadeGain(winnerAudioRef.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
-    enableEffects(winnerAudioRef);
-
-    // Loser: fade to silent
-    disableEffects(loserAudioRef);
-    if (loserAudioRef.trackIndex !== winnerAudioRef.trackIndex) {
-      fadeGain(loserAudioRef.trackIndex, 0, currentGainConfig.lockInFadeBeats);
+    // Loser tracks: fade to silent
+    for (const track of loserTrackBundle.tracks) {
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
     }
   }
 
@@ -734,15 +764,34 @@ export function createAudioRouter(
     }
   }
 
+  function handleLiveSeedStart(cue: Extract<AudioCue, { type: 'live_seed_start' }>): void {
+    ensureTransportStarted();
+    for (const trackIndex of cue.trackIndices) {
+      unmuteTrack(trackIndex);
+      setGain(trackIndex, currentGainConfig.entryGain);
+      fadeGain(trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+    }
+  }
+
+  function handleLiveSeedStop(cue: Extract<AudioCue, { type: 'live_seed_stop' }>): void {
+    for (const trackIndex of cue.trackIndices) {
+      fadeGain(trackIndex, 0, currentGainConfig.collapseFadeBeats);
+    }
+  }
+
   async function handleCollapseGesture(
     cue: Extract<AudioCue, { type: 'collapse_gesture' }>,
     state: ShowState,
   ): Promise<void> {
-    // Collect all track indices for the collapsing attempt
+    // Collect all track indices for the collapsing attempt (V3.2: iterate TrackBundle tracks)
     const collapseTrackIndices: number[] = [];
     for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      collapseTrackIndices.push(layer.optionA.trackIndex, layer.optionB.trackIndex);
+      for (const track of layer.optionA.tracks) collapseTrackIndices.push(...track.trackIndices);
+      for (const track of layer.optionB.tracks) collapseTrackIndices.push(...track.trackIndices);
     }
+    // Include live seed tracks
+    const liveSeedIndices = state.config.attempts[cue.attemptIndex]?.liveSeed?.trackIndices ?? [];
+    collapseTrackIndices.push(...liveSeedIndices);
 
     // Enable Master track delay device at the start of the collapse
     oscBridge.send('/live/device/set/parameter/value', 'master', 0, 0, 1);
@@ -768,10 +817,13 @@ export function createAudioRouter(
     // Schedule cleanup: snap tempo back to nominal after the full collapse window
     const collapseMs = state.config.timing.revealSequenceDurationMs;
     const timer = setTimeout(() => {
-      oscBridge.send('/live/song/set/tempo', NOMINAL_TEMPO_BPM);
-      oscBridge.send('/live/song/stop_playing');
+      oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
       routerState.collapseTimers.delete(cue.attemptIndex);
+      setTimeout(() => {
+        oscBridge.send('/live/song/stop_playing');
+      }, collapseMs + 3000);
     }, collapseMs);
+    
 
     routerState.collapseTimers.set(cue.attemptIndex, timer);
   }
@@ -783,61 +835,49 @@ export function createAudioRouter(
     // Enable rejection return track effects
     oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 0);
 
-    // Fade all tracks in the rejected attempt to 0
+    // Fade all tracks in the rejected attempt to 0 (V3.2: iterate TrackBundle tracks)
     for (const layer of state.attempts[cue.attemptIndex].layerPlan) {
-      fadeGain(layer.optionA.trackIndex, 0, currentGainConfig.collapseFadeBeats);
-      fadeGain(layer.optionB.trackIndex, 0, currentGainConfig.collapseFadeBeats);
+      for (const track of layer.optionA.tracks) {
+        for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.collapseFadeBeats);
+      }
+      for (const track of layer.optionB.tracks) {
+        for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.collapseFadeBeats);
+      }
     }
+    // Live seed faded by the separate live_seed_stop cue emitted by the conductor
 
-    // Schedule re-mute of return track after effect completes
+    // Schedule re-mute of return track and tempo reset after effect completes
     const rejectionMs = state.config.timing.rejectionEffectDurationMs;
     const timer = setTimeout(() => {
       oscBridge.send('/live/return/set/mute', layout.rejectionReturnTrackIndex, 1);
+      oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
       routerState.rejectionTimers.delete(cue.attemptIndex);
     }, rejectionMs);
 
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  function handleConsensusActivate(cue: Extract<AudioCue, { type: 'consensus_activate' }>): void {
+  // V3.2 live mix crossfade handler (stub — full implementation in live mix task)
+  function handleLiveMixCrossfade(cue: Extract<AudioCue, { type: 'live_mix_crossfade' }>): void {
     ensureTransportStarted();
-
-    // Snap to entry gain then swell to unity
-    unmuteTrack(cue.audioRef.trackIndex);
-    setGain(cue.audioRef.trackIndex, currentGainConfig.entryGain);
-    fadeGain(cue.audioRef.trackIndex, 1.0, currentGainConfig.consensusSwellBeats);
-    routerState.activeLayerTracks.set(cue.layerType, cue.audioRef.trackIndex);
+    // Fade out outgoing, fade in incoming (iterate all tracks in multi-track fragments)
+    for (const idx of cue.outgoingTrackIndices) {
+      fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
+    }
+    for (const idx of cue.incomingTrackIndices) {
+      unmuteTrack(idx);
+      setGain(idx, currentGainConfig.entryGain);
+      fadeGain(idx, 1.0, currentGainConfig.ceremonySwellBeats);
+    }
   }
 
-  function handleMixUpdate(
-    cue: Extract<AudioCue, { type: 'mix_update' }>,
-    state: ShowState,
-  ): void {
-    for (const change of cue.changes) {
-      const { layerType, fragmentId } = change;
-
-      // Fade out the track previously assigned to this layer (if any)
-      const previousTrack = routerState.activeLayerTracks.get(layerType);
-      if (previousTrack !== undefined) {
-        fadeGain(previousTrack, 0, currentGainConfig.lockInFadeBeats);
-      }
-
-      if (fragmentId !== null) {
-        const fragment = state.finaleState?.allFragments.find(f => f.id === fragmentId);
-        if (fragment) {
-          const newTrack = fragment.audioRef.trackIndex;
-          unmuteTrack(newTrack);
-          setGain(newTrack, currentGainConfig.entryGain);
-          fadeGain(newTrack, 1.0, currentGainConfig.consensusSwellBeats);
-          routerState.activeLayerTracks.set(layerType, newTrack);
-        } else {
-          console.warn(`[AudioRouter] mix_update: fragment ${fragmentId} not found in allFragments`);
-          routerState.activeLayerTracks.delete(layerType);
-        }
-      } else {
-        // Layer being muted — no new track
-        routerState.activeLayerTracks.delete(layerType);
-      }
+  // V3.2 live mix start handler (stub — full implementation in live mix task)
+  function handleLiveMixStart(cue: Extract<AudioCue, { type: 'live_mix_start' }>): void {
+    ensureTransportStarted();
+    for (const trackIndex of cue.activeTrackIndices) {
+      unmuteTrack(trackIndex);
+      setGain(trackIndex, currentGainConfig.entryGain);
+      fadeGain(trackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
     }
   }
 
@@ -852,6 +892,107 @@ export function createAudioRouter(
 
   function handlePanic(): void {
     silenceAllTracks();
+    stopPlayback();
+  }
+
+  /**
+   * Authoritative master panic: queries Ableton for total track count, then
+   * mutes every non-foldable track and resets Utility gains to -inf.
+   * Foldable (group) tracks are unmuted. Master track gain reset to unity.
+   * Unlike handlePanic(), this doesn't rely on the config-driven fragmentTrackIndices —
+   * it discovers the full track list from Ableton directly.
+   */
+  async function masterPanic(): Promise<void> {
+    console.log('[AudioRouter] Master panic: querying Ableton for full track list...');
+
+    // 1. Cancel all in-flight fades and sub-beat timers
+    for (const gs of routerState.trackGains.values()) {
+      if (gs.activeFadeId) {
+        timingEngine?.cancelCallbacks(gs.activeFadeId);
+        gs.activeFadeId = null;
+      }
+      for (const timer of gs.subBeatTimers) clearTimeout(timer);
+      gs.subBeatTimers = [];
+    }
+    routerState.unmutedTracks.clear();
+    routerState.activeLayerTracks.clear();
+    clearCollapseTimers();
+    clearRejectionTimers();
+
+    // 2. Query Ableton for total track count
+    oscBridge.send('/live/song/get/num_tracks');
+    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+    const numTracks = numTracksResp?.[0] ?? 0;
+    if (numTracks === 0) {
+      console.warn('[AudioRouter] Master panic: no track count from Ableton, aborting');
+      return;
+    }
+
+    // 3. Process each track in parallel — check foldable, mute/reset non-foldable
+    const trackIndices: number[] = [];
+    for (let i = 0; i < numTracks; i++) trackIndices.push(i);
+
+    const prevMax = oscBridge.getMaxListeners();
+    oscBridge.setMaxListeners(numTracks * 3 + prevMax);
+
+    let mutedCount = 0;
+    let foldableCount = 0;
+
+    await Promise.all(trackIndices.map(async (trackIndex) => {
+      // Check if foldable (group track)
+      oscBridge.send('/live/track/get/is_foldable', trackIndex);
+      const foldableResp = await waitForOSCCorrelated('/live/track/get/is_foldable', trackIndex);
+
+      if (foldableResp?.[1] === true) {
+        // Group track — unmute it so groups are open
+        foldableCount++;
+        oscBridge.send('/live/track/set/mute', trackIndex, 0);
+        return;
+      }
+
+      // Non-foldable — mute and reset gain
+      mutedCount++;
+
+      // Use cached device info if available, otherwise discover on the fly
+      let deviceInfo = routerState.deviceCache.get(trackIndex);
+      if (!deviceInfo) {
+        await discoverTrackDevice(trackIndex);
+        deviceInfo = routerState.deviceCache.get(trackIndex);
+      }
+
+      if (deviceInfo) {
+        oscBridge.send(
+          '/live/device/set/parameter/value',
+          trackIndex,
+          deviceInfo.utilityDeviceIndex,
+          deviceInfo.gainParamIndex,
+          -1,
+        );
+      }
+
+      const gs = getOrCreateTrackGainState(trackIndex);
+      gs.currentGain = 0;
+      oscBridge.send('/live/track/set/mute', trackIndex, 1);
+    }));
+
+    oscBridge.setMaxListeners(prevMax);
+
+    // 4. Reset master track Utility gain to unity (0 dB)
+    const masterDevice = routerState.deviceCache.get('master');
+    if (masterDevice) {
+      oscBridge.send(
+        '/live/device/set/parameter/value',
+        'master',
+        masterDevice.utilityDeviceIndex,
+        masterDevice.gainParamIndex,
+        0,
+      );
+    }
+
+    // 5. Stop transport
+    stopPlayback();
+
+    console.log(`[AudioRouter] Master panic complete. Muted ${mutedCount} tracks, skipped ${foldableCount} foldable.`);
   }
 
   /**
@@ -899,6 +1040,8 @@ export function createAudioRouter(
   function handleStateChange(state: ShowState, events: ConductorEvent[]): void {
     // Keep gain config in sync with show config
     currentGainConfig = state.config.timing.gain ?? DEFAULT_GAIN_CONFIG;
+    // Derive base tempo from config (first attempt, first layer)
+    routerState.baseTempo = state.config.attempts[0]?.tempos?.[0] ?? NOMINAL_TEMPO_BPM;
     // Rebuild fragment track set from state (Ableton layout as source of truth)
     updateFragmentTrackSet(state);
 
@@ -906,6 +1049,9 @@ export function createAudioRouter(
       if (event.type === 'AUDIO_CUE') {
         const cue = event.cue;
         switch (cue.type) {
+          case 'set_tempo':
+            handleSetTempo(cue);
+            break;
           case 'audition_start':
             handleAuditionStart(cue);
             break;
@@ -915,23 +1061,32 @@ export function createAudioRouter(
           case 'lock_in':
             handleLockIn(cue);
             break;
+          case 'live_seed_start':
+            handleLiveSeedStart(cue);
+            break;
+          case 'live_seed_stop':
+            handleLiveSeedStop(cue);
+            break;
           case 'collapse_gesture':
             handleCollapseGesture(cue, state);
             break;
           case 'rejection_gesture':
             handleRejectionGesture(cue, state);
             break;
-          case 'consensus_activate':
-            handleConsensusActivate(cue);
+          case 'live_mix_crossfade':
+            handleLiveMixCrossfade(cue);
             break;
-          case 'mix_update':
-            handleMixUpdate(cue, state);
+          case 'live_mix_start':
+            handleLiveMixStart(cue);
             break;
           case 'transport':
             handleTransport(cue);
             break;
           case 'panic':
             handlePanic();
+            break;
+          case 'master_panic':
+            // Async — actual work done via audioRouter.masterPanic() from socket handler
             break;
           case 'reset_utilities':
             handleResetUtilities();
@@ -944,6 +1099,14 @@ export function createAudioRouter(
         silenceAllTracks();
         clearCollapseTimers();
         clearRejectionTimers();
+      }
+
+      if (event.type === 'SHOW_PHASE_CHANGED') {
+        const phaseEvent = event as { type: 'SHOW_PHASE_CHANGED'; phase: string };
+        if (phaseEvent.phase === 'finale_elegy') {
+          oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
+          console.log(`[AudioRouter] Tempo reset to ${routerState.baseTempo} BPM at finale_elegy`);
+        }
       }
 
       if (event.type === 'SHOW_RESET') {
@@ -988,6 +1151,7 @@ export function createAudioRouter(
   return {
     handleStateChange,
     discoverDevices,
+    masterPanic,
     dispose,
   };
 }

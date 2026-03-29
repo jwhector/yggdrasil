@@ -22,8 +22,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_build: 'Song Building',
   attempt_resolve: 'Resolve',
   finale_elegy: 'Finale — Elegy',
-  finale_consensus: 'Finale — Consensus',
-  finale_performer_mix: 'Finale — Mix',
+  finale_assignment: 'Finale — Assignment',
+  finale_live_mix: 'Finale — Live Mix',
   ended: 'Ended',
 };
 
@@ -34,8 +34,8 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   attempt_build: '#d97706',
   attempt_resolve: '#92400e',
   finale_elegy: '#0e7490',
-  finale_consensus: '#15803d',
-  finale_performer_mix: '#5b21b6',
+  finale_assignment: '#0f766e',
+  finale_live_mix: '#5b21b6',
   ended: '#374151',
 };
 
@@ -60,7 +60,7 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
     : connectionState === 'connecting' || connectionState === 'reconnecting' ? '#fbbf24'
     : '#f87171';
 
-  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_consensus' || phase === 'finale_performer_mix';
+  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix';
 
   return (
     <div style={styles.panel}>
@@ -114,25 +114,23 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
       {isFinalePhase && finaleState && (
         <div style={styles.row}>
           <StatCard label="Finale Phase" value={finaleState.phase} />
-          {finaleState.phase === 'consensus_game' && (
+          {finaleState.phase === 'assignment' && (
             <>
+              <StatCard label="Mode" value={finaleState.assignment.mode} />
               <StatCard
-                label="Convergence"
-                value={`${Math.round(finaleState.consensusGame.convergenceValue * 100)}%`}
-                color={finaleState.consensusGame.convergenceValue >= finaleState.consensusGame.threshold ? '#4ade80' : '#fbbf24'}
+                label="Groups"
+                value={String(finaleState.assignment.groups.size)}
               />
-              <StatCard label="Round" value={String(finaleState.consensusGame.currentRound)} />
-              <StatCard label="Threshold" value={`${Math.round(finaleState.consensusGame.threshold * 100)}%`} dim />
-              <StatCard label="Votes" value={String(finaleState.consensusGame.votes.size)} />
-              <StatCard
-                label="Locked"
-                value={`${finaleState.consensusGame.lockedRoles.size} / 7`}
-                color={finaleState.consensusGame.lockedRoles.size === 7 ? '#4ade80' : '#888'}
-              />
+              {finaleState.assignment.timerRemaining !== null && (
+                <StatCard label="Timer" value={`${Math.ceil(finaleState.assignment.timerRemaining / 1000)}s`} />
+              )}
             </>
           )}
-          {finaleState.phase === 'performer_mix' && (
-            <StatCard label="Loop" value={String(finaleState.performerMix.loopCount)} />
+          {finaleState.phase === 'live_mix' && (
+            <>
+              <StatCard label="Locked Types" value={String(finaleState.liveMix.lockedTypes.length)} />
+              <StatCard label="Loop" value={String(finaleState.liveMix.loopCount)} />
+            </>
           )}
         </div>
       )}

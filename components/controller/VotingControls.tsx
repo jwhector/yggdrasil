@@ -8,7 +8,6 @@
 'use client';
 
 import type { ShowState, ConductorCommand, LayerPhase } from '@/conductor/types';
-import { getLayerIdentity } from '@/lib/identity';
 
 interface VotingControlsProps {
   fullState: ShowState;
@@ -22,7 +21,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
 
   const { currentLayerIndex, currentLayerPhase, layerPlan, votes, currentAuditionOption } = attempt;
   const currentLayer = layerPlan[currentLayerIndex];
-  const layerIdentity = currentLayer ? getLayerIdentity(currentLayer.type) : null;
+  const layerGroup = currentLayer?.group ?? null;
 
   const layerVotes = votes.filter(v => v.layerIndex === currentLayerIndex);
   const votesA = layerVotes.filter(v => v.choice === 'A').length;
@@ -31,7 +30,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
   const pctA = total > 0 ? Math.round((votesA / total) * 100) : 0;
   const pctB = total > 0 ? Math.round((votesB / total) * 100) : 0;
 
-  const isVoting = currentLayerPhase === 'voting' || currentLayerPhase === 'auditioning';
+  const isVoting = currentLayerPhase === 'auditioning';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const isRevealing = currentLayerPhase === 'revealing';
 
@@ -46,8 +45,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
             index={currentLayerIndex}
             total={layerPlan.length}
             phase={currentLayerPhase}
-            type={currentLayer?.type}
-            color={layerIdentity?.color}
+            type={layerGroup ?? undefined}
           />
           {isAuditioning && currentAuditionOption && (
             <span style={{
@@ -88,19 +86,10 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
       {/* Control buttons */}
       <div style={styles.buttonGrid}>
         <button
-          onClick={() => send({ type: 'OPEN_VOTING' })}
-          disabled={isVoting}
-          style={{ ...btn, ...(isVoting ? disabled : btnPrimary) }}
-          title="Open voting window"
-        >
-          Open Vote
-        </button>
-
-        <button
           onClick={() => send({ type: 'CLOSE_VOTING' })}
           disabled={!isVoting}
           style={{ ...btn, ...(!isVoting ? disabled : btnPrimary) }}
-          title="Close voting window"
+          title="Close voting and resolve immediately"
         >
           Close Vote
         </button>
@@ -121,24 +110,6 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
           title="Force option B as winner"
         >
           Force B
-        </button>
-
-        <button
-          onClick={() => send({ type: 'EXTEND_VOTE_TIMER', additionalMs: 5000 })}
-          disabled={!isVoting}
-          style={{ ...btn, ...(!isVoting ? disabled : btnSecondary) }}
-          title="Add 5 seconds to vote timer"
-        >
-          +5s
-        </button>
-
-        <button
-          onClick={() => send({ type: 'EXTEND_VOTE_TIMER', additionalMs: 10000 })}
-          disabled={!isVoting}
-          style={{ ...btn, ...(!isVoting ? disabled : btnSecondary) }}
-          title="Add 10 seconds to vote timer"
-        >
-          +10s
         </button>
 
         <button
@@ -218,7 +189,6 @@ function VoteOption({
 
 function phaseColor(phase: LayerPhase): string {
   switch (phase) {
-    case 'voting': return '#4ade80';
     case 'auditioning': return '#fbbf24';
     case 'revealing': return '#60a5fa';
     case 'locked_in': return '#818cf8';
@@ -237,7 +207,6 @@ const btn: React.CSSProperties = {
   minHeight: '48px',
 };
 const btnPrimary: React.CSSProperties = { backgroundColor: '#f0f0f0', color: '#111' };
-const btnSecondary: React.CSSProperties = { backgroundColor: '#1e3a5f', color: '#93c5fd', border: '1px solid #1d4ed8' };
 const btnWarning: React.CSSProperties = { backgroundColor: '#451a03', color: '#fbbf24', border: '1px solid #78350f' };
 const disabled: React.CSSProperties = { backgroundColor: '#1a1a1a', color: '#555', border: '1px solid #333', cursor: 'not-allowed', opacity: 0.5 };
 

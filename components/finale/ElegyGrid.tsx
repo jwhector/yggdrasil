@@ -10,13 +10,13 @@
  */
 
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
-import type { Fragment, LayerType } from '@/conductor/types';
+import type { GranularFragment, LayerType } from '@/conductor/types';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx1', 'fx2'];
+const LAYER_ORDER: LayerType[] = ['seed', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 interface ElegyGridProps {
-  availableFragments: Fragment[];   // winners — glowing
-  lockedFragments: Fragment[];      // losers + unreached — dimmed
+  availableFragments: GranularFragment[];   // winners — glowing
+  lockedFragments: GranularFragment[];      // losers + unreached — dimmed
   variant?: 'audience' | 'projector';
 }
 
@@ -27,22 +27,21 @@ export function ElegyGrid({
 }: ElegyGridProps) {
   const isProjector = variant === 'projector';
 
-  // Build a map: layerType → { winners: Fragment[], losers: Fragment[] }
-  const byLayer: Record<LayerType, { winners: Fragment[]; losers: Fragment[] }> = {
-    melody:  { winners: [], losers: [] },
+  // Build a map: granularType → { winners: GranularFragment[], losers: GranularFragment[] }
+  const byLayer: Record<LayerType, { winners: GranularFragment[]; losers: GranularFragment[] }> = {
+    seed:    { winners: [], losers: [] },
     drums:   { winners: [], losers: [] },
     pad:     { winners: [], losers: [] },
     bass:    { winners: [], losers: [] },
     harmony: { winners: [], losers: [] },
-    fx1:     { winners: [], losers: [] },
-    fx2:     { winners: [], losers: [] },
+    fx:      { winners: [], losers: [] },
   };
 
   for (const f of availableFragments) {
-    byLayer[f.layerType]?.winners.push(f);
+    byLayer[f.granularType as LayerType]?.winners.push(f);
   }
   for (const f of lockedFragments) {
-    byLayer[f.layerType]?.losers.push(f);
+    byLayer[f.granularType as LayerType]?.losers.push(f);
   }
 
   return (
@@ -60,7 +59,7 @@ export function ElegyGrid({
         const layer = getLayerIdentity(layerType);
         const { winners, losers } = byLayer[layerType];
         const allFragments = [...winners, ...losers].sort(
-          (a, b) => a.attemptIndex - b.attemptIndex || a.option.localeCompare(b.option)
+          (a, b) => a.songIndex - b.songIndex || a.option.localeCompare(b.option)
         );
         if (allFragments.length === 0) return null;
 
@@ -134,12 +133,12 @@ function FragmentTile({
   isWinner,
   isProjector,
 }: {
-  fragment: Fragment;
+  fragment: GranularFragment;
   isWinner: boolean;
   isProjector: boolean;
 }) {
   const chapter = getChapterIdentity(fragment.chapter);
-  const layer = getLayerIdentity(fragment.layerType);
+  const layer = getLayerIdentity(fragment.granularType as LayerType);
 
   const tileWidth = isProjector ? 160 : 80;
   const tileHeight = isProjector ? 80 : 48;
@@ -200,7 +199,7 @@ function FragmentTile({
           width: '100%',
         }}
       >
-        {fragment.displayLabel}
+        {fragment.layerGroupId} {fragment.option}
       </span>
       {/* Song indicator */}
       <span

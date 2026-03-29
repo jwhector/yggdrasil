@@ -1,4 +1,4 @@
--- Yggdrasil Database Schema (V2)
+-- Yggdrasil Database Schema (V3.2)
 -- SQLite with WAL mode for crash resilience
 
 PRAGMA journal_mode=WAL;
@@ -35,15 +35,61 @@ CREATE TABLE IF NOT EXISTS votes (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Consensus rounds: records each finale consensus game round for analysis
-CREATE TABLE IF NOT EXISTS consensus_rounds (
+-- [DEPRECATED V3.1] Finale groups: records audience group assignments during assembly phase
+CREATE TABLE IF NOT EXISTS finale_groups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
-  round_number INTEGER NOT NULL,
-  winning_fragment_id TEXT,          -- NULL if round failed
-  convergence REAL,
-  threshold REAL NOT NULL,
-  success BOOLEAN NOT NULL,
+  user_id TEXT NOT NULL,
+  layer_type TEXT NOT NULL,
+  auto_assigned BOOLEAN NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- [DEPRECATED V3.1] Finale group votes: records fragment votes during deliberation phase
+CREATE TABLE IF NOT EXISTS finale_group_votes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  layer_type TEXT NOT NULL,
+  fragment_id TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- [DEPRECATED V3.1] Ceremony events: records lock-ins and forfeits during ceremony phase
+CREATE TABLE IF NOT EXISTS ceremony_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  layer_type TEXT NOT NULL,
+  ambassador_user_id TEXT,
+  fragment_id TEXT,
+  event_type TEXT NOT NULL CHECK(event_type IN ('locked', 'forfeited')),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+
+-- V3.2: Finale assignments — granular type group assignments
+CREATE TABLE IF NOT EXISTS finale_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  granular_type TEXT NOT NULL,
+  auto_assigned BOOLEAN NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+
+-- V3.2: Finale live mix preference events
+CREATE TABLE IF NOT EXISTS finale_mix_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  granular_type TEXT NOT NULL,
+  fragment_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('preference', 'lock', 'unlock', 'override')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
@@ -52,4 +98,8 @@ CREATE TABLE IF NOT EXISTS consensus_rounds (
 CREATE INDEX IF NOT EXISTS idx_users_show ON users(show_id);
 CREATE INDEX IF NOT EXISTS idx_votes_show ON votes(show_id);
 CREATE INDEX IF NOT EXISTS idx_votes_user ON votes(user_id);
-CREATE INDEX IF NOT EXISTS idx_consensus_rounds_show ON consensus_rounds(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_groups_show ON finale_groups(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_group_votes_show ON finale_group_votes(show_id);
+CREATE INDEX IF NOT EXISTS idx_ceremony_events_show ON ceremony_events(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_assignments_show ON finale_assignments(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_mix_events_show ON finale_mix_events(show_id);

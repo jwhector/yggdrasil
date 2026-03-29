@@ -4,20 +4,20 @@
  * RevealSequence
  *
  * Orchestrates the 4-beat post-vote reveal animation:
- *   1. Tension   (~1s)   — both cards shown equal size, muted, no result
- *   2. Split     (~2s)   — winner grows, loser shrinks proportionally
- *   3. Drain     (~1.5s) — HealthBar drainShadow previews then animates drain
- *   4. Lock-in   (~0.5s) — winner gets a brief accent
+ *   1. Tension    (~0.9s) — both cards shown equal size, muted, no result
+ *   2. Split      (~2s)   — winner grows, loser shrinks proportionally
+ *   3. Threshold  (~1.5s) — consensus bar animates toward the doubt threshold line
+ *                           Pass: bar clears line → relief → lock-in glow
+ *                           Fail: bar stops short → red pulse
+ *   4. Lock-in    (~0.5s) — winner gets accent glow (pass only)
  *
  * Total: ~5s, designed to match revealSequenceDurationMs.
  * Audience: no exact vote counts shown.
- * Projector: can show exact vote counts alongside visual split.
+ * Projector: shows exact vote counts alongside visual split.
  */
 
 import { useEffect, useState } from 'react';
-import type { LayerConfig } from '@/conductor/types';
-import { getLayerIdentity } from '@/lib/identity';
-import { HealthBar } from './HealthBar';
+import type { V32LayerConfig } from '@/conductor/types';
 
 export interface RevealSequenceProps {
   voteResult: {
@@ -25,72 +25,71 @@ export interface RevealSequenceProps {
     consensus: number;         // 0.0–1.0 (winning side's proportion)
     votesA?: number;           // Only shown in projector variant
     votesB?: number;
-    totalVotes?: number;
   };
-  drain: {
-    drainAmount: number;
-    healthAfter: number;
+  thresholdCheck: {
+    winningProportion: number;
+    threshold: number;
+    passed: boolean;
   };
-  /** Health value before drain was applied */
-  healthBefore: number;
-  layerConfig: LayerConfig;
+  layerConfig: V32LayerConfig;
   variant: 'audience' | 'projector';
 }
 
-type RevealBeat = 'tension' | 'split' | 'drain' | 'lockin';
+type RevealBeat = 'tension' | 'split' | 'threshold' | 'lockin';
 
 const BEAT_DURATIONS: Record<RevealBeat, number> = {
   tension: 900,
   split: 2000,
-  drain: 1500,
+  threshold: 1500,
   lockin: 500,
 };
 
 export function RevealSequence({
   voteResult,
-  drain,
-  healthBefore,
+  thresholdCheck,
   layerConfig,
   variant,
 }: RevealSequenceProps) {
   const [beat, setBeat] = useState<RevealBeat>('tension');
-  const [showDrainShadow, setShowDrainShadow] = useState(false);
+  const [barProgress, setBarProgress] = useState(0);
 
   useEffect(() => {
-    // Progress through beats
     const t1 = setTimeout(() => setBeat('split'), BEAT_DURATIONS.tension);
     const t2 = setTimeout(() => {
-      setBeat('drain');
-      // Show drain shadow briefly, then let it animate away
-      setShowDrainShadow(true);
-      setTimeout(() => setShowDrainShadow(false), 600);
+      setBeat('threshold');
+      // Animate bar from 0 to winningProportion over ~800ms
+      setBarProgress(0);
+      const animFrame = setTimeout(() => setBarProgress(thresholdCheck.winningProportion), 50);
+      return () => clearTimeout(animFrame);
     }, BEAT_DURATIONS.tension + BEAT_DURATIONS.split);
-    const t3 = setTimeout(
-      () => setBeat('lockin'),
-      BEAT_DURATIONS.tension + BEAT_DURATIONS.split + BEAT_DURATIONS.drain,
-    );
+
+    let t3: ReturnType<typeof setTimeout> | undefined;
+    if (thresholdCheck.passed) {
+      t3 = setTimeout(
+        () => setBeat('lockin'),
+        BEAT_DURATIONS.tension + BEAT_DURATIONS.split + BEAT_DURATIONS.threshold,
+      );
+    }
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
-      clearTimeout(t3);
+      if (t3 !== undefined) clearTimeout(t3);
     };
-  }, []);
+  }, [thresholdCheck.passed, thresholdCheck.winningProportion]);
 
-  const identity = getLayerIdentity(layerConfig.type);
+  const identity = { symbol: layerConfig.group?.[0]?.toUpperCase() ?? '?', color: '#6b7280', label: layerConfig.group ?? '' };
   const winner = voteResult.winner;
-  const loser: 'A' | 'B' = winner === 'A' ? 'B' : 'A';
   const consensus = voteResult.consensus; // 0.5–1.0
 
   // Card sizing during split — winner gets consensus%, loser gets (1-consensus)%
   const winnerFlex = beat === 'tension' ? 1 : consensus * 2;
   const loserFlex = beat === 'tension' ? 1 : (1 - consensus) * 2;
 
-  // Health bar value to show
-  const displayHealth = beat === 'drain' || beat === 'lockin'
-    ? drain.healthAfter
-    : healthBefore;
-  const drainShadowAmount = showDrainShadow ? drain.drainAmount : 0;
+  // Threshold bar colors
+  const barColor = beat === 'threshold' || beat === 'lockin'
+    ? thresholdCheck.passed ? '#4ade80' : '#ef4444'
+    : identity.color;
 
   return (
     <div
@@ -101,10 +100,13 @@ export function RevealSequence({
         width: '100%',
       }}
     >
-      {/* Health bar with drain animation */}
-      <HealthBar
-        health={displayHealth}
-        drainShadow={drainShadowAmount}
+      {/* Threshold bar visualization */}
+      <ThresholdBar
+        winningProportion={barProgress}
+        threshold={thresholdCheck.threshold}
+        passed={thresholdCheck.passed}
+        barColor={barColor}
+        active={beat === 'threshold' || beat === 'lockin'}
         variant={variant}
       />
 
@@ -121,7 +123,6 @@ export function RevealSequence({
         {(['A', 'B'] as const).map((option) => {
           const isWinner = option === winner;
           const flex = isWinner ? winnerFlex : loserFlex;
-          const isRevealedWinner = beat !== 'tension' && isWinner;
           const isRevealedLoser = beat !== 'tension' && !isWinner;
           const isA = option === 'A';
 
@@ -146,7 +147,7 @@ export function RevealSequence({
                 padding: '16px 10px',
                 opacity: beat === 'tension' ? 0.6 : isRevealedLoser ? 0.25 : 1,
                 ...colorStyle,
-                boxShadow: beat === 'lockin' && isWinner
+                boxShadow: beat === 'lockin' && isWinner && thresholdCheck.passed
                   ? `0 0 0 2px #fff, 0 0 12px 2px ${identity.color}`
                   : 'none',
                 transition: 'flex 0.6s ease, opacity 0.4s ease, box-shadow 0.3s ease',
@@ -193,7 +194,7 @@ export function RevealSequence({
               )}
 
               {/* Winner label on lock-in */}
-              {beat === 'lockin' && isWinner && (
+              {beat === 'lockin' && isWinner && thresholdCheck.passed && (
                 <span
                   style={{
                     fontSize: '0.6rem',
@@ -209,6 +210,85 @@ export function RevealSequence({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ThresholdBar — inline sub-component used only by RevealSequence
+// ---------------------------------------------------------------------------
+
+interface ThresholdBarProps {
+  winningProportion: number;
+  threshold: number;
+  passed: boolean;
+  barColor: string;
+  active: boolean;
+  variant: 'audience' | 'projector';
+}
+
+function ThresholdBar({ winningProportion, threshold, passed, barColor, active, variant }: ThresholdBarProps) {
+  const height = variant === 'projector' ? 20 : 10;
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderRadius: height / 2,
+        overflow: 'visible',
+      }}
+    >
+      {/* Consensus fill bar */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          height: '100%',
+          width: `${winningProportion * 100}%`,
+          backgroundColor: barColor,
+          borderRadius: height / 2,
+          transition: 'width 0.8s ease-out, background-color 0.4s ease',
+          boxShadow: active && passed ? `0 0 8px 2px ${barColor}` : 'none',
+        }}
+      />
+
+      {/* Threshold line */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '-4px',
+          bottom: '-4px',
+          left: `${threshold * 100}%`,
+          width: 2,
+          backgroundColor: active
+            ? passed ? '#4ade80' : '#ef4444'
+            : 'rgba(255,255,255,0.4)',
+          transition: 'background-color 0.4s ease',
+          transform: 'translateX(-50%)',
+        }}
+      />
+
+      {/* Threshold percentage label (projector only) */}
+      {variant === 'projector' && (
+        <span
+          style={{
+            position: 'absolute',
+            top: '-20px',
+            left: `${threshold * 100}%`,
+            transform: 'translateX(-50%)',
+            fontSize: '0.6rem',
+            opacity: 0.5,
+            letterSpacing: '0.08em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {Math.round(threshold * 100)}%
+        </span>
+      )}
     </div>
   );
 }

@@ -1,5 +1,261 @@
 # CHANGELOG
 
+## 2026-03-27 — Replace melody with seed + muted live mix start + voteable silence
+
+**Context:** The "melody" granular type was always empty (melody is performed live). Live seed tracks from song-building were discarded after each attempt. This change makes live seed tracks reusable as finale fragments, adds a muted live mix start, and introduces silence as a voteable option.
+
+**Key changes:**
+- Replaced `melody` granular type with `seed` across types, config, identity, and UI
+- Seed fragments are generated from each attempt's `liveSeed` config (one per attempted song, no A/B)
+- Removed melody tracks from Song 3's flesh layer; flesh now contains only harmony + pad
+- Live mix starts fully muted — no transport, no audio, no pre-set votes
+- First group to reach majority on a real fragment triggers Ableton transport playback
+- Voteable silence: `MUTE_FRAGMENT_ID` (`__mute__`) is a valid vote target alongside real fragments. When a type's majority votes for silence, audio fades out. When they vote back to a fragment, audio fades in. Displayed as a "Silence" card in the audience UI.
+- Controller shows "Muted" badge when a type's active fragment is the mute sentinel
+- Added `transportStarted` field to `V32FinaleState.liveMix` to track first-activation
+- Updated serialization layer to include `transportStarted`
+- Updated all tests (297 passing, 1 pre-existing audio-router timing flake)
+- Updated docs: ARCHITECTURE.md, CLAUDE.md, finale.md, audio-engine.md, data-models.md, song-building.md, client-routes.md
+
+## 2026-03-26 — V3.2 Migration Phase 4: UI Components + Dead Code Cleanup
+
+**Context:** Completes the client layer of the V3.2 migration. Replaces V3.1 components with config-driven V3.2 equivalents, adds missing projector and controller UIs for the live mix phase, and removes all dead V3.1 code.
+
+**Key changes:**
+- Created `components/finale/AssignmentCards.tsx` — config-driven replacement for V3.1 AssemblyCards, uses `GranularType` props instead of hardcoded `LayerType` + `LAYER_ORDER`
+- Created `components/finale/AssignmentIdentity.tsx` — replaces GroupIdentity with `GranularType`
+- Created `components/finale/LiveMixProjector.tsx` — projector visualization with per-type rows, consensus bars, chapter colors, lock indicators; subscribes to `mix_state` at ~4 Hz
+- Created `components/controller/LiveMixControls.tsx` — performer controls with per-type override dropdowns, lock toggles, vote distribution bars; subscribes to `mix_state` at ~4 Hz
+- `app/audience/page.tsx`: Replaced AssemblyCards/GroupIdentity with AssignmentCards/AssignmentIdentity, threads `granularTypes` from config
+- `app/projector/page.tsx`: Added assignment visualization (type cards with live counts) + LiveMixProjector for `finale_live_mix`
+- `app/controller/page.tsx`: Added LiveMixControls during `finale_live_mix`
+- `conductor/types.ts`: Added `granularTypes` to `AudienceClientState.config`
+- `server/socket.ts`: Added `granularTypes` to audience config in `filterStateForClient`
+- Deleted 12 V3.1 files: AssemblyCards, GroupIdentity, DeliberationBoard, AudioPreview, CeremonyView, AltarReady, MixingMirror, MixingSurface, AssemblyControls, DeliberationControls, CeremonyControls, useAltarDetection
+
+**Tests:** 296 passing (unchanged). 2 pre-existing audio-router flakes.
+**Type check:** Clean (zero errors).
+
+**Remaining:** Manual walkthrough testing, ARCHITECTURE.md/docs update to remove V3.1 references.
+
+## 2026-03-26 — V3.2 Migration Phase 3: Live Mix Conductor Logic + Server Wiring
+
+**Context:** Implements the core Incredibox-style live mix mechanics — the finale's central interaction where audience members collaboratively control granular audio fragments in real time via majority voting with recency tiebreak.
+
+**Key changes:**
+- Created `conductor/live-mix.ts`: `getActiveFragment()` (majority + recency tiebreak), `recalculateActiveFragments()` (respects locks/overrides), `computeInitialFragments()` (picks highest winning proportion per type)
+- `conductor/conductor.ts`: Replaced 5 stub handlers with full implementations — `handleSetLiveMixPreference` (validates assignment/lock, updates votes, emits crossfade), `handleLockGranularType`, `handleUnlockGranularType` (recalculates on unlock), `handleOverrideFragment`, `handleClearOverride` (reverts to vote-based). Updated `handleStartLiveMix` to compute initial fragments, initialize all user votes, and emit `live_mix_start` audio cue.
+- `conductor/index.ts`: Exports live-mix functions
+- `server/socket.ts`: Added `set_preference` handler (derives granularType from assignment), `mix_state` broadcast at ~4 Hz during live mix (audience gets own-type detail, projector/controller get full distributions), `type_locked`/`type_unlocked` broadcast on lock/unlock events, persistence for lock/unlock/override commands
+- `db/schema.sql`: Added `finale_mix_events` table + index
+- `server/persistence.ts`: Migration v5, `saveMixEvent()`/`getMixEvents()` methods, updated `PersistenceLayer` interface
+
+**Tests:** 296 passing across 12 suites. 19 new live-mix tests (unit + integration). 2 pre-existing audio-router flakes unchanged.
+
+**Type check:** Clean (`npx tsc --noEmit` — zero errors)
+
+**Remaining (P2-P4):** See `MIGRATION-V3.2-TODO.md` — UI components (LiveMixProjector, LiveMixControls, AssignmentCards replacement), dead code cleanup.
+
+## 2026-03-26 — V3.2 Migration Phase 2: Assignment Phase & Finale Pipeline Rewrite
+
+**Context:** Replaces the V3.1 four-phase finale pipeline (assembly/deliberation/ceremony/performer_mix) with the V3.2 two-phase design (assignment/live_mix). Removes ambassador, altar, and ceremony mechanics. Introduces granular type assignment (auto or self-select) with live mix stubs for the next task.
+
+**Key changes:**
+- `conductor/types.ts`: Replaced `ShowPhase` (4 old finale phases -> 2 new), removed `FinaleState`/`FinaleConfig`/`PendingChange` (replaced by `V32FinaleState`/`V32FinaleConfig`), replaced ~24 old finale commands with 8 new (assignment + live mix), replaced ~18 old events with 6 new, updated `AudioCue` (`ceremony_activate`/`mix_update` -> `live_mix_crossfade`/`live_mix_start`), updated `AudienceFinaleView`/`ProjectorFinaleView` for V3.2
+- Created `conductor/assignment.ts`: `autoAssign()` (Fisher-Yates + round-robin), `initializeSelfSelect()`, `selectGranularType()`, `assignUndecided()`
+- `conductor/conductor.ts`: Updated phase sequence (15 phases, was 17), replaced `handleSetupFinale` to use `generateGranularFragments()` + `V32FinaleState`, added assignment handlers, live mix handlers are stubs
+- Deleted: `conductor/assembly.ts`, `deliberation.ts`, `ceremony.ts`, `performer-mix.ts` + 5 test files
+- `lib/serialization.ts`: Rewritten for `V32FinaleState` Maps (assignment.groups, liveMix.votes/activeFragments/performerOverrides)
+- `server/socket.ts`: Replaced `join_group`/`group_vote`/`volunteer_ambassador`/`altar_lock_in` with `select_type`, updated `filterStateForClient` for V3.2, updated `broadcastEvents` (removed ceremony events, added `GROUPS_ASSIGNED` handler)
+- `server/persistence.ts`: Added v4 migration (`finale_assignments` table), replaced old persistence methods with `saveFinaleAssignment`/`getFinaleAssignments`
+- `server/timing.ts`: Replaced assembly/deliberation/ambassador timers with assignment timer, updated loop boundary tracking for `finale_live_mix` (stub)
+- `server/audio-router.ts`: Replaced `ceremony_activate`/`mix_update` handlers with `live_mix_crossfade`/`live_mix_start`
+- `config/default-show.json`: Replaced `finale` contents with V3.2 shape (`assignmentMode`, `assignmentTimerMs`, etc.), removed `v32Finale` key
+- `db/schema.sql`: Added `finale_assignments` table, marked old tables as deprecated
+
+**Tests:** 270 passing across 10 suites. 19 new assignment tests. 2 pre-existing audio-router timing flakes unchanged.
+
+**Docs updated:** ARCHITECTURE.md (phase diagram, folder structure, open questions), docs/finale.md (full rewrite), docs/data-models.md (FinaleConfig, commands, events, AudioCue), docs/server-protocol.md (WebSocket events, schema, recovery)
+
+**Not included (separate tasks):** Client UI components (app pages, finale components, controller components still reference old types — tsc errors expected in client files). Live mix conductor logic (handlers are stubs).
+
+## 2026-03-26 — V3.2 Migration Phase 1: Type System Foundation
+
+**Context:** First phase of the V3.2 migration (bundled layer groups + Incredibox-style finale). Adds all new V3.2 type definitions alongside existing V3.1 types. No conductor logic, server, or UI changes — purely additive type groundwork.
+
+**Key changes:**
+- `conductor/types.ts`: Added new `// V3.2 Types` section with:
+  - `V32_LAYERS_PER_ATTEMPT = 3` constant (existing `LAYERS_PER_ATTEMPT = 6` untouched)
+  - Core abstractions: `GranularType`, `GranularTrackRef`, `TrackBundle`, `LayerGroupId`, `LayerGroupConfig`, `LayerGroup`, `LiveSeedConfig`
+  - Attempt config: `V32LayerConfig`, `V32AttemptConfig` (3 layer groups + live seed per attempt)
+  - Finale types: `GranularFragment`, `LiveMixVote`, `V32FinaleConfig`, `V32FinaleState`
+  - Client types: `AuditionProgress` (bar-level progress for audition UI)
+  - Show config: `V32ShowConfig` (with `granularTypes[]` and `layerGroups[]` registries)
+- `config/default-show.json`: Added V3.2 config alongside existing V3.1 config:
+  - `granularTypes`: 6 granular type definitions (bass, drums, pad, melody, harmony, fx)
+  - `layerGroups`: 3 group definitions (bones/flesh/spark) referencing granular types
+  - `v32Attempts`: 3 attempts with `liveSeed` + `TrackBundle` structure, staggered per V3.2 spec
+  - `v32Finale`: Slim config (assignmentMode, bothOptionsSurvive, crossSongConstraint)
+
+**Design rationale:** All new types are additive (V32-prefixed where they shadow existing types). Existing V3.1 types, constants, and consumers are untouched. This allows incremental migration — the conductor logic phase will swap references from V3.1 to V3.2 types, then the V3.1 types and V32 prefixes are removed in cleanup.
+
+**No tests changed.** Compilation clean. 336/338 tests passing (same 2 pre-existing failures).
+
+## 2026-03-20 — V3.1 Migration Phase 9: Config & Environment
+
+**Context:** Phase 9 finalizes configuration changes. Most config (`default-show.json`, `ableton-layout.json`, `conductor/types.ts`) was already V3.1-compliant from earlier phases. This phase adds runtime config validation and removes dead code.
+
+**Key changes:**
+- `server/index.ts`: Added `validateShowConfig()` — validates per-attempt array lengths (thresholds, tempos, auditionBars, layers all === 6), threshold ranges [0,1], positive tempos, positive integer auditionBars, `bothOptionsSurvive` is boolean, `ceremonyLayerOrder` has 6 unique valid LayerType entries. Server refuses to start with bad config.
+- `server/index.ts`: Removed dead `_DEFAULT_DRAIN_FACTOR` and `_DEFAULT_LAYER_MULTIPLIERS` declarations (health bar remnants, unused since Phase 1-2).
+- `.env.example`: Fixed `CEREMONY_LAYER_ORDER` example from `fx1,fx2` to `fx`.
+
+## 2026-03-20 — V3.1 Migration Phase 8: Reveal Sequence & UI
+
+**Context:** Phase 8 replaces the health bar drain with per-layer doubt threshold visualization, adds escalating urgency effects on audience phones, and implements collapse-as-release. The conductor threshold infrastructure was already complete from Phases 1-2; this phase is entirely client-side.
+
+**Key changes:**
+- `server/socket.ts`: Populated `lastThresholdCheck` in `filterStateForClient` audience branch — previously hardcoded to `null`. Now reads from `attempt.layerResults` when in `revealing` phase.
+- `components/song-building/RevealSequence.tsx`: Rewritten. Replaced `drain` beat and `HealthBar` dependency with `threshold` beat showing an animated consensus bar vs. threshold line. Pass: bar clears line with green glow. Fail: bar stops short with red pulse. Lock-in beat skipped on fail. Projector still shows vote counts.
+- `components/song-building/ThresholdDisplay.tsx`: New component (projector). Shows all 6 threshold marks as a stepped escalation bar; current layer's threshold emphasized. Visible during auditioning before the vote opens.
+- `components/song-building/UrgencyEffects.tsx`: New component (audience). Wrapper that applies `.urgency-N` CSS classes (N = layerIndex). When `collapsed=true`, strips all classes instantly.
+- `app/globals.css`: Added urgency keyframe animations (`urgency-drift-subtle/medium/heavy`, `urgency-timer-pulse`, `urgency-jitter/jitter-heavy`) and `.urgency-0` through `.urgency-5` class rules targeting `.urgency-cards` and `.urgency-timer` child selectors.
+- `app/audience/page.tsx`: Integrated `RevealSequence` (rendered during `revealing` phase) and `UrgencyEffects` (wraps OptionCards during auditioning). Collapse strips urgency instantly.
+- `app/projector/page.tsx`: Added `ThresholdDisplay` (shown during auditioning), `RevealSequence` (shown during revealing). Updated `CollapseOverlay` from red alarm to 0.6s fade-to-black (collapse is release).
+- `components/song-building/HealthBar.tsx`: Deleted. No remaining consumers.
+
+**Deviations from spec:**
+- `HealthBarControls.tsx` listed for deletion in 8.5 — file did not exist (already absent from prior phases). No action needed.
+- Audio urgency (return track degradation per layer, deferred from Phase 7) is **not** in this phase — requires Ableton session configuration that isn't ready. CSS urgency effects (8.3) are implemented.
+
+## 2026-03-19 — V3.1 Migration Phase 7: Track Layout & OSC
+
+**Context:** Phase 7 described updating Ableton track mapping for 36 tracks. Track indices are config-driven (not computed at runtime), and `default-show.json` was already updated to 36 tracks in earlier phases.
+
+**Key changes:**
+- Updated `config/ableton-layout.json`: `maxLayersPerAttempt` 7→6, comments updated (42→36 tracks, live performance tracks at 36+ instead of 42+).
+- Audio urgency (return track degradation per layer, section 7.3) deferred to Phase 8 with other urgency effects.
+
+## 2026-03-19 — V3.1 Migration Phase 6: Finale Updates (6 Layer Types)
+
+**Context:** Phase 6 verifies all finale phases use 6 layer types (not 7). Prior phases already migrated all runtime code and UI components. This phase fixes remaining stale references.
+
+**Key changes:**
+- Fixed 3 stale comments referencing "7 groups" in `conductor/types.ts` and `conductor/assembly.ts`.
+- Fixed test parameterization in `conductor/__tests__/finale-integration.test.ts` — 3 setup functions were creating configs with 7 layers but only assigning 6 layer types.
+- Fixed fragment count assertion in `SETUP_FINALE` test to match `bothOptionsSurvive: true` behavior (12 available, 0 locked).
+- Verified: all conductor modules (assembly, deliberation, ceremony, performer-mix, fragments), UI components, config, and identity mappings already correctly use the 6-layer model. 338 tests passing (same 2 pre-existing audio-router failures).
+
+## 2026-03-19 — V3.1 Migration Phase 4: Tempo & Timing
+
+**Context:** Per-layer tempos were defined in config but never sent to Ableton during song-building. Phase 4 wires up OSC tempo changes at each layer start, plus resets between songs and at finale.
+
+**Key changes:**
+- **`set_tempo` AudioCue**: New cue type emitted by conductor at layer start (in `handleStartAudition()` and `handleRerunVote()`), before `audition_start`. Carries per-layer BPM from `AttemptConfig.tempos[]`.
+- **Audio-router `handleSetTempo()`**: Sends `/live/song/set/tempo` via OSC.
+- **`routerState.baseTempo`**: Derived from config (`attempts[0].tempos[0]`) at runtime, replacing hardcoded `NOMINAL_TEMPO_BPM` (120) in all tempo reset paths.
+- **Tempo resets**: On collapse (via `clearCollapseTimers`), on rejection (after effect fades), on `ATTEMPT_COMPLETED`, and at `finale_elegy` phase change.
+- **Tests**: 3 new conductor tests (set_tempo emission, ordering, per-layer BPM). 5 new audio-router tests (OSC send, baseTempo config derivation, rejection reset, finale_elegy reset). 333 passing, same 2 pre-existing audio-router failures.
+
+## 2026-03-19 — V3.1 Migration Phases 2 & 3: Threshold Mechanic + Per-Layer Audition Timing
+
+**Phase 2 — Threshold Mechanic:**
+- Created `conductor/threshold.ts` with `checkThreshold()` pure function (~20 lines). Independently testable with exact vote counts.
+- Updated `conductor/conductor.ts` to import and call `checkThreshold()` instead of inline threshold logic in `resolveCurrentLayer()`.
+- Exported `checkThreshold` from `conductor/index.ts`.
+- Added 7 unit tests in `conductor/__tests__/threshold.test.ts` covering all edge cases from MIGRATION-v3.1.md.
+- Cleaned up 3 stale health-bar references in `conductor/__tests__/conductor.test.ts` comments.
+
+**Phase 3 — Per-Layer Audition Timing:**
+- `TimingConfig` simplified: removed `auditionDurationMs`, `votingWindowMs`, `auditionsPerLayer`. Renamed `beatsPerLoop` → `loopBoundaryBeats` (used only for performer mix loop boundaries).
+- Audition timing now reads per-layer `auditionBars[layerIndex]` and `tempos[layerIndex]` from `AttemptConfig` instead of global config.
+- Loop structure simplified: A-B-A-B (4 loops via `auditionsPerLayer=2`) → A-then-B (2 loops). Each option plays once.
+- Added exported `barsToMs()` utility in `server/timing.ts`.
+- Rewrote `startAuditionTracking()` for per-layer config. Removed legacy flat-timer mode (3 modes → 2: OSC beat-synced + fallback JS interval).
+- No `votingWindowMs` state field — Ableton/timing engine is source of truth for audition end; votes accepted when phase is `'auditioning'`, rejected otherwise.
+- Updated `server/socket.ts`: `auditionTotalLoops` is now constant `2`.
+- Updated `config/default-show.json`, `docs/data-models.md`, and all 6 test fixture files.
+- 325 tests passing (same 2 pre-existing audio-router failures). `tsc --noEmit` clean.
+
+## 2026-03-19 — V3.1 Migration Phase 1: Types & Constants
+
+**Context:** Phase 1 of the V3.1 migration. Updates all shared type definitions and constants so that subsequent phases (threshold mechanic, merged auditioning+voting, tempo, etc.) have a stable foundation. See `MIGRATION-v3.1.md` for the full migration plan.
+
+**Key changes:**
+- **7 layer types → 6**: Removed `fx1` and `fx2`, added `fx`. Updated across all conductor modules, components, tests, config, and identity mappings.
+- **Health bar removed**: Deleted `HealthBarState`, `HealthBarDrain` interfaces, `health-bar.ts` module, and all health bar test file. Removed `drainFactor` and `layerMultipliers` from `AttemptConfig`; replaced with `thresholds`, `tempos`, `auditionBars` arrays (all length 6).
+- **`LAYERS_PER_ATTEMPT = 6`**: Updated constant and all references.
+- **`LayerPhase` simplified**: Removed `'voting'` (voting now concurrent with `'auditioning'`). Removed all standalone `'voting'` phase checks across conductor, server, components, and hooks.
+- **`LayerResult` new shape**: `consensus`/`drainAmount` → `winningProportion`/`thresholdRequired`/`passed`.
+- **`Fragment` gains `wonVote: boolean`**: Marks whether a fragment won its blind vote.
+- **`FinaleConfig` gains `bothOptionsSurvive: boolean`**: Configures whether losing options are available in finale.
+- **Commands removed**: `OPEN_VOTING`, `SET_DRAIN_FACTOR`, `SET_HEALTH`.
+- **Events updated**: Removed `HEALTH_BAR_DRAINED`, added `THRESHOLD_CHECK`.
+- **Config**: `default-show.json` updated with 6-layer stagger tables, per-layer thresholds/tempos/auditionBars, `bothOptionsSurvive`, and 6-entry `ceremonyLayerOrder`.
+- **Identity**: `lib/identity.ts` updated — `fx1`/`fx2` entries replaced with single `fx` ("The Shimmer", `~`).
+- **Components**: Removed HealthBar/RevealSequence usage from audience and projector pages (compile fixes only — component files remain for Phase 8 deletion). Removed `'voting'` phase checks from `VotingControls`, `LayerProgress`, `useShowState`.
+- **Tests**: 315 passing (2 pre-existing audio-router failures unrelated to migration). Deleted `health-bar.test.ts`. Updated all test files for fx→fx, 7→6, threshold shape, removed drain assertions.
+
+**Deviations from MIGRATION-v3.1.md:** Kept `'auditioning'` as the LayerPhase name (not `'auditioning_and_voting'`) and kept `START_AUDITION` as the command name (not `START_LAYER`). These are semantic — the behavior change (concurrent voting during auditioning) is already implemented.
+
+## 2026-03-18 — Merge Auditioning and Voting Phases
+
+**Context:** The song-building flow previously had a silent `voting` phase after auditioning stopped — audio faded out while audience voted in silence. This change makes auditioning (A/B option cycling) continue throughout the voting window, eliminating the dead-air gap. Votes were already accepted during auditioning, so the `voting` phase was functionally redundant.
+
+**Changes:**
+- `conductor/conductor.ts`: `OPEN_VOTING` is now a no-op (returns `[]`). `resolveCurrentLayer()` emits `audition_stop` audio cue before transitioning to `revealing`, since `OPEN_VOTING` no longer handles this.
+- `server/timing.ts`: All three audition completion paths (OSC, fallback, legacy) now send `CLOSE_VOTING` directly instead of `OPEN_VOTING`. Removed `handleVotingPhase()` (dead code). Added `stopAuditionTracking()` to the `revealing` case.
+- `config/default-show.json`: `auditionsPerLayer` increased from 1 to 3 (6 A/B loops ≈ 48s at 120 BPM, covering old audition + voting duration).
+- `app/audience/page.tsx`: `LayerPhaseHint` shows "Tap to vote" / "Vote recorded" during `auditioning` phase (previously only during `voting`).
+- `components/controller/VotingControls.tsx`: Removed "Open Vote" button and "+5s"/"+10s" timer extend buttons (no voting timer to extend).
+- Tests updated across `conductor.test.ts` and `timing.test.ts`.
+
+**Note:** `LayerPhase` type still includes `'voting'` but it is never entered. `votingWindowMs` config is vestigial. Both can be removed in a future cleanup.
+
+## 2026-03-17 — V3 Migration Phase 1: Types & Data Models (Consensus Game → Assembly/Deliberation/Ceremony)
+
+**Context:** Phase 1 of the V3 finale redesign. The consensus game (convergence meter, timed voting rounds, threshold softening) is replaced by a physically embodied four-phase sequence: group assembly → deliberation → ambassador ceremony → performer mix. This commit updates all TypeScript types, stubs out V2 conductor handlers, and fixes compilation across the entire codebase. No new logic is implemented — that's Phase 2.
+
+**`conductor/types.ts` — core type changes:**
+- `ShowPhase`: removed `'finale_consensus'`; added `'finale_assembly' | 'finale_deliberation' | 'finale_ceremony'`
+- `FinaleState`: removed `consensusGame` sub-object; added `assembly` (groups Map, undecidedUsers, timers), `deliberation` (nested groupVotes Map, chosenFragments, ambassadors, timers), `ceremony` (layerOrder, currentAmbassador, altarReady, lockedLayers, ceremonyComplete); simplified `npc` (removed `autoTriggersEnabled`)
+- `FinaleConfig`: removed all consensus fields; added `assemblyTimerMs`, `assemblyGracePeriodMs`, `deliberationTimerMs`, `ambassadorVolunteerTimerMs`, `ceremonyLayerOrder`, `audioPreviewPath`, `layerLabels`, `npcMessages`
+- `Fragment`: added `previewAudioPath: string`
+- `NpcTriggerConfig` removed; replaced with `NpcMessageConfig { event: string; layerType?: LayerType; text: string }`
+- `GainConfig.consensusSwellBeats` → `ceremonySwellBeats` (all references updated)
+- `AudioCue`: `consensus_activate` → `ceremony_activate` (all references updated)
+- `ConductorCommand`: removed `START_CONSENSUS_ROUND`, `SUBMIT_CONSENSUS_VOTE`, `END_CONSENSUS_ROUND`, `SET_CONSENSUS_THRESHOLD`; added assembly/deliberation/ceremony command variants
+- `ConductorEvent`: removed `CONSENSUS_ROUND_*` events; added assembly/deliberation/ceremony event variants
+- `AudienceFinaleView`, `ProjectorFinaleView`: removed consensus fields; added V3 assembly/deliberation/ceremony view fields
+
+**`conductor/conductor.ts`:**
+- Updated `PHASE_SEQUENCE` to include the three new phases
+- Replaced `handleSetupFinale` FinaleState initialization with V3 sub-objects
+- Removed V2 consensus handler functions; added stub `return []` cases for all new V3 commands (TODO: Phase 2)
+- Updated `handleStartPerformerMix` to use empty Map instead of `consensusGame.lockedRoles`
+
+**`conductor/npc.ts`:** Rewrote `getNpcMessage()` API — takes `NpcMessageConfig[]`, event string, optional layerType, supports `{layerLabel}` template substitution
+
+**`conductor/fragments.ts`:** `generateFragments` accepts `audioPreviewPath`; sets `previewAudioPath` on each fragment
+
+**`lib/serialization.ts`:** Fully migrated `SerializedFinaleState` — removed `SerializedConsensusGame`; added `SerializedAssembly`, `SerializedDeliberation`, `SerializedCeremony` with proper Map↔array conversion including nested `groupVotes` Map
+
+**Server/UI compile fixes:**
+- `server/audio-router.ts`: renamed `consensusSwellBeats` → `ceremonySwellBeats`, `consensus_activate` → `ceremony_activate`
+- `app/projector/page.tsx`: replaced `finale_consensus` case with stub cases for `finale_assembly/deliberation/ceremony`
+- `app/audience/page.tsx`: updated finale phase routing for V3; removed unused imports
+- `app/controller/page.tsx`: updated `FINALE_PHASES` set
+- `components/controller/ConsensusControls.tsx`: stubbed out (returns null), pending Phase 4
+- `components/controller/MetricsPanel.tsx`: updated phase labels/colors and finale stats display
+- `components/controller/NpcControls.tsx`: removed `autoTriggersEnabled` toggle
+- `components/controller/ShowControls.tsx`: updated phase list
+
+**Tests:**
+- `conductor/__tests__/conductor.test.ts`: updated phase sequence fixture (16 phases now)
+- `conductor/__tests__/npc.test.ts`: rewritten for V3 `getNpcMessage` API
+- `server/__tests__/persistence.test.ts`, `backup.test.ts`: updated `FinaleConfig` and `FinaleState` fixtures to V3
+- `conductor/__tests__/finale-integration.test.ts`, `consensus-game.test.ts`: added `// @ts-nocheck` + `describe.skip` (V2 tests, will be replaced in Phase 2)
+
 ## 2026-03-09 — Audio Router Polish: Gain Control, Sub-Beat Interpolation, OSC Source of Truth
 
 **Context:** Refines the audio router's gain-based control model for production use with Ableton. Fixes gain mapping formula, adds sub-beat interpolation for smoother fades, and makes Ableton the single source of truth for transport state and BPM.

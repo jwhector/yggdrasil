@@ -2,17 +2,13 @@
  * Timing Engine — Hybrid Timing with AbletonOSC + Server Timers
  *
  * Manages automatic phase advancement with a hybrid approach:
- * - Server JS timers control game logic timing (audition duration, voting window,
- *   consensus round duration)
  * - AbletonOSC beat events drive audition A/B cycling and performer mix loop boundaries
+ * - Server JS timers as fallback when OSC unavailable
  * - Per-beat callback scheduler allows audio router to lock gain changes to the musical grid
  *
  * Architecture:
  * - Observes state changes via onStateChanged()
- * - For auditioning: Schedules auditionDurationMs timer → sends OPEN_VOTING
- *   (or beat-synced cycling if beatsPerLoop > 0)
- * - For voting: Schedules votingWindowMs timer → sends CLOSE_VOTING
- * - For consensus rounds: Schedules round duration timer → sends END_CONSENSUS_ROUND
+ * - For auditioning: Plays A then B (per-layer auditionBars from AttemptConfig) → sends CLOSE_VOTING
  * - For performer mix: Counts beats/bars → sends FIRE_PENDING_CHANGES at loop boundary
  *
  * Beat Callback Scheduler:
@@ -31,6 +27,7 @@ import type {
   ConductorCommand,
   ConductorEvent,
   LayerPhase,
+  AuditionProgress,
 } from '../conductor/types';
 import type { OSCBridge } from './osc';
 
@@ -48,14 +45,16 @@ export interface TimingEngineConfig {
   oscBridge: OSCBridge | null;
   /** BPM for fallback timing (default: 120) */
   fallbackBpm: number;
+  /** Callback for audition progress updates (~4 Hz during auditioning) */
+  onAuditionProgress?: (progress: AuditionProgress) => void;
 }
 
 /** Beat position within the current musical context. */
 export interface BeatPosition {
   absoluteBeat: number;    // Raw beat number from Ableton (or synthetic)
   beatInBar: number;       // 0–3 within current bar
-  barInLoop: number;       // 0–7 within current 8-bar loop
-  loopCount: number;       // Total 8-bar loops elapsed since beat tracking started
+  barInLoop: number;       // 0–(barsPerLoop-1) within current loop (driven by config.timing.loopBoundaryBeats)
+  loopCount: number;       // Total loops elapsed since beat tracking started
 }
 
 /** A scheduled per-beat callback. */
@@ -81,6 +80,8 @@ export interface TimingEngine {
   dispose(): void;
   /** Check if engine is running */
   isRunning(): boolean;
+  /** Recover and restart finale timers after a server restart. */
+  recoverTimers(state: ShowState): void;
 
   // Beat callback scheduler
   /** Register a callback to fire at a specific absolute beat number. */
@@ -123,7 +124,7 @@ interface TimerState {
 interface AuditionTrackingState {
   lastToggleBeat: number;      // Beat number at last option toggle (-1 = not yet set)
   beatsPerLoop: number;        // From config
-  totalLoops: number;          // auditionsPerLayer * 2
+  totalLoops: number;          // auditionCycles * 2 (each cycle = A + B)
   currentLoopIndex: number;    // 0-based, increments on each toggle
 }
 
@@ -132,11 +133,18 @@ interface AuditionTrackingState {
  */
 interface LoopTrackingState {
   lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
-  loopBeats: number;           // LOOP_BARS * BEATS_PER_BAR
+  loopBeats: number;           // from config.timing.loopBoundaryBeats
 }
 
 const BEATS_PER_BAR = 4;
-const LOOP_BARS = 8;          // Performer mix loop length in bars
+
+/**
+ * Convert bars to milliseconds at a given BPM.
+ */
+export function barsToMs(bars: number, bpm: number, beatsPerBar: number = BEATS_PER_BAR): number {
+  const msPerBeat = 60000 / bpm;
+  return bars * beatsPerBar * msPerBeat;
+}
 
 // ============================================================================
 // Factory
@@ -164,12 +172,13 @@ export function createTimingEngine(
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let consensusRoundTimer: NodeJS.Timeout | null = null;
+  let assignmentTimer: NodeJS.Timeout | null = null;
   let auditionState: AuditionTrackingState | null = null;
   let fallbackAuditionInterval: NodeJS.Timeout | null = null;
   let fallbackAuditionLoopIndex = 0;
   let loopState: LoopTrackingState | null = null;
   let fallbackLoopInterval: NodeJS.Timeout | null = null;
+  let configuredLoopBoundaryBeats: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
   let beatCallbacks: BeatCallback[] = [];
@@ -188,6 +197,10 @@ export function createTimingEngine(
 
   // BPM from Ableton (for sub-beat interpolation in audio router)
   let currentBpm: number = engineConfig.fallbackBpm;
+
+  // Audition progress emission (~4 Hz)
+  let auditionProgressInterval: NodeJS.Timeout | null = null;
+  let auditionStartTime: number = 0;
 
   // --------------------------------------------------------------------------
   // Timer Management
@@ -285,56 +298,139 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
-  // Consensus Round Timer
+  // Finale Timers (Assignment — self-select mode only)
   // --------------------------------------------------------------------------
 
-  /**
-   * Start consensus round timer. Fires END_CONSENSUS_ROUND when duration expires.
-   */
-  function startConsensusRoundTimer(durationMs: number): void {
-    clearConsensusRoundTimer();
-
-    console.log(`[Timing] Consensus round timer: ${durationMs}ms`);
-    consensusRoundTimer = setTimeout(() => {
+  function startAssignmentTimer(durationMs: number): void {
+    clearAssignmentTimer();
+    console.log(`[Timing] Assignment timer: ${durationMs}ms`);
+    assignmentTimer = setTimeout(() => {
       if (!running) return;
       const state = getState();
-      if (state.phase === 'finale_consensus' && state.finaleState?.consensusGame.active) {
-        console.log('[Timing] Consensus round timer expired → END_CONSENSUS_ROUND');
-        sendCommand({ type: 'END_CONSENSUS_ROUND' });
+      if (state.phase === 'finale_assignment') {
+        console.log('[Timing] Assignment timer expired → ASSIGNMENT_COMPLETE');
+        sendCommand({ type: 'ASSIGNMENT_COMPLETE' });
       }
-      consensusRoundTimer = null;
+      assignmentTimer = null;
     }, durationMs);
   }
 
-  /**
-   * Clear the consensus round timer (round ended by other means).
-   */
-  function clearConsensusRoundTimer(): void {
-    if (consensusRoundTimer) {
-      clearTimeout(consensusRoundTimer);
-      consensusRoundTimer = null;
+  function clearAssignmentTimer(): void {
+    if (assignmentTimer) {
+      clearTimeout(assignmentTimer);
+      assignmentTimer = null;
     }
+  }
+
+  function clearAllFinaleTimers(): void {
+    clearAssignmentTimer();
   }
 
   // --------------------------------------------------------------------------
   // Layer Phase Handlers
   // --------------------------------------------------------------------------
 
+  // --------------------------------------------------------------------------
+  // Audition Progress Emission (~4 Hz)
+  // --------------------------------------------------------------------------
+
+  const AUDITION_PROGRESS_INTERVAL_MS = 250; // ~4 Hz
+
+  function startAuditionProgressEmission(): void {
+    stopAuditionProgressEmission();
+    if (!engineConfig.onAuditionProgress) return;
+
+    auditionStartTime = Date.now();
+
+    auditionProgressInterval = setInterval(() => {
+      if (!running) return;
+      const progress = computeAuditionProgress();
+      if (progress && engineConfig.onAuditionProgress) {
+        engineConfig.onAuditionProgress(progress);
+      }
+    }, AUDITION_PROGRESS_INTERVAL_MS);
+  }
+
+  function stopAuditionProgressEmission(): void {
+    if (auditionProgressInterval) {
+      clearInterval(auditionProgressInterval);
+      auditionProgressInterval = null;
+    }
+  }
+
+  function computeAuditionProgress(): AuditionProgress | null {
+    const state = getState();
+    if (state.phase !== 'attempt_build') return null;
+
+    const attempt = state.attempts[state.currentAttemptIndex];
+    if (!attempt || attempt.currentLayerPhase !== 'auditioning') return null;
+
+    const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+    const layerIndex = attempt.currentLayerIndex;
+    const auditionBars = attemptConfig?.auditionBars?.[layerIndex] ?? 4;
+    const tempo = attemptConfig?.tempos?.[layerIndex] ?? engineConfig.fallbackBpm;
+    const auditionCycles = attemptConfig?.auditionCycles?.[layerIndex] ?? 1;
+    const currentOption = attempt.currentAuditionOption ?? 'A';
+
+    const optionDurationMs = barsToMs(auditionBars, tempo);
+    const votingWindowMs = optionDurationMs * auditionCycles * 2;
+    const elapsedMs = Date.now() - auditionStartTime;
+
+    // Compute bar progress within the current option's audition
+    let barProgress: number;
+    if (engineConfig.oscBridge && auditionState) {
+      // OSC mode: derive from beat position
+      const beatsSinceToggle = auditionState.lastToggleBeat >= 0
+        ? currentAbsoluteBeat - auditionState.lastToggleBeat
+        : 0;
+      barProgress = Math.min(beatsSinceToggle / auditionState.beatsPerLoop, 1.0);
+    } else {
+      // Fallback mode: derive from elapsed time within current option
+      const timeInCurrentOption = elapsedMs % optionDurationMs;
+      // After first option switch, use modular position
+      if (elapsedMs < optionDurationMs) {
+        barProgress = elapsedMs / optionDurationMs;
+      } else {
+        barProgress = timeInCurrentOption / optionDurationMs;
+      }
+      barProgress = Math.min(Math.max(barProgress, 0), 1.0);
+    }
+
+    return {
+      layerIndex,
+      currentOption,
+      barProgress,
+      totalBars: auditionBars,
+      tempo,
+      votingWindowMs,
+      elapsedMs,
+    };
+  }
+
   /**
-   * Start beat-synced audition tracking.
-   * OSC mode: counts beats from Ableton, toggles A/B every beatsPerLoop beats.
-   * Fallback mode: JS interval based on fallbackBpm.
-   * After all loops complete, sends OPEN_VOTING.
+   * Start audition tracking for the current layer.
+   * Reads per-layer auditionBars from AttemptConfig to determine timing.
+   * Plays A then B (2 total loops), then sends CLOSE_VOTING.
+   * OSC mode: counts beats from Ableton. Fallback: JS interval from per-layer tempo.
    */
   function startAuditionTracking(state: ShowState): void {
     stopAuditionTracking();
 
-    const beatsPerLoop = state.config.timing.beatsPerLoop ?? 0;
-    const auditionsPerLayer = state.config.timing.auditionsPerLayer ?? 2;
-    const { auditionDurationMs } = state.config.timing;
-    const totalLoops = auditionsPerLayer * 2;
+    const attempt = state.attempts[state.currentAttemptIndex];
+    const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+    const layerIndex = attempt?.currentLayerIndex ?? 0;
 
-    if (beatsPerLoop > 0 && engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
+    // Per-layer config from AttemptConfig
+    const auditionBars = attemptConfig?.auditionBars?.[layerIndex] ?? 4;
+    const tempo = attemptConfig?.tempos?.[layerIndex] ?? engineConfig.fallbackBpm;
+    const beatsPerLoop = auditionBars * BEATS_PER_BAR;
+    const auditionCycles = attemptConfig?.auditionCycles?.[layerIndex] ?? 1;
+    const totalLoops = auditionCycles * 2; // Each cycle = A + B
+
+    // Start progress emission (~4 Hz)
+    startAuditionProgressEmission();
+
+    if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats; first beat sets the baseline in handleBeatEvent
       auditionState = {
         lastToggleBeat: -1,
@@ -342,40 +438,44 @@ export function createTimingEngine(
         totalLoops,
         currentLoopIndex: 0,
       };
-      console.log(`[Timing] Audition tracking started (OSC, ${beatsPerLoop} beats/loop × ${totalLoops} loops)`);
-    } else if (beatsPerLoop > 0) {
-      // Fallback: derive interval from BPM
-      const msPerBeat = 60000 / engineConfig.fallbackBpm;
-      const intervalMs = beatsPerLoop * msPerBeat;
-      fallbackAuditionLoopIndex = 0;
 
-      fallbackAuditionInterval = setInterval(() => {
-        if (!running) return;
-        const currentState = getState();
-        const attempt = currentState.attempts[currentState.currentAttemptIndex];
-        if (!attempt || attempt.currentLayerPhase !== 'auditioning') {
-          stopAuditionTracking();
-          return;
-        }
-
-        fallbackAuditionLoopIndex++;
-
-        if (fallbackAuditionLoopIndex >= totalLoops) {
-          stopAuditionTracking();
-          sendCommand({ type: 'OPEN_VOTING' });
-        } else {
-          sendCommand({ type: 'TOGGLE_AUDITION' });
-        }
-      }, intervalMs);
-
-      console.log(`[Timing] Audition tracking started (fallback, ${intervalMs.toFixed(0)}ms/loop × ${totalLoops} loops)`);
+      console.log(`[Timing] Audition tracking started (OSC, ${auditionBars} bars/option × ${totalLoops} loops)`);
     } else {
-      // Legacy: flat timer using auditionDurationMs
-      console.log(`[Timing] Auditioning: scheduling ${auditionDurationMs}ms timer → OPEN_VOTING (legacy)`);
-      scheduleTimer(auditionDurationMs, state.version, 'auditioning', () => {
-        sendCommand({ type: 'OPEN_VOTING' });
-      });
+      // Fallback: JS interval using per-layer tempo
+      const intervalMs = barsToMs(auditionBars, tempo);
+      startAuditionFallbackInterval(intervalMs, totalLoops);
+      console.log(`[Timing] Audition tracking started (fallback, ${auditionBars} bars/option @ ${tempo} BPM, ${intervalMs.toFixed(0)}ms/option)`);
     }
+  }
+
+  /**
+   * Start fallback JS interval for audition cycling (non-OSC mode only).
+   * Cleared by stopAuditionTracking().
+   */
+  function startAuditionFallbackInterval(intervalMs: number, totalLoops: number): void {
+    if (fallbackAuditionInterval) {
+      clearInterval(fallbackAuditionInterval);
+    }
+    fallbackAuditionLoopIndex = 0;
+
+    fallbackAuditionInterval = setInterval(() => {
+      if (!running) return;
+      const currentState = getState();
+      const attempt = currentState.attempts[currentState.currentAttemptIndex];
+      if (!attempt || attempt.currentLayerPhase !== 'auditioning') {
+        stopAuditionTracking();
+        return;
+      }
+
+      fallbackAuditionLoopIndex++;
+
+      if (fallbackAuditionLoopIndex >= totalLoops) {
+        stopAuditionTracking();
+        sendCommand({ type: 'CLOSE_VOTING' });
+      } else {
+        sendCommand({ type: 'TOGGLE_AUDITION' });
+      }
+    }, intervalMs);
   }
 
   /**
@@ -383,24 +483,12 @@ export function createTimingEngine(
    */
   function stopAuditionTracking(): void {
     auditionState = null;
+    stopAuditionProgressEmission();
     if (fallbackAuditionInterval) {
       clearInterval(fallbackAuditionInterval);
       fallbackAuditionInterval = null;
     }
     fallbackAuditionLoopIndex = 0;
-  }
-
-  /**
-   * Handle layer entering 'voting' phase.
-   * Schedules votingWindowMs timer → sends CLOSE_VOTING.
-   */
-  function handleVotingPhase(state: ShowState): void {
-    const durationMs = state.config.timing.votingWindowMs;
-    console.log(`[Timing] Voting: scheduling ${durationMs}ms timer → CLOSE_VOTING`);
-
-    scheduleTimer(durationMs, state.version, 'voting', () => {
-      sendCommand({ type: 'CLOSE_VOTING' });
-    });
   }
 
   // --------------------------------------------------------------------------
@@ -414,7 +502,8 @@ export function createTimingEngine(
   function startLoopTracking(): void {
     stopLoopTracking();
 
-    const loopBeats = LOOP_BARS * BEATS_PER_BAR;
+    const loopBeats = configuredLoopBoundaryBeats;
+    const loopBars = configuredLoopBoundaryBeats / BEATS_PER_BAR;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats
@@ -422,7 +511,7 @@ export function createTimingEngine(
         lastBoundaryBeat: -1,
         loopBeats,
       };
-      console.log(`[Timing] Loop boundary tracking started (OSC, every ${LOOP_BARS} bars / ${loopBeats} beats)`);
+      console.log(`[Timing] Loop boundary tracking started (OSC, every ${loopBars} bars / ${loopBeats} beats)`);
     } else {
       // Fallback: JS interval
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
@@ -431,12 +520,12 @@ export function createTimingEngine(
       fallbackLoopInterval = setInterval(() => {
         if (!running) return;
         const state = getState();
-        if (state.phase !== 'finale_performer_mix') {
+        if (state.phase !== 'finale_live_mix') {
           stopLoopTracking();
           return;
         }
-        console.log('[Timing] Loop boundary → FIRE_PENDING_CHANGES');
-        sendCommand({ type: 'FIRE_PENDING_CHANGES' });
+        // TODO: Live mix loop boundary handling (V3.2 live mix task)
+        console.log('[Timing] Loop boundary (live mix)');
       }, intervalMs);
 
       console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
@@ -516,13 +605,13 @@ export function createTimingEngine(
 
     // Update beat position
     const beatsSinceLoopStart = beatNumber - loopStartBeat;
-    const loopBeats = LOOP_BARS * BEATS_PER_BAR; // 32
+    const loopBeats = configuredLoopBoundaryBeats;
     totalLoopsElapsed = Math.floor(beatsSinceLoopStart / loopBeats);
 
     currentBeatPosition = {
       absoluteBeat: beatNumber,
       beatInBar: beatNumber % BEATS_PER_BAR,
-      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % LOOP_BARS,
+      barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % (configuredLoopBoundaryBeats / BEATS_PER_BAR),
       loopCount: totalLoopsElapsed,
     };
 
@@ -568,7 +657,7 @@ export function createTimingEngine(
 
           if (auditionState.currentLoopIndex >= auditionState.totalLoops) {
             stopAuditionTracking();
-            sendCommand({ type: 'OPEN_VOTING' });
+            sendCommand({ type: 'CLOSE_VOTING' });
           } else {
             sendCommand({ type: 'TOGGLE_AUDITION' });
           }
@@ -578,9 +667,9 @@ export function createTimingEngine(
       }
     }
 
-    // --- Loop boundary tracking (performer mix) ---
+    // --- Loop boundary tracking (live mix) ---
     if (!loopState) return;
-    if (state.phase !== 'finale_performer_mix') return;
+    if (state.phase !== 'finale_live_mix') return;
 
     // Initialize baseline on first beat
     if (loopState.lastBoundaryBeat < 0) {
@@ -590,8 +679,8 @@ export function createTimingEngine(
     const beatsSinceBoundary = monotonicBeat - loopState.lastBoundaryBeat;
     if (beatsSinceBoundary >= loopState.loopBeats) {
       loopState.lastBoundaryBeat = monotonicBeat;
-      console.log(`[Timing] Loop boundary at monotonic beat ${monotonicBeat} → FIRE_PENDING_CHANGES`);
-      sendCommand({ type: 'FIRE_PENDING_CHANGES' });
+      // TODO: Live mix loop boundary handling (V3.2 live mix task)
+      console.log(`[Timing] Loop boundary at monotonic beat ${monotonicBeat} (live mix)`);
     }
   }
 
@@ -626,10 +715,12 @@ export function createTimingEngine(
   function onStateChanged(state: ShowState, events: ConductorEvent[]): void {
     if (!running || !engineConfig.enabled) return;
 
+    configuredLoopBoundaryBeats = state.config.timing.loopBoundaryBeats || 32;
+
     // Don't schedule if paused
     if (state.paused) {
       cancelCurrentTimer();
-      clearConsensusRoundTimer();
+      clearAllFinaleTimers();
       return;
     }
 
@@ -645,11 +736,8 @@ export function createTimingEngine(
         case 'auditioning':
           startAuditionTracking(state);
           break;
-        case 'voting':
-          stopAuditionTracking();
-          handleVotingPhase(state);
-          break;
         case 'revealing': {
+          stopAuditionTracking();
           const revealMs = state.config.timing.revealSequenceDurationMs;
           console.log(`[Timing] Revealing: scheduling ${revealMs}ms timer → ADVANCE_FROM_REVEAL`);
           scheduleTimer(revealMs, state.version, 'revealing', () => {
@@ -682,28 +770,27 @@ export function createTimingEngine(
     if (showPhaseEvent) {
       cancelCurrentTimer();
       stopLoopTracking();
-      clearConsensusRoundTimer();
+      clearAllFinaleTimers();
 
-      if (showPhaseEvent.phase === 'finale_performer_mix') {
+      if (showPhaseEvent.phase === 'finale_live_mix') {
         startLoopTracking();
       }
     }
 
-    // Consensus round started — set round timer
-    const roundStartedEvent = events.find(e => e.type === 'CONSENSUS_ROUND_STARTED') as
-      | { type: 'CONSENSUS_ROUND_STARTED'; roundNumber: number; threshold: number }
+    // Assignment started (self-select mode) → start assignment timer
+    const assignmentStartedEvent = events.find(e => e.type === 'ASSIGNMENT_STARTED') as
+      | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
       | undefined;
-
-    if (roundStartedEvent && state.finaleState) {
-      startConsensusRoundTimer(state.finaleState.consensusGame.roundTimeRemaining);
+    if (assignmentStartedEvent && assignmentStartedEvent.mode === 'self_select') {
+      const timerMs = state.config.finale.assignmentTimerMs;
+      if (timerMs > 0) {
+        startAssignmentTimer(timerMs);
+      }
     }
 
-    // Consensus round ended (success or failure) — clear timer
-    const roundEndedEvent = events.find(
-      e => e.type === 'CONSENSUS_ROUND_SUCCESS' || e.type === 'CONSENSUS_ROUND_FAILURE'
-    );
-    if (roundEndedEvent) {
-      clearConsensusRoundTimer();
+    // Groups assigned → clear assignment timer
+    if (events.some(e => e.type === 'GROUPS_ASSIGNED')) {
+      clearAssignmentTimer();
     }
   }
 
@@ -753,6 +840,7 @@ export function createTimingEngine(
 
     // Initialize based on current state
     const state = getState();
+    configuredLoopBoundaryBeats = state.config.timing.loopBoundaryBeats || 32;
     if (state.phase === 'attempt_build') {
       const attempt = state.attempts[state.currentAttemptIndex];
       if (attempt && attempt.status === 'in_progress') {
@@ -765,10 +853,8 @@ export function createTimingEngine(
           },
         ]);
       }
-    } else if (state.phase === 'finale_performer_mix') {
+    } else if (state.phase === 'finale_live_mix') {
       startLoopTracking();
-    } else if (state.phase === 'finale_consensus' && state.finaleState?.consensusGame.active) {
-      startConsensusRoundTimer(state.finaleState.consensusGame.roundTimeRemaining);
     }
   }
 
@@ -780,8 +866,8 @@ export function createTimingEngine(
 
     running = false;
     cancelCurrentTimer();
-    clearConsensusRoundTimer();
-    stopAuditionTracking();
+    clearAllFinaleTimers();
+    stopAuditionTracking(); // Also stops progress emission
     stopLoopTracking();
     stopFallbackBeatTicker();
     beatCallbacks = [];
@@ -815,6 +901,30 @@ export function createTimingEngine(
     return running;
   }
 
+  /**
+   * Recover and restart finale timers after a server restart.
+   * Uses state.lastUpdated as an approximation of when the timer was last active.
+   */
+  function recoverTimers(state: ShowState): void {
+    if (!state.finaleState) return;
+
+    const elapsed = Date.now() - state.lastUpdated;
+
+    if (state.phase === 'finale_assignment' && state.finaleState.assignment.mode === 'self_select') {
+      const timerRemaining = state.finaleState.assignment.timerRemaining;
+      if (timerRemaining !== null) {
+        const remaining = timerRemaining - elapsed;
+        if (remaining > 0) {
+          console.log(`[Timing] Recovering assignment timer: ${remaining}ms remaining`);
+          startAssignmentTimer(remaining);
+        } else {
+          console.log('[Timing] Assignment timer already expired on recovery → firing ASSIGNMENT_COMPLETE');
+          sendCommand({ type: 'ASSIGNMENT_COMPLETE' });
+        }
+      }
+    }
+  }
+
   return {
     start,
     stop,
@@ -822,6 +932,7 @@ export function createTimingEngine(
     onOSCMessage,
     dispose,
     isRunning,
+    recoverTimers,
     scheduleAtBeat,
     schedulePerBeat,
     cancelCallbacks,

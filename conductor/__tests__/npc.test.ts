@@ -1,222 +1,69 @@
-import { evaluateAutoTriggers, NpcGameState } from '../npc';
-import type { Fragment, LayerType, NpcTriggerConfig } from '../types';
+import { getNpcMessage } from '../npc';
+import type { NpcMessageConfig } from '../types';
 
-function makeFragment(id: string, layerType: LayerType): Fragment {
-  return {
-    id,
-    attemptIndex: 0,
-    layerIndex: 0,
-    option: 'A',
-    chapter: 'ambition',
-    layerType,
-    displayLabel: `Fragment ${id}`,
-    audioRef: { trackIndex: 0 },
-  };
-}
+const messages: NpcMessageConfig[] = [
+  { event: 'performer_abandonment', text: "He's gone. We need to do this ourselves." },
+  { event: 'assembly_start', text: 'Choose your role. Find each other.' },
+  { event: 'assembly_timer_warning', text: 'Decide now.' },
+  { event: 'deliberation_start', text: 'Listen. Decide together.' },
+  { event: 'empty_group', text: 'No one chose {layerLabel}. We\'ll go without it.' },
+  { event: 'ambassador_selected', text: '{layerLabel} has its voice.' },
+  { event: 'layer_forfeited', text: '{layerLabel} goes silent. Not every part survives.' },
+  { event: 'ceremony_start', text: 'One by one. Bring it forward.' },
+  { event: 'layer_locked', text: '' },
+  { event: 'final_layer_locked', text: "That's all of us." },
+  { event: 'ceremony_complete', text: "He's back. Show him what we built." },
+];
 
-function makeState(overrides: Partial<NpcGameState> = {}): NpcGameState {
-  return {
-    consecutiveFailures: 0,
-    lastConvergence: 0,
-    threshold: 0.4,
-    lockedRoles: new Map(),
-    availableFragments: [],
-    recentLockHistory: [],
-    ...overrides,
-  };
-}
+describe('getNpcMessage', () => {
+  test('returns message for a matching event', () => {
+    expect(getNpcMessage(messages, 'assembly_start')).toBe('Choose your role. Find each other.');
+  });
 
-describe('evaluateAutoTriggers', () => {
-  test('returns null when no triggers match', () => {
-    const state = makeState();
-    const configs: NpcTriggerConfig[] = [
-      { condition: 'consecutive_failures', threshold: 3, message: 'failing' },
+  test('returns null for unknown event', () => {
+    expect(getNpcMessage(messages, 'unknown_event')).toBeNull();
+  });
+
+  test('returns null for empty message text', () => {
+    expect(getNpcMessage(messages, 'layer_locked')).toBeNull();
+  });
+
+  test('returns null for empty message list', () => {
+    expect(getNpcMessage([], 'assembly_start')).toBeNull();
+  });
+
+  test('replaces {layerLabel} template variable', () => {
+    expect(getNpcMessage(messages, 'empty_group', undefined, { layerLabel: 'The Heartbeat' })).toBe(
+      "No one chose The Heartbeat. We'll go without it.",
+    );
+  });
+
+  test('replaces {layerLabel} in ambassador_selected', () => {
+    expect(getNpcMessage(messages, 'ambassador_selected', undefined, { layerLabel: 'The Voice' })).toBe(
+      'The Voice has its voice.',
+    );
+  });
+
+  test('leaves {layerLabel} unreplaced when no context provided', () => {
+    const result = getNpcMessage(messages, 'empty_group');
+    expect(result).toContain('{layerLabel}');
+  });
+
+  test('matches event with optional layerType when layerType matches', () => {
+    const specificMessages: NpcMessageConfig[] = [
+      { event: 'layer_forfeited', layerType: 'seed', text: 'The Voice is silent.' },
+      { event: 'layer_forfeited', text: '{layerLabel} goes silent.' },
     ];
-    expect(evaluateAutoTriggers(state, configs)).toBeNull();
+    expect(getNpcMessage(specificMessages, 'layer_forfeited', 'seed')).toBe('The Voice is silent.');
   });
 
-  test('returns first matching trigger message', () => {
-    const state = makeState({ consecutiveFailures: 3 });
-    const configs: NpcTriggerConfig[] = [
-      { condition: 'consecutive_failures', threshold: 3, message: 'first match' },
-      { condition: 'consecutive_failures', threshold: 2, message: 'second match' },
+  test('falls back to generic message when layerType does not match specific', () => {
+    const specificMessages: NpcMessageConfig[] = [
+      { event: 'layer_forfeited', layerType: 'seed', text: 'The Voice is silent.' },
+      { event: 'layer_forfeited', text: '{layerLabel} goes silent.' },
     ];
-    expect(evaluateAutoTriggers(state, configs)).toBe('first match');
-  });
-
-  test('returns null for empty trigger list', () => {
-    const state = makeState({ consecutiveFailures: 5 });
-    expect(evaluateAutoTriggers(state, [])).toBeNull();
-  });
-
-  describe('consecutive_failures', () => {
-    const config: NpcTriggerConfig = {
-      condition: 'consecutive_failures',
-      threshold: 2,
-      message: "we're falling apart",
-    };
-
-    test('fires when consecutiveFailures >= threshold', () => {
-      expect(evaluateAutoTriggers(makeState({ consecutiveFailures: 2 }), [config])).toBe(
-        "we're falling apart",
-      );
-      expect(evaluateAutoTriggers(makeState({ consecutiveFailures: 5 }), [config])).toBe(
-        "we're falling apart",
-      );
-    });
-
-    test('does not fire when consecutiveFailures < threshold', () => {
-      expect(evaluateAutoTriggers(makeState({ consecutiveFailures: 1 }), [config])).toBeNull();
-    });
-  });
-
-  describe('same_song_streak', () => {
-    const config: NpcTriggerConfig = {
-      condition: 'same_song_streak',
-      threshold: 3,
-      message: 'again? we know that one works',
-    };
-
-    test('fires when last N locks are from same attempt', () => {
-      const state = makeState({
-        recentLockHistory: [
-          { attemptIndex: 0 },
-          { attemptIndex: 1 },
-          { attemptIndex: 1 },
-          { attemptIndex: 1 },
-        ],
-      });
-      expect(evaluateAutoTriggers(state, [config])).toBe('again? we know that one works');
-    });
-
-    test('does not fire when locks are from different attempts', () => {
-      const state = makeState({
-        recentLockHistory: [{ attemptIndex: 0 }, { attemptIndex: 1 }, { attemptIndex: 2 }],
-      });
-      expect(evaluateAutoTriggers(state, [config])).toBeNull();
-    });
-
-    test('does not fire when history is shorter than threshold', () => {
-      const state = makeState({
-        recentLockHistory: [{ attemptIndex: 1 }, { attemptIndex: 1 }],
-      });
-      expect(evaluateAutoTriggers(state, [config])).toBeNull();
-    });
-  });
-
-  describe('near_miss', () => {
-    const config: NpcTriggerConfig = {
-      condition: 'near_miss',
-      message: "so close... you're almost there",
-    };
-
-    test('fires when convergence is just below threshold (within 5%)', () => {
-      // threshold=0.4, convergence=0.36 → delta=0.04 < 0.05
-      const state = makeState({ lastConvergence: 0.36, threshold: 0.4 });
-      expect(evaluateAutoTriggers(state, [config])).toBe("so close... you're almost there");
-    });
-
-    test('fires at exactly threshold - 5%', () => {
-      const state = makeState({ lastConvergence: 0.35, threshold: 0.4 });
-      expect(evaluateAutoTriggers(state, [config])).toBe("so close... you're almost there");
-    });
-
-    test('does not fire when convergence is far below threshold', () => {
-      const state = makeState({ lastConvergence: 0.1, threshold: 0.4 });
-      expect(evaluateAutoTriggers(state, [config])).toBeNull();
-    });
-
-    test('does not fire when convergence meets threshold (success, not near-miss)', () => {
-      const state = makeState({ lastConvergence: 0.4, threshold: 0.4 });
-      expect(evaluateAutoTriggers(state, [config])).toBeNull();
-    });
-  });
-
-  describe('first_success', () => {
-    const config: NpcTriggerConfig = { condition: 'first_success', message: 'yes! keep going!' };
-
-    test('fires when exactly 1 role is locked', () => {
-      const lockedRoles = new Map<LayerType, string>([['melody', 'frag-1']]);
-      expect(evaluateAutoTriggers(makeState({ lockedRoles }), [config])).toBe('yes! keep going!');
-    });
-
-    test('does not fire with 0 roles locked', () => {
-      expect(evaluateAutoTriggers(makeState(), [config])).toBeNull();
-    });
-
-    test('does not fire with 2+ roles locked', () => {
-      const lockedRoles = new Map<LayerType, string>([
-        ['melody', 'frag-1'],
-        ['drums', 'frag-2'],
-      ]);
-      expect(evaluateAutoTriggers(makeState({ lockedRoles }), [config])).toBeNull();
-    });
-  });
-
-  describe('final_fragment', () => {
-    const config: NpcTriggerConfig = {
-      condition: 'final_fragment',
-      message: 'one more. make it count.',
-    };
-
-    test('fires when 6 roles are locked (one remaining)', () => {
-      const lockedRoles = new Map<LayerType, string>([
-        ['melody', 'f1'],
-        ['drums', 'f2'],
-        ['pad', 'f3'],
-        ['bass', 'f4'],
-        ['harmony', 'f5'],
-        ['fx1', 'f6'],
-      ]);
-      expect(evaluateAutoTriggers(makeState({ lockedRoles }), [config])).toBe(
-        'one more. make it count.',
-      );
-    });
-
-    test('does not fire with fewer than 6 roles locked', () => {
-      const lockedRoles = new Map<LayerType, string>([['melody', 'f1']]);
-      expect(evaluateAutoTriggers(makeState({ lockedRoles }), [config])).toBeNull();
-    });
-  });
-
-  describe('single_option_role', () => {
-    const config: NpcTriggerConfig = {
-      condition: 'single_option_role',
-      message: 'only one path forward here',
-    };
-
-    test('fires when an unlocked role has only one available fragment', () => {
-      const available = [
-        makeFragment('f-melody-1', 'melody'),
-        makeFragment('f-drums-1', 'drums'),
-        makeFragment('f-drums-2', 'drums'),
-      ];
-      const state = makeState({ availableFragments: available });
-      expect(evaluateAutoTriggers(state, [config])).toBe('only one path forward here');
-    });
-
-    test('does not fire when all unlocked roles have multiple fragments', () => {
-      const available = [
-        makeFragment('f-melody-1', 'melody'),
-        makeFragment('f-melody-2', 'melody'),
-        makeFragment('f-drums-1', 'drums'),
-        makeFragment('f-drums-2', 'drums'),
-      ];
-      expect(evaluateAutoTriggers(makeState({ availableFragments: available }), [config])).toBeNull();
-    });
-
-    test('ignores already-locked roles when counting', () => {
-      // melody is locked, drums has only one fragment
-      const available = [
-        makeFragment('f-melody-1', 'melody'),
-        makeFragment('f-drums-1', 'drums'),
-        makeFragment('f-drums-2', 'drums'),
-      ];
-      const lockedRoles = new Map<LayerType, string>([['melody', 'f-melody-1']]);
-      // drums has 2 fragments → no single-option role
-      expect(
-        evaluateAutoTriggers(makeState({ availableFragments: available, lockedRoles }), [config]),
-      ).toBeNull();
-    });
+    expect(getNpcMessage(specificMessages, 'layer_forfeited', 'drums', { layerLabel: 'The Heartbeat' })).toBe(
+      'The Heartbeat goes silent.',
+    );
   });
 });

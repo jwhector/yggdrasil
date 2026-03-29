@@ -3,34 +3,22 @@
 import { useMemo, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { HealthBar } from '@/components/song-building/HealthBar';
-import { RevealSequence } from '@/components/song-building/RevealSequence';
+import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { ProjectorConvergenceView } from '@/components/finale/ProjectorConvergenceView';
-import { MixingMirror } from '@/components/finale/MixingMirror';
-import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
-import type { LayerResult, LayerType } from '@/conductor/types';
+import { LiveMixProjector } from '@/components/finale/LiveMixProjector';
+import { AuditionProgress } from '@/components/song-building/AuditionProgress';
+import { getChapterIdentity } from '@/lib/identity';
+import { ThresholdDisplay } from '@/components/song-building/ThresholdDisplay';
+import { RevealSequence } from '@/components/song-building/RevealSequence';
+import type { LayerResult } from '@/conductor/types';
 
 const SHOW_ID = 'default-show';
 
 export default function ProjectorPage() {
   const { socket, userId } = useSocket({ showId: SHOW_ID, mode: 'projector' });
   const { state, isLoading, currentAttempt } = useShowState(socket, 'projector', userId);
-
-  // Derive live vote tallies from the current layer's votes
-  const liveVotes = useMemo(() => {
-    if (!currentAttempt) return null;
-    const layerVotes = currentAttempt.votes.filter(
-      (v) => v.layerIndex === currentAttempt.currentLayerIndex
-    );
-    const votesA = layerVotes.filter((v) => v.choice === 'A').length;
-    const votesB = layerVotes.filter((v) => v.choice === 'B').length;
-    const total = votesA + votesB;
-    const consensus = total > 0 ? Math.max(votesA, votesB) / total : null;
-    const winner: 'A' | 'B' = votesA >= votesB ? 'A' : 'B';
-    return { votesA, votesB, total, consensus, winner };
-  }, [currentAttempt]);
+  const auditionProgress = useAuditionProgress(socket, state?.phase, currentAttempt?.currentLayerPhase);
 
   // Current layer config
   const currentLayerConfig = useMemo(() => {
@@ -61,21 +49,17 @@ export default function ProjectorPage() {
       if (!currentAttempt || !currentLayerConfig) return <ProjectorDark />;
 
       const chapter = getChapterIdentity(currentAttempt.chapter);
-      const layer = getLayerIdentity(currentLayerConfig.type);
-      const isRevealing = currentAttempt.currentLayerPhase === 'revealing';
+      const layer = { symbol: currentLayerConfig.group?.[0]?.toUpperCase() ?? '?', color: '#6b7280', label: currentLayerConfig.group ?? '' };
+      const attemptConfig = state.config.attempts[state.currentAttemptIndex];
+      const allThresholds: number[] = attemptConfig?.thresholds ?? [];
+      const threshold = allThresholds[currentAttempt.currentLayerIndex] ?? 0.5;
 
-      // During revealing phase: compute vote result from votes + latest drain from health history
-      const latestDrain = isRevealing
-        ? currentAttempt.healthBar.history[currentAttempt.healthBar.history.length - 1] ?? null
+      // Derive threshold check data from layerResults during revealing phase
+      const revealLayerResult = currentAttempt.currentLayerPhase === 'revealing'
+        ? currentAttempt.layerResults.find(r => r.layerIndex === currentAttempt.currentLayerIndex) ?? null
         : null;
-      const revealVoteResult = isRevealing && liveVotes
-        ? {
-            winner: liveVotes.winner,
-            consensus: liveVotes.consensus ?? 0.5,
-            votesA: liveVotes.votesA,
-            votesB: liveVotes.votesB,
-            totalVotes: liveVotes.total,
-          }
+      const thresholdCheck = revealLayerResult && revealLayerResult.passed !== null
+        ? { winningProportion: revealLayerResult.winningProportion!, threshold: revealLayerResult.thresholdRequired!, passed: revealLayerResult.passed }
         : null;
 
       return (
@@ -103,23 +87,38 @@ export default function ProjectorPage() {
             userCount={userCount}
           />
 
-          {/* Health bar — prominent, always visible */}
-          <HealthBar
-            health={currentAttempt.healthBar.current}
-            drainShadow={isRevealing && latestDrain ? latestDrain.drainAmount : 0}
-            variant="projector"
-          />
+          {/* Threshold display — visible before and during the vote */}
+          {currentAttempt.currentLayerPhase !== 'locked_in' && currentAttempt.currentLayerPhase !== 'collapsed' && (
+            <ThresholdDisplay
+              threshold={threshold}
+              layerIndex={currentAttempt.currentLayerIndex}
+              allThresholds={allThresholds}
+              layerColor={layer.color}
+            />
+          )}
 
-          {/* Current layer card OR reveal sequence */}
-          {isRevealing && revealVoteResult && latestDrain ? (
+          {/* Audition progress (during auditioning phase) */}
+          {currentAttempt.currentLayerPhase === 'auditioning' && auditionProgress && (
+            <AuditionProgress progress={auditionProgress} />
+          )}
+
+          {/* Reveal sequence (during revealing phase) */}
+          {currentAttempt.currentLayerPhase === 'revealing'
+            && currentAttempt.currentVoteResult
+            && thresholdCheck ? (
             <RevealSequence
-              voteResult={revealVoteResult}
-              drain={{ drainAmount: latestDrain.drainAmount, healthAfter: latestDrain.healthAfter }}
-              healthBefore={currentAttempt.healthBar.current + latestDrain.drainAmount}
+              voteResult={{
+                winner: currentAttempt.currentVoteResult.winner,
+                consensus: currentAttempt.currentVoteResult.consensus,
+                votesA: currentAttempt.currentVoteResult.votesA,
+                votesB: currentAttempt.currentVoteResult.votesB,
+              }}
+              thresholdCheck={thresholdCheck}
               layerConfig={currentLayerConfig}
               variant="projector"
             />
           ) : (
+            /* Current layer card (during auditioning / locked_in / collapsed) */
             <ProjectorLayerCard
               layerSymbol={layer.symbol}
               layerLabel={layer.label}
@@ -135,7 +134,7 @@ export default function ProjectorPage() {
           {/* Stack history */}
           <ProjectorStackHistory results={currentAttempt.layerResults} />
 
-          {/* Collapse overlay */}
+          {/* Collapse overlay — fade to black (collapse is release, not alarm) */}
           {currentAttempt.status === 'collapsed' && (
             <CollapseOverlay />
           )}
@@ -146,6 +145,8 @@ export default function ProjectorPage() {
     case 'finale_elegy': {
       const fs = state.finaleState;
       if (!fs) return <ProjectorDark />;
+      const availableIds = new Set(fs.availableFragments.map(f => f.id));
+      const losers = fs.allFragments.filter(f => !availableIds.has(f.id));
       return (
         <main style={projectorMainStyle}>
           <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
@@ -153,46 +154,54 @@ export default function ProjectorPage() {
           </div>
           <ElegyGrid
             availableFragments={fs.availableFragments}
-            lockedFragments={fs.lockedFragments}
+            lockedFragments={losers}
             variant="projector"
           />
         </main>
       );
     }
 
-    case 'finale_consensus': {
-      const fs = state.finaleState;
-      if (!fs) return <ProjectorDark />;
+    case 'finale_assignment': {
+      const fas = state.finaleState;
+      if (!fas) return <ProjectorDark />;
+      const assignmentTypes = state.config.granularTypes ?? [];
       return (
         <main style={projectorMainStyle}>
-          <ProjectorConvergenceView
-            convergenceValue={fs.convergenceValue}
-            threshold={fs.threshold}
-            roundTimeRemaining={fs.roundTimeRemaining}
-            roundDurationMs={15000}
-            currentRound={fs.currentRound}
-            lockedRoles={fs.lockedRoles as Array<{ layerType: LayerType; fragmentId: string }>}
-            availableFragments={fs.availableFragments}
-            npcMessage={fs.npcMessage}
-            socket={socket}
-          />
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const, padding: '40px 40px 0' }}>
+            Assignment
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', padding: '20px 40px' }}>
+            {assignmentTypes.map(gt => {
+              const size = fas.groupSizes.find(g => g.granularType === gt.id)?.count ?? 0;
+              return (
+                <div key={gt.id} style={{
+                  padding: '16px 24px',
+                  borderRadius: '10px',
+                  backgroundColor: `${gt.color}10`,
+                  border: `1px solid ${gt.color}30`,
+                  textAlign: 'center',
+                  minWidth: '120px',
+                }}>
+                  <div style={{ fontSize: '1.5rem', color: gt.color }}>{gt.symbol}</div>
+                  <div style={{ fontSize: '0.7rem', color: gt.color, marginTop: '4px' }}>{gt.label}</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginTop: '8px' }}>{size}</div>
+                </div>
+              );
+            })}
+          </div>
         </main>
       );
     }
 
-    case 'finale_performer_mix': {
-      const fs = state.finaleState;
-      if (!fs) return <ProjectorDark />;
+    case 'finale_live_mix': {
+      const fls = state.finaleState;
+      if (!fls) return <ProjectorDark />;
       return (
-        <main style={projectorMainStyle}>
-          <MixingMirror
-            activeLayers={fs.mixActiveLayers as Array<{ layerType: LayerType; fragmentId: string | null }>}
-            pendingChanges={fs.mixPendingChanges}
-            loopPosition={fs.loopPosition}
-            loopCount={0}
-            allFragments={fs.availableFragments}
-          />
-        </main>
+        <LiveMixProjector
+          finaleState={fls}
+          granularTypes={state.config.granularTypes ?? []}
+          socket={socket}
+        />
       );
     }
 
@@ -382,12 +391,13 @@ function ProjectorStackHistory({ results }: { results: LayerResult[] }) {
         BUILT
       </span>
       {resolved.map((result) => {
-        const identity = getLayerIdentity(result.type);
+        const groupLabel = result.group ?? result.type ?? '?';
+        const symbol = groupLabel[0]?.toUpperCase() ?? '?';
         const isA = result.chosenOption === 'A';
         return (
           <div
             key={result.layerIndex}
-            title={`Layer ${result.layerIndex + 1}: ${result.type} (${result.chosenOption})`}
+            title={`Layer ${result.layerIndex + 1}: ${groupLabel} (${result.chosenOption})`}
             style={{
               width: '28px',
               height: '28px',
@@ -396,12 +406,12 @@ function ProjectorStackHistory({ results }: { results: LayerResult[] }) {
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '0.85rem',
-              backgroundColor: isA ? identity.color : 'transparent',
-              border: isA ? 'none' : `2px solid ${identity.color}`,
-              color: isA ? '#000' : identity.color,
+              backgroundColor: isA ? '#6b7280' : 'transparent',
+              border: isA ? 'none' : '2px solid #6b7280',
+              color: isA ? '#000' : '#6b7280',
             }}
           >
-            {identity.symbol}
+            {symbol}
           </div>
         );
       })}
@@ -415,26 +425,17 @@ function CollapseOverlay() {
       style={{
         position: 'absolute',
         inset: 0,
-        backgroundColor: 'rgba(239,68,68,0.12)',
-        border: '2px solid rgba(239,68,68,0.3)',
-        borderRadius: '0',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        backgroundColor: '#000',
         pointerEvents: 'none',
-        // TODO: Replace with collapse animation (visual + audio sync)
+        animation: 'collapse-fade-in 0.6s ease-out forwards',
       }}
     >
-      <p
-        style={{
-          fontSize: '2rem',
-          fontWeight: 700,
-          color: 'rgba(239,68,68,0.6)',
-          letterSpacing: '0.2em',
-        }}
-      >
-        COLLAPSED
-      </p>
+      <style>{`
+        @keyframes collapse-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

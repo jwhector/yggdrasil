@@ -14,62 +14,54 @@ import { unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createPersistence } from '../persistence';
 import { createInitialState } from '../../conductor/conductor';
-import type { ShowConfig, LayerVote, User } from '../../conductor/types';
+import type { ShowConfig, LayerVote, User, V32AttemptConfig, V32LayerConfig } from '../../conductor/types';
 
 // ============================================================================
 // Test Config Helper
 // ============================================================================
 
-function createTestConfig(): ShowConfig {
+function makeV32Layer(index: number): V32LayerConfig {
   return {
-    layersPerAttempt: 7,
-    attempts: [
-      {
-        chapter: 'ambition',
-        title: 'Ambition',
-        drainFactor: 0.5,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
-        layers: [
-          { index: 0, type: 'melody', optionA: { trackIndex: 0 }, optionB: { trackIndex: 1 }, labelA: 'A', labelB: 'B' },
-          { index: 1, type: 'drums', optionA: { trackIndex: 2 }, optionB: { trackIndex: 3 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-      {
-        chapter: 'love',
-        title: 'Love',
-        drainFactor: 0.6,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
-        layers: [
-          { index: 0, type: 'pad', optionA: { trackIndex: 4 }, optionB: { trackIndex: 5 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
-      {
-        chapter: 'avoidance',
-        title: 'Avoidance',
-        drainFactor: 0.7,
-        layerMultipliers: [0.5, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0],
-        layers: [
-          { index: 0, type: 'bass', optionA: { trackIndex: 6 }, optionB: { trackIndex: 7 }, labelA: 'A', labelB: 'B' },
-        ],
-      },
+    index,
+    group: ['bones', 'flesh', 'spark'][index % 3],
+    labelA: 'A',
+    labelB: 'B',
+    optionA: { tracks: [{ granularType: 'bass', trackIndices: [index * 2] }] },
+    optionB: { tracks: [{ granularType: 'bass', trackIndices: [index * 2 + 1] }] },
+  };
+}
+
+function createTestConfig(): ShowConfig {
+  const makeAttempt = (chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig => ({
+    chapter,
+    title: chapter,
+    liveSeed: { trackIndices: [99] },
+    layers: [0, 1, 2].map(i => makeV32Layer(i)),
+    thresholds: [0.5, 0.66, 0.99],
+    tempos: [120, 120, 120],
+    auditionBars: [4, 4, 2],
+    auditionCycles: [1, 1, 1],
+  });
+
+  return {
+    layersPerAttempt: 3,
+    granularTypes: [
+      { id: 'bass', label: 'Bass', color: '#000', symbol: '■' },
+      { id: 'drums', label: 'Drums', color: '#000', symbol: '▲' },
     ],
+    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
-      consensusRoundDurationMs: 15000,
-      firstRoundDurationMs: 20000,
-      initialThreshold: 0.4,
-      thresholdDecayPerFailure: 0.05,
-      minThreshold: 0.25,
-      interRoundDelayMs: 3000,
-      successCelebrationMs: 6000,
-      npcAutoTriggers: [],
+      assignmentMode: 'auto',
+      assignmentTimerMs: 30000,
+      bothOptionsSurvive: true,
+      crossSongConstraint: false,
+      audioPreviewPath: '/audio/previews',
+      npcMessages: [],
     },
     timing: {
-      auditionDurationMs: 4000,
-      votingWindowMs: 30000,
       revealSequenceDurationMs: 5000,
       rejectionEffectDurationMs: 2000,
-      beatsPerLoop: 0,
-      auditionsPerLayer: 2,
+      loopBoundaryBeats: 32,
     },
     lobby: { waitingMessage: 'Welcome' },
     seatIds: ['seat-1', 'seat-2'],
@@ -167,47 +159,44 @@ describe('State persistence', () => {
     db.close();
   });
 
-  test('preserves finaleState Maps (consensusGame votes, lockedRoles, performerMix activeLayers)', () => {
+  test('preserves finaleState Maps (assignment groups, liveMix votes, liveMix activeFragments)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
     state.finaleState = {
-      phase: 'consensus_game',
+      phase: 'assignment',
       availableFragments: [],
       allFragments: [],
-      lockedFragments: [],
-      consensusGame: {
-        active: true,
-        currentRound: 2,
-        roundTimeRemaining: 10000,
-        votes: new Map([['user-1', 'frag-0-0-A'], ['user-2', 'frag-0-1-B']]),
-        convergenceValue: 0.6,
-        threshold: 0.4,
-        consecutiveFailures: 0,
-        lockedRoles: new Map([['melody', 'frag-0-0-A']]),
+      assignment: {
+        mode: 'auto',
+        groups: new Map([['bass', ['user-1', 'user-2']], ['drums', ['user-3']]]),
+        timerRemaining: null,
       },
-      npc: { currentMessage: 'Try again', autoTriggersEnabled: true },
-      performerMix: {
-        activeLayers: new Map([['melody', 'frag-0-0-A'], ['drums', null]]),
-        pendingChanges: [],
+      liveMix: {
+        votes: new Map([['bass', new Map([['user-1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
+        activeFragments: new Map([['bass', 'frag-0-0-A']]),
+        lockedTypes: [],
+
+        performerOverrides: new Map(),
+        liveTracksActive: [],
+        transportStarted: false,
         loopPosition: 0,
         loopCount: 0,
-        liveTracksActive: [],
       },
+      npc: { currentMessage: 'Try again' },
     };
 
     db.saveState(state);
     const loaded = db.loadState('show-1');
 
     expect(loaded!.finaleState).not.toBeNull();
-    expect(loaded!.finaleState!.consensusGame.votes).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.consensusGame.votes.get('user-1')).toBe('frag-0-0-A');
-    expect(loaded!.finaleState!.consensusGame.votes.get('user-2')).toBe('frag-0-1-B');
-    expect(loaded!.finaleState!.consensusGame.lockedRoles).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.consensusGame.lockedRoles.get('melody')).toBe('frag-0-0-A');
-    expect(loaded!.finaleState!.performerMix.activeLayers).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.performerMix.activeLayers.get('melody')).toBe('frag-0-0-A');
-    expect(loaded!.finaleState!.performerMix.activeLayers.get('drums')).toBeNull();
+    expect(loaded!.finaleState!.assignment.groups).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.assignment.groups.get('bass')).toEqual(['user-1', 'user-2']);
+    expect(loaded!.finaleState!.liveMix.votes).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.liveMix.votes.get('bass')).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.liveMix.votes.get('bass')!.get('user-1')!.fragmentId).toBe('frag-0-0-A');
+    expect(loaded!.finaleState!.liveMix.activeFragments).toBeInstanceOf(Map);
+    expect(loaded!.finaleState!.liveMix.activeFragments.get('bass')).toBe('frag-0-0-A');
 
     db.close();
   });
@@ -330,40 +319,52 @@ describe('User persistence', () => {
   });
 });
 
-describe('Consensus round persistence', () => {
-  test('saves a successful consensus round', () => {
+describe('Finale persistence (V3.2)', () => {
+  test('saves a finale assignment', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
 
     expect(() =>
-      db.saveConsensusRound('show-1', 1, 'frag-0-0-A', 0.8, 0.4, true)
+      db.saveFinaleAssignment('show-1', 'user-1', 'bass', false)
     ).not.toThrow();
 
     db.close();
   });
 
-  test('saves a failed round with null fragmentId', () => {
+  test('saves an auto-assigned finale assignment', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
+    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
 
     expect(() =>
-      db.saveConsensusRound('show-1', 1, null, 0.3, 0.4, false)
+      db.saveFinaleAssignment('show-1', 'user-1', 'drums', true)
     ).not.toThrow();
+
+    const assignments = db.getFinaleAssignments('show-1');
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].granularType).toBe('drums');
+    expect(assignments[0].autoAssigned).toBe(true);
 
     db.close();
   });
 
-  test('saves multiple rounds for same show', () => {
+  test('retrieves all assignments for a show', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
-    db.saveConsensusRound('show-1', 1, null, 0.2, 0.4, false);
-    db.saveConsensusRound('show-1', 2, 'frag-0-0-A', 0.7, 0.35, true);
+    db.saveFinaleAssignment('show-1', 'user-1', 'bass', true);
+    db.saveFinaleAssignment('show-1', 'user-2', 'drums', true);
+    db.saveFinaleAssignment('show-1', 'user-3', 'bass', false);
 
-    db.close(); // No error = pass
+    const assignments = db.getFinaleAssignments('show-1');
+    expect(assignments).toHaveLength(3);
+    expect(assignments.map(a => a.granularType).sort()).toEqual(['bass', 'bass', 'drums']);
+
+    db.close();
   });
 });
 
