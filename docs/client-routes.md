@@ -31,7 +31,7 @@
 - Duration: ~10–15 seconds, purely observational, no interaction
 
 **Finale — Assignment (V3.2):**
-- Each audience member is assigned to a granular type (bass, drums, melody, pad, harmony, fx)
+- Each audience member is assigned to a granular type (bass, drums, seed, pad, harmony, fx)
 - Assignment mode configurable: auto (system assigns) or self-select
 - Screen shows assigned type with symbol, color, and label
 
@@ -109,7 +109,7 @@ Layer group identity is derived from the first granular type in each group:
 | Layer Group | First Granular Type | Symbol | Label |
 |-------------|-------------------|--------|-------|
 | bones | bass | ■ | "The Foundation" |
-| flesh | melody | ✦ | "The Character" |
+| flesh | harmony | ● | "The Character" |
 | spark | fx | ~ | "The Edge" |
 
 ### Granular Type Identity (finale)
@@ -119,7 +119,7 @@ Layer group identity is derived from the first granular type in each group:
 | Bass | TBD | ■ | "The Ground" |
 | Drums | TBD | ▲ | "The Heartbeat" |
 | Pad | TBD | ◆ | "The Warmth" |
-| Melody | TBD | ✦ | "The Voice" |
+| Seed | TBD | ◎ | "The Seed" |
 | Harmony | TBD | ● | "The Color" |
 | FX | TBD | ~ | "The Shimmer" |
 

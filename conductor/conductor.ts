@@ -37,14 +37,13 @@ import type {
   V32LayerConfig,
   TrackBundle,
   GranularType,
-  LiveMixVote,
 } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import { generateGranularFragments } from './fragments';
 import { getNpcMessage } from './npc';
 import { autoAssign, initializeSelfSelect, selectGranularType, assignUndecided } from './assignment';
-import { getActiveFragment, computeInitialFragments } from './live-mix';
+import { getActiveFragment } from './live-mix';
 
 // ============================================================================
 // State Initialization
@@ -1069,6 +1068,7 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
       lockedTypes: [],
       performerOverrides: new Map(),
       liveTracksActive: [],
+      transportStarted: false,
       loopPosition: 0,
       loopCount: 0,
     },
@@ -1154,39 +1154,20 @@ function handleStartLiveMix(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
   state.finaleState.phase = 'live_mix';
 
-  // Compute initial fragments — pick highest winning proportion per granular type
-  const initialFragments = computeInitialFragments(
-    state.finaleState.availableFragments,
-    state.attempts,
-  );
-  state.finaleState.liveMix.activeFragments = initialFragments;
+  // Live mix starts muted — no initial fragments, no pre-set votes.
+  // Audio begins when a group first reaches majority on a fragment.
+  // The very first group to activate triggers Ableton transport.
+  state.finaleState.liveMix.activeFragments = new Map();
+  state.finaleState.liveMix.transportStarted = false;
 
-  // Initialize votes: each user starts with preference set to auto-selected fragment
-  for (const [granularType, members] of state.finaleState.assignment.groups) {
-    const fragmentId = initialFragments.get(granularType);
-    if (!fragmentId) continue;
-    const typeVotes = new Map<UserId, LiveMixVote>();
-    for (const userId of members) {
-      typeVotes.set(userId, { fragmentId, timestamp: Date.now() });
-    }
-    state.finaleState.liveMix.votes.set(granularType, typeVotes);
-  }
-
-  // Collect track indices for initial unmute (flatten multi-track fragments)
-  const activeTrackIndices: number[] = [];
-  for (const [, fragmentId] of initialFragments) {
-    const frag = state.finaleState.availableFragments.find(f => f.id === fragmentId)
-      ?? state.finaleState.allFragments.find(f => f.id === fragmentId);
-    if (frag) activeTrackIndices.push(...frag.trackIndices);
+  // Initialize empty vote maps per granular type
+  for (const [granularType] of state.finaleState.assignment.groups) {
+    state.finaleState.liveMix.votes.set(granularType, new Map());
   }
 
   const events: ConductorEvent[] = [
-    { type: 'LIVE_MIX_STARTED', initialFragments },
+    { type: 'LIVE_MIX_STARTED', initialFragments: new Map() },
   ];
-
-  if (activeTrackIndices.length > 0) {
-    events.push({ type: 'AUDIO_CUE', cue: { type: 'live_mix_start', activeTrackIndices } });
-  }
 
   const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'live_mix_start');
   if (npcMsg) {
@@ -1248,6 +1229,12 @@ function handleSetLiveMixPreference(
     const events: ConductorEvent[] = [
       { type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' },
     ];
+
+    // First group to activate triggers Ableton transport
+    if (!fs.liveMix.transportStarted && !previousActive) {
+      fs.liveMix.transportStarted = true;
+      events.push({ type: 'AUDIO_CUE', cue: { type: 'transport', action: 'play' } });
+    }
 
     // Emit audio crossfade cue
     const outFrag = previousActive

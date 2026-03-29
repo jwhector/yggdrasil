@@ -12,7 +12,7 @@
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
 import type { GranularFragment, LayerType } from '@/conductor/types';
 
-const LAYER_ORDER: LayerType[] = ['melody', 'drums', 'pad', 'bass', 'harmony', 'fx'];
+const LAYER_ORDER: LayerType[] = ['seed', 'drums', 'pad', 'bass', 'harmony', 'fx'];
 
 interface ElegyGridProps {
   availableFragments: GranularFragment[];   // winners — glowing
@@ -29,7 +29,7 @@ export function ElegyGrid({
 
   // Build a map: granularType → { winners: GranularFragment[], losers: GranularFragment[] }
   const byLayer: Record<LayerType, { winners: GranularFragment[]; losers: GranularFragment[] }> = {
-    melody:  { winners: [], losers: [] },
+    seed:    { winners: [], losers: [] },
     drums:   { winners: [], losers: [] },
     pad:     { winners: [], losers: [] },
     bass:    { winners: [], losers: [] },

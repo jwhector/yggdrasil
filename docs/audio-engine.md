@@ -42,8 +42,8 @@ Same key, same BPM, same progression — songs feel different via:
 Each layer type occupies a designated frequency range. EQ cuts on each track remove energy from other layers' ranges:
 - **Bass:** Owns 60–200 Hz. Low-pass filter at ~250 Hz.
 - **Drums:** Key hits span spectrum (kick ~60–100 Hz, snare ~200–500 Hz, hi-hats ~8kHz+). No single fence; manage via arrangement.
-- **Pad:** 200–500 Hz. Cut below 200 Hz (bass territory) and above 2 kHz (melody territory).
-- **Melody:** 500 Hz – 2 kHz. Cut below 400 Hz.
+- **Pad:** 200–500 Hz. Cut below 200 Hz (bass territory) and above 2 kHz.
+- **Seed:** Live seed tracks — prerecorded loops that anchor each song's harmonic/rhythmic world. Become controllable fragments in the finale.
 - **Harmony:** 1–4 kHz. Higher register than pad to avoid competition.
 - **FX:** Extremes and gaps. Very high shimmer, very low rumble, or sweeping through spectrum.
 
@@ -55,7 +55,7 @@ Each layer type occupies a designated frequency range. EQ cuts on each track rem
 - **Velocity dynamics:** vary note velocities within each 8-bar loop. Louder on downbeats, softer on offbeats. Slight crescendo toward bar 5.
 - **Micro-timing/swing:** use Ableton's groove pool. Different swing amounts per song for differentiation.
 - **Timbre evolution:** automate one parameter per fragment across 8 bars (filter opening, reverb swell, chorus depth).
-- **Reverb discipline:** reverb on melody, harmony, FX. Keep bass and drums dry or nearly dry.
+- **Reverb discipline:** reverb on harmony, seed, FX. Keep bass and drums dry or nearly dry.
 
 ### Audio Preview Production
 
@@ -83,8 +83,8 @@ Each fragment clip must be exported as a standalone audio file for in-browser pr
 - Live seed: tracks 0, 1, 2
 - bones/optionA: bass=track 3, drums=track 4
 - bones/optionB: bass=track 5, drums=track 6
-- flesh/optionA: melody=track 7, pad=track 8, harmony=track 9
-- flesh/optionB: melody=track 10, pad=track 11, harmony=track 12
+- flesh/optionA: pad=track 7, harmony=track 8
+- flesh/optionB: pad=track 9, harmony=track 10
 - spark/optionA: fx=track 13
 - spark/optionB: fx=track 14
 

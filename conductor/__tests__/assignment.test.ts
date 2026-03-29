@@ -31,7 +31,7 @@ const TEST_GRANULAR_TYPES: GranularType[] = [
   { id: 'bass', label: 'Bass', color: '#000', symbol: '■' },
   { id: 'drums', label: 'Drums', color: '#000', symbol: '▲' },
   { id: 'pad', label: 'Pad', color: '#000', symbol: '◆' },
-  { id: 'melody', label: 'Melody', color: '#000', symbol: '✦' },
+  { id: 'seed', label: 'Seed', color: '#000', symbol: '◎' },
   { id: 'harmony', label: 'Harmony', color: '#000', symbol: '●' },
   { id: 'fx', label: 'FX', color: '#000', symbol: '~' },
 ];

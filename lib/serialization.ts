@@ -44,6 +44,7 @@ export interface SerializedLiveMix {
   lockedTypes: string[];
   performerOverrides: [string, string][];
   liveTracksActive: string[];
+  transportStarted: boolean;
   loopPosition: number;
   loopCount: number;
 }
@@ -92,6 +93,7 @@ export function serializeFinaleState(fs: V32FinaleState): SerializedFinaleState 
       lockedTypes: fs.liveMix.lockedTypes,
       performerOverrides: Array.from(fs.liveMix.performerOverrides.entries()),
       liveTracksActive: fs.liveMix.liveTracksActive,
+      transportStarted: fs.liveMix.transportStarted,
       loopPosition: fs.liveMix.loopPosition,
       loopCount: fs.liveMix.loopCount,
     },
@@ -117,6 +119,7 @@ export function deserializeFinaleState(data: SerializedFinaleState): V32FinaleSt
       lockedTypes: data.liveMix.lockedTypes,
       performerOverrides: new Map(data.liveMix.performerOverrides),
       liveTracksActive: data.liveMix.liveTracksActive,
+      transportStarted: data.liveMix.transportStarted,
       loopPosition: data.liveMix.loopPosition,
       loopCount: data.liveMix.loopCount,
     },

@@ -104,6 +104,7 @@ function makeMinimalFinaleState(timerRemaining: number | null = null): V32Finale
       lockedTypes: [],
       performerOverrides: new Map(),
       liveTracksActive: [],
+      transportStarted: false,
       loopPosition: 0,
       loopCount: 0,
     },

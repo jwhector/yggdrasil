@@ -251,6 +251,22 @@ export function generateGranularFragments(
         }
       }
     }
+
+    // Generate seed fragment from live seed tracks
+    const liveSeed = config.liveSeed;
+    if (liveSeed?.trackIndices?.length) {
+      fragments.push({
+        id: `${attempt.index}-seed-seed-A`,
+        songIndex: attempt.index,
+        layerGroupId: 'seed',
+        granularType: 'seed',
+        option: 'A',
+        chapter: attempt.chapter,
+        trackIndices: liveSeed.trackIndices,
+        wonVote: true,
+        previewAudioPath: `${audioPreviewPath}/preview-${attempt.index}-seed-A.mp3`,
+      });
+    }
   }
 
   return fragments;

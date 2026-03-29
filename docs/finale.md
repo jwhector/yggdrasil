@@ -78,6 +78,9 @@ The performer (via controller) can:
 
 ### Audio Behavior
 
+- **Muted start:** Live mix begins fully silent — no transport, no audio
+- Audio activates per-type: when a group first reaches majority on a fragment, that type's audio starts
+- The **first group to reach majority** triggers Ableton transport playback
 - Individual granular tracks are controlled independently (not bundled)
 - Crossfades happen at bar boundaries (quantized to loop position)
 - The performer returns and plays live over the shifting foundation

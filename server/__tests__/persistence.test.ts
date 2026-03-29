@@ -178,6 +178,7 @@ describe('State persistence', () => {
         lockedTypes: [],
         performerOverrides: new Map(),
         liveTracksActive: [],
+        transportStarted: false,
         loopPosition: 0,
         loopCount: 0,
       },

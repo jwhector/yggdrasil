@@ -375,12 +375,6 @@
           "optionA": {
             "tracks": [
               {
-                "granularType": "melody",
-                "trackIndices": [
-                  39
-                ]
-              },
-              {
                 "granularType": "pad",
                 "trackIndices": [
                   40
@@ -396,12 +390,6 @@
           },
           "optionB": {
             "tracks": [
-              {
-                "granularType": "melody",
-                "trackIndices": [
-                  42
-                ]
-              },
               {
                 "granularType": "pad",
                 "trackIndices": [
@@ -481,10 +469,10 @@
       "symbol": "\u25c6"
     },
     {
-      "id": "melody",
-      "label": "The Voice",
+      "id": "seed",
+      "label": "The Seed",
       "color": "#TBD",
-      "symbol": "\u2726"
+      "symbol": "◎"
     },
     {
       "id": "harmony",
@@ -512,7 +500,6 @@
       "id": "flesh",
       "label": "The Character",
       "granularTypes": [
-        "melody",
         "harmony",
         "pad"
       ]

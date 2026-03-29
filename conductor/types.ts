@@ -33,7 +33,7 @@ export type Chapter = 'ambition' | 'love' | 'avoidance';
  * 6 fixed types — one per layer slot per attempt.
  */
 export type LayerType =
-  | 'melody'
+  | 'seed'
   | 'drums'
   | 'pad'
   | 'bass'
@@ -441,7 +441,7 @@ export const V32_LAYERS_PER_ATTEMPT = 3;
  * 6 types by default, configurable. These are the V3.2 equivalent of LayerType values.
  */
 export interface GranularType {
-  id: string;           // e.g., 'bass', 'drums', 'melody'
+  id: string;           // e.g., 'bass', 'drums', 'seed'
   label: string;        // Finale-facing name (e.g., 'The Ground')
   color: string;        // For finale UI
   symbol: string;       // For finale UI
@@ -596,6 +596,7 @@ export interface V32FinaleState {
     lockedTypes: string[];                          // Performer-locked granular types
     performerOverrides: Map<string, string>;        // granularTypeId → fragmentId (performer forced)
     liveTracksActive: string[];                     // Live performance track IDs
+    transportStarted: boolean;                      // Whether Ableton transport has been triggered
     loopPosition: number;                           // 0.0 to 1.0 within current loop
     loopCount: number;
   };

@@ -51,15 +51,15 @@ describe('getNpcMessage', () => {
 
   test('matches event with optional layerType when layerType matches', () => {
     const specificMessages: NpcMessageConfig[] = [
-      { event: 'layer_forfeited', layerType: 'melody', text: 'The Voice is silent.' },
+      { event: 'layer_forfeited', layerType: 'seed', text: 'The Voice is silent.' },
       { event: 'layer_forfeited', text: '{layerLabel} goes silent.' },
     ];
-    expect(getNpcMessage(specificMessages, 'layer_forfeited', 'melody')).toBe('The Voice is silent.');
+    expect(getNpcMessage(specificMessages, 'layer_forfeited', 'seed')).toBe('The Voice is silent.');
   });
 
   test('falls back to generic message when layerType does not match specific', () => {
     const specificMessages: NpcMessageConfig[] = [
-      { event: 'layer_forfeited', layerType: 'melody', text: 'The Voice is silent.' },
+      { event: 'layer_forfeited', layerType: 'seed', text: 'The Voice is silent.' },
       { event: 'layer_forfeited', text: '{layerLabel} goes silent.' },
     ];
     expect(getNpcMessage(specificMessages, 'layer_forfeited', 'drums', { layerLabel: 'The Heartbeat' })).toBe(

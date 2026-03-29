@@ -25,13 +25,13 @@ interface TrackBundle {
 }
 
 interface GranularTrackRef {
-  granularType: string;       // e.g., 'bass', 'drums', 'melody'
+  granularType: string;       // e.g., 'bass', 'drums', 'seed'
   trackIndex: number;         // Ableton track index (config-driven, not formula)
 }
 
 // Layer group definitions
 // bones  = "The Foundation" → bass + drums
-// flesh  = "The Character"  → melody + harmony + pad
+// flesh  = "The Character"  → harmony + pad
 // spark  = "The Edge"       → fx
 ```
 

@@ -37,9 +37,9 @@ The audience is framed as the performer's inner council — parts of the subcons
 | **Attempt** | One story/song-building cycle. The show has 3 attempts, each tied to a chapter. |
 | **Chapter** | A thematic identity: Ambition (Song 1), Love (Song 2), Avoidance (Song 3). Chapters have consistent colors/icons throughout. |
 | **Layer Group** | A bundled set of Ableton tracks that the audience votes on as a unit. Each attempt has **3 layer groups** (bones, flesh, spark). Each group bundles multiple granular types (e.g., bones = bass + drums). |
-| **Granular Type** | An individual musical role within a layer group: bass, drums, melody, pad, harmony, fx. During song-building, these are bundled into groups. During the finale, they are decomposed for individual control. |
+| **Granular Type** | An individual musical role within a layer group: bass, drums, pad, harmony, fx. Plus **seed** — the live seed tracks from song-building, which become controllable fragments in the finale. During song-building, layer groups are bundled. During the finale, they are decomposed for individual control. |
 | **TrackBundle** | A collection of `GranularTrackRef` entries — the Ableton tracks for one option (A or B) of a layer group. Config-driven, not formula-based. |
-| **Live Seed** | A prerecorded loop the performer theatrically "plays" at the start of each song. Anchors the harmonic and rhythmic world. Separate Ableton tracks per song, unmuted when `attempt_build` starts, muted on collapse/rejection. |
+| **Live Seed** | A prerecorded loop the performer theatrically "plays" at the start of each song. Anchors the harmonic and rhythmic world. Separate Ableton tracks per song, unmuted when `attempt_build` starts, muted on collapse/rejection. In the finale, live seed tracks become the **seed** granular type — one fragment per attempted song. |
 | **Option** | One of 2 choices (A or B) within a layer group. Binary choice. |
 | **Lock-in** | When a layer group's winning option is confirmed and becomes part of the song stack. |
 | **Doubt Threshold** | A per-layer pass/fail check. Each layer has a configurable threshold. Default curve: `[0.50, 0.66, 0.99]`. Layer 0 always passes, layer 2 almost always collapses. No cumulative state — each vote is independent. |

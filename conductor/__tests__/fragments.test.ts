@@ -313,8 +313,8 @@ function makeV32LayerConfig(index: number, group: string): V32LayerConfig {
       b: [{ granularType: 'bass', trackIndices: [index * 10 + 3] }, { granularType: 'drums', trackIndices: [index * 10 + 4] }],
     },
     flesh: {
-      a: [{ granularType: 'melody', trackIndices: [index * 10 + 1] }, { granularType: 'pad', trackIndices: [index * 10 + 2] }, { granularType: 'harmony', trackIndices: [index * 10 + 3] }],
-      b: [{ granularType: 'melody', trackIndices: [index * 10 + 4] }, { granularType: 'pad', trackIndices: [index * 10 + 5] }, { granularType: 'harmony', trackIndices: [index * 10 + 6] }],
+      a: [{ granularType: 'pad', trackIndices: [index * 10 + 2] }, { granularType: 'harmony', trackIndices: [index * 10 + 3] }],
+      b: [{ granularType: 'pad', trackIndices: [index * 10 + 5] }, { granularType: 'harmony', trackIndices: [index * 10 + 6] }],
     },
     spark: {
       a: [{ granularType: 'fx', trackIndices: [index * 10 + 1] }],
@@ -429,11 +429,16 @@ describe('generateGranularFragments', () => {
     const fragments = generateGranularFragments([attempt], configs, '/audio', false);
 
     // Layer 0 (bones, chose A): 2 tracks (bass, drums) = 2 fragments
-    // Layer 1 (flesh, chose B): 3 tracks (melody, pad, harmony) = 3 fragments
+    // Layer 1 (flesh, chose B): 2 tracks (pad, harmony) = 2 fragments
     // Layer 2 (spark, chose A): 1 track (fx) = 1 fragment
-    // Total: 6 winner-only fragments
+    // + 1 seed fragment from liveSeed
+    // Total: 6 fragments
     expect(fragments).toHaveLength(6);
-    expect(fragments.every(f => f.wonVote)).toBe(true);
+
+    const seedFragments = fragments.filter(f => f.granularType === 'seed');
+    expect(seedFragments).toHaveLength(1);
+    expect(seedFragments[0].wonVote).toBe(true);
+    expect(seedFragments[0].id).toBe('0-seed-seed-A');
   });
 
   test('voted layer with bothOptionsSurvive=true produces 2 GranularFragments per granular type', () => {
@@ -441,13 +446,15 @@ describe('generateGranularFragments', () => {
     const configs = [makeV32AttemptConfig('ambition')];
     const fragments = generateGranularFragments([attempt], configs, '/audio', true);
 
-    // Each granular type gets winner + loser: 6 types × 2 = 12
-    expect(fragments).toHaveLength(12);
+    // Each layer type gets winner + loser: bones(4) + flesh(4) + spark(2) = 10
+    // + 1 seed fragment (no A/B, always 1)
+    // Total: 11
+    expect(fragments).toHaveLength(11);
 
     const winners = fragments.filter(f => f.wonVote);
     const losers = fragments.filter(f => !f.wonVote);
-    expect(winners).toHaveLength(6);
-    expect(losers).toHaveLength(6);
+    expect(winners).toHaveLength(6); // 5 layer winners + 1 seed
+    expect(losers).toHaveLength(5);
   });
 
   test('collapsed layer still produces winners fragments', () => {
@@ -457,12 +464,13 @@ describe('generateGranularFragments', () => {
     const fragments = generateGranularFragments([attempt], configs, '/audio', false);
 
     // Layer 0 (bones, locked_in, chose A): 2 winner fragments
-    // Layer 1 (flesh, collapsed, chose A): 3 winner fragments
+    // Layer 1 (flesh, collapsed, chose A): 2 winner fragments
     // Layer 2 (spark, unreached): 0 fragments
+    // + 1 seed fragment
     expect(fragments).toHaveLength(5);
 
     const fleshFragments = fragments.filter(f => f.layerGroupId === 'flesh');
-    expect(fleshFragments).toHaveLength(3);
+    expect(fleshFragments).toHaveLength(2);
     expect(fleshFragments.every(f => f.wonVote)).toBe(true);
   });
 
@@ -487,9 +495,9 @@ describe('generateGranularFragments', () => {
     ];
     const fragments = generateGranularFragments([attempt0, attempt1, attempt2], configs, '/audio', true);
 
-    // Per song: bones(2) + flesh(3) + spark(1) = 6 types × 2 options = 12
-    // 3 songs × 12 = 36
-    expect(fragments).toHaveLength(36);
+    // Per song: bones(2) + flesh(2) + spark(1) = 5 types × 2 options = 10, + 1 seed = 11
+    // 3 songs × 11 = 33
+    expect(fragments).toHaveLength(33);
   });
 
   test('fragment count across full show with bothOptionsSurvive=false', () => {
@@ -503,7 +511,7 @@ describe('generateGranularFragments', () => {
     ];
     const fragments = generateGranularFragments([attempt0, attempt1, attempt2], configs, '/audio', false);
 
-    // Per song: bones(2) + flesh(3) + spark(1) = 6 winners only
+    // Per song: bones(2) + flesh(2) + spark(1) = 5 winners + 1 seed = 6
     // 3 songs × 6 = 18
     expect(fragments).toHaveLength(18);
   });
@@ -519,8 +527,9 @@ describe('generateGranularFragments', () => {
     // Spot-check format
     expect(ids).toContain('0-bones-bass-A');
     expect(ids).toContain('0-bones-drums-A');
-    expect(ids).toContain('0-flesh-melody-B');
+    expect(ids).toContain('0-flesh-pad-B');
     expect(ids).toContain('0-spark-fx-A');
+    expect(ids).toContain('0-seed-seed-A');
   });
 
   test('previewAudioPath follows naming convention', () => {
@@ -531,8 +540,8 @@ describe('generateGranularFragments', () => {
     const bassA = fragments.find(f => f.granularType === 'bass' && f.option === 'A');
     expect(bassA?.previewAudioPath).toBe('/audio/previews/preview-0-bass-A.mp3');
 
-    const melodyB = fragments.find(f => f.granularType === 'melody' && f.option === 'B');
-    expect(melodyB?.previewAudioPath).toBe('/audio/previews/preview-0-melody-B.mp3');
+    const seedA = fragments.find(f => f.granularType === 'seed' && f.option === 'A');
+    expect(seedA?.previewAudioPath).toBe('/audio/previews/preview-0-seed-A.mp3');
   });
 
   test('skips pending attempts', () => {
@@ -575,7 +584,7 @@ describe('generateGranularFragments — alwaysAvailable', () => {
     // Layer 0 (bones) chose A — so B is the loser
     const fragments = generateGranularFragments([attempt], [config], '/audio', false);
 
-    // Winners: bones A(bass, drums) + flesh B(melody, pad, harmony) + spark A(fx) = 6
+    // Winners: bones A(bass, drums) + flesh B(pad, harmony) + spark A(fx) = 5 + 1 seed = 6
     // Plus: bones B bass (alwaysAvailable) = 1
     // But drums on B is NOT alwaysAvailable, so excluded
     expect(fragments).toHaveLength(7);
@@ -599,8 +608,9 @@ describe('generateGranularFragments — alwaysAvailable', () => {
     const fragments = generateGranularFragments([attempt], [config], '/audio', false);
 
     // Layer 0 (bones, locked_in): 2 winners
-    // Layer 1 (flesh, collapsed): 3 winners
+    // Layer 1 (flesh, collapsed): 2 winners
     // Layer 2 (spark, unreached): 1 alwaysAvailable fragment from option A
+    // + 1 seed fragment
     expect(fragments).toHaveLength(6);
 
     const sparkFragment = fragments.find(f => f.layerGroupId === 'spark');

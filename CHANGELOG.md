@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-03-27 — Replace melody with seed + muted live mix start
+
+**Context:** The "melody" granular type was always empty (melody is performed live). Live seed tracks from song-building were discarded after each attempt. This change makes live seed tracks reusable as finale fragments and adds a more dramatic live mix start.
+
+**Key changes:**
+- Replaced `melody` granular type with `seed` across types, config, identity, and UI
+- Seed fragments are generated from each attempt's `liveSeed` config (one per attempted song, no A/B)
+- Removed melody tracks from Song 3's flesh layer; flesh now contains only harmony + pad
+- Live mix starts fully muted — no transport, no audio, no pre-set votes
+- First group to reach majority on a fragment triggers Ableton transport playback
+- Subsequent group activations unmute their tracks via crossfade (empty outgoing)
+- Added `transportStarted` field to `V32FinaleState.liveMix` to track first-activation
+- Updated serialization layer to include `transportStarted`
+- Updated all tests (297 passing, 1 pre-existing audio-router timing flake)
+- Updated docs: ARCHITECTURE.md, CLAUDE.md, finale.md, audio-engine.md, data-models.md, song-building.md, client-routes.md
+
 ## 2026-03-26 — V3.2 Migration Phase 4: UI Components + Dead Code Cleanup
 
 **Context:** Completes the client layer of the V3.2 migration. Replaces V3.1 components with config-driven V3.2 equivalents, adds missing projector and controller UIs for the live mix phase, and removes all dead V3.1 code.

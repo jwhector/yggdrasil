@@ -93,7 +93,7 @@ interface TrackBundle {
 }
 
 interface GranularTrackRef {
-  granularType: string;               // e.g., 'bass', 'drums', 'melody'
+  granularType: string;               // e.g., 'bass', 'drums', 'seed'
   trackIndex: number;                 // Ableton track index (config-driven)
 }
 

@@ -215,6 +215,7 @@ describe('recalculateActiveFragments', () => {
         lockedTypes: [],
         performerOverrides: new Map(),
         liveTracksActive: [],
+        transportStarted: false,
         loopPosition: 0,
         loopCount: 0,
       },
@@ -278,7 +279,8 @@ describe('Live Mix conductor handlers', () => {
     processCommand(state, { type: 'ADVANCE_PHASE' }); // → finale_live_mix
 
     expect(state.finaleState!.phase).toBe('live_mix');
-    expect(state.finaleState!.liveMix.activeFragments.size).toBeGreaterThan(0);
+    // Live mix starts muted — no active fragments
+    expect(state.finaleState!.liveMix.activeFragments.size).toBe(0);
 
     // Find the user's assigned granular type
     let userType: string | null = null;
@@ -290,13 +292,30 @@ describe('Live Mix conductor handlers', () => {
     // With bothOptionsSurvive=true, allFragments may have more options
     const allForType = state.finaleState!.allFragments.filter(f => f.granularType === userType);
 
-    if (allForType.length >= 2) {
-      const currentActive = state.finaleState!.liveMix.activeFragments.get(userType!);
-      const alternative = allForType.find(f => f.id !== currentActive);
-      if (alternative) {
-        // Have all users in this group switch to the alternative
-        const groupMembers = state.finaleState!.assignment.groups.get(userType!) ?? [];
-        let sawFragmentChange = false;
+    if (allForType.length >= 1) {
+      const firstFragment = allForType[0];
+      // Have all users in this group vote for the first fragment to establish majority
+      const groupMembers = state.finaleState!.assignment.groups.get(userType!) ?? [];
+      let sawFragmentChange = false;
+      for (const member of groupMembers) {
+        const events = processCommand(state, {
+          type: 'SET_LIVE_MIX_PREFERENCE',
+          userId: member,
+          granularType: userType!,
+          fragmentId: firstFragment.id,
+        });
+        if (events.some(e => e.type === 'ACTIVE_FRAGMENT_CHANGED')) {
+          sawFragmentChange = true;
+        }
+      }
+      // First vote should have triggered an ACTIVE_FRAGMENT_CHANGED
+      expect(sawFragmentChange).toBe(true);
+      expect(state.finaleState!.liveMix.activeFragments.get(userType!)).toBe(firstFragment.id);
+
+      // Now switch to an alternative if available
+      if (allForType.length >= 2) {
+        const alternative = allForType[1];
+        sawFragmentChange = false;
         for (const member of groupMembers) {
           const events = processCommand(state, {
             type: 'SET_LIVE_MIX_PREFERENCE',
@@ -308,9 +327,7 @@ describe('Live Mix conductor handlers', () => {
             sawFragmentChange = true;
           }
         }
-        // After all members switch, the active fragment should be the alternative
         expect(state.finaleState!.liveMix.activeFragments.get(userType!)).toBe(alternative.id);
-        // At some point during the switches, ACTIVE_FRAGMENT_CHANGED should have fired
         expect(sawFragmentChange).toBe(true);
       }
     }
@@ -431,7 +448,15 @@ describe('Live Mix conductor handlers', () => {
 
     const bassFragments = state.finaleState!.allFragments.filter(f => f.granularType === 'bass');
     if (bassFragments.length >= 2) {
+      // Establish votes first (live mix starts muted, no initial votes)
+      const bassMembers = state.finaleState!.assignment.groups.get('bass') ?? [];
+      const voteTarget = bassFragments[0];
+      for (const member of bassMembers) {
+        processCommand(state, { type: 'SET_LIVE_MIX_PREFERENCE', userId: member, granularType: 'bass', fragmentId: voteTarget.id });
+      }
       const voteActive = state.finaleState!.liveMix.activeFragments.get('bass');
+      expect(voteActive).toBe(voteTarget.id);
+
       const other = bassFragments.find(f => f.id !== voteActive)!;
 
       // Override to something else
@@ -441,12 +466,12 @@ describe('Live Mix conductor handlers', () => {
       // Clear override — should revert to vote-based result
       processCommand(state, { type: 'CLEAR_OVERRIDE', granularType: 'bass' });
       expect(state.finaleState!.liveMix.performerOverrides.has('bass')).toBe(false);
-      // Active fragment should be determined by votes (initial votes were set to voteActive)
+      // Active fragment should be determined by votes
       expect(state.finaleState!.liveMix.activeFragments.get('bass')).toBe(voteActive);
     }
   });
 
-  test('START_LIVE_MIX computes initial fragments and initializes votes', () => {
+  test('START_LIVE_MIX starts muted with no initial fragments or votes', () => {
     const state = createTestState();
     const voters = ['user-0', 'user-1', 'user-2', 'user-3'];
     for (const v of voters) processCommand(state, { type: 'USER_CONNECT', userId: v });
@@ -456,27 +481,24 @@ describe('Live Mix conductor handlers', () => {
 
     expect(state.finaleState!.phase).toBe('live_mix');
 
-    // Initial fragments should be set for each granular type that has fragments
-    expect(state.finaleState!.liveMix.activeFragments.size).toBeGreaterThan(0);
+    // Live mix starts muted — no active fragments
+    expect(state.finaleState!.liveMix.activeFragments.size).toBe(0);
+    expect(state.finaleState!.liveMix.transportStarted).toBe(false);
 
-    // Votes should be initialized for assigned users
-    for (const [granularType, members] of state.finaleState!.assignment.groups) {
+    // Empty vote maps should be initialized per granular type
+    for (const [granularType] of state.finaleState!.assignment.groups) {
       const typeVotes = state.finaleState!.liveMix.votes.get(granularType);
-      if (state.finaleState!.liveMix.activeFragments.has(granularType)) {
-        expect(typeVotes).toBeDefined();
-        for (const member of members) {
-          expect(typeVotes!.has(member)).toBe(true);
-        }
-      }
+      expect(typeVotes).toBeDefined();
+      expect(typeVotes!.size).toBe(0);
     }
 
-    // Should have LIVE_MIX_STARTED event with initialFragments
+    // Should have LIVE_MIX_STARTED event with empty initialFragments
     const startedEvent = events.find(e => e.type === 'LIVE_MIX_STARTED');
     expect(startedEvent).toBeDefined();
 
-    // Should have AUDIO_CUE for initial unmute
+    // Should NOT have AUDIO_CUE for initial unmute (starts muted)
     const audioCue = events.find(e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'live_mix_start');
-    expect(audioCue).toBeDefined();
+    expect(audioCue).toBeUndefined();
   });
 });
 

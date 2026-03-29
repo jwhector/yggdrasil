@@ -30,7 +30,7 @@ export const CHAPTER_IDENTITY: Record<Chapter, ChapterIdentity> = {
 
 // TODO: See DECISIONS.md O3
 export const LAYER_IDENTITY: Record<LayerType, LayerIdentity> = {
-  melody:  { color: '#e5e5e5', symbol: '\u2726', label: 'The voice' },      // ✦
+  seed:    { color: '#e5e5e5', symbol: '◎',      label: 'The seed' },
   drums:   { color: '#f5c542', symbol: '\u25B2', label: 'The heartbeat' },  // ▲
   pad:     { color: '#7b2d8b', symbol: '\u25C6', label: 'The warmth' },     // ◆
   bass:    { color: '#8b1a1a', symbol: '\u25A0', label: 'The ground' },     // ■
