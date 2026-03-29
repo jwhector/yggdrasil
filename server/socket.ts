@@ -148,6 +148,7 @@ export function setupSocketHandlers(
       activeFragments,
       voteDistributions,
       lockedTypes: fs.liveMix.lockedTypes,
+
       loopPosition: fs.liveMix.loopPosition,
     });
 
@@ -156,6 +157,7 @@ export function setupSocketHandlers(
       activeFragments,
       voteDistributions,
       lockedTypes: fs.liveMix.lockedTypes,
+
       loopPosition: fs.liveMix.loopPosition,
     });
 
@@ -179,6 +181,7 @@ export function setupSocketHandlers(
         activeFragments,
         myVoteDistribution,
         lockedTypes: fs.liveMix.lockedTypes,
+  
       });
     }
   }, MIX_STATE_BROADCAST_INTERVAL_MS);
@@ -669,6 +672,7 @@ export function filterStateForClient(
             };
           }),
           lockedTypes: fs.liveMix.lockedTypes,
+    
           loopPosition: fs.liveMix.loopPosition,
           // NPC
           npcMessage: fs.npc.currentMessage,
@@ -757,6 +761,7 @@ export function filterStateForClient(
           myVote: myVoteData?.fragmentId ?? null,
           activeFragments,
           lockedTypes: fs.liveMix.lockedTypes,
+    
           npcMessage: fs.npc.currentMessage,
         };
       }

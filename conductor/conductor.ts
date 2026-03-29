@@ -38,6 +38,7 @@ import type {
   TrackBundle,
   GranularType,
 } from './types';
+import { MUTE_FRAGMENT_ID } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import { generateGranularFragments } from './fragments';
@@ -1200,8 +1201,9 @@ function handleSetLiveMixPreference(
     return [{ type: 'ERROR', message: `${granularType} is locked` }];
   }
 
-  // Validate: fragment exists in available fragments for this type
-  const validFragment = fs.availableFragments.some(f => f.id === fragmentId && f.granularType === granularType)
+  // Validate: fragment exists in available fragments for this type (MUTE_FRAGMENT_ID is always valid)
+  const validFragment = fragmentId === MUTE_FRAGMENT_ID
+    || fs.availableFragments.some(f => f.id === fragmentId && f.granularType === granularType)
     || (state.config.finale.bothOptionsSurvive && fs.allFragments.some(f => f.id === fragmentId && f.granularType === granularType));
   if (!validFragment) {
     return [{ type: 'ERROR', message: `Fragment ${fragmentId} not available for ${granularType}` }];
@@ -1230,24 +1232,27 @@ function handleSetLiveMixPreference(
       { type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' },
     ];
 
-    // First group to activate triggers Ableton transport
-    if (!fs.liveMix.transportStarted && !previousActive) {
+    // First group to activate triggers Ableton transport (mute votes don't count)
+    if (!fs.liveMix.transportStarted && !previousActive && newActive !== MUTE_FRAGMENT_ID) {
       fs.liveMix.transportStarted = true;
       events.push({ type: 'AUDIO_CUE', cue: { type: 'transport', action: 'play' } });
     }
 
-    // Emit audio crossfade cue
-    const outFrag = previousActive
-      ? (fs.allFragments.find(f => f.id === previousActive))
+    // Crossfade audio — handle mute transitions
+    const outFrag = (previousActive && previousActive !== MUTE_FRAGMENT_ID)
+      ? fs.allFragments.find(f => f.id === previousActive)
       : null;
-    const inFrag = fs.allFragments.find(f => f.id === newActive);
-    if (inFrag) {
+    const inFrag = (newActive !== MUTE_FRAGMENT_ID)
+      ? fs.allFragments.find(f => f.id === newActive)
+      : null;
+
+    if (inFrag || outFrag) {
       events.push({
         type: 'AUDIO_CUE',
         cue: {
           type: 'live_mix_crossfade',
           granularType,
-          incomingTrackIndices: inFrag.trackIndices,
+          incomingTrackIndices: inFrag?.trackIndices ?? [],
           outgoingTrackIndices: outFrag?.trackIndices ?? [],
         },
       });

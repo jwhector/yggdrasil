@@ -11,6 +11,7 @@
 'use client';
 
 import type { GranularFragment, LayerType, Chapter } from '@/conductor/types';
+import { MUTE_FRAGMENT_ID } from '@/conductor/types';
 import { getLayerIdentity, getChapterIdentity } from '@/lib/identity';
 
 export interface LiveMixControllerProps {
@@ -20,6 +21,7 @@ export interface LiveMixControllerProps {
   voteDistribution: Map<string, number>;
   totalVotes: number;
   isLocked: boolean;
+  isMuted: boolean;
   granularType: string;
   onSelectFragment: (fragmentId: string) => void;
 }
@@ -31,6 +33,7 @@ export function LiveMixController({
   voteDistribution,
   totalVotes,
   isLocked,
+  isMuted,
   granularType,
   onSelectFragment,
 }: LiveMixControllerProps) {
@@ -53,8 +56,9 @@ export function LiveMixController({
       }}>
         <span style={{
           fontSize: '1.6rem',
-          color: identity.color,
+          color: isMuted ? 'rgba(255,255,255,0.2)' : identity.color,
           lineHeight: 1,
+          transition: 'color 0.3s ease',
         }}>
           {identity.symbol}
         </span>
@@ -68,7 +72,7 @@ export function LiveMixController({
         </span>
       </div>
 
-      {/* Fragment cards */}
+      {/* Fragment cards + mute option */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -85,6 +89,14 @@ export function LiveMixController({
             onTap={() => onSelectFragment(fragment.id)}
           />
         ))}
+
+        {/* Mute option — voteable like any fragment */}
+        <MuteCard
+          isActive={isMuted}
+          isSelected={myVote === MUTE_FRAGMENT_ID}
+          proportion={totalVotes > 0 ? (voteDistribution.get(MUTE_FRAGMENT_ID) ?? 0) / totalVotes : 0}
+          onTap={() => onSelectFragment(MUTE_FRAGMENT_ID)}
+        />
       </div>
 
       {/* Locked overlay */}
@@ -225,6 +237,112 @@ function FragmentCard({
           <span style={{
             fontSize: '0.6rem',
             color: typeColor,
+            letterSpacing: '0.15em',
+            fontWeight: 600,
+          }}>
+            NOW
+          </span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mute Card — voteable silence option
+// ---------------------------------------------------------------------------
+
+function MuteCard({
+  isActive,
+  isSelected,
+  proportion,
+  onTap,
+}: {
+  isActive: boolean;
+  isSelected: boolean;
+  proportion: number;
+  onTap: () => void;
+}) {
+  const borderColor = isActive
+    ? 'rgba(255,255,255,0.5)'
+    : isSelected
+      ? 'rgba(255,255,255,0.6)'
+      : 'rgba(255,255,255,0.08)';
+
+  const boxShadow = isActive
+    ? '0 0 12px 2px rgba(255,255,255,0.1)'
+    : isSelected
+      ? '0 0 0 2px rgba(255,255,255,0.3)'
+      : 'none';
+
+  return (
+    <button
+      type="button"
+      onClick={onTap}
+      style={{
+        position: 'relative',
+        width: '100%',
+        minHeight: '56px',
+        padding: '14px 16px 14px 20px',
+        border: `2px solid ${borderColor}`,
+        borderLeft: '4px solid rgba(255,255,255,0.15)',
+        borderRadius: '12px',
+        backgroundColor: 'rgba(255,255,255,0.02)',
+        boxShadow,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        overflow: 'hidden',
+        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+        WebkitTapHighlightColor: 'transparent',
+        outline: 'none',
+        textAlign: 'left',
+        fontFamily: 'inherit',
+      }}
+    >
+      {/* Consensus fill bar */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: `${Math.max(proportion * 100, 0)}%`,
+          backgroundColor: 'rgba(255,255,255,0.06)',
+          transition: 'width 0.3s ease',
+          borderRadius: '10px 0 0 10px',
+        }}
+      />
+
+      <span style={{
+        position: 'relative',
+        zIndex: 1,
+        fontSize: '0.75rem',
+        color: 'rgba(255,255,255,0.35)',
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+      }}>
+        Silence
+      </span>
+
+      {isActive && (
+        <div style={{
+          position: 'relative',
+          zIndex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}>
+          <div style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(255,255,255,0.5)',
+          }} />
+          <span style={{
+            fontSize: '0.6rem',
+            color: 'rgba(255,255,255,0.5)',
             letterSpacing: '0.15em',
             fontWeight: 600,
           }}>

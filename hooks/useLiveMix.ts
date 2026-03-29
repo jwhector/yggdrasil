@@ -11,6 +11,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { AudienceFinaleView, GranularFragment } from '@/conductor/types';
+import { MUTE_FRAGMENT_ID } from '@/conductor/types';
 
 export interface LiveMixState {
   myGroupFragments: GranularFragment[];
@@ -19,6 +20,7 @@ export interface LiveMixState {
   voteDistribution: Map<string, number>; // fragmentId → count
   totalVotes: number;
   isLocked: boolean;
+  isMuted: boolean;
   otherTypesActive: Array<{ granularType: string; fragmentId: string }>;
   setPreference: (fragmentId: string) => void;
 }
@@ -75,6 +77,7 @@ export function useLiveMix(
       voteDistribution: new Map(),
       totalVotes: 0,
       isLocked: false,
+      isMuted: false,
       otherTypesActive: [],
       setPreference,
     };
@@ -95,6 +98,8 @@ export function useLiveMix(
   const isLocked = myFinale.myGranularType != null
     && lockedTypes.includes(myFinale.myGranularType);
 
+  const isMuted = activeFragment === MUTE_FRAGMENT_ID;
+
   const otherTypesActive = myFinale.activeFragments.filter(
     (af) => af.granularType !== myFinale.myGranularType,
   );
@@ -106,6 +111,7 @@ export function useLiveMix(
     voteDistribution,
     totalVotes,
     isLocked,
+    isMuted,
     otherTypesActive,
     setPreference,
   };

@@ -1,16 +1,17 @@
 # CHANGELOG
 
-## 2026-03-27 — Replace melody with seed + muted live mix start
+## 2026-03-27 — Replace melody with seed + muted live mix start + voteable silence
 
-**Context:** The "melody" granular type was always empty (melody is performed live). Live seed tracks from song-building were discarded after each attempt. This change makes live seed tracks reusable as finale fragments and adds a more dramatic live mix start.
+**Context:** The "melody" granular type was always empty (melody is performed live). Live seed tracks from song-building were discarded after each attempt. This change makes live seed tracks reusable as finale fragments, adds a muted live mix start, and introduces silence as a voteable option.
 
 **Key changes:**
 - Replaced `melody` granular type with `seed` across types, config, identity, and UI
 - Seed fragments are generated from each attempt's `liveSeed` config (one per attempted song, no A/B)
 - Removed melody tracks from Song 3's flesh layer; flesh now contains only harmony + pad
 - Live mix starts fully muted — no transport, no audio, no pre-set votes
-- First group to reach majority on a fragment triggers Ableton transport playback
-- Subsequent group activations unmute their tracks via crossfade (empty outgoing)
+- First group to reach majority on a real fragment triggers Ableton transport playback
+- Voteable silence: `MUTE_FRAGMENT_ID` (`__mute__`) is a valid vote target alongside real fragments. When a type's majority votes for silence, audio fades out. When they vote back to a fragment, audio fades in. Displayed as a "Silence" card in the audience UI.
+- Controller shows "Muted" badge when a type's active fragment is the mute sentinel
 - Added `transportStarted` field to `V32FinaleState.liveMix` to track first-activation
 - Updated serialization layer to include `transportStarted`
 - Updated all tests (297 passing, 1 pre-existing audio-router timing flake)

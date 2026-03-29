@@ -145,6 +145,7 @@ function makeFinaleState(allFragments: Fragment[] = []): V32FinaleState {
       votes: new Map(),
       activeFragments: new Map(),
       lockedTypes: [],
+
       performerOverrides: new Map(),
       liveTracksActive: [],
       transportStarted: false,

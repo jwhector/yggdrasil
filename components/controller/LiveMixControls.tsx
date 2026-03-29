@@ -11,6 +11,7 @@
 
 import { useState, useEffect } from 'react';
 import type { GranularType, GranularFragment, ConductorCommand } from '@/conductor/types';
+import { MUTE_FRAGMENT_ID } from '@/conductor/types';
 import { getChapterIdentity } from '@/lib/identity';
 import type { Socket } from 'socket.io-client';
 
@@ -60,6 +61,7 @@ export function LiveMixControls({
           const activeEntry = activeFragments.find(a => a.granularType === gt.id);
           const activeFrag = activeEntry ? typeFragments.find(f => f.id === activeEntry.fragmentId) ?? null : null;
           const isLocked = lockedTypes.includes(gt.id);
+          const isMuted = activeEntry?.fragmentId === MUTE_FRAGMENT_ID;
           const distribution = voteDistributions.find(d => d.granularType === gt.id);
 
           return (
@@ -70,6 +72,7 @@ export function LiveMixControls({
               activeFragment={activeFrag}
               activeFragmentId={activeEntry?.fragmentId ?? null}
               isLocked={isLocked}
+              isMuted={isMuted}
               distribution={distribution?.votes ?? []}
               sendCommand={sendCommand}
             />
@@ -86,6 +89,7 @@ function TypeControlRow({
   activeFragment,
   activeFragmentId,
   isLocked,
+  isMuted,
   distribution,
   sendCommand,
 }: {
@@ -94,6 +98,7 @@ function TypeControlRow({
   activeFragment: GranularFragment | null;
   activeFragmentId: string | null;
   isLocked: boolean;
+  isMuted: boolean;
   distribution: Array<{ fragmentId: string; count: number }>;
   sendCommand: (command: ConductorCommand) => void;
 }) {
@@ -125,6 +130,8 @@ function TypeControlRow({
       backgroundColor: '#111',
       borderRadius: '8px',
       border: `1px solid ${isLocked ? 'rgba(255,255,255,0.15)' : '#222'}`,
+      opacity: isMuted ? 0.5 : 1,
+      transition: 'opacity 0.3s ease',
     }}>
       {/* Top row: type info + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -155,6 +162,22 @@ function TypeControlRow({
         >
           {overrideOpen ? 'Cancel' : 'Override'}
         </button>
+
+        {/* Muted indicator (audience-voted) */}
+        {isMuted && (
+          <span style={{
+            padding: '4px 8px',
+            borderRadius: '4px',
+            backgroundColor: '#4a3800',
+            color: '#fbbf24',
+            fontSize: '0.55rem',
+            fontWeight: 600,
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+          }}>
+            Muted
+          </span>
+        )}
 
         {/* Lock toggle */}
         <button

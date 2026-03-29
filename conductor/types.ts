@@ -28,6 +28,9 @@ export type Timestamp = number;
 /** The three story chapters, each corresponding to one song-building attempt. */
 export type Chapter = 'ambition' | 'love' | 'avoidance';
 
+/** Sentinel fragment ID: when a type's active fragment is this, audio is muted. Voteable like any fragment. */
+export const MUTE_FRAGMENT_ID = '__mute__';
+
 /**
  * Layer types represent the musical role of each layer in a song.
  * 6 fixed types — one per layer slot per attempt.

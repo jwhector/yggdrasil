@@ -213,6 +213,7 @@ describe('recalculateActiveFragments', () => {
         votes: new Map(),
         activeFragments: new Map(),
         lockedTypes: [],
+
         performerOverrides: new Map(),
         liveTracksActive: [],
         transportStarted: false,

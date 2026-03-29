@@ -298,6 +298,7 @@ function LiveMixView({
           voteDistribution={liveMix.voteDistribution}
           totalVotes={liveMix.totalVotes}
           isLocked={liveMix.isLocked}
+          isMuted={liveMix.isMuted}
           granularType={myFinale.myGranularType}
           onSelectFragment={liveMix.setPreference}
         />

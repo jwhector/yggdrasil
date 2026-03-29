@@ -102,6 +102,7 @@ function makeMinimalFinaleState(timerRemaining: number | null = null): V32Finale
       votes: new Map(),
       activeFragments: new Map(),
       lockedTypes: [],
+
       performerOverrides: new Map(),
       liveTracksActive: [],
       transportStarted: false,

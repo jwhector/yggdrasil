@@ -157,6 +157,7 @@ describe('loadBackup', () => {
         votes: new Map([['bass', new Map([['u1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
         activeFragments: new Map([['bass', 'frag-0-0-A']]),
         lockedTypes: [],
+
         performerOverrides: new Map(),
         liveTracksActive: [],
         transportStarted: false,
