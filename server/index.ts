@@ -28,7 +28,7 @@ import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
 import { setupSocketHandlers, broadcastEvents } from './socket';
 import { createAndPruneBackup } from './backup';
-import { createOSCBridge, createNullOSCBridge, type OSCBridge } from './osc';
+import { createOSCBridge, createNullOSCBridge, createRemoteOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
 import { createAudioRouter, type AudioRouter, type AbletonLayoutConfig } from './audio-router';
 
@@ -54,6 +54,10 @@ const OSC_ENABLED = process.env.OSC_ENABLED !== 'false'; // Default: true
 const OSC_SEND_PORT = parseInt(process.env.OSC_SEND_PORT || '11000', 10);
 const OSC_RECEIVE_PORT = parseInt(process.env.OSC_RECEIVE_PORT || '11001', 10);
 const ABLETON_HOST = process.env.ABLETON_HOST || process.env.OSC_HOST || '127.0.0.1';
+
+// OSC_MODE: 'local' (direct UDP), 'remote' (relay via bridge client), 'disabled'
+// Defaults: 'local' if OSC_ENABLED, 'disabled' otherwise
+const OSC_MODE = (process.env.OSC_MODE || (OSC_ENABLED ? 'local' : 'disabled')) as 'local' | 'remote' | 'disabled';
 
 /**
  * Parse show config JSON and apply environment variable overrides.
@@ -261,10 +265,16 @@ async function main() {
   // OSC Bridge and Timing Engine Setup
   // ============================================================================
 
-  // Create OSC bridge (or null bridge if OSC disabled)
+  // Create OSC bridge based on mode
   let oscBridge: OSCBridge;
-  if (OSC_ENABLED) {
-    console.log('[Server] Creating OSC bridge...');
+  let remoteBridge: ReturnType<typeof createRemoteOSCBridge> | null = null;
+
+  if (OSC_MODE === 'remote') {
+    console.log('[Server] Creating remote OSC bridge (waiting for bridge client)...');
+    remoteBridge = createRemoteOSCBridge();
+    oscBridge = remoteBridge;
+  } else if (OSC_MODE === 'local') {
+    console.log('[Server] Creating local OSC bridge...');
     oscBridge = createOSCBridge({
       sendPort: OSC_SEND_PORT,
       receivePort: OSC_RECEIVE_PORT,
@@ -300,7 +310,7 @@ async function main() {
       getState,
       {
         enabled: true,
-        oscBridge: OSC_ENABLED ? oscBridge : null,
+        oscBridge: OSC_MODE !== 'disabled' ? oscBridge : null,
         onAuditionProgress: (progress) => {
           io.to('audience').to('projector').emit('audition_progress', progress);
         },
@@ -336,12 +346,26 @@ async function main() {
 
   // Setup socket handlers (after audio router so masterPanic can be wired)
   console.log('[Server] Setting up Socket.IO handlers...');
-  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter);
+  const onBridgeConnect = remoteBridge
+    ? (socket: import('socket.io').Socket) => {
+        const cleanup = remoteBridge!.attachBridgeSocket(socket);
+        // Trigger device discovery when bridge client connects
+        audioRouter.discoverDevices(getState()).catch(err => {
+          console.error('[Server] Device discovery after bridge connect failed:', err);
+        });
+        return cleanup;
+      }
+    : undefined;
+  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter, onBridgeConnect);
 
   // Start OSC bridge and timing engine
   try {
     await oscBridge.start();
-    console.log(`[Server] OSC bridge started (send: ${OSC_SEND_PORT}, receive: ${OSC_RECEIVE_PORT})`);
+    if (OSC_MODE === 'local') {
+      console.log(`[Server] OSC bridge started (send: ${OSC_SEND_PORT}, receive: ${OSC_RECEIVE_PORT})`);
+    } else if (OSC_MODE === 'remote') {
+      console.log('[Server] Remote OSC bridge started (awaiting bridge client connection)');
+    }
   } catch (err) {
     console.error('[Server] Failed to start OSC bridge:', err);
     console.log('[Server] Continuing without OSC...');
@@ -358,7 +382,8 @@ async function main() {
   }
 
   // Discover Utility devices on all fragment tracks (after OSC is live)
-  if (OSC_ENABLED) {
+  // In remote mode, discovery happens when the bridge client connects (see onBridgeConnect above)
+  if (OSC_MODE === 'local') {
     audioRouter.discoverDevices(getState()).catch(err => {
       console.error('[Server] Device discovery failed:', err);
     });

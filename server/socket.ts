@@ -31,7 +31,7 @@ import { serializeState } from '../lib/serialization';
 // Types
 // ============================================================================
 
-type ClientMode = 'audience' | 'projector' | 'controller';
+type ClientMode = 'audience' | 'projector' | 'controller' | 'osc-bridge';
 
 interface ClientHeartbeat {
   socketId: string;
@@ -71,6 +71,7 @@ export function setupSocketHandlers(
   persistence: PersistenceLayer,
   createNewShow?: () => ShowState,
   audioRouter?: AudioRouter,
+  onBridgeConnect?: (socket: Socket) => () => void,
 ): void {
   // Heartbeat tracking
   const heartbeats = new Map<string, ClientHeartbeat>();
@@ -245,10 +246,21 @@ export function setupSocketHandlers(
     // ------------------------------------------------------------------
     // join — first connection or re-join after page reload
     //
-    // Payload: { userId?, seatId?, mode: 'audience' | 'projector' | 'controller' }
+    // Payload: { userId?, seatId?, mode: 'audience' | 'projector' | 'controller' | 'osc-bridge' }
     // ------------------------------------------------------------------
     socket.on('join', async (data: { userId?: UserId; mode: ClientMode; seatId?: string }) => {
       console.log(`[Socket] Join: mode=${data.mode} userId=${data.userId ?? '(new)'}`);
+
+      // OSC bridge client — wire up and return early
+      if (data.mode === 'osc-bridge') {
+        if (onBridgeConnect) {
+          const cleanup = onBridgeConnect(socket);
+          socket.on('disconnect', cleanup);
+        } else {
+          console.warn('[Socket] OSC bridge client connected but no bridge handler configured');
+        }
+        return;
+      }
 
       const state = getState();
       socket.join(data.mode);
