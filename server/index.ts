@@ -168,7 +168,7 @@ async function main() {
   // Attach Socket.IO
   const io = new SocketIOServer(server, {
     cors: {
-      origin: dev ? '*' : false,
+      origin: '*',
     },
     // Reconnection settings
     pingTimeout: 5000,
