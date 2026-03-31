@@ -914,14 +914,10 @@ function collapseAttempt(state: ShowState, attempt: AttemptState): ConductorEven
     cue: { type: 'collapse_gesture', attemptIndex: attempt.index },
   });
 
-  // Stop live seed on collapse
-  const attemptCfg = state.config.attempts[attempt.index];
-  if (attemptCfg?.liveSeed?.trackIndices?.length) {
-    events.push({
-      type: 'AUDIO_CUE',
-      cue: { type: 'live_seed_stop', attemptIndex: attempt.index, trackIndices: attemptCfg.liveSeed.trackIndices },
-    });
-  }
+  // Note: live_seed_stop is NOT emitted here because collapse_gesture already
+  // includes the live seed tracks in its wall-clock gain ramp (audio-router.ts).
+  // Emitting a separate beat-locked live_seed_stop would race with the collapse
+  // ramp, causing the track to be unmuted and faded back in by stale beat callbacks.
 
   // Auto-advance (except Song 3)
   events.push(...autoAdvanceAfterCollapse(state));

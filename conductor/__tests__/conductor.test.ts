@@ -1033,7 +1033,7 @@ describe('V3.2: 3 Bundled Layer Groups', () => {
     expect((liveSeedCue as any).cue.trackIndices).toEqual([99]);
   });
 
-  test('collapse emits live_seed_stop cue', () => {
+  test('collapse does NOT emit separate live_seed_stop (handled by collapse_gesture)', () => {
     const config = createCollapseConfig(1);
     const state = createTestState(config);
     connectUser(state, 'u1');
@@ -1046,11 +1046,19 @@ describe('V3.2: 3 Bundled Layer Groups', () => {
     processCommand(state, { type: 'CLOSE_VOTING' });
     const events = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
 
+    // live_seed_stop should NOT be emitted during collapse — the collapse_gesture
+    // already includes live seed tracks in its wall-clock gain ramp. A separate
+    // beat-locked live_seed_stop would race and unmute the track.
     const liveSeedStop = events.find(
       e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'live_seed_stop'
     );
-    expect(liveSeedStop).toBeDefined();
-    expect((liveSeedStop as any).cue.attemptIndex).toBe(0);
+    expect(liveSeedStop).toBeUndefined();
+
+    // collapse_gesture should still be emitted
+    const collapseGesture = events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'collapse_gesture'
+    );
+    expect(collapseGesture).toBeDefined();
   });
 
   test('song rejection emits live_seed_stop cue', () => {
