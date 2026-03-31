@@ -349,10 +349,17 @@ async function main() {
   const onBridgeConnect = remoteBridge
     ? (socket: import('socket.io').Socket) => {
         const cleanup = remoteBridge!.attachBridgeSocket(socket);
-        // Trigger device discovery when bridge client connects
-        audioRouter.discoverDevices(getState()).catch(err => {
-          console.error('[Server] Device discovery after bridge connect failed:', err);
+
+        // Re-initialize timing engine subscriptions and beat state
+        if (timingEngine) {
+          timingEngine.onBridgeReconnect();
+        }
+
+        // Reset audio router state and re-discover devices
+        audioRouter.onBridgeReconnect(getState()).catch(err => {
+          console.error('[Server] Audio router reconnect failed:', err);
         });
+
         return cleanup;
       }
     : undefined;

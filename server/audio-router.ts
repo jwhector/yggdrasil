@@ -112,6 +112,8 @@ export interface AudioRouter {
   discoverDevices(state?: ShowState): Promise<void>;
   /** Authoritative panic: query Ableton for all tracks, mute every non-foldable, reset gains */
   masterPanic(): Promise<void>;
+  /** Reset state and re-discover devices after bridge (re)connect */
+  onBridgeReconnect(state: ShowState): Promise<void>;
   /** Clean up resources */
   dispose(): void;
 }
@@ -1131,6 +1133,36 @@ export function createAudioRouter(
   // Lifecycle
   // --------------------------------------------------------------------------
 
+  /**
+   * Reset state and re-discover devices after bridge (re)connect.
+   * Ableton's state is unknown after a reconnect, so we clear all tracked
+   * gains, mute state, and device cache, then re-discover.
+   */
+  async function onBridgeReconnect(state: ShowState): Promise<void> {
+    console.log('[AudioRouter] Bridge reconnected — resetting state and re-discovering devices');
+
+    // Cancel all in-flight fades and sub-beat timers
+    for (const gs of routerState.trackGains.values()) {
+      if (gs.activeFadeId) {
+        timingEngine?.cancelCallbacks(gs.activeFadeId);
+      }
+      for (const timer of gs.subBeatTimers) clearTimeout(timer);
+    }
+
+    // Reset tracked state (Ableton state is unknown)
+    routerState.trackGains.clear();
+    routerState.unmutedTracks.clear();
+    routerState.deviceCache.clear();
+    routerState.discoveryComplete = false;
+    routerState.transportStarted = false;
+    routerState.foldableTracks.clear();
+    clearCollapseTimers();
+    clearRejectionTimers();
+
+    // Re-discover devices
+    await discoverDevices(state);
+  }
+
   function dispose(): void {
     // Cancel all in-flight fades and sub-beat timers
     for (const gs of routerState.trackGains.values()) {
@@ -1152,6 +1184,7 @@ export function createAudioRouter(
     handleStateChange,
     discoverDevices,
     masterPanic,
+    onBridgeReconnect,
     dispose,
   };
 }

@@ -82,6 +82,8 @@ export interface TimingEngine {
   isRunning(): boolean;
   /** Recover and restart finale timers after a server restart. */
   recoverTimers(state: ShowState): void;
+  /** Re-subscribe to OSC events and reset beat state after bridge (re)connect. */
+  onBridgeReconnect(): void;
 
   // Beat callback scheduler
   /** Register a callback to fire at a specific absolute beat number. */
@@ -925,6 +927,43 @@ export function createTimingEngine(
     }
   }
 
+  /**
+   * Re-subscribe to OSC events and reset beat state after bridge (re)connect.
+   * Called when the osc-bridge client connects or reconnects.
+   */
+  function onBridgeReconnect(): void {
+    if (!running || !engineConfig.oscBridge) return;
+
+    console.log('[Timing] Bridge reconnected — re-subscribing to OSC events');
+
+    // Reset beat tracking (new Ableton session = new beat numbers)
+    previousRawBeat = -1;
+    beatWrapOffset = 0;
+    currentAbsoluteBeat = 0;
+    currentBeatPosition = null;
+    currentBpm = engineConfig.fallbackBpm;
+
+    // Reset audition/loop baselines so they re-anchor to new beats
+    if (auditionState) auditionState.lastToggleBeat = -1;
+    if (loopState) loopState.lastBoundaryBeat = -1;
+
+    // Re-subscribe to Ableton events
+    engineConfig.oscBridge.send('/live/song/start_listen/beat');
+    engineConfig.oscBridge.send('/live/song/start_listen/tempo');
+    engineConfig.oscBridge.send('/live/song/get/tempo');
+
+    // Re-initialize for current phase (restart audition/loop tracking if mid-show)
+    const state = getState();
+    if (state.phase === 'attempt_build') {
+      const attempt = state.attempts[state.currentAttemptIndex];
+      if (attempt?.status === 'in_progress' && attempt.currentLayerPhase === 'auditioning') {
+        startAuditionTracking(state);
+      }
+    } else if (state.phase === 'finale_live_mix') {
+      startLoopTracking();
+    }
+  }
+
   return {
     start,
     stop,
@@ -933,6 +972,7 @@ export function createTimingEngine(
     dispose,
     isRunning,
     recoverTimers,
+    onBridgeReconnect,
     scheduleAtBeat,
     schedulePerBeat,
     cancelCallbacks,
