@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "ts-node --project tsconfig.server.json server/index.ts",
     "dev:network": "HOST=0.0.0.0 ts-node --project tsconfig.server.json server/index.ts",
-    "build": "next build",
+    "build": "npm rebuild @tailwindcss/oxide && next build",
     "start": "NODE_ENV=production ts-node --project tsconfig.server.json server/index.ts",
     "bridge": "ts-node --project tsconfig.server.json bridge/osc-bridge.ts",
     "mock:ableton": "ts-node --project tsconfig.server.json server/tools/osc-mock-ableton.ts",
