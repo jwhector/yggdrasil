@@ -117,7 +117,8 @@ function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | '
   }
   const revealEvents = processCommand(state, { type: 'CLOSE_VOTING' });
   const lockInEvents = processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
-  return [...revealEvents, ...lockInEvents];
+  const verdictEvents = processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
+  return [...revealEvents, ...lockInEvents, ...verdictEvents];
 }
 
 
@@ -429,6 +430,80 @@ describe('Song-Building Layer Flow', () => {
 });
 
 // ============================================================================
+// Reveal Stakes
+// ============================================================================
+
+describe('REVEAL_STAKES', () => {
+  test('emits REVEAL_STAKES_SHOWN during revealing phase', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+
+    expect(state.attempts[0].currentLayerPhase).toBe('revealing');
+    expect(state.attempts[0].revealStakesShown).toBe(false);
+
+    const events = processCommand(state, { type: 'REVEAL_STAKES' });
+    const shown = findEvent(events, 'REVEAL_STAKES_SHOWN');
+    expect(shown).toBeDefined();
+    expect(shown!.type === 'REVEAL_STAKES_SHOWN' && shown!.threshold).toBeGreaterThan(0);
+    expect(state.attempts[0].revealStakesShown).toBe(true);
+  });
+
+  test('errors when not in revealing phase', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+
+    const events = processCommand(state, { type: 'REVEAL_STAKES' });
+    expect(findEvent(events, 'ERROR')).toBeDefined();
+  });
+
+  test('ignores duplicate REVEAL_STAKES', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'REVEAL_STAKES' });
+
+    const events = processCommand(state, { type: 'REVEAL_STAKES' });
+    expect(events).toHaveLength(0);
+  });
+
+  test('revealStakesShown resets after ADVANCE_FROM_REVEAL', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'REVEAL_STAKES' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+
+    expect(state.attempts[0].revealStakesShown).toBe(false);
+  });
+
+  test('revealStakesShown resets on RERUN_VOTE', () => {
+    const state = createTestState();
+    connectUser(state, 'user-1');
+    advanceToBuild(state);
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'user-1', choice: 'A' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'REVEAL_STAKES' });
+    processCommand(state, { type: 'RERUN_VOTE' });
+
+    expect(state.attempts[0].revealStakesShown).toBe(false);
+    expect(state.attempts[0].currentLayerPhase).toBe('auditioning');
+  });
+});
+
+// ============================================================================
 // Vote Resolution: Lock-in
 // ============================================================================
 
@@ -570,6 +645,7 @@ describe('Threshold Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
     expect(state.attempts[0].status).toBe('in_progress');
 
     // Layer 1: 50/50, threshold=0.6 → collapses
@@ -579,6 +655,7 @@ describe('Threshold Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
 
     expect(state.attempts[0].status).toBe('collapsed');
     expect(state.attempts[0].collapsedAtLayer).toBe(1);
@@ -617,6 +694,7 @@ describe('Threshold Collapse', () => {
 
     processCommand(state, { type: 'CLOSE_VOTING' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
 
     expect(state.phase).toBe('attempt_story');
     expect(state.currentAttemptIndex).toBe(1);
@@ -636,6 +714,7 @@ describe('Threshold Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
     // Now at attempt_story index 1
 
     // Advance to attempt_build 1 and collapse
@@ -646,6 +725,7 @@ describe('Threshold Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
 
     expect(state.phase).toBe('attempt_story');
     expect(state.currentAttemptIndex).toBe(2);
@@ -687,6 +767,7 @@ describe('Threshold Collapse', () => {
     processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u2', choice: 'B' });
     processCommand(state, { type: 'CLOSE_VOTING' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
 
     // Layer 1: collapses (threshold=0.6)
     processCommand(state, { type: 'START_AUDITION' });

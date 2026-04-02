@@ -97,12 +97,20 @@ yggdrasil/
 │
 ├── components/
 │   ├── LobbyDisplay.tsx         # Projector lobby screen
+│   ├── projector/               # Canvas 2D projector visualization
+│   │   ├── ProjectorCanvas.tsx  # Fullscreen canvas + render loop
+│   │   ├── useProjectorState.ts # Visual state derivation from conductor state
+│   │   └── renderers/           # Pure drawing functions
+│   │       ├── shared.ts        # Noise, membrane, color utils, layout constants
+│   │       ├── skeleton.ts      # Pentagon nodes, seed node, connectors, arcs
+│   │       ├── audition.ts      # A/B labels, header, "NOW PLAYING" indicator
+│   │       └── reveal.ts        # Two-beat reveal: stakes + verdict animations
 │   ├── song-building/
-│   │   ├── OptionCards.tsx       # A/B voting cards
-│   │   ├── RevealSequence.tsx   # Post-vote reveal + threshold check
+│   │   ├── OptionCards.tsx       # A/B voting cards (audience)
+│   │   ├── RevealSequence.tsx   # Post-vote reveal + threshold check (audience)
 │   │   ├── LayerProgress.tsx    # 3-layer progress indicator
 │   │   ├── AuditionProgress.tsx # Bar-level audition progress
-│   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (projector)
+│   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (audience)
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Fragment wreckage display

@@ -54,7 +54,7 @@ function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null,
+    currentVoteResult: null, revealStakesShown: false,
   };
 }
 
@@ -93,7 +93,7 @@ function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null,
+    currentVoteResult: null, revealStakesShown: false,
   };
 }
 
@@ -179,7 +179,7 @@ describe('generateFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
-      currentVoteResult: null,
+      currentVoteResult: null, revealStakesShown: false,
     };
     const configs = [makeAttemptConfig('avoidance', 1)];
     const fragments = generateFragments([pending], configs);
@@ -371,7 +371,7 @@ function makeV32CompletedAttempt(index: number, chapter: 'ambition' | 'love' | '
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null,
+    currentVoteResult: null, revealStakesShown: false,
   };
 }
 
@@ -418,7 +418,7 @@ function makeV32CollapsedAttempt(index: number, chapter: 'ambition' | 'love' | '
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null,
+    currentVoteResult: null, revealStakesShown: false,
   };
 }
 
@@ -557,7 +557,7 @@ describe('generateGranularFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
-      currentVoteResult: null,
+      currentVoteResult: null, revealStakesShown: false,
     };
     const configs = [makeV32AttemptConfig('ambition')];
     const fragments = generateGranularFragments([pending], configs, '/audio', true);

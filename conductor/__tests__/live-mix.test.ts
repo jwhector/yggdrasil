@@ -107,6 +107,7 @@ function completeSingleLayer(state: ShowState, voters: string[], choice: 'A' | '
   }
   processCommand(state, { type: 'CLOSE_VOTING' });
   processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+  processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
 }
 
 function completeAllLayers(state: ShowState, voters: string[]): void {
@@ -520,14 +521,14 @@ describe('computeInitialFragments', () => {
         currentLayerIndex: 0, currentLayerPhase: 'locked_in',
         layerResults: [{ layerIndex: 0, group: 'bones', status: 'locked_in', chosenOption: 'A', winningProportion: 0.7, thresholdRequired: 0.5, passed: true }],
         votes: [], status: 'completed', collapsedAtLayer: null,
-        currentAuditionOption: null, auditionLoopIndex: 0, currentVoteResult: null,
+        currentAuditionOption: null, auditionLoopIndex: 0, currentVoteResult: null, revealStakesShown: false,
       },
       {
         index: 1, chapter: 'love', layerPlan: [],
         currentLayerIndex: 0, currentLayerPhase: 'locked_in',
         layerResults: [{ layerIndex: 0, group: 'bones', status: 'locked_in', chosenOption: 'B', winningProportion: 0.9, thresholdRequired: 0.5, passed: true }],
         votes: [], status: 'completed', collapsedAtLayer: null,
-        currentAuditionOption: null, auditionLoopIndex: 0, currentVoteResult: null,
+        currentAuditionOption: null, auditionLoopIndex: 0, currentVoteResult: null, revealStakesShown: false,
       },
     ];
 

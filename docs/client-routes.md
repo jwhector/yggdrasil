@@ -47,12 +47,18 @@
 
 **Story phases:** Dark or minimal atmospheric display.
 
-**Song-building phases (V3.2):**
-- Top: Song attempt title + chapter color/icon
-- Center: Current layer group card — group symbol + label, Option A vs Option B
-- Threshold display: current layer's threshold line
-- Reveal animation: vote split visualization, threshold check
-- Stack history: icons of chosen layer groups so far (3 slots)
+**Song-building phases (V3.2) — Canvas 2D:**
+
+Rendered on a single `<canvas>` element via `ProjectorCanvas.tsx`. Dark background (#090909). No DOM components — everything is drawn.
+
+- **Pentagon skeleton:** 5 granular-type nodes (bass, drums, pad, harmony, fx) arranged in a circle around a center melody/seed node
+- **Node states:** empty (dim outline), active (pulsing membrane with chapter color), filled (steady glow), collapsed (dashed dark red)
+- **Connectors:** radial lines from center to each node; curved bundle arcs for layer groups (bass-drums, harmony-pad) with traveling dot animation during audition
+- **A/B labels:** large letters positioned left/right of skeleton, active option pulsing with "NOW PLAYING" micro-label, sound descriptors below
+- **Header:** layer group name in chapter color, layer counter
+- **Two-beat reveal:** Beat 1 (Show Stakes) fades skeleton, slides A/B to center, animates threshold line. Beat 2 (Reveal Votes) grows bars to vote proportions, shows pass/fail verdict. Both beats are manually triggered via controller.
+
+See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 
 **Finale — Elegy:**
 - Full fragment grid with winners glowing, losers/locked dimmed

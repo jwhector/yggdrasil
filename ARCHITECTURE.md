@@ -232,12 +232,20 @@ solo-show/
 │
 ├── components/                  # React components
 │   ├── LobbyDisplay.tsx         # Projector lobby screen
+│   ├── projector/               # Canvas 2D projector visualization
+│   │   ├── ProjectorCanvas.tsx  # Fullscreen canvas + render loop
+│   │   ├── useProjectorState.ts # Visual state derivation from conductor state
+│   │   └── renderers/           # Pure drawing functions
+│   │       ├── shared.ts        # Noise, membrane, color utils, layout constants
+│   │       ├── skeleton.ts      # Pentagon nodes, seed node, connectors, arcs
+│   │       ├── audition.ts      # A/B labels, header, "NOW PLAYING" indicator
+│   │       └── reveal.ts        # Two-beat reveal: stakes + verdict animations
 │   ├── song-building/
-│   │   ├── OptionCards.tsx       # A/B voting cards
-│   │   ├── RevealSequence.tsx   # Post-vote reveal animation
+│   │   ├── OptionCards.tsx       # A/B voting cards (audience)
+│   │   ├── RevealSequence.tsx   # Post-vote reveal animation (audience)
 │   │   ├── LayerProgress.tsx    # Completed/upcoming layer indicators
 │   │   ├── AuditionProgress.tsx # Bar-level audition progress indicator
-│   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (projector)
+│   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (audience)
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Full fragment wreckage display
