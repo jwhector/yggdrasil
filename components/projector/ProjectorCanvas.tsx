@@ -52,6 +52,15 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress }: Pro
     const prevMode = prevModeRef.current;
     const newMode = visualState.mode;
 
+    if (newMode !== prevMode) {
+      console.log(`[ProjectorCanvas] mode: ${prevMode} → ${newMode}`, {
+        voteResult: !!visualState.voteResult,
+        thresholdCheck: !!visualState.thresholdCheck,
+        layerPhase: currentAttempt?.currentLayerPhase,
+        revealStakesShown: currentAttempt?.revealStakesShown,
+      });
+    }
+
     // Record start time when entering stakes or verdict mode
     if (newMode !== prevMode && (newMode === 'stakes' || newMode === 'verdict')) {
       revealStartRef.current = performance.now();
