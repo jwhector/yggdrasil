@@ -44,6 +44,13 @@ export const BG_COLOR = '#090909';
 export const EMPTY_COLOR: RGB = { r: 60, g: 60, b: 55 };       // #3c3c37
 export const COLLAPSED_COLOR: RGB = { r: 80, g: 30, b: 30 };   // #501e1e
 
+/** Chapter colors for the projector pentagon (distinct from identity.ts UI colors). */
+export const FINALE_CHAPTER_COLORS: Record<string, RGB> = {
+  love:  { r: 232, g: 167, b: 53  },   // amber/gold
+  ambition:      { r: 224, g: 96,  b: 112 },   // coral/rose
+  avoidance: { r: 69,  g: 176, b: 144 },   // teal/green
+};
+
 /** Pentagon node definitions — 5 nodes arranged clockwise from top. */
 export const PENTAGON_NODES: NodeDef[] = [
   { id: 'bass',    symbol: '\u25A0', label: 'BASS',    angle: -Math.PI / 2 },                      // top
@@ -81,9 +88,29 @@ export function hexToRgb(hex: string): RGB {
 // Math helpers
 // ============================================================================
 
+/** Clamp value to 0–1 range. */
+export function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+/** Linear interpolation between a and b. */
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/** Linear interpolation between two RGB colors. */
+export function lerpRgb(a: RGB, b: RGB, t: number): RGB {
+  const c = clamp01(t);
+  return {
+    r: a.r + (b.r - a.r) * c,
+    g: a.g + (b.g - a.g) * c,
+    b: a.b + (b.b - a.b) * c,
+  };
+}
+
 /** Ease in-out (clamped 0–1). */
 export function ease(t: number): number {
-  const c = Math.max(0, Math.min(1, t));
+  const c = clamp01(t);
   return c < 0.5 ? 2 * c * c : 1 - Math.pow(-2 * c + 2, 2) / 2;
 }
 

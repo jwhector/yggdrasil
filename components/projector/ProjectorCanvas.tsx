@@ -13,24 +13,36 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useProjectorState } from './useProjectorState';
 import type { ProjectorVisualState } from './useProjectorState';
-import { BG_COLOR, ease } from './renderers/shared';
+import { BG_COLOR, ease, clamp01 } from './renderers/shared';
 import { drawSkeleton } from './renderers/skeleton';
 import { drawHeader, drawABLabels } from './renderers/audition';
 import { drawStakes, drawVerdict } from './renderers/reveal';
+import { drawFinale, resetCrossfadeState } from './renderers/finale';
+import {
+  drawLockinTransition,
+  drawCollapseTransition,
+  drawCompleteTransition,
+  TRANSITION_DURATIONS,
+} from './renderers/transitions';
+import type { TransitionState } from './renderers/transitions';
+import type { MixStateInput } from './useProjectorState';
 import type { ProjectorClientState, AttemptState, AuditionProgress } from '@/conductor/types';
 
 interface ProjectorCanvasProps {
   state: ProjectorClientState;
   currentAttempt: AttemptState | null;
   auditionProgress: AuditionProgress | null;
+  mixStateData?: MixStateInput | null;
 }
 
-export function ProjectorCanvas({ state, currentAttempt, auditionProgress }: ProjectorCanvasProps) {
+export function ProjectorCanvas({ state, currentAttempt, auditionProgress, mixStateData }: ProjectorCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const stateRef = useRef<ProjectorVisualState | null>(null);
   const revealStartRef = useRef<number>(0);
   const prevModeRef = useRef<string>('dark');
+  const transitionRef = useRef<TransitionState | null>(null);
+  const skeletonFadeInRef = useRef<number>(0);
 
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
@@ -45,12 +57,13 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress }: Pro
   }, []);
 
   // Derive visual state from props
-  const visualState = useProjectorState(state, currentAttempt, auditionProgress, dimensions.width, dimensions.height);
+  const visualState = useProjectorState(state, currentAttempt, auditionProgress, dimensions.width, dimensions.height, mixStateData);
 
-  // Track mode transitions for reveal timing
+  // Track mode transitions for reveal timing and animated transitions
   useEffect(() => {
     const prevMode = prevModeRef.current;
     const newMode = visualState.mode;
+    const now = performance.now();
 
     if (newMode !== prevMode) {
       console.log(`[ProjectorCanvas] mode: ${prevMode} → ${newMode}`, {
@@ -59,11 +72,40 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress }: Pro
         layerPhase: currentAttempt?.currentLayerPhase,
         revealStakesShown: currentAttempt?.revealStakesShown,
       });
+
+      // Detect transitions that need animation
+      if (prevMode === 'verdict' && stateRef.current) {
+        const fromState = { ...stateRef.current };
+        const fromRevealElapsed = now - revealStartRef.current;
+
+        if (newMode === 'skeleton') {
+          // Lock-in: verdict → skeleton (next layer)
+          transitionRef.current = {
+            fromState,
+            fromRevealElapsed,
+            startTime: now,
+            type: 'lockin',
+          };
+        } else if (newMode === 'dark') {
+          // Collapse or completion → dark
+          const passed = fromState.thresholdCheck?.passed ?? true;
+          transitionRef.current = {
+            fromState,
+            fromRevealElapsed,
+            startTime: now,
+            type: passed ? 'complete_to_dark' : 'collapse_to_dark',
+          };
+        }
+      } else if (prevMode === 'dark' && (newMode === 'skeleton' || newMode === 'finale')) {
+        // New attempt or finale beginning: fade in
+        skeletonFadeInRef.current = now;
+        if (newMode === 'finale') resetCrossfadeState();
+      }
     }
 
     // Record start time when entering stakes or verdict mode
     if (newMode !== prevMode && (newMode === 'stakes' || newMode === 'verdict')) {
-      revealStartRef.current = performance.now();
+      revealStartRef.current = now;
     }
 
     prevModeRef.current = newMode;
@@ -108,21 +150,57 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress }: Pro
     ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, 0, W, H);
 
+    // Handle active transitions (takes priority over normal mode rendering)
+    const transition = transitionRef.current;
+    if (transition) {
+      const transElapsed = now - transition.startTime;
+      const duration = TRANSITION_DURATIONS[transition.type];
+
+      if (transElapsed >= duration) {
+        // Transition complete — clear and fall through to normal rendering
+        transitionRef.current = null;
+      } else {
+        switch (transition.type) {
+          case 'lockin':
+            drawLockinTransition(ctx, transition.fromState, s, t, transElapsed, transition.fromRevealElapsed);
+            break;
+          case 'collapse_to_dark':
+            drawCollapseTransition(ctx, transition.fromState, t, transElapsed, transition.fromRevealElapsed);
+            break;
+          case 'complete_to_dark':
+            drawCompleteTransition(ctx, transition.fromState, t, transElapsed, transition.fromRevealElapsed);
+            break;
+        }
+        animFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
+    }
+
     // Draw based on mode
     switch (s.mode) {
-      case 'skeleton':
+      case 'skeleton': {
         drawHeader(ctx, s, t);
-        drawSkeleton(ctx, s, t, 1);
+        // Fade in from dark (new attempt starting)
+        let skelAlpha = 1;
+        if (skeletonFadeInRef.current > 0) {
+          const fadeElapsed = now - skeletonFadeInRef.current;
+          skelAlpha = ease(clamp01(fadeElapsed / 800));
+          if (fadeElapsed >= 800) {
+            skeletonFadeInRef.current = 0; // Done fading in
+          }
+        }
+        drawSkeleton(ctx, s, t, skelAlpha);
         drawABLabels(ctx, s, t);
         break;
+      }
 
       case 'stakes': {
         drawHeader(ctx, s, t);
         const stakesElapsed = now - revealStartRef.current;
         // Skeleton fades out over first 600ms
-        const skelAlpha = 1 - ease(Math.min(1, stakesElapsed / 600));
-        if (skelAlpha > 0) {
-          drawSkeleton(ctx, s, t, skelAlpha);
+        const skelFadeAlpha = 1 - ease(Math.min(1, stakesElapsed / 600));
+        if (skelFadeAlpha > 0) {
+          drawSkeleton(ctx, s, t, skelFadeAlpha);
         }
         drawStakes(ctx, s, t, stakesElapsed);
         break;
@@ -132,6 +210,19 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress }: Pro
         drawHeader(ctx, s, t);
         const verdictElapsed = now - revealStartRef.current;
         drawVerdict(ctx, s, t, verdictElapsed);
+        break;
+      }
+
+      case 'finale': {
+        let finaleAlpha = 1;
+        if (skeletonFadeInRef.current > 0) {
+          const fadeElapsed = now - skeletonFadeInRef.current;
+          finaleAlpha = ease(clamp01(fadeElapsed / 800));
+          if (fadeElapsed >= 800) {
+            skeletonFadeInRef.current = 0;
+          }
+        }
+        drawFinale(ctx, s, t, finaleAlpha);
         break;
       }
 

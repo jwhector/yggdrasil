@@ -56,7 +56,7 @@ export function drawSkeleton(
 // ============================================================================
 
 interface NodeState {
-  state: 'empty' | 'active' | 'filled' | 'collapsed';
+  state: 'empty' | 'active' | 'filled' | 'collapsed' | 'finale';
   color: RGB;
 }
 
@@ -164,7 +164,7 @@ function drawSeedNode(
 // Connectors
 // ============================================================================
 
-function drawRadialLines(
+export function drawRadialLines(
   ctx: CanvasRenderingContext2D,
   layout: LayoutMetrics,
   state: ProjectorVisualState,

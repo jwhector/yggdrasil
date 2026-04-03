@@ -9,7 +9,7 @@
 
 import { useMemo } from 'react';
 import { getChapterIdentity, getLayerGroupIdentity } from '@/lib/identity';
-import { hexToRgb, EMPTY_COLOR, LAYER_GROUP_NODES } from './renderers/shared';
+import { hexToRgb, EMPTY_COLOR, FINALE_CHAPTER_COLORS, LAYER_GROUP_NODES } from './renderers/shared';
 import type { RGB } from './renderers/shared';
 import type { ProjectorClientState, AuditionProgress, AttemptState, VoteResult } from '@/conductor/types';
 
@@ -18,12 +18,12 @@ import type { ProjectorClientState, AuditionProgress, AttemptState, VoteResult }
 // ============================================================================
 
 export interface NodeVisualState {
-  state: 'empty' | 'active' | 'filled' | 'collapsed';
+  state: 'empty' | 'active' | 'filled' | 'collapsed' | 'finale';
   color: RGB;
 }
 
 export interface ProjectorVisualState {
-  mode: 'dark' | 'skeleton' | 'stakes' | 'verdict';
+  mode: 'dark' | 'skeleton' | 'stakes' | 'verdict' | 'finale';
   canvasWidth: number;
   canvasHeight: number;
 
@@ -51,6 +51,12 @@ export interface ProjectorVisualState {
   thresholdCheck: { threshold: number; winningProportion: number; passed: boolean } | null;
 }
 
+/** Mix state data resolved from socket events for the finale. */
+export interface MixStateInput {
+  nodeChapters: Record<string, string>;  // granularType → chapter name
+  loopPosition: number;
+}
+
 // ============================================================================
 // Hook
 // ============================================================================
@@ -61,6 +67,7 @@ export function useProjectorState(
   auditionProgress: AuditionProgress | null,
   canvasWidth: number,
   canvasHeight: number,
+  mixState?: MixStateInput | null,
 ): ProjectorVisualState {
   return useMemo(() => {
     const base: ProjectorVisualState = {
@@ -82,7 +89,29 @@ export function useProjectorState(
       thresholdCheck: null,
     };
 
-    if (!state || !currentAttempt) return base;
+    if (!state) return base;
+
+    // ---- Finale live mix ----
+    if (state.phase === 'finale_live_mix' && mixState) {
+      const allGranularTypes = ['bass', 'drums', 'pad', 'harmony', 'fx', 'seed'];
+      const nodes: Record<string, NodeVisualState> = {};
+
+      for (const typeId of allGranularTypes) {
+        const chapter = mixState.nodeChapters[typeId];
+        const color = chapter ? (FINALE_CHAPTER_COLORS[chapter] ?? EMPTY_COLOR) : EMPTY_COLOR;
+        nodes[typeId] = { state: 'finale', color };
+      }
+
+      return {
+        ...base,
+        mode: 'finale',
+        nodes,
+        loopPosition: mixState.loopPosition,
+      };
+    }
+
+    // ---- Song-building (attempt_build) ----
+    if (!currentAttempt) return base;
     if (state.phase !== 'attempt_build') return base;
 
     const chapter = getChapterIdentity(currentAttempt.chapter);
@@ -201,5 +230,5 @@ export function useProjectorState(
       voteResult: currentAttempt.currentVoteResult,
       thresholdCheck,
     };
-  }, [state, currentAttempt, auditionProgress, canvasWidth, canvasHeight]);
+  }, [state, currentAttempt, auditionProgress, canvasWidth, canvasHeight, mixState]);
 }

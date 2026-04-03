@@ -369,7 +369,17 @@ async function main() {
         return cleanup;
       }
     : undefined;
-  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter, onBridgeConnect);
+  // Compute live loop position from timing engine beat tracking
+  const getLoopPosition = (): number => {
+    if (!timingEngine) return 0;
+    const bp = timingEngine.getCurrentBeatPosition();
+    if (!bp) return 0;
+    const loopBeats = getState().config.timing.loopBoundaryBeats || 32;
+    const beatsIntoLoop = bp.barInLoop * 4 + bp.beatInBar;
+    return Math.min(beatsIntoLoop / loopBeats, 1);
+  };
+
+  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter, onBridgeConnect, getLoopPosition);
 
   // Start OSC bridge and timing engine
   try {

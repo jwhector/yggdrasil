@@ -7,7 +7,7 @@
  */
 
 import type { ProjectorVisualState } from '../useProjectorState';
-import { computeLayout, rgb, ease } from './shared';
+import { computeLayout, rgb, ease, clamp01, lerp } from './shared';
 import type { RGB } from './shared';
 
 // ============================================================================
@@ -290,14 +290,3 @@ export function drawVerdict(
   }
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}

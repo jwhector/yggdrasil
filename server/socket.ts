@@ -72,6 +72,7 @@ export function setupSocketHandlers(
   createNewShow?: () => ShowState,
   audioRouter?: AudioRouter,
   onBridgeConnect?: (socket: Socket) => () => void,
+  getLoopPosition?: () => number,
 ): void {
   // Heartbeat tracking
   const heartbeats = new Map<string, ClientHeartbeat>();
@@ -150,7 +151,7 @@ export function setupSocketHandlers(
       voteDistributions,
       lockedTypes: fs.liveMix.lockedTypes,
 
-      loopPosition: fs.liveMix.loopPosition,
+      loopPosition: getLoopPosition ? getLoopPosition() : fs.liveMix.loopPosition,
     });
 
     // Controller gets full data
@@ -159,7 +160,7 @@ export function setupSocketHandlers(
       voteDistributions,
       lockedTypes: fs.liveMix.lockedTypes,
 
-      loopPosition: fs.liveMix.loopPosition,
+      loopPosition: getLoopPosition ? getLoopPosition() : fs.liveMix.loopPosition,
     });
 
     // Each audience member gets: full active fragments, but only detailed votes for their own type

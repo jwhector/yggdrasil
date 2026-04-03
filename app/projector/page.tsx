@@ -1,12 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
+import { useMixState } from '@/hooks/useMixState';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { LiveMixProjector } from '@/components/finale/LiveMixProjector';
 import { ProjectorCanvas } from '@/components/projector/ProjectorCanvas';
 
 const SHOW_ID = 'default-show';
@@ -15,6 +14,7 @@ export default function ProjectorPage() {
   const { socket, userId } = useSocket({ showId: SHOW_ID, mode: 'projector' });
   const { state, isLoading, currentAttempt } = useShowState(socket, 'projector', userId);
   const auditionProgress = useAuditionProgress(socket, state?.phase, currentAttempt?.currentLayerPhase);
+  const mixStateData = useMixState(socket, state?.finaleState ?? null);
 
   if (isLoading || !state) {
     return <ProjectorDark />;
@@ -32,10 +32,11 @@ export default function ProjectorPage() {
       );
 
     case 'opener':
-    case 'attempt_story':
       return <ProjectorDark />;
 
+    case 'attempt_story':
     case 'attempt_build':
+    case 'attempt_resolve':
       return <ProjectorCanvas state={state} currentAttempt={currentAttempt} auditionProgress={auditionProgress} />;
 
     case 'finale_elegy': {
@@ -89,17 +90,15 @@ export default function ProjectorPage() {
       );
     }
 
-    case 'finale_live_mix': {
-      const fls = state.finaleState;
-      if (!fls) return <ProjectorDark />;
+    case 'finale_live_mix':
       return (
-        <LiveMixProjector
-          finaleState={fls}
-          granularTypes={state.config.granularTypes ?? []}
-          socket={socket}
+        <ProjectorCanvas
+          state={state}
+          currentAttempt={currentAttempt}
+          auditionProgress={auditionProgress}
+          mixStateData={mixStateData}
         />
       );
-    }
 
     case 'ended':
       return <ProjectorDark />;

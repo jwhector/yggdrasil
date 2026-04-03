@@ -33,6 +33,7 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
   const isVoting = currentLayerPhase === 'auditioning';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const isRevealing = currentLayerPhase === 'revealing';
+  const isStuckInVerdict = currentLayerPhase === 'locked_in' || currentLayerPhase === 'collapsed';
   const stakesShown = attempt.revealStakesShown;
 
   const send = (cmd: ConductorCommand) => sendCommand(cmd);
@@ -129,6 +130,15 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
           title="Reveal the vote result (Beat 2)"
         >
           Reveal Votes
+        </button>
+
+        <button
+          onClick={() => send({ type: 'ADVANCE_FROM_VERDICT' })}
+          disabled={!isStuckInVerdict}
+          style={{ ...btn, ...(!isStuckInVerdict ? disabled : btnWarning) }}
+          title="Force advance past verdict (failsafe if timer didn't fire)"
+        >
+          Force Advance
         </button>
 
         <button
