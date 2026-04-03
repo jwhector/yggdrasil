@@ -61,9 +61,10 @@ function getDisplayColor(nodeId: string, targetColor: RGB): RGB {
   return lerpRgb(entry.fromColor, entry.toColor, progress);
 }
 
-/** Clear crossfade state (call when leaving finale mode). */
-export function resetCrossfadeState(): void {
+/** Clear module-level state (call when entering/leaving finale mode). */
+export function resetFinaleState(): void {
   crossfadeState.clear();
+  loopInterp = { lastServerPos: 0, lastServerTime: 0, velocity: 0 };
 }
 
 // ============================================================================
@@ -194,8 +195,9 @@ export function drawFinale(
   const seedDisplayColor = getDisplayColor('seed', seedTargetColor);
   drawFinaleSeedNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, seedDisplayColor, t);
 
-  // Loop position ring
-  drawLoopRing(ctx, layout.centerX, layout.centerY, layout.orbitRadius, layout.nodeRadius, state.loopPosition);
+  // Loop position ring (interpolated for smooth animation between ~4 Hz server updates)
+  const smoothLoopPos = getInterpolatedLoopPosition(state.loopPosition);
+  drawLoopRing(ctx, layout.centerX, layout.centerY, layout.orbitRadius, layout.nodeRadius, smoothLoopPos);
 
   // Finale header
   drawFinaleHeader(ctx, W, H);

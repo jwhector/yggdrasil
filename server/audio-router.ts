@@ -823,7 +823,7 @@ export function createAudioRouter(
       routerState.collapseTimers.delete(cue.attemptIndex);
       setTimeout(() => {
         oscBridge.send('/live/song/stop_playing');
-      }, collapseMs + 3000);
+      }, 3000);
     }, collapseMs);
     
 

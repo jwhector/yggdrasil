@@ -1,3 +1,4 @@
 {
+  "/controller/page": "app/controller/page.js",
   "/projector/page": "app/projector/page.js"
 }

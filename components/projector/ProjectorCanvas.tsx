@@ -17,7 +17,7 @@ import { BG_COLOR, ease, clamp01 } from './renderers/shared';
 import { drawSkeleton } from './renderers/skeleton';
 import { drawHeader, drawABLabels } from './renderers/audition';
 import { drawStakes, drawVerdict } from './renderers/reveal';
-import { drawFinale, resetCrossfadeState } from './renderers/finale';
+import { drawFinale, resetFinaleState } from './renderers/finale';
 import {
   drawLockinTransition,
   drawCollapseTransition,
@@ -99,7 +99,7 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress, mixSt
       } else if (prevMode === 'dark' && (newMode === 'skeleton' || newMode === 'finale')) {
         // New attempt or finale beginning: fade in
         skeletonFadeInRef.current = now;
-        if (newMode === 'finale') resetCrossfadeState();
+        if (newMode === 'finale') resetFinaleState();
       }
     }
 
