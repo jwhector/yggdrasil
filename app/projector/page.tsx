@@ -46,9 +46,6 @@ export default function ProjectorPage() {
       const losers = fs.allFragments.filter(f => !availableIds.has(f.id));
       return (
         <main style={projectorMainStyle}>
-          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const }}>
-            The Elegy
-          </div>
           <ElegyGrid
             availableFragments={fs.availableFragments}
             lockedFragments={losers}
@@ -64,9 +61,6 @@ export default function ProjectorPage() {
       const assignmentTypes = state.config.granularTypes ?? [];
       return (
         <main style={projectorMainStyle}>
-          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.15em', textTransform: 'uppercase' as const, padding: '40px 40px 0' }}>
-            Assignment
-          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', padding: '20px 40px' }}>
             {assignmentTypes.map(gt => {
               const size = fas.groupSizes.find(g => g.granularType === gt.id)?.count ?? 0;

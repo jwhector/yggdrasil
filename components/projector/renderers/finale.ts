@@ -288,16 +288,9 @@ function drawLoopRing(
 // ============================================================================
 
 function drawFinaleHeader(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
+  _ctx: CanvasRenderingContext2D,
+  _W: number,
+  _H: number,
 ): void {
-  const topY = H * 0.06;
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.font = `${W * 0.009}px system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.letterSpacing = '0.15em';
-  ctx.fillText('LIVE MIX', W / 2, topY);
-  ctx.letterSpacing = '0em';
+  // Header text label removed
 }

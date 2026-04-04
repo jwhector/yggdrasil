@@ -14,40 +14,11 @@ import type { RGB } from './shared';
 // ============================================================================
 
 export function drawHeader(
-  ctx: CanvasRenderingContext2D,
-  state: ProjectorVisualState,
-  t: number,
+  _ctx: CanvasRenderingContext2D,
+  _state: ProjectorVisualState,
+  _t: number,
 ): void {
-  if (state.mode === 'dark') return;
-
-  const W = state.canvasWidth;
-  const cx = W / 2;
-  const topY = state.canvasHeight * 0.06;
-  const color = state.chapterColor;
-
-  // "SEQUENCE STATE" — small dim label
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.font = `${W * 0.01}px system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const statusText = state.currentAuditionOption
-    ? 'AUDITIONING'
-    : 'SONG ' + (state.currentAttemptIndex + 1);
-  ctx.fillText(statusText, cx, topY);
-
-  // Layer group label — large, chapter color
-  ctx.fillStyle = rgb(color, 0.9);
-  ctx.font = `bold ${W * 0.028}px system-ui, sans-serif`;
-  ctx.fillText(state.layerGroupLabel.toUpperCase(), cx, topY + W * 0.032);
-
-  // "LAYER X OF Y" — small dim
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.font = `${W * 0.01}px system-ui, sans-serif`;
-  ctx.fillText(
-    `LAYER ${state.currentLayerIndex + 1} OF ${state.totalLayers}`,
-    cx,
-    topY + W * 0.055,
-  );
+  // Header text labels removed — canvas draws without top-of-screen text
 }
 
 // ============================================================================
