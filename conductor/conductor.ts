@@ -87,6 +87,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     currentAuditionOption: null,
     auditionLoopIndex: 0,
     currentVoteResult: null,
+    revealStakesShown: false,
   }));
 
   return {
@@ -135,8 +136,12 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleToggleAudition(state);
     case 'CLOSE_VOTING':
       return handleCloseVoting(state);
+    case 'REVEAL_STAKES':
+      return handleRevealStakes(state);
     case 'ADVANCE_FROM_REVEAL':
       return handleAdvanceFromReveal(state);
+    case 'ADVANCE_FROM_VERDICT':
+      return handleAdvanceFromVerdict(state);
     case 'SUBMIT_VOTE':
       return handleSubmitVote(state, command.userId, command.choice);
     case 'FORCE_OPTION':
@@ -575,6 +580,8 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
   attempt.currentLayerPhase = 'auditioning';
   attempt.currentAuditionOption = 'A';
   attempt.auditionLoopIndex = 0;
+  attempt.revealStakesShown = false;
+  attempt.currentVoteResult = null;
 
   // Per-layer tempo from config
   const attemptConfig = state.config.attempts[attempt.index];
@@ -747,8 +754,46 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
 }
 
 /**
+ * Show the stakes (threshold) during the revealing phase.
+ * Beat 1 of the two-beat reveal — projector shows the threshold bar.
+ * Does not change the conductor phase.
+ */
+function handleRevealStakes(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_build') {
+    return [{ type: 'ERROR', message: 'Can only reveal stakes during attempt_build' }];
+  }
+
+  const attempt = currentAttempt(state);
+  if (!attempt || attempt.status !== 'in_progress') {
+    return [{ type: 'ERROR', message: 'No active attempt' }];
+  }
+
+  if (attempt.currentLayerPhase !== 'revealing') {
+    return [{ type: 'ERROR', message: `Cannot reveal stakes from layer phase: ${attempt.currentLayerPhase}` }];
+  }
+
+  if (attempt.revealStakesShown) {
+    return []; // Already shown; ignore duplicate
+  }
+
+  attempt.revealStakesShown = true;
+
+  const layerResult = attempt.layerResults.find(r => r.layerIndex === attempt.currentLayerIndex);
+  const threshold = layerResult?.thresholdRequired ?? 0.5;
+
+  return [{
+    type: 'REVEAL_STAKES_SHOWN',
+    attemptIndex: attempt.index,
+    layerIndex: attempt.currentLayerIndex,
+    threshold,
+  }];
+}
+
+/**
  * Advance from the revealing phase to locked_in or collapsed.
- * Called by the timing engine after the reveal animation completes.
+ * Beat 2 of the two-beat reveal — sets the verdict state but does NOT
+ * auto-advance to the next layer/attempt. The timing engine schedules
+ * ADVANCE_FROM_VERDICT after the verdict animation completes.
  */
 function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
   if (state.phase !== 'attempt_build') {
@@ -764,21 +809,144 @@ function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
     return []; // Already advanced; ignore duplicate
   }
 
-  const voteResult = attempt.currentVoteResult;
-
-  // Clear reveal data
-  attempt.currentVoteResult = null;
+  // Clear reveal flag
+  attempt.revealStakesShown = false;
 
   // Determine pass/collapse from the layer result recorded during resolveCurrentLayer
   const layerResult = attempt.layerResults.find(r => r.layerIndex === attempt.currentLayerIndex);
   const passed = layerResult?.passed ?? true;
+  const events: ConductorEvent[] = [];
 
   if (!passed) {
-    return collapseAttempt(state, attempt);
+    // Mark as collapsed but don't auto-advance yet — verdict animation plays first
+    attempt.status = 'collapsed';
+    attempt.collapsedAtLayer = attempt.currentLayerIndex;
+    attempt.currentLayerPhase = 'collapsed';
+    markUnreachedLayers(attempt);
+
+    events.push({
+      type: 'LAYER_PHASE_CHANGED',
+      attemptIndex: attempt.index,
+      layerIndex: attempt.currentLayerIndex,
+      phase: 'collapsed',
+    });
+    events.push({
+      type: 'ATTEMPT_COLLAPSED',
+      attemptIndex: attempt.index,
+      atLayer: attempt.currentLayerIndex,
+    });
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: { type: 'collapse_gesture', attemptIndex: attempt.index },
+    });
   } else {
-    const winner = voteResult?.winner ?? 'A';
-    return lockInLayer(state, attempt, winner);
+    // Lock in the layer but don't advance to next layer yet — verdict animation plays first
+    const winner = attempt.currentVoteResult?.winner ?? 'A';
+    const layerIndex = attempt.currentLayerIndex;
+    const layerConfig = attempt.layerPlan[layerIndex];
+
+    // Record layer result
+    const existingResult = attempt.layerResults.find(r => r.layerIndex === layerIndex);
+    if (!existingResult) {
+      const layerVotes = attempt.votes.filter(v => v.layerIndex === layerIndex);
+      const { winningProportion } = calculateConsensus(layerVotes);
+      attempt.layerResults.push({
+        layerIndex,
+        group: layerConfig?.group ?? null,
+        status: 'locked_in',
+        chosenOption: winner,
+        winningProportion,
+        thresholdRequired: null,
+        passed: true,
+      });
+    } else {
+      existingResult.status = 'locked_in';
+      existingResult.chosenOption = winner;
+    }
+
+    attempt.currentLayerPhase = 'locked_in';
+
+    events.push({
+      type: 'LAYER_PHASE_CHANGED',
+      attemptIndex: attempt.index,
+      layerIndex,
+      phase: 'locked_in',
+    });
+    events.push({
+      type: 'LAYER_LOCKED_IN',
+      attemptIndex: attempt.index,
+      layerIndex,
+      winner,
+    });
+
+    const loser: 'A' | 'B' = winner === 'A' ? 'B' : 'A';
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'lock_in',
+        attemptIndex: attempt.index,
+        layerIndex,
+        winner,
+        winnerTrackBundle: layerConfig?.optionA && layerConfig?.optionB
+          ? (winner === 'A' ? layerConfig.optionA : layerConfig.optionB)
+          : EMPTY_TRACK_BUNDLE,
+        loserTrackBundle: layerConfig?.optionA && layerConfig?.optionB
+          ? (loser === 'A' ? layerConfig.optionA : layerConfig.optionB)
+          : EMPTY_TRACK_BUNDLE,
+      },
+    });
   }
+
+  // Don't clear currentVoteResult yet — projector needs it for verdict animation.
+  // It will be cleared by ADVANCE_FROM_VERDICT.
+  return events;
+}
+
+/**
+ * Advance from the verdict state to the next layer or attempt.
+ * Fired by the timing engine after the verdict animation completes.
+ */
+function handleAdvanceFromVerdict(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'attempt_build') {
+    return [{ type: 'ERROR', message: 'Can only advance from verdict during attempt_build' }];
+  }
+
+  const attempt = currentAttempt(state);
+  if (!attempt) {
+    return [{ type: 'ERROR', message: 'No active attempt' }];
+  }
+
+  // Clear vote result now that verdict animation is done
+  attempt.currentVoteResult = null;
+
+  if (attempt.currentLayerPhase === 'collapsed') {
+    return autoAdvanceAfterCollapse(state);
+  }
+
+  if (attempt.currentLayerPhase === 'locked_in') {
+    const layerIndex = attempt.currentLayerIndex;
+    if (layerIndex < attempt.layerPlan.length - 1) {
+      attempt.currentLayerIndex = layerIndex + 1;
+      attempt.currentLayerPhase = 'locked';
+      return [];
+    } else {
+      attempt.status = 'completed';
+      markUnreachedLayers(attempt);
+
+      const events: ConductorEvent[] = [];
+      events.push({ type: 'ATTEMPT_COMPLETED', attemptIndex: attempt.index });
+
+      state.phase = 'attempt_resolve';
+      events.push({
+        type: 'SHOW_PHASE_CHANGED',
+        phase: 'attempt_resolve',
+        attemptIndex: state.currentAttemptIndex,
+      });
+      return events;
+    }
+  }
+
+  return []; // Already advanced; ignore
 }
 
 /**
@@ -1023,6 +1191,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     currentAuditionOption: null,
     auditionLoopIndex: 0,
     currentVoteResult: null,
+    revealStakesShown: false,
   }));
 
   return [

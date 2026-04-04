@@ -127,6 +127,7 @@ export interface AttemptState {
   currentAuditionOption: 'A' | 'B' | null;  // Which option is currently playing
   auditionLoopIndex: number;                  // 0-based count of loops completed
   currentVoteResult: VoteResult | null;       // Set during revealing phase, cleared on lock-in
+  revealStakesShown: boolean;                 // True after REVEAL_STAKES fires in current revealing phase
 }
 
 /** Static configuration for a single attempt. */
@@ -340,7 +341,9 @@ export type ConductorCommand =
   | { type: 'START_AUDITION' }
   | { type: 'TOGGLE_AUDITION' }
   | { type: 'CLOSE_VOTING' }
+  | { type: 'REVEAL_STAKES' }
   | { type: 'ADVANCE_FROM_REVEAL' }
+  | { type: 'ADVANCE_FROM_VERDICT' }
   | { type: 'SUBMIT_VOTE'; userId: UserId; choice: 'A' | 'B' }
   | { type: 'FORCE_OPTION'; choice: 'A' | 'B' }
   | { type: 'EXTEND_VOTE_TIMER'; additionalMs: number }
@@ -401,6 +404,7 @@ export type ConductorEvent =
   | { type: 'VOTE_RESULT'; attemptIndex: number; layerIndex: number; result: VoteResult }
   | { type: 'LAYER_LOCKED_IN'; attemptIndex: number; layerIndex: number; winner: 'A' | 'B' }
   | { type: 'THRESHOLD_CHECK'; attemptIndex: number; layerIndex: number; winningProportion: number; threshold: number; passed: boolean }
+  | { type: 'REVEAL_STAKES_SHOWN'; attemptIndex: number; layerIndex: number; threshold: number }
   | { type: 'ATTEMPT_COLLAPSED'; attemptIndex: number; atLayer: number }
   | { type: 'ATTEMPT_COMPLETED'; attemptIndex: number }
   | { type: 'SONG_REJECTED'; attemptIndex: number }

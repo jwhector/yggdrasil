@@ -260,7 +260,7 @@ describe('TimingEngine', () => {
       expect(sendCommand).not.toHaveBeenCalled();
     });
 
-    test('locked_in does not schedule a timer', () => {
+    test('locked_in schedules ADVANCE_FROM_VERDICT after revealSequenceDurationMs', () => {
       advanceToBuild(state);
 
       timingEngine.onStateChanged(state, [{
@@ -270,9 +270,9 @@ describe('TimingEngine', () => {
         phase: 'locked_in',
       }]);
 
-      jest.advanceTimersByTime(60000);
+      jest.advanceTimersByTime(state.config.timing.revealSequenceDurationMs + 100);
 
-      expect(sendCommand).not.toHaveBeenCalled();
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_FROM_VERDICT' });
     });
   });
 

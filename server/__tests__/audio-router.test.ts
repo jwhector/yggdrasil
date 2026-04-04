@@ -474,7 +474,10 @@ describe('AudioRouter', () => {
       await Promise.resolve();
 
       mockSend.mockClear();
-      // Cleanup timer fires at revealSequenceDurationMs (3000ms) after it was scheduled
+      // Outer cleanup timer fires at revealSequenceDurationMs (3000ms) after it was scheduled
+      jest.advanceTimersByTime(3000);
+      // Inner timer defers stop_playing by 3000 (6000ms) so Ableton
+      // can process the tempo reset before transport stops
       jest.advanceTimersByTime(3000);
 
       expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');

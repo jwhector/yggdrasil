@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2026-04-02 — Projector Visual Spec Phase 1+2: Canvas skeleton, audition, two-beat reveal
+
+**Context:** Replaces the DOM-based projector song-building view with a Canvas 2D pentagon skeleton visualization, per `PROJECTOR-VISUAL-SPEC.md`. Adds a two-beat manual reveal: the performer controls when stakes (threshold) and verdict (vote result) are shown via controller buttons.
+
+**Key changes:**
+- Created `components/projector/ProjectorCanvas.tsx` — fullscreen canvas with DPR-aware sizing and `requestAnimationFrame` render loop
+- Created `components/projector/useProjectorState.ts` — derives visual state from conductor state
+- Created `components/projector/renderers/` — pure drawing functions for skeleton, audition labels, and reveal animations
+- Modified `app/projector/page.tsx` — `attempt_build` case now renders `<ProjectorCanvas>`
+- Added `REVEAL_STAKES` command + `REVEAL_STAKES_SHOWN` event to conductor types
+- Added `ADVANCE_FROM_VERDICT` command — timing engine fires this after verdict animation, separating verdict display from state advance
+- Split `ADVANCE_FROM_REVEAL` so it sets locked_in/collapsed without auto-advancing; `ADVANCE_FROM_VERDICT` handles the advance
+- Removed auto-advance timer from revealing phase in timing engine; reveal is now fully manual
+- Added `revealStakesShown` boolean to `AttemptState` for refresh-safe state tracking
+- Added "Show Stakes" and "Reveal Votes" controller buttons in `VotingControls.tsx`
+- 302 tests passing (5 new REVEAL_STAKES tests), 1 pre-existing audio-router flake
+
 ## 2026-03-27 — Replace melody with seed + muted live mix start + voteable silence
 
 **Context:** The "melody" granular type was always empty (melody is performed live). Live seed tracks from song-building were discarded after each attempt. This change makes live seed tracks reusable as finale fragments, adds a muted live mix start, and introduces silence as a voteable option.

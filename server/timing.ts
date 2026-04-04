@@ -740,21 +740,29 @@ export function createTimingEngine(
           break;
         case 'revealing': {
           stopAuditionTracking();
-          const revealMs = state.config.timing.revealSequenceDurationMs;
-          console.log(`[Timing] Revealing: scheduling ${revealMs}ms timer → ADVANCE_FROM_REVEAL`);
-          scheduleTimer(revealMs, state.version, 'revealing', () => {
-            sendCommand({ type: 'ADVANCE_FROM_REVEAL' });
+          // Two-beat reveal: performer manually fires REVEAL_STAKES then ADVANCE_FROM_REVEAL
+          // via controller buttons. No auto-advance timer.
+          console.log('[Timing] Revealing — waiting for manual REVEAL_STAKES → ADVANCE_FROM_REVEAL');
+          break;
+        }
+        case 'locked_in': {
+          stopAuditionTracking();
+          const verdictMs = state.config.timing.revealSequenceDurationMs;
+          console.log(`[Timing] Layer locked in — scheduling ${verdictMs}ms verdict timer → ADVANCE_FROM_VERDICT`);
+          scheduleTimer(verdictMs, state.version, 'verdict', () => {
+            sendCommand({ type: 'ADVANCE_FROM_VERDICT' });
           });
           break;
         }
-        case 'locked_in':
+        case 'collapsed': {
           stopAuditionTracking();
-          console.log('[Timing] Layer locked in — waiting for manual advance');
+          const collapseVerdictMs = state.config.timing.revealSequenceDurationMs;
+          console.log(`[Timing] Attempt collapsed — scheduling ${collapseVerdictMs}ms verdict timer → ADVANCE_FROM_VERDICT`);
+          scheduleTimer(collapseVerdictMs, state.version, 'verdict', () => {
+            sendCommand({ type: 'ADVANCE_FROM_VERDICT' });
+          });
           break;
-        case 'collapsed':
-          stopAuditionTracking();
-          console.log('[Timing] Attempt collapsed — no timer needed');
-          break;
+        }
         case 'locked':
           stopAuditionTracking();
           console.log('[Timing] Layer reset to locked — timers cancelled');

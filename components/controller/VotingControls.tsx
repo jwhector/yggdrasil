@@ -33,6 +33,8 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
   const isVoting = currentLayerPhase === 'auditioning';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const isRevealing = currentLayerPhase === 'revealing';
+  const isStuckInVerdict = currentLayerPhase === 'locked_in' || currentLayerPhase === 'collapsed';
+  const stakesShown = attempt.revealStakesShown;
 
   const send = (cmd: ConductorCommand) => sendCommand(cmd);
 
@@ -110,6 +112,33 @@ export function VotingControls({ fullState, sendCommand }: VotingControlsProps) 
           title="Force option B as winner"
         >
           Force B
+        </button>
+
+        <button
+          onClick={() => send({ type: 'REVEAL_STAKES' })}
+          disabled={!isRevealing || stakesShown}
+          style={{ ...btn, ...((!isRevealing || stakesShown) ? disabled : btnReveal) }}
+          title="Show the threshold stakes (Beat 1)"
+        >
+          Show Stakes
+        </button>
+
+        <button
+          onClick={() => send({ type: 'ADVANCE_FROM_REVEAL' })}
+          disabled={!isRevealing || !stakesShown}
+          style={{ ...btn, ...((!isRevealing || !stakesShown) ? disabled : btnReveal) }}
+          title="Reveal the vote result (Beat 2)"
+        >
+          Reveal Votes
+        </button>
+
+        <button
+          onClick={() => send({ type: 'ADVANCE_FROM_VERDICT' })}
+          disabled={!isStuckInVerdict}
+          style={{ ...btn, ...(!isStuckInVerdict ? disabled : btnWarning) }}
+          title="Force advance past verdict (failsafe if timer didn't fire)"
+        >
+          Force Advance
         </button>
 
         <button
@@ -207,6 +236,7 @@ const btn: React.CSSProperties = {
   minHeight: '48px',
 };
 const btnPrimary: React.CSSProperties = { backgroundColor: '#f0f0f0', color: '#111' };
+const btnReveal: React.CSSProperties = { backgroundColor: '#1e1b4b', color: '#818cf8', border: '1px solid #3730a3' };
 const btnWarning: React.CSSProperties = { backgroundColor: '#451a03', color: '#fbbf24', border: '1px solid #78350f' };
 const disabled: React.CSSProperties = { backgroundColor: '#1a1a1a', color: '#555', border: '1px solid #333', cursor: 'not-allowed', opacity: 0.5 };
 
