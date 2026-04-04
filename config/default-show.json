@@ -452,7 +452,7 @@
   "granularTypes": [
     {
       "id": "bass",
-      "label": "The Ground",
+      "label": "The Mind",
       "color": "#TBD",
       "symbol": "\u25a0"
     },
@@ -464,25 +464,25 @@
     },
     {
       "id": "pad",
-      "label": "The Warmth",
+      "label": "The Hand",
       "color": "#TBD",
       "symbol": "\u25c6"
     },
     {
       "id": "seed",
-      "label": "The Seed",
+      "label": "The Soul",
       "color": "#TBD",
       "symbol": "◎"
     },
     {
       "id": "harmony",
-      "label": "The Color",
+      "label": "The Hair",
       "color": "#TBD",
       "symbol": "\u25cf"
     },
     {
       "id": "fx",
-      "label": "The Shimmer",
+      "label": "The Kidney",
       "color": "#TBD",
       "symbol": "~"
     }

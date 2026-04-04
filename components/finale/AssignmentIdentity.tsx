@@ -15,6 +15,15 @@ interface AssignmentIdentityProps {
   granularType: GranularType;
 }
 
+const identityDescriptions: Record<string, string> = {
+  'bass': 'The Mind', 
+  'drums': 'The Heartbeat',
+  'pad': 'The Hand',
+  'seed': 'The Soul',
+  'harmony': 'The Hair',
+  'fx': 'The Kidney',
+};
+
 export function AssignmentIdentity({ granularType }: AssignmentIdentityProps) {
   return (
     <div style={{
@@ -64,7 +73,7 @@ export function AssignmentIdentity({ granularType }: AssignmentIdentityProps) {
         textAlign: 'center',
         padding: '0 32px',
       }}>
-        Find others with your symbol
+        {identityDescriptions[granularType.id]}
       </p>
     </div>
   );
