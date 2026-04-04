@@ -262,6 +262,7 @@ export interface ShowState {
 
 export interface ShowConfig {
   layersPerAttempt: number;             // 3 in V3.2 (was 6)
+  chapters?: ChapterConfig[];           // Visual identity per chapter (color, label, icon)
   granularTypes?: GranularType[];       // V3.2: master registry of granular types
   layerGroups?: LayerGroupConfig[];     // V3.2: layer group definitions (bones/flesh/spark)
   attempts: V32AttemptConfig[];         // Length 3; V3.2 structure with TrackBundles + liveSeed
@@ -442,6 +443,17 @@ export type ConductorEvent =
 
 /** Number of audience-facing layer groups per attempt in V3.2 (bones, flesh, spark). */
 export const V32_LAYERS_PER_ATTEMPT = 3;
+
+/**
+ * Chapter visual identity — color, label, and icon for a narrative chapter.
+ * Stored in show config so identity is config-driven rather than hardcoded.
+ */
+export interface ChapterConfig {
+  id: Chapter;
+  label: string;   // Display name (e.g., 'Ambition')
+  color: string;   // CSS color
+  icon: string;    // Unicode symbol
+}
 
 /**
  * A single granular instrument type — the atomic unit of the finale.
@@ -685,6 +697,7 @@ export interface AudienceClientState {
   myFinale: AudienceFinaleView | null;
   config: {
     lobby: { waitingMessage: string };
+    chapters: ChapterConfig[];
     granularTypes: GranularType[];
   };
 }

@@ -812,6 +812,7 @@ export function filterStateForClient(
         myFinale,
         config: {
           lobby: state.config.lobby,
+          chapters: state.config.chapters ?? [],
           granularTypes: state.config.granularTypes ?? [],
         },
       };

@@ -22,6 +22,7 @@ import type {
   ProjectorClientState,
 } from '@/conductor/types';
 import { updateLastVersion } from '@/lib/storage';
+import { hydrateIdentity } from '@/lib/identity';
 import { deserializeState, isSerializedState, type SerializedShowState } from '@/lib/serialization';
 
 export type ClientMode = 'controller' | 'projector' | 'audience';
@@ -98,6 +99,7 @@ export function useShowState(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleStateSync = (data: any) => {
+      if (data?.config) hydrateIdentity(data.config);
       if (mode === 'controller' && isSerializedState(data)) {
         const deserialized = deserializeState(data);
         setFullState(deserialized);

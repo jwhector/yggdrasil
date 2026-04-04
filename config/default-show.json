@@ -449,41 +449,46 @@
     "waitingMessage": "The show will begin shortly."
   },
   "seatIds": [],
+  "chapters": [
+    { "id": "ambition",  "label": "Ambition",  "color": "#e63946", "icon": "\u25b2" },
+    { "id": "love",      "label": "Love",       "color": "#f4a261", "icon": "\u25cf" },
+    { "id": "avoidance", "label": "Avoidance",  "color": "#457b9d", "icon": "\u25c6" }
+  ],
   "granularTypes": [
     {
       "id": "bass",
       "label": "The Mind",
-      "color": "#TBD",
+      "color": "#8b1a1a",
       "symbol": "\u25a0"
     },
     {
       "id": "drums",
       "label": "The Heartbeat",
-      "color": "#TBD",
+      "color": "#f5c542",
       "symbol": "\u25b2"
     },
     {
       "id": "pad",
       "label": "The Hand",
-      "color": "#TBD",
+      "color": "#7b2d8b",
       "symbol": "\u25c6"
     },
     {
       "id": "seed",
       "label": "The Soul",
-      "color": "#TBD",
+      "color": "#e5e5e5",
       "symbol": "◎"
     },
     {
       "id": "harmony",
       "label": "The Hair",
-      "color": "#TBD",
+      "color": "#2563eb",
       "symbol": "\u25cf"
     },
     {
       "id": "fx",
       "label": "The Kidney",
-      "color": "#TBD",
+      "color": "#22c55e",
       "symbol": "~"
     }
   ],
