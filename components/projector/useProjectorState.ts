@@ -41,7 +41,9 @@ export interface ProjectorVisualState {
   labelA: string;
   labelB: string;
   layerGroupLabel: string;
-  chapterColor: RGB;
+  chapterColor: RGB;      // Primary (seed node)
+  chapterColorA: RGB;     // Option A
+  chapterColorB: RGB;     // Option B
 
   // Timing
   loopPosition: number;
@@ -53,7 +55,8 @@ export interface ProjectorVisualState {
 
 /** Mix state data resolved from socket events for the finale. */
 export interface MixStateInput {
-  nodeChapters: Record<string, string>;  // granularType → chapter name
+  nodeChapters: Record<string, string>;       // granularType → chapter name
+  nodeOptions: Record<string, 'A' | 'B'>;    // granularType → active fragment option
   loopPosition: number;
 }
 
@@ -84,6 +87,8 @@ export function useProjectorState(
       labelB: '',
       layerGroupLabel: '',
       chapterColor: EMPTY_COLOR,
+      chapterColorA: EMPTY_COLOR,
+      chapterColorB: EMPTY_COLOR,
       loopPosition: 0,
       voteResult: null,
       thresholdCheck: null,
@@ -98,7 +103,14 @@ export function useProjectorState(
 
       for (const typeId of allGranularTypes) {
         const chapter = mixState.nodeChapters[typeId];
-        const color = chapter ? (FINALE_CHAPTER_COLORS[chapter] ?? EMPTY_COLOR) : EMPTY_COLOR;
+        const option = mixState.nodeOptions[typeId];
+        let color = EMPTY_COLOR;
+        if (chapter) {
+          const colors = FINALE_CHAPTER_COLORS[chapter];
+          if (colors) {
+            color = option ? colors[option] : colors.primary;
+          }
+        }
         nodes[typeId] = { state: 'finale', color };
       }
 
@@ -116,6 +128,8 @@ export function useProjectorState(
 
     const chapter = getChapterIdentity(currentAttempt.chapter);
     const chapterColorRgb = hexToRgb(chapter.color);
+    const chapterColorA = hexToRgb(chapter.colorA);
+    const chapterColorB = hexToRgb(chapter.colorB);
     const layerPlan = currentAttempt.layerPlan;
     const currentLayerIndex = currentAttempt.currentLayerIndex;
     const currentLayerConfig = layerPlan[currentLayerIndex];
@@ -163,9 +177,12 @@ export function useProjectorState(
         nodes[typeId] = { state: 'empty', color: EMPTY_COLOR };
       } else if (groupLayerIdx === currentLayerIndex) {
         if (layerPhase === 'auditioning' || layerPhase === 'revealing') {
-          nodes[typeId] = { state: 'active', color: chapterColorRgb };
+          const audOpt = currentAttempt.currentAuditionOption;
+          const audColor = audOpt === 'A' ? chapterColorA : audOpt === 'B' ? chapterColorB : chapterColorRgb;
+          nodes[typeId] = { state: 'active', color: audColor };
         } else if (layerPhase === 'locked_in') {
-          nodes[typeId] = { state: 'filled', color: chapterColorRgb };
+          const optColor = layerResult?.chosenOption === 'A' ? chapterColorA : layerResult?.chosenOption === 'B' ? chapterColorB : chapterColorRgb;
+          nodes[typeId] = { state: 'filled', color: optColor };
         } else if (layerPhase === 'collapsed') {
           nodes[typeId] = { state: 'collapsed', color: chapterColorRgb };
         } else {
@@ -173,7 +190,8 @@ export function useProjectorState(
         }
       } else {
         if (layerResult?.status === 'locked_in') {
-          nodes[typeId] = { state: 'filled', color: chapterColorRgb };
+          const optColor = layerResult.chosenOption === 'A' ? chapterColorA : layerResult.chosenOption === 'B' ? chapterColorB : chapterColorRgb;
+          nodes[typeId] = { state: 'filled', color: optColor };
         } else if (layerResult?.status === 'collapsed') {
           nodes[typeId] = { state: 'collapsed', color: chapterColorRgb };
         } else {
@@ -226,6 +244,8 @@ export function useProjectorState(
       labelB: currentLayerConfig?.labelB ?? '',
       layerGroupLabel,
       chapterColor: chapterColorRgb,
+      chapterColorA,
+      chapterColorB,
       loopPosition: auditionProgress?.barProgress ?? 0,
       voteResult: currentAttempt.currentVoteResult,
       thresholdCheck,

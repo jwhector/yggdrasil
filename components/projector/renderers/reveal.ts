@@ -52,7 +52,8 @@ export function drawStakes(
   const H = state.canvasHeight;
   const layout = computeLayout(W, H);
   const bars = computeBarLayout(W, H);
-  const color = state.chapterColor;
+  const colorA = state.chapterColorA;
+  const colorB = state.chapterColorB;
 
   // A/B label positions: slide from sides to center bottom
   const slideProgress = ease(clamp01((elapsed - 400) / 800));
@@ -67,19 +68,21 @@ export function drawStakes(
   const labelAlpha = 0.85;
   const letterSize = W * 0.06;
 
-  ctx.fillStyle = rgb(color, labelAlpha);
   ctx.font = `bold ${letterSize}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.fillStyle = rgb(colorA, labelAlpha);
   ctx.fillText('A', aX, labelY);
+  ctx.fillStyle = rgb(colorB, labelAlpha);
   ctx.fillText('B', bX, labelY);
 
   // Sound descriptors below labels
   const descAlpha = slideProgress * 0.5;
   const descSize = W * 0.012;
-  ctx.fillStyle = rgb(color, descAlpha);
   ctx.font = `${descSize}px system-ui, sans-serif`;
+  ctx.fillStyle = rgb(colorA, descAlpha);
   ctx.fillText(state.labelA.toUpperCase(), aX, labelY + letterSize * 0.6);
+  ctx.fillStyle = rgb(colorB, descAlpha);
   ctx.fillText(state.labelB.toUpperCase(), bX, labelY + letterSize * 0.6);
 
   // Empty bar tracks (fade in 400–1200ms)
@@ -139,7 +142,8 @@ export function drawVerdict(
   const W = state.canvasWidth;
   const H = state.canvasHeight;
   const bars = computeBarLayout(W, H);
-  const color = state.chapterColor;
+  const colorA = state.chapterColorA;
+  const colorB = state.chapterColorB;
 
   const vr = state.voteResult;
   const tc = state.thresholdCheck;
@@ -165,21 +169,21 @@ export function drawVerdict(
   const loserAlpha = lerp(0.85, 0.25, labelBrightness);
 
   // A label
-  ctx.fillStyle = rgb(color, isAWinner ? winnerAlpha : loserAlpha);
+  ctx.fillStyle = rgb(colorA, isAWinner ? winnerAlpha : loserAlpha);
   ctx.font = `bold ${letterSize}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('A', bars.aX, bars.labelY);
 
   // B label
-  ctx.fillStyle = rgb(color, isAWinner ? loserAlpha : winnerAlpha);
+  ctx.fillStyle = rgb(colorB, isAWinner ? loserAlpha : winnerAlpha);
   ctx.fillText('B', bars.bX, bars.labelY);
 
   // Descriptor labels
   ctx.font = `${descSize}px system-ui, sans-serif`;
-  ctx.fillStyle = rgb(color, (isAWinner ? winnerAlpha : loserAlpha) * 0.6);
+  ctx.fillStyle = rgb(colorA, (isAWinner ? winnerAlpha : loserAlpha) * 0.6);
   ctx.fillText(state.labelA.toUpperCase(), bars.aX, bars.labelY + letterSize * 0.6);
-  ctx.fillStyle = rgb(color, (isAWinner ? loserAlpha : winnerAlpha) * 0.6);
+  ctx.fillStyle = rgb(colorB, (isAWinner ? loserAlpha : winnerAlpha) * 0.6);
   ctx.fillText(state.labelB.toUpperCase(), bars.bX, bars.labelY + letterSize * 0.6);
 
   // Empty bar tracks
@@ -195,7 +199,7 @@ export function drawVerdict(
   const loserBarAlpha = 0.12;
 
   // A bar
-  ctx.fillStyle = rgb(color, isAWinner ? winnerBarAlpha : loserBarAlpha);
+  ctx.fillStyle = rgb(colorA, isAWinner ? winnerBarAlpha : loserBarAlpha);
   ctx.fillRect(
     bars.aX - bars.barWidth / 2,
     bars.barBottom - barHeightA,
@@ -204,7 +208,7 @@ export function drawVerdict(
   );
 
   // B bar
-  ctx.fillStyle = rgb(color, isAWinner ? loserBarAlpha : winnerBarAlpha);
+  ctx.fillStyle = rgb(colorB, isAWinner ? loserBarAlpha : winnerBarAlpha);
   ctx.fillRect(
     bars.bX - bars.barWidth / 2,
     bars.barBottom - barHeightB,
@@ -220,14 +224,14 @@ export function drawVerdict(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
 
-    ctx.fillStyle = rgb(color, (isAWinner ? 0.8 : 0.3) * pctFade);
+    ctx.fillStyle = rgb(colorA, (isAWinner ? 0.8 : 0.3) * pctFade);
     ctx.fillText(
       `${Math.round(propA * 100)}%`,
       bars.aX,
       bars.barBottom - barHeightA - W * 0.008,
     );
 
-    ctx.fillStyle = rgb(color, (isAWinner ? 0.3 : 0.8) * pctFade);
+    ctx.fillStyle = rgb(colorB, (isAWinner ? 0.3 : 0.8) * pctFade);
     ctx.fillText(
       `${Math.round(propB * 100)}%`,
       bars.bX,

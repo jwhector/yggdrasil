@@ -66,8 +66,11 @@ export function LayerProgress({
         let symbol = identity?.symbol ?? '·';
 
         if (isCompleted) {
-          backgroundColor = chapterIdentity.color;
-          borderColor = chapterIdentity.color;
+          const optColor = result?.chosenOption === 'A' ? chapterIdentity.colorA
+            : result?.chosenOption === 'B' ? chapterIdentity.colorB
+            : chapterIdentity.color;
+          backgroundColor = optColor;
+          borderColor = optColor;
           textColor = '#000';
         } else if (isCurrentCollapsed) {
           backgroundColor = 'rgba(239,68,68,0.15)';

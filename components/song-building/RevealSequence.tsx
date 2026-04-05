@@ -17,7 +17,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { V32LayerConfig } from '@/conductor/types';
+import type { V32LayerConfig, Chapter } from '@/conductor/types';
+import { getChapterIdentity } from '@/lib/identity';
 
 export interface RevealSequenceProps {
   voteResult: {
@@ -33,6 +34,7 @@ export interface RevealSequenceProps {
   };
   layerConfig: V32LayerConfig;
   variant: 'audience' | 'projector';
+  chapter?: Chapter;
 }
 
 type RevealBeat = 'tension' | 'split' | 'threshold' | 'lockin';
@@ -49,6 +51,7 @@ export function RevealSequence({
   thresholdCheck,
   layerConfig,
   variant,
+  chapter,
 }: RevealSequenceProps) {
   const [beat, setBeat] = useState<RevealBeat>('tension');
   const [barProgress, setBarProgress] = useState(0);
@@ -78,7 +81,11 @@ export function RevealSequence({
     };
   }, [thresholdCheck.passed, thresholdCheck.winningProportion]);
 
-  const identity = { symbol: layerConfig.group?.[0]?.toUpperCase() ?? '?', color: '#6b7280', label: layerConfig.group ?? '' };
+  const chapterIdentity = chapter ? getChapterIdentity(chapter) : null;
+  const baseColor = '#6b7280';
+  const identity = { symbol: layerConfig.group?.[0]?.toUpperCase() ?? '?', color: baseColor, label: layerConfig.group ?? '' };
+  const colorA = chapterIdentity?.colorA ?? baseColor;
+  const colorB = chapterIdentity?.colorB ?? baseColor;
   const winner = voteResult.winner;
   const consensus = voteResult.consensus; // 0.5–1.0
 
@@ -126,9 +133,10 @@ export function RevealSequence({
           const isRevealedLoser = beat !== 'tension' && !isWinner;
           const isA = option === 'A';
 
+          const optColor = isA ? colorA : colorB;
           const colorStyle: React.CSSProperties = isA
-            ? { backgroundColor: identity.color, color: '#000', border: '2px solid transparent' }
-            : { backgroundColor: 'transparent', border: `2px solid ${identity.color}`, color: identity.color };
+            ? { backgroundColor: optColor, color: '#000', border: '2px solid transparent' }
+            : { backgroundColor: 'transparent', border: `2px solid ${optColor}`, color: optColor };
 
           const label = option === 'A' ? layerConfig.labelA : layerConfig.labelB;
 
@@ -148,7 +156,7 @@ export function RevealSequence({
                 opacity: beat === 'tension' ? 0.6 : isRevealedLoser ? 0.25 : 1,
                 ...colorStyle,
                 boxShadow: beat === 'lockin' && isWinner && thresholdCheck.passed
-                  ? `0 0 0 2px #fff, 0 0 12px 2px ${identity.color}`
+                  ? `0 0 0 2px #fff, 0 0 12px 2px ${optColor}`
                   : 'none',
                 transition: 'flex 0.6s ease, opacity 0.4s ease, box-shadow 0.3s ease',
               }}

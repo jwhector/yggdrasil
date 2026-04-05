@@ -146,6 +146,7 @@ function FragmentCard({
   onTap: () => void;
 }) {
   const chapter = getChapterIdentity(fragment.chapter as Chapter);
+  const optColor = fragment.option === 'A' ? chapter.colorA : chapter.colorB;
 
   // Border: active = type color glow, selected = white ring, default = subtle
   const borderColor = isActive
@@ -170,7 +171,7 @@ function FragmentCard({
         minHeight: '72px',
         padding: '16px 16px 16px 20px',
         border: `2px solid ${borderColor}`,
-        borderLeft: `4px solid ${chapter.color}`,
+        borderLeft: `4px solid ${optColor}`,
         borderRadius: '12px',
         backgroundColor: 'rgba(255,255,255,0.03)',
         boxShadow,
@@ -194,7 +195,7 @@ function FragmentCard({
           left: 0,
           bottom: 0,
           width: `${Math.max(proportion * 100, 0)}%`,
-          backgroundColor: `${chapter.color}20`,
+          backgroundColor: `${optColor}20`,
           transition: 'width 0.3s ease',
           borderRadius: '10px 0 0 10px',
         }}
@@ -204,7 +205,7 @@ function FragmentCard({
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <span style={{
           fontSize: '1rem',
-          color: chapter.color,
+          color: optColor,
           fontWeight: 500,
         }}>
           {chapter.label}

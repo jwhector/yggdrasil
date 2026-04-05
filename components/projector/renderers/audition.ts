@@ -45,8 +45,8 @@ export function drawABLabels(
   const isAActive = state.currentAuditionOption === 'A';
   const isBActive = state.currentAuditionOption === 'B';
 
-  drawOptionLabel(ctx, 'A', aX, labelY, W, state.chapterColor, isAActive, state.labelA, t);
-  drawOptionLabel(ctx, 'B', bX, labelY, W, state.chapterColor, isBActive, state.labelB, t);
+  drawOptionLabel(ctx, 'A', aX, labelY, W, state.chapterColorA, isAActive, state.labelA, t);
+  drawOptionLabel(ctx, 'B', bX, labelY, W, state.chapterColorB, isBActive, state.labelB, t);
 }
 
 function drawOptionLabel(

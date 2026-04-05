@@ -793,6 +793,7 @@ export function filterStateForClient(
           currentLayerIndex: attempt.currentLayerIndex,
           currentLayerPhase: attempt.currentLayerPhase,
           layerCount: attempt.layerPlan.length,
+          layerPlan: attempt.layerPlan,
           currentLayerConfig,
           layerResults: attempt.layerResults,
           myVote,
@@ -814,6 +815,7 @@ export function filterStateForClient(
           lobby: state.config.lobby,
           chapters: state.config.chapters ?? [],
           granularTypes: state.config.granularTypes ?? [],
+          intrusiveThoughts: state.config.intrusiveThoughts ?? [],
         },
       };
     }

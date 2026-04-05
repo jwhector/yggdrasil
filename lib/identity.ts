@@ -9,7 +9,9 @@
 import type { Chapter, LayerType, LayerGroupId, LayerGroupConfig, GranularType, ChapterConfig } from '@/conductor/types';
 
 export interface ChapterIdentity {
-  color: string;   // CSS color
+  color: string;   // Primary / seed CSS color
+  colorA: string;  // Option A CSS color
+  colorB: string;  // Option B CSS color
   label: string;   // Display name
   icon: string;    // Unicode symbol
 }
@@ -22,9 +24,9 @@ export interface LayerIdentity {
 
 // Fallback defaults — overwritten by hydrateIdentity() when config arrives.
 let chapterLookup: Record<string, ChapterIdentity> = {
-  ambition:  { color: '#e63946', label: 'Ambition',  icon: '\u25B2' },
-  love:      { color: '#f4a261', label: 'Love',      icon: '\u25CF' },
-  avoidance: { color: '#457b9d', label: 'Avoidance', icon: '\u25C6' },
+  ambition:  { color: '#e63946', colorA: '#ff6b6b', colorB: '#c2185b', label: 'Ambition',  icon: '\u25B2' },
+  love:      { color: '#f4a261', colorA: '#ffcc80', colorB: '#e65100', label: 'Love',      icon: '\u25CF' },
+  avoidance: { color: '#457b9d', colorA: '#64b5f6', colorB: '#1a237e', label: 'Avoidance', icon: '\u25C6' },
 };
 
 let layerLookup: Record<string, LayerIdentity> = {
@@ -54,7 +56,13 @@ export function hydrateIdentity(config: {
   if (config.chapters?.length) {
     chapterLookup = {};
     for (const c of config.chapters) {
-      chapterLookup[c.id] = { color: c.color, label: c.label, icon: c.icon };
+      chapterLookup[c.id] = {
+        color: c.color,
+        colorA: c.colorA ?? c.color,
+        colorB: c.colorB ?? c.color,
+        label: c.label,
+        icon: c.icon,
+      };
     }
   }
   if (config.granularTypes?.length) {
@@ -72,7 +80,13 @@ export function getLayerIdentity(type: LayerType | string): LayerIdentity {
 
 /** Get chapter identity. */
 export function getChapterIdentity(chapter: Chapter | string): ChapterIdentity {
-  return chapterLookup[chapter] ?? { color: '#6b7280', label: chapter, icon: '' };
+  return chapterLookup[chapter] ?? { color: '#6b7280', colorA: '#6b7280', colorB: '#6b7280', label: chapter, icon: '' };
+}
+
+/** Get the option-specific color for a chapter. */
+export function getChapterOptionColor(chapter: Chapter | string, option: 'A' | 'B'): string {
+  const identity = getChapterIdentity(chapter);
+  return option === 'A' ? identity.colorA : identity.colorB;
 }
 
 /** Get symbol, label, and color for a V3.2 layer group, derived from its first granular type. */

@@ -200,6 +200,9 @@ function TypeControlRow({
           {distribution.map(({ fragmentId, count }) => {
             const frag = fragments.find(f => f.id === fragmentId);
             const chapter = frag ? getChapterIdentity(frag.chapter) : null;
+            const fragOptColor = frag && chapter
+              ? (frag.option === 'A' ? chapter.colorA : chapter.colorB)
+              : null;
             const pct = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
             const isActive = fragmentId === activeFragmentId;
             return (
@@ -208,7 +211,7 @@ function TypeControlRow({
                 title={`${frag?.chapter ?? '?'} S${(frag?.songIndex ?? 0) + 1} ${frag?.option ?? '?'}: ${count} votes`}
                 style={{
                   width: `${pct}%`,
-                  backgroundColor: chapter?.color ?? '#444',
+                  backgroundColor: fragOptColor ?? '#444',
                   opacity: isActive ? 1 : 0.4,
                   transition: 'width 0.3s ease',
                 }}
@@ -223,6 +226,7 @@ function TypeControlRow({
         <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
           {fragments.map((frag) => {
             const chapter = getChapterIdentity(frag.chapter);
+            const fragColor = frag.option === 'A' ? chapter.colorA : chapter.colorB;
             const isActive = frag.id === activeFragmentId;
             return (
               <button
@@ -231,9 +235,9 @@ function TypeControlRow({
                 style={{
                   ...btnStyle,
                   padding: '4px 8px',
-                  backgroundColor: isActive ? `${chapter.color}30` : '#1a1a1a',
-                  border: isActive ? `1px solid ${chapter.color}` : '1px solid #333',
-                  color: chapter.color,
+                  backgroundColor: isActive ? `${fragColor}30` : '#1a1a1a',
+                  border: isActive ? `1px solid ${fragColor}` : '1px solid #333',
+                  color: fragColor,
                   fontSize: '0.6rem',
                 }}
               >

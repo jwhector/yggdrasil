@@ -1,14 +1,15 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
-import { LayerProgress } from '@/components/song-building/LayerProgress';
+import { MiniSkeleton } from '@/components/song-building/MiniSkeleton';
 import { OptionCards } from '@/components/song-building/OptionCards';
-import { RevealSequence } from '@/components/song-building/RevealSequence';
-import { UrgencyEffects } from '@/components/song-building/UrgencyEffects';
-import { AuditionProgress } from '@/components/song-building/AuditionProgress';
+import type { RevealResult } from '@/components/song-building/OptionCards';
+import { AuditionBars } from '@/components/song-building/AuditionBars';
+import { LayerDots } from '@/components/song-building/LayerDots';
+import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { AssignmentCards } from '@/components/finale/AssignmentCards';
@@ -16,7 +17,7 @@ import { AssignmentIdentity } from '@/components/finale/AssignmentIdentity';
 import { LiveMixController } from '@/components/finale/LiveMixController';
 import { LiveMixSpectator } from '@/components/finale/LiveMixSpectator';
 import { useLiveMix } from '@/hooks/useLiveMix';
-import type { AudienceFinaleView, GranularType } from '@/conductor/types';
+import type { AudienceFinaleView, AudienceAttemptView, AudienceClientState, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -91,77 +92,13 @@ function AudienceContent() {
       )}
 
       {phase === 'attempt_build' && currentAttempt && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            width: '100%',
-            minHeight: '100vh',
-            overflowY: 'auto',
-            paddingTop: '16px',
-            paddingBottom: '32px',
-            gap: '12px',
-            padding: '16px',
-            boxSizing: 'border-box',
-          }}
-        >
-          {/* Chapter label */}
-          <ChapterLabel chapter={currentAttempt.chapter} attemptIndex={state.currentAttemptIndex} />
-
-          {/* Layer progress strip */}
-          <LayerProgress
-            layerResults={currentAttempt.layerResults}
-            currentLayerIndex={currentAttempt.currentLayerIndex}
-            currentLayerPhase={currentAttempt.currentLayerPhase}
-            layerCount={currentAttempt.layerCount}
-            chapter={currentAttempt.chapter}
-          />
-
-          {/* Audition progress (during auditioning phase) */}
-          {currentAttempt.currentLayerPhase === 'auditioning' && auditionProgress && (
-            <AuditionProgress progress={auditionProgress} />
-          )}
-
-          {/* Reveal sequence (during revealing phase) */}
-          {currentAttempt.currentLayerPhase === 'revealing'
-            && currentAttempt.currentVoteResult
-            && currentAttempt.lastThresholdCheck
-            && currentAttempt.currentLayerConfig ? (
-            <RevealSequence
-              voteResult={{
-                winner: currentAttempt.currentVoteResult.winner,
-                consensus: currentAttempt.currentVoteResult.winningProportion,
-              }}
-              thresholdCheck={currentAttempt.lastThresholdCheck}
-              layerConfig={currentAttempt.currentLayerConfig}
-              variant="audience"
-            />
-          ) : null}
-
-          {/* Voting cards (during auditioning phase) */}
-          {currentAttempt.currentLayerPhase !== 'revealing' && currentAttempt.currentLayerConfig ? (
-            <UrgencyEffects
-              layerIndex={currentAttempt.currentLayerIndex}
-              collapsed={currentAttempt.status === 'collapsed'}
-            >
-              <div className="urgency-cards">
-                <OptionCards
-                  layerConfig={currentAttempt.currentLayerConfig}
-                  myVote={currentAttempt.myVote}
-                  disabled={currentAttempt.currentLayerPhase !== 'auditioning'}
-                  onVote={handleVote}
-                  currentAuditionOption={currentAttempt.currentAuditionOption}
-                />
-              </div>
-              <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
-            </UrgencyEffects>
-          ) : null}
-
-          {/* Phase hint outside urgency wrapper (only during reveal) */}
-          {currentAttempt.currentLayerPhase === 'revealing' && (
-            <LayerPhaseHint phase={currentAttempt.currentLayerPhase} hasVoted={currentAttempt.myVote !== null} />
-          )}
-        </div>
+        <BuildView
+          currentAttempt={currentAttempt}
+          auditionProgress={auditionProgress}
+          config={state.config}
+          attemptIndex={state.currentAttemptIndex}
+          onVote={handleVote}
+        />
       )}
 
       {phase === 'attempt_build' && !currentAttempt && (
@@ -385,47 +322,176 @@ function PulsingDot() {
   );
 }
 
-function ChapterLabel({ chapter, attemptIndex }: { chapter: string; attemptIndex: number }) {
+// ---------------------------------------------------------------------------
+// Build View — song-building audience UI
+// ---------------------------------------------------------------------------
+
+function BuildView({
+  currentAttempt,
+  auditionProgress,
+  config,
+  attemptIndex,
+  onVote,
+}: {
+  currentAttempt: AudienceAttemptView;
+  auditionProgress: AuditionProgressData | null;
+  config: AudienceClientState['config'];
+  attemptIndex: number;
+  onVote: (choice: 'A' | 'B') => void;
+}) {
+  const [thoughtsDismissed, setThoughtsDismissed] = useState(false);
+  const [prevLayerKey, setPrevLayerKey] = useState('');
+
+  const { chapter, currentLayerIndex, currentLayerPhase, layerResults, myVote } = currentAttempt;
+
+  // Reset dismissed state when layer changes
+  const currentLayerKey = `${currentAttempt.index}-${currentLayerIndex}`;
+  if (currentLayerKey !== prevLayerKey) {
+    setPrevLayerKey(currentLayerKey);
+    setThoughtsDismissed(false);
+  }
+  const isRevealing = currentLayerPhase === 'revealing';
+  const isAuditioning = currentLayerPhase === 'auditioning';
+  const hasVoted = myVote !== null;
+
+  // Intrusive thoughts for this attempt + layer
+  const thoughtsConfig = config.intrusiveThoughts?.find(c => c.chapter === chapter);
+  const thoughts = thoughtsConfig?.layers[currentLayerIndex] ?? [];
+  const thoughtsActive = isRevealing && thoughts.length > 0;
+
+  const layerKey = `${attemptIndex}-${currentLayerIndex}`;
+
+  // Build reveal result from vote data
+  let revealResult: RevealResult | null = null;
+  if (isRevealing && currentAttempt.currentVoteResult && currentAttempt.lastThresholdCheck && thoughtsDismissed) {
+    const vr = currentAttempt.currentVoteResult;
+    revealResult = {
+      winner: vr.winner,
+      proportionA: vr.winner === 'A' ? vr.winningProportion : 1 - vr.winningProportion,
+      proportionB: vr.winner === 'B' ? vr.winningProportion : 1 - vr.winningProportion,
+      passed: currentAttempt.lastThresholdCheck.passed,
+    };
+  }
+
+  // Also show reveal for locked_in / collapsed (post-reveal states)
+  if ((currentLayerPhase === 'locked_in' || currentLayerPhase === 'collapsed') && currentAttempt.currentVoteResult && currentAttempt.lastThresholdCheck) {
+    const vr = currentAttempt.currentVoteResult;
+    revealResult = {
+      winner: vr.winner,
+      proportionA: vr.winner === 'A' ? vr.winningProportion : 1 - vr.winningProportion,
+      proportionB: vr.winner === 'B' ? vr.winningProportion : 1 - vr.winningProportion,
+      passed: currentAttempt.lastThresholdCheck.passed,
+    };
+  }
+
+  const isDimmed = thoughtsActive && !thoughtsDismissed;
+
   return (
     <div
       style={{
-        textAlign: 'center',
-        paddingBottom: '8px',
-        color: 'rgba(255,255,255,0.4)',
-        fontSize: '0.75rem',
-        letterSpacing: '0.12em',
-        textTransform: 'uppercase',
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        minHeight: '100vh',
+        overflowY: 'auto',
+        padding: '16px',
+        paddingBottom: '32px',
+        gap: '12px',
+        boxSizing: 'border-box',
+        alignItems: 'center',
       }}
     >
-      Song {attemptIndex + 1} · {chapter}
+      {/* Mini pentagon skeleton */}
+      <div style={{ opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+        <MiniSkeleton
+          chapter={chapter}
+          currentLayerIndex={currentLayerIndex}
+          layerResults={layerResults}
+          layerPlan={currentAttempt.layerPlan}
+          layerPhase={currentLayerPhase}
+          currentAuditionOption={currentAttempt.currentAuditionOption}
+          layerGroups={[]}
+        />
+      </div>
+
+      {/* Option cards — visible during auditioning, locked, and reveal */}
+      {currentAttempt.currentLayerConfig && (
+        <OptionCards
+          layerConfig={currentAttempt.currentLayerConfig}
+          myVote={myVote}
+          disabled={!isAuditioning}
+          onVote={onVote}
+          currentAuditionOption={currentAttempt.currentAuditionOption}
+          chapter={chapter}
+          revealResult={revealResult}
+          dimmed={isDimmed}
+        />
+      )}
+
+      {/* Audition depleting bars (only during auditioning, before vote) */}
+      {isAuditioning && auditionProgress && (
+        <div style={{ width: '100%', opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+          <AuditionBars
+            progress={auditionProgress}
+            chapter={chapter}
+            currentAuditionOption={currentAttempt.currentAuditionOption}
+          />
+        </div>
+      )}
+
+      {/* Layer dots */}
+      <div style={{ opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+        <LayerDots
+          layerCount={currentAttempt.layerCount}
+          currentLayerIndex={currentLayerIndex}
+          layerResults={layerResults}
+          chapter={chapter}
+        />
+      </div>
+
+      {/* Bottom text hints */}
+      {isAuditioning && !hasVoted && (
+        <p
+          style={{
+            textAlign: 'center',
+            color: 'rgba(255,255,255,0.15)',
+            fontSize: '0.7rem',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            opacity: isDimmed ? 0.3 : 1,
+            transition: 'opacity 0.4s ease',
+          }}
+        >
+          TAP TO VOTE
+        </p>
+      )}
+      {isAuditioning && hasVoted && (
+        <p
+          style={{
+            textAlign: 'center',
+            color: 'rgba(255,255,255,0.12)',
+            fontSize: '0.7rem',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            opacity: isDimmed ? 0.3 : 1,
+            transition: 'opacity 0.4s ease',
+          }}
+        >
+          VOTE LOCKED
+        </p>
+      )}
+
+      {/* Intrusive thoughts overlay */}
+      <IntrusiveThoughts
+        key={layerKey}
+        thoughts={thoughts}
+        active={thoughtsActive}
+        dismissed={thoughtsDismissed}
+        onDismiss={() => setThoughtsDismissed(true)}
+        chapter={chapter}
+      />
     </div>
   );
-}
-
-function LayerPhaseHint({ phase, hasVoted }: { phase: string; hasVoted: boolean }) {
-  if (phase === 'auditioning' && !hasVoted) {
-    return (
-      <p
-        style={{
-          textAlign: 'center',
-          color: 'rgba(255,255,255,0.4)',
-          fontSize: '0.8rem',
-          marginTop: '16px',
-          letterSpacing: '0.08em',
-        }}
-      >
-        Tap to vote
-      </p>
-    );
-  }
-  if (phase === 'auditioning' && hasVoted) {
-    return (
-      <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', marginTop: '16px' }}>
-        Vote recorded
-      </p>
-    );
-  }
-  return null;
 }
 
 function PauseOverlay() {

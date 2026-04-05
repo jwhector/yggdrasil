@@ -450,9 +450,9 @@
   },
   "seatIds": [],
   "chapters": [
-    { "id": "ambition",  "label": "Ambition",  "color": "#e63946", "icon": "\u25b2" },
-    { "id": "love",      "label": "Love",       "color": "#f4a261", "icon": "\u25cf" },
-    { "id": "avoidance", "label": "Avoidance",  "color": "#457b9d", "icon": "\u25c6" }
+    { "id": "ambition",  "label": "Ambition",  "color": "#e63946", "colorA": "#ff6b6b", "colorB": "#c2185b", "icon": "\u25b2" },
+    { "id": "love",      "label": "Love",       "color": "#f4a261", "colorA": "#ffcc80", "colorB": "#e65100", "icon": "\u25cf" },
+    { "id": "avoidance", "label": "Avoidance",  "color": "#457b9d", "colorA": "#64b5f6", "colorB": "#1a237e", "icon": "\u25c6" }
   ],
   "granularTypes": [
     {
@@ -514,6 +514,32 @@
       "label": "The Edge",
       "granularTypes": [
         "fx"
+      ]
+    }
+  ],
+  "intrusiveThoughts": [
+    {
+      "chapter": "ambition",
+      "layers": [
+        ["What if they hate it?", "You're not ready", "This is a mistake"],
+        ["Nobody's listening", "They're just being polite", "Stop while you're ahead"],
+        ["You'll never finish anything", "It was better in your head", "Walk away now"]
+      ]
+    },
+    {
+      "chapter": "love",
+      "layers": [
+        ["You don't deserve this", "They'll leave eventually", "Don't get attached"],
+        ["You're too much", "You're not enough", "They're pretending"],
+        ["Love is a trap", "You'll ruin it", "Run before they do"]
+      ]
+    },
+    {
+      "chapter": "avoidance",
+      "layers": [
+        ["Why bother?", "It won't matter", "Nothing changes"],
+        ["Just let it go", "You're wasting everyone's time", "Disappear"],
+        ["You were never going to finish", "Give up gracefully", "Silence is easier"]
       ]
     }
   ],

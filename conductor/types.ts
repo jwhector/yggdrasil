@@ -272,6 +272,13 @@ export interface ShowConfig {
     waitingMessage: string;             // Text displayed while waiting
   };
   seatIds: SeatId[];                    // Known seats for QR code generation
+  intrusiveThoughts?: IntrusiveThoughtsConfig[];  // Per-attempt, per-layer thought strings
+}
+
+/** Intrusive thoughts shown during reveal stakes on audience phones. */
+export interface IntrusiveThoughtsConfig {
+  chapter: Chapter;
+  layers: string[][];                   // [layerIndex][thoughtIndex] — thoughts for each layer
 }
 
 // Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.
@@ -451,7 +458,9 @@ export const V32_LAYERS_PER_ATTEMPT = 3;
 export interface ChapterConfig {
   id: Chapter;
   label: string;   // Display name (e.g., 'Ambition')
-  color: string;   // CSS color
+  color: string;   // Primary / seed CSS color
+  colorA: string;  // Option A CSS color
+  colorB: string;  // Option B CSS color
   icon: string;    // Unicode symbol
 }
 
@@ -649,6 +658,7 @@ export interface AudienceAttemptView {
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerCount: number;
+  layerPlan: V32LayerConfig[];
   currentLayerConfig: V32LayerConfig | null;
   layerResults: LayerResult[];
   myVote: 'A' | 'B' | null;
@@ -699,6 +709,7 @@ export interface AudienceClientState {
     lobby: { waitingMessage: string };
     chapters: ChapterConfig[];
     granularTypes: GranularType[];
+    intrusiveThoughts: IntrusiveThoughtsConfig[];
   };
 }
 
