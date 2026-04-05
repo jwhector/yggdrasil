@@ -99,9 +99,12 @@ export function IntrusiveThoughts({
   const [items, setItems] = useState<ThoughtItem[]>([]);
   const chapterIdentity = getChapterIdentity(chapter);
 
-  // Seed randomized positions when thoughts activate
+  // Seed randomized positions when thoughts activate (only once per activation)
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (!active || dismissed) return;
+    if (!active || dismissed) { seededRef.current = false; return; }
+    if (seededRef.current) return;
+    seededRef.current = true;
 
     const newItems: ThoughtItem[] = thoughts.map((text, i) => ({
       text,
@@ -273,23 +276,43 @@ function DraggableThought({
   const reverseIndex = (totalCount - 1) - item.index;
   const landY = `calc(${PILE_CONFIG.landingPct}vh + ${reverseIndex * PILE_CONFIG.yOffsetPx}px)`;
 
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+  // Unified pointer start (touch + mouse)
+  const pointerStart = useCallback((clientX: number) => {
     if (item.flung) return;
-    touchStartRef.current = { x: e.touches[0].clientX };
+    touchStartRef.current = { x: clientX };
     onDragStart();
   }, [item.flung, onDragStart]);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+  const pointerMove = useCallback((clientX: number) => {
     if (!touchStartRef.current || item.flung) return;
-    const dx = e.touches[0].clientX - touchStartRef.current.x;
-    onDragMove(dx);
+    onDragMove(clientX - touchStartRef.current.x);
   }, [item.flung, onDragMove]);
 
-  const handleTouchEnd = useCallback(() => {
+  const pointerEnd = useCallback(() => {
     if (!touchStartRef.current || item.flung) return;
     touchStartRef.current = null;
     onDragEnd();
   }, [item.flung, onDragEnd]);
+
+  // Touch handlers
+  const handleTouchStart = useCallback((e: React.TouchEvent) => pointerStart(e.touches[0].clientX), [pointerStart]);
+  const handleTouchMove = useCallback((e: React.TouchEvent) => pointerMove(e.touches[0].clientX), [pointerMove]);
+  const handleTouchEnd = useCallback(() => pointerEnd(), [pointerEnd]);
+
+  // Mouse handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    pointerStart(e.clientX);
+
+    const moveHandler = (ev: MouseEvent) => pointerMove(ev.clientX);
+    const upHandler = () => {
+      pointerEnd();
+      window.removeEventListener('mousemove', moveHandler);
+      window.removeEventListener('mouseup', upHandler);
+    };
+    window.addEventListener('mousemove', moveHandler);
+    window.addEventListener('mouseup', upHandler);
+  }, [pointerStart, pointerMove, pointerEnd]);
 
   // Compute transform
   let transform: string;
@@ -329,6 +352,7 @@ function DraggableThought({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onMouseDown={handleMouseDown}
       style={{
         position: 'absolute',
         left: '50%',

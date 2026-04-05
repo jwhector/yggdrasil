@@ -340,16 +340,19 @@ function BuildView({
   onVote: (choice: 'A' | 'B') => void;
 }) {
   const [thoughtsDismissed, setThoughtsDismissed] = useState(false);
+  const [thoughtsTriggered, setThoughtsTriggered] = useState(false);
   const [prevLayerKey, setPrevLayerKey] = useState('');
 
   const { chapter, currentLayerIndex, currentLayerPhase, layerResults, myVote } = currentAttempt;
 
-  // Reset dismissed state when layer changes
+  // Reset state when layer changes
   const currentLayerKey = `${currentAttempt.index}-${currentLayerIndex}`;
   if (currentLayerKey !== prevLayerKey) {
     setPrevLayerKey(currentLayerKey);
     setThoughtsDismissed(false);
+    setThoughtsTriggered(false);
   }
+
   const isRevealing = currentLayerPhase === 'revealing';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const hasVoted = myVote !== null;
@@ -357,34 +360,37 @@ function BuildView({
   // Intrusive thoughts for this attempt + layer
   const thoughtsConfig = config.intrusiveThoughts?.find(c => c.chapter === chapter);
   const thoughts = thoughtsConfig?.layers[currentLayerIndex] ?? [];
-  const thoughtsActive = isRevealing && thoughts.length > 0;
+
+  // Latch: once reveal starts, thoughts stay triggered for the rest of this layer
+  if (isRevealing && thoughts.length > 0 && !thoughtsTriggered) {
+    setThoughtsTriggered(true);
+  }
+
+  // Thoughts are active from the moment they're triggered until dismissed
+  const thoughtsActive = thoughtsTriggered && !thoughtsDismissed;
 
   const layerKey = `${attemptIndex}-${currentLayerIndex}`;
 
-  // Build reveal result from vote data
+  // Thoughts block the UI and the reveal result until dismissed
+  const thoughtsBlocking = thoughtsTriggered && !thoughtsDismissed;
+
+  // Build reveal result from vote data.
+  // Only show after the conductor advances past revealing (locked_in / collapsed),
+  // AND after the user has dismissed intrusive thoughts.
   let revealResult: RevealResult | null = null;
-  if (isRevealing && currentAttempt.currentVoteResult && currentAttempt.lastThresholdCheck && thoughtsDismissed) {
-    const vr = currentAttempt.currentVoteResult;
+  const hasVoteData = currentAttempt.currentVoteResult && currentAttempt.lastThresholdCheck;
+  const verdictPhase = currentLayerPhase === 'locked_in' || currentLayerPhase === 'collapsed';
+  if (verdictPhase && hasVoteData && !thoughtsBlocking) {
+    const vr = currentAttempt.currentVoteResult!;
     revealResult = {
       winner: vr.winner,
       proportionA: vr.winner === 'A' ? vr.winningProportion : 1 - vr.winningProportion,
       proportionB: vr.winner === 'B' ? vr.winningProportion : 1 - vr.winningProportion,
-      passed: currentAttempt.lastThresholdCheck.passed,
+      passed: currentAttempt.lastThresholdCheck!.passed,
     };
   }
 
-  // Also show reveal for locked_in / collapsed (post-reveal states)
-  if ((currentLayerPhase === 'locked_in' || currentLayerPhase === 'collapsed') && currentAttempt.currentVoteResult && currentAttempt.lastThresholdCheck) {
-    const vr = currentAttempt.currentVoteResult;
-    revealResult = {
-      winner: vr.winner,
-      proportionA: vr.winner === 'A' ? vr.winningProportion : 1 - vr.winningProportion,
-      proportionB: vr.winner === 'B' ? vr.winningProportion : 1 - vr.winningProportion,
-      passed: currentAttempt.lastThresholdCheck.passed,
-    };
-  }
-
-  const isDimmed = thoughtsActive && !thoughtsDismissed;
+  const isDimmed = thoughtsBlocking;
 
   return (
     <div
@@ -419,7 +425,7 @@ function BuildView({
         <OptionCards
           layerConfig={currentAttempt.currentLayerConfig}
           myVote={myVote}
-          disabled={!isAuditioning}
+          disabled={!isAuditioning || thoughtsBlocking}
           onVote={onVote}
           currentAuditionOption={currentAttempt.currentAuditionOption}
           chapter={chapter}
