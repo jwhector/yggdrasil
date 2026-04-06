@@ -254,6 +254,13 @@ export interface ShowState {
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
   paused: boolean;
+  openerSlideState: OpenerSlidePosition | null;  // null = blank screen (before first or after last slide)
+}
+
+/** Current position in the opener slide deck. */
+export interface OpenerSlidePosition {
+  pointIndex: number;                   // Which point (0-based)
+  subPointIndex: number;                // -1 = point only, 0+ = sub-points revealed up to this index
 }
 
 // ============================================================================
@@ -273,6 +280,13 @@ export interface ShowConfig {
   };
   seatIds: SeatId[];                    // Known seats for QR code generation
   intrusiveThoughts?: IntrusiveThoughtsConfig[];  // Per-attempt, per-layer thought strings
+  openerSlides?: OpenerSlide[];          // Slide deck for opener phase
+}
+
+/** A single opener slide: a main point with optional sub-points. */
+export interface OpenerSlide {
+  point: string;
+  subPoints?: string[];
 }
 
 /** Intrusive thoughts config — shared pool distributed by the server. */
@@ -352,6 +366,7 @@ export type ConductorCommand =
   // Show flow
   | { type: 'ADVANCE_PHASE' }
   | { type: 'JUMP_TO_PHASE'; phase: ShowPhase; attemptIndex?: number }
+  | { type: 'ADVANCE_SLIDE' }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
 
@@ -412,6 +427,7 @@ export type ConductorCommand =
 export type ConductorEvent =
   // Show flow
   | { type: 'SHOW_PHASE_CHANGED'; phase: ShowPhase; attemptIndex?: number }
+  | { type: 'OPENER_SLIDE_CHANGED'; position: OpenerSlidePosition | null }
   | { type: 'PAUSED' }
   | { type: 'RESUMED' }
 
@@ -756,4 +772,5 @@ export interface ProjectorClientState {
   attempts: AttemptState[];
   finaleState: ProjectorFinaleView | null;
   config: ShowConfig;
+  openerSlideState: OpenerSlidePosition | null;
 }

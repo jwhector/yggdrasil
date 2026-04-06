@@ -772,6 +772,7 @@ export function filterStateForClient(
         version: state.version,
         currentAttemptIndex: state.currentAttemptIndex,
         userCount: state.users.size,
+        openerSlideState: state.openerSlideState,
         attempts: state.attempts,
         finaleState: fs ? {
           finalePhase: fs.phase,
