@@ -55,13 +55,15 @@ export function useMixState(
     if (!activeFragments) return null;
 
     const nodeChapters: Record<string, string> = {};
+    const nodeOptions: Record<string, 'A' | 'B'> = {};
     for (const { granularType, fragmentId } of activeFragments) {
       const fragment = fragmentMap.get(fragmentId);
       if (fragment) {
         nodeChapters[granularType] = fragment.chapter;
+        nodeOptions[granularType] = fragment.option;
       }
     }
 
-    return { nodeChapters, loopPosition };
+    return { nodeChapters, nodeOptions, loopPosition };
   }, [fragmentMap, mixPayload, finaleState]);
 }

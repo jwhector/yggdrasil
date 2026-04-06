@@ -24,6 +24,7 @@ import {
   drawCompleteTransition,
   TRANSITION_DURATIONS,
 } from './renderers/transitions';
+import { updatePhysics, renderParticles } from './renderers/thoughts-physics';
 import type { TransitionState } from './renderers/transitions';
 import type { MixStateInput } from './useProjectorState';
 import type { ProjectorClientState, AttemptState, AuditionProgress } from '@/conductor/types';
@@ -40,6 +41,7 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress, mixSt
   const animFrameRef = useRef<number>(0);
   const stateRef = useRef<ProjectorVisualState | null>(null);
   const revealStartRef = useRef<number>(0);
+  const prevTimeRef = useRef<number>(0);
   const prevModeRef = useRef<string>('dark');
   const transitionRef = useRef<TransitionState | null>(null);
   const skeletonFadeInRef = useRef<number>(0);
@@ -144,6 +146,8 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress, mixSt
     const H = s.canvasHeight;
     const t = time * 0.001; // seconds
     const now = performance.now();
+    const dt = prevTimeRef.current > 0 ? Math.min((now - prevTimeRef.current) / 1000, 0.05) : 0;
+    prevTimeRef.current = now;
 
     // Clear
     ctx.clearRect(0, 0, W, H);
@@ -203,6 +207,9 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress, mixSt
           drawSkeleton(ctx, s, t, skelFadeAlpha);
         }
         drawStakes(ctx, s, t, stakesElapsed);
+        // Intrusive thoughts overlay (on top of reveal)
+        updatePhysics(dt, W, H);
+        renderParticles(ctx);
         break;
       }
 
@@ -210,6 +217,9 @@ export function ProjectorCanvas({ state, currentAttempt, auditionProgress, mixSt
         drawHeader(ctx, s, t);
         const verdictElapsed = now - revealStartRef.current;
         drawVerdict(ctx, s, t, verdictElapsed);
+        // Intrusive thoughts overlay (on top of reveal)
+        updatePhysics(dt, W, H);
+        renderParticles(ctx);
         break;
       }
 

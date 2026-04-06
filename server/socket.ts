@@ -20,9 +20,11 @@ import type {
   ConductorEvent,
   UserId,
   AttemptState,
+  AssignedThought,
   V32LayerConfig,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
+import { assignThoughts, findThoughtsConfig } from '../conductor/intrusive-thoughts';
 import type { PersistenceLayer } from './persistence';
 import type { AudioRouter } from './audio-router';
 import { serializeState } from '../lib/serialization';
@@ -49,6 +51,13 @@ const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 
 const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
 const GROUP_UPDATE_BROADCAST_INTERVAL_MS = 500; // ~2 Hz during assignment
 const MIX_STATE_BROADCAST_INTERVAL_MS = 250;    // ~4 Hz during live mix
+
+// ============================================================================
+// Intrusive thoughts — server-side state
+// ============================================================================
+
+/** Active thoughts for the current reveal. Cleared on layer/attempt change. */
+let activeThoughts: AssignedThought[] = [];
 
 // ============================================================================
 // Setup
@@ -300,6 +309,13 @@ export function setupSocketHandlers(
       } else {
         // Projector or controller: just send current state
         socket.emit('state_sync', filterStateForClient(state, data.mode));
+
+        // Send active thoughts to projector on connect
+        if (data.mode === 'projector' && activeThoughts.length > 0) {
+          socket.emit('thoughts_state', {
+            thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
+          });
+        }
       }
     });
 
@@ -334,6 +350,16 @@ export function setupSocketHandlers(
 
       // Full state sync (client may have missed changes while offline)
       socket.emit('state_sync', filterStateForClient(state, 'audience', data.userId));
+
+      // Resend any active intrusive thoughts for this user
+      if (activeThoughts.length > 0) {
+        const myThoughts = activeThoughts
+          .filter(t => t.userId === data.userId && !t.dismissed)
+          .map(t => ({ id: t.id, text: t.text }));
+        if (myThoughts.length > 0) {
+          socket.emit('thoughts_assigned', { thoughts: myThoughts });
+        }
+      }
 
       await broadcastEvents(io, events, state);
     });
@@ -460,6 +486,23 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
+    // dismiss_thought — audience member swipes away an intrusive thought
+    // ------------------------------------------------------------------
+    socket.on('dismiss_thought', (data: { thoughtId: string; direction: 'left' | 'right' }) => {
+      const thought = activeThoughts.find(t => t.id === data.thoughtId);
+      if (!thought || thought.dismissed) return;
+
+      thought.dismissed = true;
+      thought.dismissDirection = data.direction;
+
+      // Notify projector of the dismissal (lightweight delta, not full state)
+      io.to('projector').emit('thought_dismissed', {
+        thoughtId: data.thoughtId,
+        direction: data.direction,
+      });
+    });
+
+    // ------------------------------------------------------------------
     // command — controller sends a ConductorCommand directly
     // ------------------------------------------------------------------
     socket.on('command', async (command: ConductorCommand) => {
@@ -518,6 +561,27 @@ export function setupSocketHandlers(
             }
           }
         }
+      }
+
+      // Clear intrusive thoughts when advancing past verdict (layer actually moves on)
+      if (processedCommand.type === 'ADVANCE_FROM_VERDICT' && activeThoughts.length > 0) {
+        // Fling all remaining thoughts off-screen at random directions
+        for (const t of activeThoughts) {
+          if (!t.dismissed) {
+            t.dismissed = true;
+            t.dismissDirection = Math.random() > 0.5 ? 'right' : 'left';
+            io.to('projector').emit('thought_dismissed', {
+              thoughtId: t.id,
+              direction: t.dismissDirection,
+            });
+          }
+        }
+        // Clear after a brief delay for the fling animation
+        setTimeout(() => {
+          activeThoughts = [];
+          io.to('projector').emit('thoughts_clear');
+          io.to('audience').emit('thoughts_clear');
+        }, 500);
       }
 
       // Persist lock/unlock/override mix events
@@ -621,6 +685,42 @@ export async function broadcastEvents(
         io.to('audience').emit('type_unlocked', { granularType: event.granularType });
         io.to('projector').emit('type_unlocked', { granularType: event.granularType });
         break;
+
+      case 'REVEAL_STAKES_SHOWN': {
+        // Distribute intrusive thoughts to audience + projector
+        const attempt = state.attempts[event.attemptIndex];
+        if (!attempt) break;
+        const thoughtsConfig = findThoughtsConfig(state.config.intrusiveThoughts, attempt.chapter);
+        if (!thoughtsConfig) break;
+
+        const connectedUserIds: UserId[] = [];
+        const audienceSocks = await io.in('audience').fetchSockets();
+        for (const s of audienceSocks) {
+          const uid = (s as any).userId as UserId | undefined;
+          if (uid) connectedUserIds.push(uid);
+        }
+
+        activeThoughts = assignThoughts(thoughtsConfig, event.layerIndex, connectedUserIds, event.attemptIndex);
+        console.log(`[Thoughts] Assigned ${activeThoughts.length} thoughts to ${connectedUserIds.length} users (layer ${event.layerIndex})`);
+
+        // Send each audience member their thoughts
+        for (const s of audienceSocks) {
+          const uid = (s as any).userId as UserId | undefined;
+          if (!uid) continue;
+          const myThoughts = activeThoughts
+            .filter(t => t.userId === uid)
+            .map(t => ({ id: t.id, text: t.text }));
+          if (myThoughts.length > 0) {
+            s.emit('thoughts_assigned', { thoughts: myThoughts });
+          }
+        }
+
+        // Send full list to projector
+        io.to('projector').emit('thoughts_state', {
+          thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
+        });
+        break;
+      }
 
       case 'ERROR':
         io.to('controller').emit('error', event);
@@ -793,6 +893,7 @@ export function filterStateForClient(
           currentLayerIndex: attempt.currentLayerIndex,
           currentLayerPhase: attempt.currentLayerPhase,
           layerCount: attempt.layerPlan.length,
+          layerPlan: attempt.layerPlan,
           currentLayerConfig,
           layerResults: attempt.layerResults,
           myVote,
@@ -812,7 +913,9 @@ export function filterStateForClient(
         myFinale,
         config: {
           lobby: state.config.lobby,
+          chapters: state.config.chapters ?? [],
           granularTypes: state.config.granularTypes ?? [],
+          intrusiveThoughts: state.config.intrusiveThoughts ?? [],
         },
       };
     }

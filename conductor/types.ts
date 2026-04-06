@@ -262,6 +262,7 @@ export interface ShowState {
 
 export interface ShowConfig {
   layersPerAttempt: number;             // 3 in V3.2 (was 6)
+  chapters?: ChapterConfig[];           // Visual identity per chapter (color, label, icon)
   granularTypes?: GranularType[];       // V3.2: master registry of granular types
   layerGroups?: LayerGroupConfig[];     // V3.2: layer group definitions (bones/flesh/spark)
   attempts: V32AttemptConfig[];         // Length 3; V3.2 structure with TrackBundles + liveSeed
@@ -271,6 +272,23 @@ export interface ShowConfig {
     waitingMessage: string;             // Text displayed while waiting
   };
   seatIds: SeatId[];                    // Known seats for QR code generation
+  intrusiveThoughts?: IntrusiveThoughtsConfig[];  // Per-attempt, per-layer thought strings
+}
+
+/** Intrusive thoughts config — shared pool distributed by the server. */
+export interface IntrusiveThoughtsConfig {
+  chapter: Chapter;
+  thoughtsPerPerson: number[];          // Per-layer count [1, 3, 5]
+  pool: string[][];                     // [layerIndex][poolIndex] — shared pool per layer
+}
+
+/** A single thought assigned to a specific user by the server. */
+export interface AssignedThought {
+  id: string;                           // Unique: "{attemptIndex}-{layerIndex}-{userId}-{i}"
+  text: string;
+  userId: UserId;
+  dismissed: boolean;
+  dismissDirection?: 'left' | 'right';
 }
 
 // Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.
@@ -442,6 +460,19 @@ export type ConductorEvent =
 
 /** Number of audience-facing layer groups per attempt in V3.2 (bones, flesh, spark). */
 export const V32_LAYERS_PER_ATTEMPT = 3;
+
+/**
+ * Chapter visual identity — color, label, and icon for a narrative chapter.
+ * Stored in show config so identity is config-driven rather than hardcoded.
+ */
+export interface ChapterConfig {
+  id: Chapter;
+  label: string;   // Display name (e.g., 'Ambition')
+  color: string;   // Primary / seed CSS color
+  colorA: string;  // Option A CSS color
+  colorB: string;  // Option B CSS color
+  icon: string;    // Unicode symbol
+}
 
 /**
  * A single granular instrument type — the atomic unit of the finale.
@@ -637,6 +668,7 @@ export interface AudienceAttemptView {
   currentLayerIndex: number;
   currentLayerPhase: LayerPhase;
   layerCount: number;
+  layerPlan: V32LayerConfig[];
   currentLayerConfig: V32LayerConfig | null;
   layerResults: LayerResult[];
   myVote: 'A' | 'B' | null;
@@ -685,7 +717,9 @@ export interface AudienceClientState {
   myFinale: AudienceFinaleView | null;
   config: {
     lobby: { waitingMessage: string };
+    chapters: ChapterConfig[];
     granularTypes: GranularType[];
+    intrusiveThoughts: IntrusiveThoughtsConfig[];
   };
 }
 

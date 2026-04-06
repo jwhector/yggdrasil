@@ -44,11 +44,23 @@ export const BG_COLOR = '#090909';
 export const EMPTY_COLOR: RGB = { r: 60, g: 60, b: 55 };       // #3c3c37
 export const COLLAPSED_COLOR: RGB = { r: 80, g: 30, b: 30 };   // #501e1e
 
-/** Chapter colors for the projector pentagon (distinct from identity.ts UI colors). */
-export const FINALE_CHAPTER_COLORS: Record<string, RGB> = {
-  love:  { r: 232, g: 167, b: 53  },   // amber/gold
-  ambition:      { r: 224, g: 96,  b: 112 },   // coral/rose
-  avoidance: { r: 69,  g: 176, b: 144 },   // teal/green
+/** Chapter colors for the projector pentagon — primary + per-option variants. */
+export const FINALE_CHAPTER_COLORS: Record<string, { primary: RGB; A: RGB; B: RGB }> = {
+  ambition: {
+    primary: { r: 224, g: 96,  b: 112 },   // coral/rose
+    A:       { r: 255, g: 107, b: 107 },   // warm coral
+    B:       { r: 194, g: 24,  b: 91  },   // deep magenta
+  },
+  love: {
+    primary: { r: 232, g: 167, b: 53  },   // amber/gold
+    A:       { r: 255, g: 204, b: 128 },   // light peach
+    B:       { r: 230, g: 81,  b: 0   },   // burnt orange
+  },
+  avoidance: {
+    primary: { r: 69,  g: 176, b: 144 },   // teal/green
+    A:       { r: 100, g: 181, b: 246 },   // sky blue
+    B:       { r: 26,  g: 35,  b: 126 },   // deep indigo
+  },
 };
 
 /** Pentagon node definitions — 5 nodes arranged clockwise from top. */

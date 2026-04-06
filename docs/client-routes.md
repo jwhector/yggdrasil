@@ -14,15 +14,20 @@
 **Story phases (phones down):** Screen goes dark/minimal ("listen" state).
 
 **Song-building phases (V3.2 — 3 bundled layer groups):**
-- Two large tappable cards: Option A (left) and Option B (right), styled with layer group identity (symbol derived from first granular type: bones→■, flesh→✦, spark→~)
+- **Mini pentagon** (canvas) at top showing active/filled/empty/collapsed node states matching the projector
+- Two large tappable cards: Option A (left, `chapterIdentity.colorA`) and Option B (right, `chapterIdentity.colorB`)
+  - Active card shows "NOW PLAYING" micro-label; selected card shows "YOUR VOTE" + filled dot
+  - Cards support inline reveal mode: fill bars showing vote percentages, winner enlarged with "CHOSEN" badge
 - **Blind vote**: no live feedback on vote split during the voting window
-- After vote closes → **Reveal sequence**:
-  1. Both options shown side by side, no result (tension beat)
-  2. Split revealed: winning option grows, losing option shrinks proportionally
-  3. Threshold check (winning proportion compared against doubt threshold)
-  4. Winning option's audio locks into the mix
-- 3-slot layer progress indicator showing completed/upcoming layer groups
-- Personal vote history dot on each completed layer (subtle indicator of which side you voted for)
+- **Depleting progress bars**: per-option bar depletes as current option plays; overall bar depletes as voting window closes
+- **3-dot layer progress**: filled with winning option's color on lock-in, pulsing outline on current
+- After vote closes → **Intrusive thoughts + reveal**:
+  1. Server distributes thought bubbles (1→3→5 escalating per layer) from shared pool
+  2. Thoughts fall from top of screen, pile up as draggable thought bubbles with sub-bubble tails
+  3. UI dims while thoughts are present; voting is blocked
+  4. User swipes each thought individually to dismiss (touch + mouse supported)
+  5. After all thoughts dismissed AND conductor advances to locked_in/collapsed: vote result shown inside cards
+- Intrusive thoughts are mirrored on projector as physics-based membrane bubbles (see `/projector` below)
 
 **Finale — Elegy moment (optional pre-assembly beat):**
 - Full grid of all fragments from all three songs, organized by role

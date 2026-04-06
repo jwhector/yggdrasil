@@ -375,6 +375,9 @@ async function main() {
     const bp = timingEngine.getCurrentBeatPosition();
     if (!bp) return 0;
     const loopBeats = getState().config.timing.loopBoundaryBeats || 32;
+    if (bp.rawBeat !== undefined) {
+      return bp.rawBeat / loopBeats;
+    }
     const beatsIntoLoop = bp.barInLoop * 4 + bp.beatInBar;
     return Math.min(beatsIntoLoop / loopBeats, 1);
   };

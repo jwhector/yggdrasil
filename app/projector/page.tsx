@@ -4,6 +4,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useMixState } from '@/hooks/useMixState';
+import { useProjectorThoughts } from '@/hooks/useProjectorThoughts';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { ProjectorCanvas } from '@/components/projector/ProjectorCanvas';
@@ -15,6 +16,7 @@ export default function ProjectorPage() {
   const { state, isLoading, currentAttempt } = useShowState(socket, 'projector', userId);
   const auditionProgress = useAuditionProgress(socket, state?.phase, currentAttempt?.currentLayerPhase);
   const mixStateData = useMixState(socket, state?.finaleState ?? null);
+  useProjectorThoughts(socket);
 
   if (isLoading || !state) {
     return <ProjectorDark />;

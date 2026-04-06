@@ -23,6 +23,13 @@ function chapterFromFragmentId(fragmentId: string): Chapter | null {
   return SONG_CHAPTERS[songIndex];
 }
 
+/** Extract option (A/B) from fragment ID. */
+function optionFromFragmentId(fragmentId: string): 'A' | 'B' | null {
+  const parts = fragmentId.split('-');
+  const opt = parts[parts.length - 1];
+  return opt === 'A' || opt === 'B' ? opt : null;
+}
+
 export function LiveMixSpectator({
   activeFragments,
 }: LiveMixSpectatorProps) {
@@ -56,6 +63,10 @@ export function LiveMixSpectator({
           const typeIdentity = getLayerIdentity(granularType as LayerType);
           const chapter = chapterFromFragmentId(fragmentId);
           const chapterIdentity = chapter ? getChapterIdentity(chapter) : null;
+          const option = optionFromFragmentId(fragmentId);
+          const dotColor = chapterIdentity
+            ? (option === 'A' ? chapterIdentity.colorA : option === 'B' ? chapterIdentity.colorB : chapterIdentity.color)
+            : null;
 
           return (
             <div
@@ -104,11 +115,11 @@ export function LiveMixSpectator({
                     width: '6px',
                     height: '6px',
                     borderRadius: '50%',
-                    backgroundColor: chapterIdentity.color,
+                    backgroundColor: dotColor ?? chapterIdentity.color,
                   }} />
                   <span style={{
                     fontSize: '0.65rem',
-                    color: chapterIdentity.color,
+                    color: dotColor ?? chapterIdentity.color,
                     opacity: 0.8,
                   }}>
                     {chapterIdentity.label}

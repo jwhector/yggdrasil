@@ -139,14 +139,15 @@ function FragmentTile({
 }) {
   const chapter = getChapterIdentity(fragment.chapter);
   const layer = getLayerIdentity(fragment.granularType as LayerType);
+  const optColor = fragment.option === 'A' ? chapter.colorA : chapter.colorB;
 
   const tileWidth = isProjector ? 160 : 80;
   const tileHeight = isProjector ? 80 : 48;
 
   const winnerStyle: React.CSSProperties = {
-    backgroundColor: chapter.color + '33',
-    border: `1px solid ${chapter.color}`,
-    boxShadow: `0 0 ${isProjector ? 20 : 10}px ${chapter.color}66`,
+    backgroundColor: optColor + '33',
+    border: `1px solid ${optColor}`,
+    boxShadow: `0 0 ${isProjector ? 20 : 10}px ${optColor}66`,
     opacity: 1,
   };
 
@@ -179,7 +180,7 @@ function FragmentTile({
           width: isProjector ? '10px' : '6px',
           height: isProjector ? '10px' : '6px',
           borderRadius: '50%',
-          backgroundColor: isWinner ? chapter.color : '#444',
+          backgroundColor: isWinner ? optColor : '#444',
           flexShrink: 0,
         }}
       />
@@ -205,7 +206,7 @@ function FragmentTile({
       <span
         style={{
           fontSize: isProjector ? '0.6rem' : '0.45rem',
-          color: isWinner ? chapter.color : '#444',
+          color: isWinner ? optColor : '#444',
           letterSpacing: '0.05em',
         }}
       >

@@ -20,6 +20,7 @@ Full state syncs on every mutation:
 | `join` | `{ userId?, seatId?, mode }` | All |
 | `reconnect` | `{ userId, showId, lastVersion }` | All |
 | `vote` | `{ choice: 'A' \| 'B' }` | Audience (song-building) |
+| `dismiss_thought` | `{ thoughtId, direction: 'left' \| 'right' }` | Audience (intrusive thoughts) |
 | `select_type` | `{ granularType }` | Audience (self-select assignment) |
 | `set_preference` | `{ fragmentId }` | Audience (live mix) |
 | `command` | `ConductorCommand` | Controller |
@@ -37,9 +38,15 @@ Full state syncs on every mutation:
 | `type_locked` | `{ granularType }` | Audience + Projector (performer locked a type) |
 | `type_unlocked` | `{ granularType }` | Audience + Projector (performer unlocked a type) |
 | `audition_progress` | `AuditionProgress` | Audience + Projector (song-building, ~4 Hz) |
+| `thoughts_assigned` | `{ thoughts: { id, text }[] }` | Individual audience member (on reveal stakes) |
+| `thought_dismissed` | `{ thoughtId, direction }` | Projector (per-dismiss delta) |
+| `thoughts_state` | `{ thoughts: { id, text, dismissed }[] }` | Projector (bulk on reveal start + reconnect) |
+| `thoughts_clear` | — | Audience + Projector (layer/attempt change) |
 | `error` | `{ message }` | Controller |
 
 **Note on group updates:** Sent as a separate event during assignment at ~2 Hz for responsive group size displays, NOT as part of state_sync. The `mix_state` event is high-frequency during live mix to keep the UI responsive.
+
+**Note on intrusive thoughts:** Server distributes thoughts from a shared pool on `REVEAL_STAKES_SHOWN`. Each audience member gets a random subset (1→3→5 escalating per layer). Dismissals are per-thought deltas sent to projector — no bulk polling. Server tracks state in module-level `activeThoughts` array, cleared on layer resolve.
 
 ---
 

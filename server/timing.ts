@@ -52,6 +52,7 @@ export interface TimingEngineConfig {
 /** Beat position within the current musical context. */
 export interface BeatPosition {
   absoluteBeat: number;    // Raw beat number from Ableton (or synthetic)
+  rawBeat?: number;        // Raw beat number from Ableton (or synthetic)
   beatInBar: number;       // 0–3 within current bar
   barInLoop: number;       // 0–(barsPerLoop-1) within current loop (driven by config.timing.loopBoundaryBeats)
   loopCount: number;       // Total loops elapsed since beat tracking started
@@ -602,7 +603,7 @@ export function createTimingEngine(
     return 60000 / currentBpm;
   }
 
-  function handleBeatCallbacks(beatNumber: number): void {
+  function handleBeatCallbacks(beatNumber: number, rawBeat?: number): void {
     currentAbsoluteBeat = beatNumber;
 
     // Update beat position
@@ -615,6 +616,7 @@ export function createTimingEngine(
       beatInBar: beatNumber % BEATS_PER_BAR,
       barInLoop: Math.floor(beatsSinceLoopStart / BEATS_PER_BAR) % (configuredLoopBoundaryBeats / BEATS_PER_BAR),
       loopCount: totalLoopsElapsed,
+      rawBeat
     };
 
     // Fire any scheduled callbacks for this beat
@@ -641,7 +643,7 @@ export function createTimingEngine(
     const state = getState();
 
     // Fire scheduled beat callbacks (uses monotonic for scheduling)
-    handleBeatCallbacks(monotonicBeat);
+    handleBeatCallbacks(monotonicBeat, rawBeatNumber);
 
     // --- Audition beat tracking (song-building) ---
     if (auditionState && state.phase === 'attempt_build') {

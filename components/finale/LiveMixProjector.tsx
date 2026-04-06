@@ -108,6 +108,9 @@ function TypeRow({
   const chapterIdentity = activeFragment
     ? getChapterIdentity(activeFragment.chapter)
     : null;
+  const optColor = activeFragment && chapterIdentity
+    ? (activeFragment.option === 'A' ? chapterIdentity.colorA : chapterIdentity.colorB)
+    : null;
 
   // Consensus visualization: solid when unanimous, flickers when contested
   const consensusOpacity = consensus > 0.8 ? 1 : 0.4 + consensus * 0.6;
@@ -177,7 +180,7 @@ function TypeRow({
               width: '8px',
               height: '8px',
               borderRadius: '2px',
-              backgroundColor: chapterIdentity.color,
+              backgroundColor: optColor ?? chapterIdentity.color,
             }} />
             <span style={{
               fontSize: '0.7rem',
@@ -204,7 +207,7 @@ function TypeRow({
         <div style={{
           height: '100%',
           width: `${consensus * 100}%`,
-          backgroundColor: chapterIdentity?.color ?? granularType.color,
+          backgroundColor: optColor ?? chapterIdentity?.color ?? granularType.color,
           borderRadius: '3px',
           transition: 'width 0.3s ease',
           opacity: consensusOpacity,
