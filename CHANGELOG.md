@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 2026-04-05 — Per-option chapter colors, audience build UI redesign, server-driven intrusive thoughts with projector physics
+
+**Context:** Three connected changes: (1) visual differentiation of A/B option choices throughout the show, (2) audience phone UI redesign for song-building matching a canvas-based mockup, (3) server-distributed intrusive thoughts that appear on both audience phones and the projector as physics-based membrane bubbles.
+
+### Per-option chapter colors
+- Each chapter now has 3 colors: `color` (primary/seed), `colorA`, `colorB` — defined in `ChapterConfig` and `config/default-show.json`
+- `ChapterIdentity` in `lib/identity.ts` extended with `colorA`/`colorB` + `getChapterOptionColor()` helper
+- Updated across all consumers: projector canvas renderers (audition, reveal, skeleton), song-building components (OptionCards, LayerProgress, RevealSequence), finale components (ElegyGrid, LiveMixController, LiveMixProjector, LiveMixSpectator), controller (LiveMixControls)
+- Projector `FINALE_CHAPTER_COLORS` now has `primary`/`A`/`B` per chapter; `MixStateInput` includes `nodeOptions`
+
+### Audience build UI redesign
+- New `MiniSkeleton.tsx` — canvas-drawn mini pentagon for audience phones (reuses shared.ts geometry + membranes)
+- Rewritten `OptionCards.tsx` — cleaner card design with "NOW PLAYING" label, vote dots, per-option colors, and inline reveal mode (fill bars + percentages + "CHOSEN" badge)
+- New `AuditionBars.tsx` — depleting progress bars replacing the old filling `AuditionProgress`
+- New `LayerDots.tsx` — 3 simple dots replacing the old `LayerProgress` strip
+- `BuildView` component in `audience/page.tsx` composes: MiniSkeleton → OptionCards → AuditionBars → LayerDots → hints
+- Added `layerPlan` to `AudienceAttemptView` for the mini skeleton to derive node states
+
+### Server-driven intrusive thoughts
+- **Server is single source of truth**: `conductor/intrusive-thoughts.ts` has pure `assignThoughts()` function drawing from shared pool without replacement per user
+- **Config**: `IntrusiveThoughtsConfig` now has `thoughtsPerPerson: [1, 3, 5]` (escalating per layer) and `pool: string[][]` (~15 strings per layer per chapter)
+- **Socket events**: `thoughts_assigned` (server→audience), `dismiss_thought` (audience→server), `thought_dismissed` (server→projector), `thoughts_state` (server→projector bulk), `thoughts_clear` (layer change)
+- **Audience**: `useIntrusiveThoughts` hook subscribes to server events; `IntrusiveThoughts.tsx` renders individually-draggable thought bubbles with rounded styling + sub-bubble tails; supports both touch and mouse; thoughts block reveal result until all dismissed
+- **Projector**: Physics-based membrane bubbles in `thoughts-physics.ts` — circle/oval collision, gravity scaled by size, allowed overlap for organic piling, `smoothNoise` membrane rendering matching pentagon aesthetic, sub-bubble tails. Renders on top of stakes/verdict. Dismissed thoughts fling off-screen.
+- **Recovery**: Audience reconnect gets remaining thoughts; projector reconnect gets full snapshot
+- **Testing**: `server/tools/simulate-audience.ts` — 40+ simulated clients for load testing
+- 303 tests passing
+
 ## 2026-04-02 — Projector Visual Spec Phase 1+2: Canvas skeleton, audition, two-beat reveal
 
 **Context:** Replaces the DOM-based projector song-building view with a Canvas 2D pentagon skeleton visualization, per `PROJECTOR-VISUAL-SPEC.md`. Adds a two-beat manual reveal: the performer controls when stakes (threshold) and verdict (vote result) are shown via controller buttons.

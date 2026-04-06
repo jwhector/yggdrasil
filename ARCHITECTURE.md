@@ -204,6 +204,7 @@ solo-show/
 │   ├── assignment.ts            # Granular type assignment (auto/self-select)
 │   ├── live-mix.ts              # Majority voting, recency tiebreak, initial fragment selection
 │   ├── fragments.ts             # Fragment generation from attempt results
+│   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
 │   ├── npc.ts                   # NPC event-driven message logic
 │   ├── types.ts                 # Shared type definitions
 │   └── __tests__/               # Unit tests
@@ -218,7 +219,8 @@ solo-show/
 │   ├── audio-router.ts          # Maps AUDIO_CUE events to OSC messages
 │   ├── __tests__/
 │   └── tools/
-│       └── osc-mock-ableton.ts  # Mock Ableton for testing
+│       ├── osc-mock-ableton.ts  # Mock Ableton for testing
+│       └── simulate-audience.ts # 40+ simulated audience clients for load testing
 │
 ├── app/                         # Next.js App Router (pages)
 │   ├── layout.tsx
@@ -239,12 +241,15 @@ solo-show/
 │   │       ├── shared.ts        # Noise, membrane, color utils, layout constants
 │   │       ├── skeleton.ts      # Pentagon nodes, seed node, connectors, arcs
 │   │       ├── audition.ts      # A/B labels, header, "NOW PLAYING" indicator
-│   │       └── reveal.ts        # Two-beat reveal: stakes + verdict animations
+│   │       ├── reveal.ts        # Two-beat reveal: stakes + verdict animations
+│   │       └── thoughts-physics.ts # Intrusive thoughts physics engine + membrane renderer
 │   ├── song-building/
-│   │   ├── OptionCards.tsx       # A/B voting cards (audience)
+│   │   ├── OptionCards.tsx       # A/B voting cards with inline reveal mode (audience)
+│   │   ├── MiniSkeleton.tsx     # Canvas mini pentagon for audience phones
+│   │   ├── AuditionBars.tsx     # Depleting progress bars during audition
+│   │   ├── LayerDots.tsx        # 3-dot layer progress indicator
+│   │   ├── IntrusiveThoughts.tsx # Draggable thought bubble overlay (audience)
 │   │   ├── RevealSequence.tsx   # Post-vote reveal animation (audience)
-│   │   ├── LayerProgress.tsx    # Completed/upcoming layer indicators
-│   │   ├── AuditionProgress.tsx # Bar-level audition progress indicator
 │   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (audience)
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
@@ -269,7 +274,9 @@ solo-show/
 │   ├── useShowState.ts          # Client-side state management
 │   ├── useLiveMix.ts            # Live mix state management
 │   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
-│   └── useAudioPreview.ts       # In-browser audio preview playback
+│   ├── useAudioPreview.ts       # In-browser audio preview playback
+│   ├── useIntrusiveThoughts.ts  # Audience: server-assigned thought subscription + dismiss
+│   └── useProjectorThoughts.ts  # Projector: thought state → physics engine bridge
 │
 ├── lib/
 │   ├── socket-client.ts         # Socket.IO client setup

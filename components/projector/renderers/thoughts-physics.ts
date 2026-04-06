@@ -1,35 +1,60 @@
 /**
  * Intrusive Thoughts — Physics Engine for Projector Canvas
  *
- * Module-level state (same pattern as finale renderer). Manages particle simulation
- * for falling/piling thought text, with AABB collision resolution.
+ * Organic thought bubbles rendered as membrane shapes (matching the pentagon
+ * skeleton aesthetic). Circle-based collision produces smooth sliding behavior.
  *
+ * Module-level state (same pattern as finale renderer).
  * All constants are tunable at the top of the file.
  */
+
+import { smoothNoise, rgb } from './shared';
+import type { RGB } from './shared';
 
 // ============================================================================
 // Tunable Constants
 // ============================================================================
 
-const GRAVITY = 150;              // px/s² (low gravity feel)
-const DAMPING = 0.65;             // velocity multiplier on collision
-const FRICTION = 0.985;           // per-frame velocity decay
-const SETTLE_THRESHOLD = 2;       // velocity below which particle is "settled"
-const SPAWN_STAGGER_MS = 50;      // ms between each particle spawn
-const FLING_SPEED = 1200;         // px/s for dismissed particles
-const FLING_VY = -200;            // slight upward arc on fling
-const PARTICLE_HEIGHT = 28;       // fixed height per particle (font + padding)
-const PARTICLE_PADDING_X = 16;    // horizontal padding for text
-const FONT_SIZE = 14;             // px
-const FONT = `${FONT_SIZE}px monospace`;
-const MAX_ROTATION = 0.15;        // radians — max rotation for settled particles
-const ROTATION_DAMPING = 0.92;    // rotational velocity decay
+// Physics
+const GRAVITY_BASE = 380;         // px/s² — base gravity (scaled by size)
+const GRAVITY_SIZE_SCALE = 0.4;   // how much size affects fall speed (0 = none, 1 = fully proportional)
+const DAMPING = 0.4;              // velocity retained on collision (low = soft/sliding)
+const FRICTION = 0.97;            // per-frame velocity decay
+const SETTLE_THRESHOLD = 1.5;     // velocity below which particle is "settled"
+const SETTLE_FLOOR_MARGIN = 2;    // px proximity to floor to consider settled
+const COLLISION_OVERLAP = 0.25;   // fraction of combined radii that can overlap (0 = no overlap, 1 = full)
+const SPAWN_STAGGER_MS = 40;      // ms between each particle spawn
+const FLING_SPEED = 1400;         // px/s for dismissed particles
+const FLING_VY = -150;            // slight upward arc on fling
 
-// Visual
-const BG_COLOR = 'rgba(20, 8, 8, 0.82)';
-const TEXT_COLOR = 'rgba(255, 180, 180, 0.7)';
-const BORDER_COLOR = 'rgba(200, 60, 60, 0.2)';
-const BORDER_RADIUS = 5;
+// Sizing — oval bubbles (radiusX > radiusY)
+const MIN_RADIUS_X = 30;         // minimum horizontal radius
+const RADIUS_X_PER_CHAR = 3.2;   // additional horizontal radius per character
+const MAX_RADIUS_X = 80;         // cap
+const RADIUS_Y = 30;             // fixed vertical radius
+const FONT_SIZE = 12;             // px
+const FONT = `${FONT_SIZE}px monospace`;
+
+// Membrane rendering
+const MEMBRANE_SEGMENTS = 24;     // path segments per bubble (lower than skeleton's 48)
+const MEMBRANE_NOISE_SETTLED = 0.06;  // subtle breathing when at rest
+const MEMBRANE_NOISE_AIRBORNE = 0.12; // more wobble while falling
+const MEMBRANE_NOISE_FLUNG = 0.20;    // stretchy distortion during fling
+const MEMBRANE_SPEED_SETTLED = 0.6;   // slow breathing
+const MEMBRANE_SPEED_AIRBORNE = 1.4;  // faster wobble
+
+// Thought-bubble tail (sub-bubble)
+const TAIL_RADIUS_RATIO = 0.22;    // sub-bubble radius relative to radiusY
+const TAIL_OFFSET_X = 0.7;         // horizontal offset as ratio of radiusX (from center)
+const TAIL_OFFSET_Y = 1.1;         // vertical offset as ratio of radiusY (below center)
+const TAIL_SEGMENTS = 12;
+
+// Colors
+const BUBBLE_COLOR: RGB = { r: 180, g: 50, b: 50 };   // dark red membrane
+const BUBBLE_FILL_ALPHA = 0.12;
+const BUBBLE_STROKE_ALPHA = 0.35;
+const TEXT_COLOR = 'rgba(255, 170, 170, 0.65)';
+const TEXT_COLOR_FLUNG = 'rgba(255, 170, 170, 0.3)';
 
 // ============================================================================
 // Types
@@ -42,14 +67,15 @@ interface Particle {
   y: number;
   vx: number;
   vy: number;
-  width: number;
-  height: number;
-  rotation: number;
-  vRotation: number;
+  radiusX: number;
+  radiusY: number;
   settled: boolean;
   flung: boolean;
   opacity: number;
-  measured: boolean;   // whether width has been measured via ctx.measureText
+  seed: number;        // unique noise seed for membrane variation
+  age: number;         // seconds since spawn (for animation phase)
+  measured: boolean;
+  tailSide: 'left' | 'right';  // which side the thought-bubble tail appears
 }
 
 // ============================================================================
@@ -62,21 +88,19 @@ let canvasW = 0;
 let canvasH = 0;
 let spawnQueue: { id: string; text: string }[] = [];
 let spawnTimer = 0;
+let globalTime = 0;
 
 // ============================================================================
 // Public API
 // ============================================================================
 
-/** Initialize with a batch of thoughts. Queues them for staggered spawning. */
 export function initThoughts(thoughts: { id: string; text: string }[]): void {
-  // Don't reset existing particles — allow incremental adds on reconnect
   const existingIds = new Set(particles.map(p => p.id));
   const newThoughts = thoughts.filter(t => !existingIds.has(t.id));
   spawnQueue = [...spawnQueue, ...newThoughts.map(t => ({ id: t.id, text: t.text }))];
   spawnTimer = 0;
 }
 
-/** Dismiss a specific thought — fling it off-screen. */
 export function dismissThought(id: string, direction: 'left' | 'right'): void {
   const p = particles.find(p => p.id === id);
   if (!p || p.flung) return;
@@ -84,29 +108,27 @@ export function dismissThought(id: string, direction: 'left' | 'right'): void {
   p.settled = false;
   p.vx = direction === 'right' ? FLING_SPEED : -FLING_SPEED;
   p.vy = FLING_VY;
-  p.vRotation = (direction === 'right' ? 1 : -1) * 3;
 }
 
-/** Clear all thoughts (on phase change). */
 export function clearThoughts(): void {
   particles = [];
   spawnQueue = [];
   spawnTimer = 0;
 }
 
-/** Get current particle count (for debugging/metrics). */
 export function getParticleCount(): number {
   return particles.length + spawnQueue.length;
 }
 
 // ============================================================================
-// Physics Update (called each frame)
+// Physics Update
 // ============================================================================
 
 export function updatePhysics(dt: number, cw: number, ch: number): void {
   canvasW = cw;
   canvasH = ch;
   floorY = ch * 0.88;
+  globalTime += dt;
 
   // Process spawn queue
   spawnTimer += dt * 1000;
@@ -116,17 +138,17 @@ export function updatePhysics(dt: number, cw: number, ch: number): void {
     particles.push(createParticle(item.id, item.text));
   }
 
-  // Update each particle
+  // Update particles
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
+    p.age += dt;
 
     if (p.flung) {
-      // Flung particles: move fast, fade out, remove when off-screen
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.rotation += p.vRotation * dt;
-      p.opacity -= dt * 2.5;
-      if (p.opacity <= 0 || p.x < -p.width * 2 || p.x > canvasW + p.width * 2) {
+      p.vy += GRAVITY_BASE * 0.5 * dt;
+      p.opacity -= dt * 2.0;
+      if (p.opacity <= 0 || p.x < -p.radiusX * 4 || p.x > canvasW + p.radiusX * 4) {
         particles.splice(i, 1);
       }
       continue;
@@ -134,53 +156,48 @@ export function updatePhysics(dt: number, cw: number, ch: number): void {
 
     if (p.settled) continue;
 
-    // Apply gravity
-    p.vy += GRAVITY * dt;
+    // Gravity — larger bubbles fall slightly faster
+    const sizeRatio = (p.radiusX + p.radiusY) / (MAX_RADIUS_X + RADIUS_Y);
+    const gravity = GRAVITY_BASE * (1 + (sizeRatio - 0.5) * GRAVITY_SIZE_SCALE);
+    p.vy += gravity * dt;
 
-    // Apply friction
+    // Friction
     p.vx *= FRICTION;
     p.vy *= FRICTION;
-    p.vRotation *= ROTATION_DAMPING;
 
     // Move
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.rotation += p.vRotation * dt;
 
-    // Clamp rotation
-    if (Math.abs(p.rotation) > MAX_ROTATION) {
-      p.rotation = Math.sign(p.rotation) * MAX_ROTATION;
-      p.vRotation = 0;
-    }
-
-    // Floor collision
-    if (p.y + p.height / 2 > floorY) {
-      p.y = floorY - p.height / 2;
-      p.vy = -p.vy * DAMPING;
-      p.vRotation += (Math.random() - 0.5) * 0.5;
+    // Floor collision (use radiusY for vertical)
+    if (p.y + p.radiusY > floorY) {
+      p.y = floorY - p.radiusY;
+      p.vy = -Math.abs(p.vy) * DAMPING;
+      p.vx += (Math.random() - 0.5) * 15;
       if (Math.abs(p.vy) < SETTLE_THRESHOLD) {
         p.vy = 0;
       }
     }
 
-    // Wall collision
-    if (p.x - p.width / 2 < 0) {
-      p.x = p.width / 2;
-      p.vx = -p.vx * DAMPING;
-    } else if (p.x + p.width / 2 > canvasW) {
-      p.x = canvasW - p.width / 2;
-      p.vx = -p.vx * DAMPING;
+    // Wall collision (use radiusX for horizontal)
+    if (p.x - p.radiusX < 0) {
+      p.x = p.radiusX;
+      p.vx = Math.abs(p.vx) * DAMPING;
+    } else if (p.x + p.radiusX > canvasW) {
+      p.x = canvasW - p.radiusX;
+      p.vx = -Math.abs(p.vx) * DAMPING;
     }
 
-    // Check if settled
-    if (Math.abs(p.vx) < SETTLE_THRESHOLD && Math.abs(p.vy) < SETTLE_THRESHOLD && p.y + p.height / 2 >= floorY - 1) {
+    // Settle check
+    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    if (speed < SETTLE_THRESHOLD && p.y + p.radiusY >= floorY - SETTLE_FLOOR_MARGIN) {
       p.vx = 0;
       p.vy = 0;
       p.settled = true;
     }
   }
 
-  // Inter-particle AABB collision (O(n²) — fine for ≤200 particles)
+  // Oval collision uses average radius for distance checks
   for (let i = 0; i < particles.length; i++) {
     const a = particles[i];
     if (a.flung) continue;
@@ -189,13 +206,13 @@ export function updatePhysics(dt: number, cw: number, ch: number): void {
       const b = particles[j];
       if (b.flung) continue;
 
-      resolveCollision(a, b);
+      resolveOvalCollision(a, b);
     }
   }
 }
 
 // ============================================================================
-// Rendering (called each frame)
+// Rendering
 // ============================================================================
 
 export function renderParticles(ctx: CanvasRenderingContext2D): void {
@@ -203,34 +220,37 @@ export function renderParticles(ctx: CanvasRenderingContext2D): void {
   ctx.font = FONT;
 
   for (const p of particles) {
-    // Measure text width on first render
+    // Measure text on first render to adjust radiusX
     if (!p.measured) {
       const metrics = ctx.measureText(p.text);
-      p.width = metrics.width + PARTICLE_PADDING_X * 2;
+      p.radiusX = Math.min(Math.max(MIN_RADIUS_X, metrics.width / 2 + 14), MAX_RADIUS_X);
       p.measured = true;
     }
 
     ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(p.rotation);
     ctx.globalAlpha = Math.max(0, p.opacity);
 
-    // Background
-    const hw = p.width / 2;
-    const hh = p.height / 2;
-    ctx.beginPath();
-    ctx.roundRect(-hw, -hh, p.width, p.height, BORDER_RADIUS);
-    ctx.fillStyle = BG_COLOR;
-    ctx.fill();
-    ctx.strokeStyle = BORDER_COLOR;
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    let noiseIntensity: number;
+    let timeScale: number;
+    if (p.flung) {
+      noiseIntensity = MEMBRANE_NOISE_FLUNG;
+      timeScale = MEMBRANE_SPEED_AIRBORNE * 2;
+    } else if (p.settled) {
+      noiseIntensity = MEMBRANE_NOISE_SETTLED;
+      timeScale = MEMBRANE_SPEED_SETTLED;
+    } else {
+      noiseIntensity = MEMBRANE_NOISE_AIRBORNE;
+      timeScale = MEMBRANE_SPEED_AIRBORNE;
+    }
 
-    // Text
-    ctx.fillStyle = TEXT_COLOR;
+    // Draw oval membrane + tail sub-bubble
+    drawThoughtMembrane(ctx, p.x, p.y, p.radiusX, p.radiusY, noiseIntensity, globalTime * timeScale, p.seed, p.tailSide);
+
+    // Text centered inside
+    ctx.fillStyle = p.flung ? TEXT_COLOR_FLUNG : TEXT_COLOR;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(p.text, 0, 1); // +1 for visual centering with monospace
+    ctx.fillText(p.text, p.x, p.y + 1);
 
     ctx.restore();
   }
@@ -239,82 +259,143 @@ export function renderParticles(ctx: CanvasRenderingContext2D): void {
 }
 
 // ============================================================================
+// Oval Membrane Drawing
+// ============================================================================
+
+function drawThoughtMembrane(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  rx: number,
+  ry: number,
+  noiseIntensity: number,
+  time: number,
+  seed: number,
+  tailSide: 'left' | 'right',
+): void {
+  // Main bubble
+  ctx.beginPath();
+  for (let i = 0; i <= MEMBRANE_SEGMENTS; i++) {
+    const angle = (i / MEMBRANE_SEGMENTS) * Math.PI * 2;
+    const noise = smoothNoise(
+      Math.cos(angle) * 3,
+      Math.sin(angle) * 3,
+      time + seed,
+    );
+    const noiseMul = 1 + noise * noiseIntensity;
+    const px = x + Math.cos(angle) * rx * noiseMul;
+    const py = y + Math.sin(angle) * ry * noiseMul;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+
+  ctx.fillStyle = rgb(BUBBLE_COLOR, BUBBLE_FILL_ALPHA);
+  ctx.fill();
+  ctx.strokeStyle = rgb(BUBBLE_COLOR, BUBBLE_STROKE_ALPHA);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Sub-bubble tail
+  const tailSign = tailSide === 'right' ? 1 : -1;
+  const tailX = x + rx * TAIL_OFFSET_X * tailSign;
+  const tailY = y + ry * TAIL_OFFSET_Y;
+  const tailR = ry * TAIL_RADIUS_RATIO;
+
+  ctx.beginPath();
+  for (let i = 0; i <= TAIL_SEGMENTS; i++) {
+    const angle = (i / TAIL_SEGMENTS) * Math.PI * 2;
+    const noise = smoothNoise(
+      Math.cos(angle) * 4,
+      Math.sin(angle) * 4,
+      time * 1.5 + seed + 50,
+    );
+    const noiseMul = 1 + noise * noiseIntensity * 0.6;
+    const px = tailX + Math.cos(angle) * tailR * noiseMul;
+    const py = tailY + Math.sin(angle) * tailR * noiseMul;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+
+  ctx.fillStyle = rgb(BUBBLE_COLOR, BUBBLE_FILL_ALPHA);
+  ctx.fill();
+  ctx.strokeStyle = rgb(BUBBLE_COLOR, BUBBLE_STROKE_ALPHA);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
 function createParticle(id: string, text: string): Particle {
-  // Estimate width (will be corrected on first render via measureText)
-  const estimatedWidth = text.length * FONT_SIZE * 0.6 + PARTICLE_PADDING_X * 2;
+  const estRadiusX = Math.min(
+    Math.max(MIN_RADIUS_X, text.length * RADIUS_X_PER_CHAR + 12),
+    MAX_RADIUS_X,
+  );
 
   return {
     id,
     text,
-    x: Math.random() * (canvasW * 0.6) + canvasW * 0.2,  // spawn in middle 60%
-    y: -PARTICLE_HEIGHT - Math.random() * 60,               // above viewport
-    vx: (Math.random() - 0.5) * 40,
-    vy: Math.random() * 30 + 10,                            // slight initial downward
-    width: estimatedWidth,
-    height: PARTICLE_HEIGHT,
-    rotation: (Math.random() - 0.5) * 0.1,
-    vRotation: (Math.random() - 0.5) * 0.3,
+    x: Math.random() * (canvasW * 0.6) + canvasW * 0.2,
+    y: -RADIUS_Y - Math.random() * 80,
+    vx: (Math.random() - 0.5) * 30,
+    vy: Math.random() * 20 + 5,
+    radiusX: estRadiusX,
+    radiusY: RADIUS_Y,
     settled: false,
     flung: false,
     opacity: 1,
+    seed: Math.random() * 100,
+    age: 0,
     measured: false,
+    tailSide: Math.random() > 0.5 ? 'right' : 'left',
   };
 }
 
-function resolveCollision(a: Particle, b: Particle): void {
-  // AABB overlap check
-  const aLeft = a.x - a.width / 2;
-  const aRight = a.x + a.width / 2;
-  const aTop = a.y - a.height / 2;
-  const aBottom = a.y + a.height / 2;
+/** Collision using average of the two ovals' mean radii, with allowed overlap. */
+function resolveOvalCollision(a: Particle, b: Particle): void {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const distSq = dx * dx + dy * dy;
+  const avgRadiusA = (a.radiusX + a.radiusY) / 2;
+  const avgRadiusB = (b.radiusX + b.radiusY) / 2;
+  // Allow some overlap — only push apart when closer than (1 - overlap) of combined radii
+  const minDist = (avgRadiusA + avgRadiusB) * (1 - COLLISION_OVERLAP);
 
-  const bLeft = b.x - b.width / 2;
-  const bRight = b.x + b.width / 2;
-  const bTop = b.y - b.height / 2;
-  const bBottom = b.y + b.height / 2;
+  if (distSq >= minDist * minDist || distSq === 0) return;
 
-  const overlapX = Math.min(aRight, bRight) - Math.max(aLeft, bLeft);
-  const overlapY = Math.min(aBottom, bBottom) - Math.max(aTop, bTop);
+  const dist = Math.sqrt(distSq);
+  const overlap = minDist - dist;
 
-  if (overlapX <= 0 || overlapY <= 0) return; // No overlap
+  const nx = dx / dist;
+  const ny = dy / dist;
 
-  // Push apart along axis of least overlap
-  if (overlapX < overlapY) {
-    // Separate horizontally
-    const sign = a.x < b.x ? -1 : 1;
-    const push = overlapX / 2 + 0.5;
-    a.x += sign * push;
-    b.x -= sign * push;
+  const push = overlap / 2 + 0.5;
+  a.x -= nx * push;
+  a.y -= ny * push;
+  b.x += nx * push;
+  b.y += ny * push;
 
-    // Swap horizontal velocities with damping
-    if (!a.settled || !b.settled) {
-      const tempVx = a.vx;
-      a.vx = b.vx * DAMPING;
-      b.vx = tempVx * DAMPING;
-      a.settled = false;
-      b.settled = false;
-    }
-  } else {
-    // Separate vertically
-    const sign = a.y < b.y ? -1 : 1;
-    const push = overlapY / 2 + 0.5;
-    a.y += sign * push;
-    b.y -= sign * push;
+  const dvx = a.vx - b.vx;
+  const dvy = a.vy - b.vy;
+  const relVelNormal = dvx * nx + dvy * ny;
 
-    // Swap vertical velocities with damping
-    if (!a.settled || !b.settled) {
-      const tempVy = a.vy;
-      a.vy = b.vy * DAMPING;
-      b.vy = tempVy * DAMPING;
-      a.settled = false;
-      b.settled = false;
-    }
+  if (relVelNormal <= 0) return;
+
+  const impulse = relVelNormal * DAMPING;
+  if (!a.settled) {
+    a.vx -= impulse * nx;
+    a.vy -= impulse * ny;
+    a.settled = false;
+  }
+  if (!b.settled) {
+    b.vx += impulse * nx;
+    b.vy += impulse * ny;
+    b.settled = false;
   }
 
-  // Add slight rotational response
-  a.vRotation += (Math.random() - 0.5) * 0.2;
-  b.vRotation += (Math.random() - 0.5) * 0.2;
+  if (a.settled && Math.abs(relVelNormal) > SETTLE_THRESHOLD * 3) a.settled = false;
+  if (b.settled && Math.abs(relVelNormal) > SETTLE_THRESHOLD * 3) b.settled = false;
 }

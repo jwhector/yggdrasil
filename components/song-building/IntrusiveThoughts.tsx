@@ -18,12 +18,12 @@ import { getChapterIdentity } from '@/lib/identity';
 // Tunable constants (grouped for easy iteration)
 // ============================================================================
 
-/** Styling for individual thought elements. */
+/** Styling for individual thought bubble elements. */
 const THOUGHT_STYLE: React.CSSProperties = {
   fontSize: '0.85rem',
   fontFamily: 'monospace',
-  padding: '8px 16px',
-  borderRadius: '6px',
+  padding: '10px 18px',
+  borderRadius: '20px',
   background: 'rgba(20, 8, 8, 0.85)',
   border: '1px solid rgba(200, 60, 60, 0.2)',
   color: 'rgba(255, 180, 180, 0.7)',
@@ -36,6 +36,10 @@ const THOUGHT_STYLE: React.CSSProperties = {
   WebkitUserSelect: 'none',
   touchAction: 'none',
 };
+
+/** Styling for the sub-bubble tail. */
+const TAIL_SIZE = 8;
+const TAIL_OFFSET_X = 12;  // px from bubble edge
 
 /** Animation timing parameters. */
 const FALL_TIMING = {
@@ -87,6 +91,7 @@ interface ThoughtItem {
   index: number;
   dragX: number;
   dragging: boolean;
+  tailSide: 'left' | 'right';
 }
 
 export function IntrusiveThoughts({
@@ -103,6 +108,7 @@ export function IntrusiveThoughts({
   useEffect(() => {
     if (!active || thoughts.length === 0) {
       seededRef.current = false;
+      setItems([]);
       return;
     }
     if (seededRef.current) return;
@@ -122,6 +128,7 @@ export function IntrusiveThoughts({
       index: i,
       dragX: 0,
       dragging: false,
+      tailSide: Math.random() > 0.5 ? 'right' : 'left',
     }));
     setItems(newItems);
 
@@ -357,6 +364,19 @@ function DraggableThought({
       }}
     >
       {item.text}
+      {/* Sub-bubble tail */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: -TAIL_SIZE - 3,
+          [item.tailSide]: TAIL_OFFSET_X,
+          width: TAIL_SIZE,
+          height: TAIL_SIZE,
+          borderRadius: '50%',
+          background: 'inherit',
+          border: 'inherit',
+        }}
+      />
     </div>
   );
 }

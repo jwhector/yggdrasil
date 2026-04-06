@@ -115,7 +115,7 @@ function createClient(index: number): ClientState {
 
     setTimeout(() => {
       simulateDismissals(client, index);
-    }, 10000);
+    }, 30000);
 
     // Simulate staggered dismissal
     // simulateDismissals(client, index);

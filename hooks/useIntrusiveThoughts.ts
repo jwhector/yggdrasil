@@ -53,6 +53,14 @@ export function useIntrusiveThoughts(
     };
   }, [socket]);
 
+  // Clear thoughts when returning to auditioning (new layer started)
+  useEffect(() => {
+    if (layerPhase === 'auditioning' || layerPhase === 'locked') {
+      setThoughts([]);
+      hadThoughtsRef.current = false;
+    }
+  }, [layerPhase]);
+
   // Dismiss a thought: remove locally + notify server
   const dismissThought = useCallback((id: string, direction: 'left' | 'right') => {
     setThoughts(prev => prev.filter(t => t.id !== id));

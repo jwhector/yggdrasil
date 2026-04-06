@@ -74,6 +74,7 @@ yggdrasil/
 │   ├── voting.ts                # Vote tallying + doubt threshold check
 │   ├── threshold.ts             # Doubt threshold check
 │   ├── fragments.ts             # Fragment generation (layer group → granular decomposition)
+│   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
 │   ├── assignment.ts            # Finale group auto/self-select assignment
 │   ├── live-mix.ts              # Majority voting, recency tiebreak, initial fragment selection
 │   ├── npc.ts                   # NPC event-driven message lookup
@@ -104,12 +105,15 @@ yggdrasil/
 │   │       ├── shared.ts        # Noise, membrane, color utils, layout constants
 │   │       ├── skeleton.ts      # Pentagon nodes, seed node, connectors, arcs
 │   │       ├── audition.ts      # A/B labels, header, "NOW PLAYING" indicator
-│   │       └── reveal.ts        # Two-beat reveal: stakes + verdict animations
+│   │       ├── reveal.ts        # Two-beat reveal: stakes + verdict animations
+│   │       └── thoughts-physics.ts # Intrusive thoughts physics engine + membrane renderer
 │   ├── song-building/
-│   │   ├── OptionCards.tsx       # A/B voting cards (audience)
+│   │   ├── OptionCards.tsx       # A/B voting cards with inline reveal mode (audience)
+│   │   ├── MiniSkeleton.tsx     # Canvas mini pentagon for audience phones
+│   │   ├── AuditionBars.tsx     # Depleting progress bars during audition
+│   │   ├── LayerDots.tsx        # 3-dot layer progress indicator
+│   │   ├── IntrusiveThoughts.tsx # Draggable thought bubble overlay (audience)
 │   │   ├── RevealSequence.tsx   # Post-vote reveal + threshold check (audience)
-│   │   ├── LayerProgress.tsx    # 3-layer progress indicator
-│   │   ├── AuditionProgress.tsx # Bar-level audition progress
 │   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (audience)
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
@@ -134,7 +138,9 @@ yggdrasil/
 │   ├── useShowState.ts
 │   ├── useLiveMix.ts            # Live mix state management
 │   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
-│   └── useAudioPreview.ts       # In-browser audio preview playback
+│   ├── useAudioPreview.ts       # In-browser audio preview playback
+│   ├── useIntrusiveThoughts.ts  # Audience: server-assigned thought subscription + dismiss
+│   └── useProjectorThoughts.ts  # Projector: thought state → physics engine bridge
 │
 ├── lib/
 │   ├── socket-client.ts
