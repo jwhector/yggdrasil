@@ -275,10 +275,20 @@ export interface ShowConfig {
   intrusiveThoughts?: IntrusiveThoughtsConfig[];  // Per-attempt, per-layer thought strings
 }
 
-/** Intrusive thoughts shown during reveal stakes on audience phones. */
+/** Intrusive thoughts config — shared pool distributed by the server. */
 export interface IntrusiveThoughtsConfig {
   chapter: Chapter;
-  layers: string[][];                   // [layerIndex][thoughtIndex] — thoughts for each layer
+  thoughtsPerPerson: number[];          // Per-layer count [1, 3, 5]
+  pool: string[][];                     // [layerIndex][poolIndex] — shared pool per layer
+}
+
+/** A single thought assigned to a specific user by the server. */
+export interface AssignedThought {
+  id: string;                           // Unique: "{attemptIndex}-{layerIndex}-{userId}-{i}"
+  text: string;
+  userId: UserId;
+  dismissed: boolean;
+  dismissDirection?: 'left' | 'right';
 }
 
 // Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.

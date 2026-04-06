@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
@@ -11,13 +11,14 @@ import { AuditionBars } from '@/components/song-building/AuditionBars';
 import { LayerDots } from '@/components/song-building/LayerDots';
 import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
+import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { AssignmentCards } from '@/components/finale/AssignmentCards';
 import { AssignmentIdentity } from '@/components/finale/AssignmentIdentity';
 import { LiveMixController } from '@/components/finale/LiveMixController';
 import { LiveMixSpectator } from '@/components/finale/LiveMixSpectator';
 import { useLiveMix } from '@/hooks/useLiveMix';
-import type { AudienceFinaleView, AudienceAttemptView, AudienceClientState, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
+import type { AudienceFinaleView, AudienceAttemptView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -95,9 +96,9 @@ function AudienceContent() {
         <BuildView
           currentAttempt={currentAttempt}
           auditionProgress={auditionProgress}
-          config={state.config}
           attemptIndex={state.currentAttemptIndex}
           onVote={handleVote}
+          socket={socket}
         />
       )}
 
@@ -329,50 +330,25 @@ function PulsingDot() {
 function BuildView({
   currentAttempt,
   auditionProgress,
-  config,
   attemptIndex,
   onVote,
+  socket,
 }: {
   currentAttempt: AudienceAttemptView;
   auditionProgress: AuditionProgressData | null;
-  config: AudienceClientState['config'];
   attemptIndex: number;
   onVote: (choice: 'A' | 'B') => void;
+  socket: Socket | null;
 }) {
-  const [thoughtsDismissed, setThoughtsDismissed] = useState(false);
-  const [thoughtsTriggered, setThoughtsTriggered] = useState(false);
-  const [prevLayerKey, setPrevLayerKey] = useState('');
-
   const { chapter, currentLayerIndex, currentLayerPhase, layerResults, myVote } = currentAttempt;
-
-  // Reset state when layer changes
-  const currentLayerKey = `${currentAttempt.index}-${currentLayerIndex}`;
-  if (currentLayerKey !== prevLayerKey) {
-    setPrevLayerKey(currentLayerKey);
-    setThoughtsDismissed(false);
-    setThoughtsTriggered(false);
-  }
-
-  const isRevealing = currentLayerPhase === 'revealing';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const hasVoted = myVote !== null;
 
-  // Intrusive thoughts for this attempt + layer
-  const thoughtsConfig = config.intrusiveThoughts?.find(c => c.chapter === chapter);
-  const thoughts = thoughtsConfig?.layers[currentLayerIndex] ?? [];
-
-  // Latch: once reveal starts, thoughts stay triggered for the rest of this layer
-  if (isRevealing && thoughts.length > 0 && !thoughtsTriggered) {
-    setThoughtsTriggered(true);
-  }
-
-  // Thoughts are active from the moment they're triggered until dismissed
-  const thoughtsActive = thoughtsTriggered && !thoughtsDismissed;
+  // Server-driven intrusive thoughts
+  const intrusiveThoughts = useIntrusiveThoughts(socket, undefined, currentLayerPhase);
+  const thoughtsBlocking = intrusiveThoughts.hasThoughts;
 
   const layerKey = `${attemptIndex}-${currentLayerIndex}`;
-
-  // Thoughts block the UI and the reveal result until dismissed
-  const thoughtsBlocking = thoughtsTriggered && !thoughtsDismissed;
 
   // Build reveal result from vote data.
   // Only show after the conductor advances past revealing (locked_in / collapsed),
@@ -490,10 +466,9 @@ function BuildView({
       {/* Intrusive thoughts overlay */}
       <IntrusiveThoughts
         key={layerKey}
-        thoughts={thoughts}
-        active={thoughtsActive}
-        dismissed={thoughtsDismissed}
-        onDismiss={() => setThoughtsDismissed(true)}
+        thoughts={intrusiveThoughts.thoughts}
+        active={intrusiveThoughts.hasThoughts}
+        onDismiss={intrusiveThoughts.dismissThought}
         chapter={chapter}
       />
     </div>
