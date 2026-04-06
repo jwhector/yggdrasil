@@ -563,6 +563,27 @@ export function setupSocketHandlers(
         }
       }
 
+      // Clear intrusive thoughts when advancing past verdict (layer actually moves on)
+      if (processedCommand.type === 'ADVANCE_FROM_VERDICT' && activeThoughts.length > 0) {
+        // Fling all remaining thoughts off-screen at random directions
+        for (const t of activeThoughts) {
+          if (!t.dismissed) {
+            t.dismissed = true;
+            t.dismissDirection = Math.random() > 0.5 ? 'right' : 'left';
+            io.to('projector').emit('thought_dismissed', {
+              thoughtId: t.id,
+              direction: t.dismissDirection,
+            });
+          }
+        }
+        // Clear after a brief delay for the fling animation
+        setTimeout(() => {
+          activeThoughts = [];
+          io.to('projector').emit('thoughts_clear');
+          io.to('audience').emit('thoughts_clear');
+        }, 500);
+      }
+
       // Persist lock/unlock/override mix events
       if (processedCommand.type === 'LOCK_GRANULAR_TYPE') {
         persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, '', 'lock');
@@ -700,13 +721,6 @@ export async function broadcastEvents(
         });
         break;
       }
-
-      case 'LAYER_LOCKED_IN':
-      case 'ATTEMPT_COLLAPSED':
-        // Clear thoughts when layer resolves
-        activeThoughts = [];
-        io.to('projector').emit('thoughts_clear');
-        break;
 
       case 'ERROR':
         io.to('controller').emit('error', event);

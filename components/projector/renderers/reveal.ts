@@ -269,28 +269,28 @@ export function drawVerdict(
     thresholdY + 1,
   );
 
-  // Verdict text (1600–2100ms)
-  if (elapsed > 1600) {
-    const verdictFade = ease(clamp01((elapsed - 1600) / 500));
-    const verdictSize = W * 0.022;
-    const verdictY = bars.barTop - W * 0.03;
+  // Verdict text (1600–2100ms) 
+  // if (elapsed > 1600) {
+  //   const verdictFade = ease(clamp01((elapsed - 1600) / 500));
+  //   const verdictSize = W * 0.022;
+  //   const verdictY = bars.barTop - W * 0.03;
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+  //   ctx.textAlign = 'center';
+  //   ctx.textBaseline = 'middle';
 
-    if (passed) {
-      // "THRESHOLD MET" — amber, pulsing
-      const pulse = 0.7 + 0.3 * Math.sin(t * 4);
-      ctx.fillStyle = `rgba(232,167,53,${verdictFade * pulse})`;
-      ctx.font = `bold ${verdictSize}px system-ui, sans-serif`;
-      ctx.fillText('THRESHOLD MET', W / 2, verdictY);
-    } else {
-      // "DOUBT OVERWHELMS" — red, trembling
-      const tremble = Math.sin(t * 20) * W * 0.002;
-      ctx.fillStyle = `rgba(239,68,68,${verdictFade * 0.9})`;
-      ctx.font = `bold ${verdictSize}px system-ui, sans-serif`;
-      ctx.fillText('DOUBT OVERWHELMS', W / 2 + tremble, verdictY);
-    }
-  }
+  //   if (passed) {
+  //     // "THRESHOLD MET" — amber, pulsing
+  //     const pulse = 0.7 + 0.3 * Math.sin(t * 4);
+  //     ctx.fillStyle = `rgba(232,167,53,${verdictFade * pulse})`;
+  //     ctx.font = `bold ${verdictSize}px system-ui, sans-serif`;
+  //     ctx.fillText('THRESHOLD MET', W / 2, verdictY);
+  //   } else {
+  //     // "DOUBT OVERWHELMS" — red, trembling
+  //     const tremble = Math.sin(t * 20) * W * 0.002;
+  //     ctx.fillStyle = `rgba(239,68,68,${verdictFade * 0.9})`;
+  //     ctx.font = `bold ${verdictSize}px system-ui, sans-serif`;
+  //     ctx.fillText('DOUBT OVERWHELMS', W / 2 + tremble, verdictY);
+  //   }
+  // }
 }
 

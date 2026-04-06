@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
+import { DisconnectOverlay } from '@/components/DisconnectOverlay';
 import { MiniSkeleton } from '@/components/song-building/MiniSkeleton';
 import { OptionCards } from '@/components/song-building/OptionCards';
 import type { RevealResult } from '@/components/song-building/OptionCards';
@@ -43,7 +44,7 @@ function AudienceContent() {
   const searchParams = useSearchParams();
   const seatId = searchParams.get('seat') ?? undefined;
 
-  const { socket, connectionState, userId, emit } = useSocket({
+  const { socket, connectionState, userId, emit, reconnect, hasGivenUp } = useSocket({
     showId: SHOW_ID,
     seatId: seatId ?? null,
     mode: 'audience',
@@ -65,7 +66,7 @@ function AudienceContent() {
   if (isLoading || !state) {
     return (
       <Screen>
-        <ConnectionIndicator state={connectionState} />
+        <DisconnectOverlay connectionState={connectionState} hasGivenUp={hasGivenUp} onReconnect={reconnect} />
         <PulsingDot />
       </Screen>
     );
@@ -80,8 +81,8 @@ function AudienceContent() {
       {/* Pause overlay */}
       {paused && <PauseOverlay />}
 
-      {/* Connection indicator (top-right corner) */}
-      <ConnectionIndicator state={connectionState} />
+      {/* Disconnect overlay */}
+      <DisconnectOverlay connectionState={connectionState} hasGivenUp={hasGivenUp} onReconnect={reconnect} />
 
       {/* Phase routing */}
       {phase === 'lobby' && (
@@ -341,6 +342,7 @@ function BuildView({
   socket: Socket | null;
 }) {
   const { chapter, currentLayerIndex, currentLayerPhase, layerResults, myVote } = currentAttempt;
+  const isLocked = currentLayerPhase === 'locked';
   const isAuditioning = currentLayerPhase === 'auditioning';
   const hasVoted = myVote !== null;
 
@@ -375,16 +377,25 @@ function BuildView({
         flexDirection: 'column',
         width: '100%',
         minHeight: '100vh',
-        overflowY: 'auto',
+        overflowY: isLocked ? 'hidden' : 'auto',
         padding: '16px',
         paddingBottom: '32px',
-        gap: '12px',
+        gap: isLocked ? '0px' : '12px',
         boxSizing: 'border-box',
         alignItems: 'center',
+        transition: 'gap 0.6s ease',
       }}
     >
-      {/* Mini pentagon skeleton */}
-      <div style={{ opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+      {/* Skeleton — centered+scaled when locked, small at top when active */}
+      <div
+        style={{
+          marginTop: isLocked ? 'calc(50vh - 140px)' : '0px',
+          transform: isLocked ? 'scale(1.25)' : 'scale(1)',
+          transition: 'margin-top 0.6s ease, transform 0.6s ease, opacity 0.4s ease',
+          opacity: isDimmed ? 0.3 : 1,
+          transformOrigin: 'center top',
+        }}
+      >
         <MiniSkeleton
           chapter={chapter}
           currentLayerIndex={currentLayerIndex}
@@ -396,32 +407,79 @@ function BuildView({
         />
       </div>
 
-      {/* Option cards — visible during auditioning, locked, and reveal */}
-      {currentAttempt.currentLayerConfig && (
-        <OptionCards
-          layerConfig={currentAttempt.currentLayerConfig}
-          myVote={myVote}
-          disabled={!isAuditioning || thoughtsBlocking}
-          onVote={onVote}
-          currentAuditionOption={currentAttempt.currentAuditionOption}
-          chapter={chapter}
-          revealResult={revealResult}
-          dimmed={isDimmed}
-        />
-      )}
-
-      {/* Audition depleting bars (only during auditioning, before vote) */}
-      {isAuditioning && auditionProgress && (
-        <div style={{ width: '100%', opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
-          <AuditionBars
-            progress={auditionProgress}
-            chapter={chapter}
+      {/* A/B content — fades + slides in when auditioning starts */}
+      <div
+        style={{
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '12px',
+          opacity: isLocked ? 0 : 1,
+          transform: isLocked ? 'translateY(20px)' : 'translateY(0)',
+          transition: 'opacity 0.5s ease 0.15s, transform 0.5s ease 0.15s',
+          pointerEvents: isLocked ? 'none' : 'auto',
+        }}
+      >
+        {/* Option cards — visible during auditioning and reveal */}
+        {currentAttempt.currentLayerConfig && (
+          <OptionCards
+            layerConfig={currentAttempt.currentLayerConfig}
+            myVote={myVote}
+            disabled={!isAuditioning || thoughtsBlocking}
+            onVote={onVote}
             currentAuditionOption={currentAttempt.currentAuditionOption}
+            chapter={chapter}
+            revealResult={revealResult}
+            dimmed={isDimmed}
           />
-        </div>
-      )}
+        )}
 
-      {/* Layer dots */}
+        {/* Audition depleting bars (only during auditioning, before vote) */}
+        {isAuditioning && auditionProgress && (
+          <div style={{ width: '100%', opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+            <AuditionBars
+              progress={auditionProgress}
+              chapter={chapter}
+              currentAuditionOption={currentAttempt.currentAuditionOption}
+            />
+          </div>
+        )}
+
+        {/* Bottom text hints */}
+        {isAuditioning && !hasVoted && (
+          <p
+            style={{
+              textAlign: 'center',
+              color: 'rgba(255,255,255,0.15)',
+              fontSize: '0.7rem',
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              opacity: isDimmed ? 0.3 : 1,
+              transition: 'opacity 0.4s ease',
+            }}
+          >
+            TAP TO VOTE
+          </p>
+        )}
+        {isAuditioning && hasVoted && (
+          <p
+            style={{
+              textAlign: 'center',
+              color: 'rgba(255,255,255,0.12)',
+              fontSize: '0.7rem',
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              opacity: isDimmed ? 0.3 : 1,
+              transition: 'opacity 0.4s ease',
+            }}
+          >
+            VOTE LOCKED
+          </p>
+        )}
+      </div>
+
+      {/* Layer dots — always visible */}
       <div style={{ opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
         <LayerDots
           layerCount={currentAttempt.layerCount}
@@ -430,38 +488,6 @@ function BuildView({
           chapter={chapter}
         />
       </div>
-
-      {/* Bottom text hints */}
-      {isAuditioning && !hasVoted && (
-        <p
-          style={{
-            textAlign: 'center',
-            color: 'rgba(255,255,255,0.15)',
-            fontSize: '0.7rem',
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            opacity: isDimmed ? 0.3 : 1,
-            transition: 'opacity 0.4s ease',
-          }}
-        >
-          TAP TO VOTE
-        </p>
-      )}
-      {isAuditioning && hasVoted && (
-        <p
-          style={{
-            textAlign: 'center',
-            color: 'rgba(255,255,255,0.12)',
-            fontSize: '0.7rem',
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            opacity: isDimmed ? 0.3 : 1,
-            transition: 'opacity 0.4s ease',
-          }}
-        >
-          VOTE LOCKED
-        </p>
-      )}
 
       {/* Intrusive thoughts overlay */}
       <IntrusiveThoughts
@@ -495,30 +521,3 @@ function PauseOverlay() {
   );
 }
 
-function ConnectionIndicator({ state }: { state: string }) {
-  if (state === 'connected') return null;
-
-  const color = state === 'connecting' ? '#f5c542' : '#ef4444';
-  const label = state === 'connecting' ? 'connecting' : 'reconnecting';
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: '12px',
-        right: '12px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '4px 10px',
-        borderRadius: '20px',
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        border: `1px solid ${color}`,
-        zIndex: 100,
-      }}
-    >
-      <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: color }} />
-      <span style={{ fontSize: '0.65rem', color, letterSpacing: '0.08em' }}>{label}</span>
-    </div>
-  );
-}
