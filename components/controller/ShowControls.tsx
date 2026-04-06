@@ -43,6 +43,7 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
   const [jumpAttemptIndex, setJumpAttemptIndex] = useState<number>(0);
 
   const handleAdvance = () => sendCommand({ type: 'ADVANCE_PHASE' });
+  const handleAdvanceSlide = () => sendCommand({ type: 'ADVANCE_SLIDE' });
   const handlePause = () => sendCommand({ type: 'PAUSE' });
   const handleResume = () => sendCommand({ type: 'RESUME' });
   const handleStartAudition = () => sendCommand({ type: 'START_AUDITION' });
@@ -53,6 +54,20 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
       : { type: 'JUMP_TO_PHASE', phase: jumpPhase };
     sendCommand(cmd);
   };
+
+  const openerSlides = fullState.config.openerSlides;
+  const showSlideButton = phase === 'opener' && openerSlides && openerSlides.length > 0;
+
+  // Compute total steps: for each slide, 1 (point) + subPoints.length, plus final blank
+  const totalSteps = openerSlides
+    ? openerSlides.reduce((sum, s) => sum + 1 + (s.subPoints?.length ?? 0), 0) + 1
+    : 0;
+  const slideState = fullState.openerSlideState;
+  const currentStep = slideState === null || slideState === undefined
+    ? 0
+    : openerSlides
+      ? openerSlides.slice(0, slideState.pointIndex).reduce((sum, s) => sum + 1 + (s.subPoints?.length ?? 0), 0) + 1 + (slideState.subPointIndex >= 0 ? slideState.subPointIndex + 1 : 0)
+      : 0;
 
   const canStartAudition =
     phase === 'attempt_build' &&
@@ -79,6 +94,15 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
         >
           {paused ? 'Resume' : 'Pause'}
         </button>
+
+        {showSlideButton && (
+          <button
+            onClick={handleAdvanceSlide}
+            style={{ ...styles.btn, ...styles.btnPrimary }}
+          >
+            Advance Slide ({currentStep}/{totalSteps})
+          </button>
+        )}
 
         {canStartAudition && (
           <button

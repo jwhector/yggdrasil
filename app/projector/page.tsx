@@ -8,6 +8,7 @@ import { useProjectorThoughts } from '@/hooks/useProjectorThoughts';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { ProjectorCanvas } from '@/components/projector/ProjectorCanvas';
+import { OpenerSlides } from '@/components/projector/OpenerSlides';
 
 const SHOW_ID = 'default-show';
 
@@ -33,8 +34,13 @@ export default function ProjectorPage() {
         />
       );
 
-    case 'opener':
+    case 'opener': {
+      const slides = state.config.openerSlides;
+      if (slides?.length && state.openerSlideState !== undefined) {
+        return <OpenerSlides slides={slides} position={state.openerSlideState} />;
+      }
       return <ProjectorDark />;
+    }
 
     case 'attempt_story':
     case 'attempt_build':

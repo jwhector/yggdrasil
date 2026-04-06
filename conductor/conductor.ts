@@ -101,6 +101,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     version: 0,
     lastUpdated: Date.now(),
     paused: false,
+    openerSlideState: null,
   };
 }
 
@@ -124,6 +125,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleAdvancePhase(state);
     case 'JUMP_TO_PHASE':
       return handleJumpToPhase(state, command.phase, command.attemptIndex);
+    case 'ADVANCE_SLIDE':
+      return handleAdvanceSlide(state);
     case 'PAUSE':
       return handlePause(state);
     case 'RESUME':
@@ -247,6 +250,43 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'ended',
 ];
 
+function handleAdvanceSlide(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'opener') {
+    return [{ type: 'ERROR', message: 'ADVANCE_SLIDE only valid during opener phase' }];
+  }
+
+  const slides = state.config.openerSlides;
+  if (!slides || slides.length === 0) {
+    return [{ type: 'ERROR', message: 'No opener slides configured' }];
+  }
+
+  const cur = state.openerSlideState;
+
+  if (cur === null) {
+    // Blank → show first point (no sub-points yet)
+    state.openerSlideState = { pointIndex: 0, subPointIndex: -1 };
+  } else {
+    const slide = slides[cur.pointIndex];
+    const maxSub = (slide.subPoints?.length ?? 0) - 1;
+
+    if (cur.subPointIndex < maxSub) {
+      // Reveal next sub-point
+      state.openerSlideState = { pointIndex: cur.pointIndex, subPointIndex: cur.subPointIndex + 1 };
+    } else if (cur.pointIndex < slides.length - 1) {
+      // Next point
+      state.openerSlideState = { pointIndex: cur.pointIndex + 1, subPointIndex: -1 };
+    } else {
+      // Past last point → blank
+      state.openerSlideState = null;
+    }
+  }
+
+  return [
+    { type: 'OPENER_SLIDE_CHANGED', position: state.openerSlideState },
+    { type: 'STATE_UPDATED', version: state.version },
+  ];
+}
+
 function handleAdvancePhase(state: ShowState): ConductorEvent[] {
   if (state.paused) {
     return [{ type: 'ERROR', message: 'Cannot advance phase while paused' }];
@@ -312,6 +352,10 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
   state.phase = nextPhase;
 
   // Phase entry side effects
+  if (nextPhase === 'opener') {
+    state.openerSlideState = null;
+  }
+
   if (nextPhase === 'attempt_build') {
     const attempt = currentAttempt(state);
     if (attempt && attempt.status === 'pending') {

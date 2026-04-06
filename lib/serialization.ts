@@ -69,6 +69,7 @@ export interface SerializedShowState {
   version: number;
   lastUpdated: number;
   paused: boolean;
+  openerSlideState?: ShowState['openerSlideState'];
 }
 
 // ============================================================================
@@ -147,6 +148,7 @@ export function serializeState(state: ShowState): SerializedShowState {
     version: state.version,
     lastUpdated: state.lastUpdated,
     paused: state.paused,
+    openerSlideState: state.openerSlideState,
   };
 }
 
@@ -166,6 +168,7 @@ export function deserializeState(data: SerializedShowState): ShowState {
     version: data.version,
     lastUpdated: data.lastUpdated,
     paused: data.paused,
+    openerSlideState: data.openerSlideState ?? null,
   };
 }
 
