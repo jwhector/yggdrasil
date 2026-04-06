@@ -59,6 +59,31 @@ const MIX_STATE_BROADCAST_INTERVAL_MS = 250;    // ~4 Hz during live mix
 /** Active thoughts for the current reveal. Cleared on layer/attempt change. */
 let activeThoughts: AssignedThought[] = [];
 
+/**
+ * Fling all remaining intrusive thoughts off-screen and clear state.
+ * Called from both the socket command handler and the timing engine path.
+ */
+export function clearThoughtsOnAdvance(io: SocketIOServer): void {
+  if (activeThoughts.length === 0) return;
+
+  for (const t of activeThoughts) {
+    if (!t.dismissed) {
+      t.dismissed = true;
+      t.dismissDirection = Math.random() > 0.5 ? 'right' : 'left';
+      io.to('projector').emit('thought_dismissed', {
+        thoughtId: t.id,
+        direction: t.dismissDirection,
+      });
+    }
+  }
+
+  setTimeout(() => {
+    activeThoughts = [];
+    io.to('projector').emit('thoughts_clear');
+    io.to('audience').emit('thoughts_clear');
+  }, 500);
+}
+
 // ============================================================================
 // Setup
 // ============================================================================
@@ -564,24 +589,8 @@ export function setupSocketHandlers(
       }
 
       // Clear intrusive thoughts when advancing past verdict (layer actually moves on)
-      if (processedCommand.type === 'ADVANCE_FROM_VERDICT' && activeThoughts.length > 0) {
-        // Fling all remaining thoughts off-screen at random directions
-        for (const t of activeThoughts) {
-          if (!t.dismissed) {
-            t.dismissed = true;
-            t.dismissDirection = Math.random() > 0.5 ? 'right' : 'left';
-            io.to('projector').emit('thought_dismissed', {
-              thoughtId: t.id,
-              direction: t.dismissDirection,
-            });
-          }
-        }
-        // Clear after a brief delay for the fling animation
-        setTimeout(() => {
-          activeThoughts = [];
-          io.to('projector').emit('thoughts_clear');
-          io.to('audience').emit('thoughts_clear');
-        }, 500);
+      if (processedCommand.type === 'ADVANCE_FROM_VERDICT') {
+        clearThoughtsOnAdvance(io);
       }
 
       // Persist lock/unlock/override mix events

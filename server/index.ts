@@ -26,7 +26,7 @@ import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand } from '..
 import { LAYERS_PER_ATTEMPT } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
-import { setupSocketHandlers, broadcastEvents } from './socket';
+import { setupSocketHandlers, broadcastEvents, clearThoughtsOnAdvance } from './socket';
 import { createAndPruneBackup } from './backup';
 import { createOSCBridge, createNullOSCBridge, createRemoteOSCBridge, type OSCBridge } from './osc';
 import { createTimingEngine, type TimingEngine } from './timing';
@@ -300,6 +300,10 @@ async function main() {
     setState(state, events);
     persistence.saveState(state);
     await broadcastEvents(io, events, state);
+
+    if (command.type === 'ADVANCE_FROM_VERDICT') {
+      clearThoughtsOnAdvance(io);
+    }
   }
 
   // Create timing engine
