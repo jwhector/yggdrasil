@@ -368,8 +368,9 @@ export function createNullOSCBridge(): OSCBridge {
       console.log(`[OSC-Null] Would send: ${address}`, args);
     },
     sendBundle(messages: { address: string; args: (string | number | boolean)[] }[]): void {
+      // Delegate to send() so mocked send() is called in tests
       for (const msg of messages) {
-        console.log(`[OSC-Null] Would send (bundle): ${msg.address}`, msg.args);
+        this.send(msg.address, ...msg.args);
       }
     },
     on(address: string, handler: (...args: any[]) => void): void {

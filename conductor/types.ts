@@ -419,6 +419,7 @@ export type ConductorCommand =
 
   // Finale — Playback & Remix (V3.3)
   | { type: 'START_PLAYBACK' }
+  | { type: 'PREPARE_COLUMN_CROSSFADE' }
   | { type: 'ADVANCE_QUILT_COLUMN' }
   | { type: 'MOVE_CELL'; userId: UserId; targetCellId: string }
   | { type: 'CHANGE_CELL_SONG'; userId: UserId; songIndex: number }

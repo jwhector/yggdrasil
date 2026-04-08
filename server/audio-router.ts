@@ -325,14 +325,28 @@ export function createAudioRouter(
     const startGain = gs.currentGain;
     const fromBeat = startBeat ?? (timingEngine.getCurrentBeat() + 1);
 
+    // Equal-power easing for perceptually smooth fades.
+    // easeProgress always maps 0→0, 1→1 (no transition → full transition).
+    // Fade-out: slow departure from full gain, accelerates toward silence.
+    // Fade-in: fast departure from silence, decelerates toward full gain.
+    // Both keep perceived loudness constant during overlapping crossfades.
+    const fadingOut = targetGain < startGain;
+    const easeProgress = (t: number): number => {
+      return fadingOut
+        ? 1 - Math.cos(t * Math.PI / 2)   // Slow start (stays loud), fast end (drops to silence)
+        : Math.sin(t * Math.PI / 2);       // Fast start (jumps from silence), slow end (eases into full)
+    };
+
     timingEngine.schedulePerBeat(
       fadeId,
       fromBeat,
       durationBeats,
       (beatIndex: number, totalBeats: number) => {
-        // On-beat step
+        // On-beat step — snap to target on final beat to avoid floating-point drift
         const progress = (beatIndex + 1) / totalBeats;
-        const newGain = startGain + (targetGain - startGain) * progress;
+        const newGain = progress >= 1.0
+          ? targetGain
+          : startGain + (targetGain - startGain) * easeProgress(progress);
         setGain(trackIndex, Math.max(0, Math.min(1, newGain)));
 
         // Sub-beat steps between this beat and the next
@@ -343,7 +357,8 @@ export function createAudioRouter(
           for (let s = 1; s < stepsPerBeat; s++) {
             const frac = s / stepsPerBeat;
             const subProgress = progress + (nextProgress - progress) * frac;
-            const subGain = startGain + (targetGain - startGain) * subProgress;
+            const easedSubProgress = easeProgress(subProgress);
+            const subGain = startGain + (targetGain - startGain) * easedSubProgress;
             const timer = setTimeout(() => {
               setGain(trackIndex, Math.max(0, Math.min(1, subGain)));
             }, beatMs * frac);

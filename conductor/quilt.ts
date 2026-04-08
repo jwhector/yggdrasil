@@ -511,6 +511,15 @@ export function advancePlayhead(grid: QuiltGrid): {
   return { columnIndex: grid.playheadColumn, loopWrapped };
 }
 
+/**
+ * Peek at the next column without advancing the playhead or mutating state.
+ */
+export function peekNextColumn(grid: QuiltGrid): number {
+  const currentOrderIndex = grid.columnOrder.indexOf(grid.playheadColumn);
+  const nextOrderIndex = (currentOrderIndex + 1) % grid.columnOrder.length;
+  return grid.columnOrder[nextOrderIndex];
+}
+
 // ============================================================================
 // Available Songs (derived from attempt results)
 // ============================================================================

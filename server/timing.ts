@@ -137,6 +137,8 @@ interface AuditionTrackingState {
 interface LoopTrackingState {
   lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
   loopBeats: number;           // from config.timing.loopBoundaryBeats
+  crossfadeBeats: number;      // How many beats before boundary to fire PREPARE_COLUMN_CROSSFADE
+  crossfadeSent: boolean;      // Whether the pre-cue has been sent for the current interval
 }
 
 const BEATS_PER_BAR = 4;
@@ -181,6 +183,7 @@ export function createTimingEngine(
   let fallbackAuditionLoopIndex = 0;
   let loopState: LoopTrackingState | null = null;
   let fallbackLoopInterval: NodeJS.Timeout | null = null;
+  let fallbackCrossfadeTimeout: NodeJS.Timeout | null = null;
   let configuredLoopBoundaryBeats: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
@@ -681,17 +684,31 @@ export function createTimingEngine(
     );
     const loopBars = loopBeats / BEATS_PER_BAR;
 
+    const crossfadeBeats = Math.min(
+      state.config.timing.gain?.crossfadeBeats ?? 1,
+      loopBeats - 1, // Clamp: pre-cue can't fire at or before previous boundary
+    );
+
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats
       loopState = {
         lastBoundaryBeat: -1,
         loopBeats,
+        crossfadeBeats,
+        crossfadeSent: false,
       };
-      console.log(`[Timing] Loop boundary tracking started (OSC, every ${loopBars} bars / ${loopBeats} beats)`);
+      console.log(`[Timing] Loop boundary tracking started (OSC, every ${loopBars} bars / ${loopBeats} beats, crossfade ${crossfadeBeats} beats early)`);
     } else {
       // Fallback: JS interval
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
       const intervalMs = loopBeats * msPerBeat;
+      const crossfadeMs = crossfadeBeats * msPerBeat;
+
+      // Schedule the first pre-cue (subsequent ones are scheduled after each boundary)
+      fallbackCrossfadeTimeout = setTimeout(() => {
+        if (!running) return;
+        sendCommand({ type: 'PREPARE_COLUMN_CROSSFADE' });
+      }, intervalMs - crossfadeMs);
 
       fallbackLoopInterval = setInterval(() => {
         if (!running) return;
@@ -701,9 +718,15 @@ export function createTimingEngine(
           return;
         }
         sendCommand({ type: 'ADVANCE_QUILT_COLUMN' });
+
+        // Schedule next pre-cue
+        fallbackCrossfadeTimeout = setTimeout(() => {
+          if (!running) return;
+          sendCommand({ type: 'PREPARE_COLUMN_CROSSFADE' });
+        }, intervalMs - crossfadeMs);
       }, intervalMs);
 
-      console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
+      console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms, crossfade ${crossfadeMs.toFixed(0)}ms early)`);
     }
   }
 
@@ -715,6 +738,10 @@ export function createTimingEngine(
     if (fallbackLoopInterval) {
       clearInterval(fallbackLoopInterval);
       fallbackLoopInterval = null;
+    }
+    if (fallbackCrossfadeTimeout) {
+      clearTimeout(fallbackCrossfadeTimeout);
+      fallbackCrossfadeTimeout = null;
     }
   }
 
@@ -853,8 +880,17 @@ export function createTimingEngine(
     }
 
     const beatsSinceBoundary = monotonicBeat - loopState.lastBoundaryBeat;
+
+    // Pre-cue: start crossfade ahead of boundary
+    if (!loopState.crossfadeSent && beatsSinceBoundary >= loopState.loopBeats - loopState.crossfadeBeats) {
+      loopState.crossfadeSent = true;
+      sendCommand({ type: 'PREPARE_COLUMN_CROSSFADE' });
+    }
+
+    // Boundary: advance playhead state (audio already transitioning)
     if (beatsSinceBoundary >= loopState.loopBeats) {
       loopState.lastBoundaryBeat = monotonicBeat;
+      loopState.crossfadeSent = false;
       sendCommand({ type: 'ADVANCE_QUILT_COLUMN' });
     }
 

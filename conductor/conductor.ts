@@ -63,6 +63,7 @@ import {
   unmuteCell as quiltUnmuteCell,
   overrideCellSong as quiltOverrideCellSong,
   advancePlayhead as quiltAdvancePlayhead,
+  peekNextColumn as quiltPeekNextColumn,
   resolveTrack,
   buildTrackMap,
   deriveAvailableSongs,
@@ -224,6 +225,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Playback & Remix (V3.3)
     case 'START_PLAYBACK':
       return handleStartPlayback(state);
+    case 'PREPARE_COLUMN_CROSSFADE':
+      return handlePrepareColumnCrossfade(state);
     case 'ADVANCE_QUILT_COLUMN':
       return handleAdvanceQuiltColumn(state);
     case 'MOVE_CELL':
@@ -1639,27 +1642,69 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
   return events;
 }
 
-function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
+/**
+ * Fires crossfadeBeats before the column boundary.
+ * Peeks at the next column, computes track diffs, and emits audio cues
+ * so the crossfade completes by the time the boundary arrives.
+ * Does NOT advance the playhead.
+ */
+function handlePrepareColumnCrossfade(state: ShowState): ConductorEvent[] {
   if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
 
   const quilt = state.finaleState.quilt;
   const trackMap = state.finaleState.trackMap;
   const mutedCells = state.finaleState.remix.mutedCells;
-  const arc = state.finaleState.arc;
-  const previousColumn = quilt.playheadColumn;
+  const currentColumn = quilt.playheadColumn;
+  const nextColumn = quiltPeekNextColumn(quilt);
 
-  // Determine which granular types are active (arc entry filtering)
+  if (currentColumn === nextColumn) return []; // Single column — no crossfade needed
+
   const enteredTypes = getEnteredGranularTypes(state);
 
-  // Build a map of granularType -> active trackIndex for the previous column
-  const previousTracks = new Map<string, number>();
+  // Current column's active tracks
+  const currentTracks = new Map<string, number>();
   for (const cell of quilt.cells.values()) {
-    if (cell.columnIndex === previousColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+    if (cell.columnIndex === currentColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
       if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
       const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndex !== null) previousTracks.set(cell.granularType, trackIndex);
+      if (trackIndex !== null) currentTracks.set(cell.granularType, trackIndex);
     }
   }
+
+  // Next column's active tracks
+  const nextTracks = new Map<string, number>();
+  for (const cell of quilt.cells.values()) {
+    if (cell.columnIndex === nextColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
+      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndex !== null) nextTracks.set(cell.granularType, trackIndex);
+    }
+  }
+
+  // Compute track changes
+  const trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] = [];
+  const allTypes = new Set([...currentTracks.keys(), ...nextTracks.keys()]);
+  for (const gt of allTypes) {
+    const prev = currentTracks.get(gt) ?? null;
+    const next = nextTracks.get(gt) ?? null;
+    if (prev !== next) {
+      trackChanges.push({ granularType: gt, muteTrack: prev, unmuteTrack: next });
+    }
+  }
+
+  if (trackChanges.length === 0) return [];
+
+  return [{
+    type: 'AUDIO_CUE',
+    cue: { type: 'quilt_column_change', columnIndex: nextColumn, trackChanges },
+  }];
+}
+
+function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
+
+  const quilt = state.finaleState.quilt;
+  const arc = state.finaleState.arc;
 
   // Advance playhead
   const { columnIndex, loopWrapped } = quiltAdvancePlayhead(quilt);
@@ -1679,37 +1724,9 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
     }
   }
 
-  // Build a map of granularType -> active trackIndex for the new column
-  const newTracks = new Map<string, number>();
-  for (const cell of quilt.cells.values()) {
-    if (cell.columnIndex === columnIndex && cell.songIndex !== null && !mutedCells.has(cell.id)) {
-      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
-      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndex !== null) newTracks.set(cell.granularType, trackIndex);
-    }
-  }
-
-  // Compute track changes: only include types where the track actually changed
-  const trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] = [];
-  const allTypes = new Set([...previousTracks.keys(), ...newTracks.keys()]);
-  for (const gt of allTypes) {
-    const prev = previousTracks.get(gt) ?? null;
-    const next = newTracks.get(gt) ?? null;
-    if (prev !== next) {
-      trackChanges.push({ granularType: gt, muteTrack: prev, unmuteTrack: next });
-    }
-  }
-
   const events: ConductorEvent[] = [];
 
   events.push({ type: 'PLAYHEAD_ADVANCED', columnIndex });
-
-  if (trackChanges.length > 0) {
-    events.push({
-      type: 'AUDIO_CUE',
-      cue: { type: 'quilt_column_change', columnIndex, trackChanges },
-    });
-  }
 
   // Append arc phase transition events (sort applied, phase changed, etc.)
   events.push(...arcPhaseEvents);
