@@ -794,14 +794,14 @@ export function createTimingEngine(
       | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
       | undefined;
     if (assignmentStartedEvent && assignmentStartedEvent.mode === 'self_select') {
-      const timerMs = state.config.finale.assignmentTimerMs;
+      const timerMs = state.config.finale.quilt.assignmentTimerMs;
       if (timerMs > 0) {
         startAssignmentTimer(timerMs);
       }
     }
 
-    // Groups assigned → clear assignment timer
-    if (events.some(e => e.type === 'GROUPS_ASSIGNED')) {
+    // All cells assigned → clear assignment timer
+    if (events.some(e => e.type === 'ALL_CELLS_ASSIGNED')) {
       clearAssignmentTimer();
     }
   }

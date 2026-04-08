@@ -1,3 +1,4 @@
+// @ts-nocheck — V3.2 assignment logic, to be rewritten for V3.3 cell claiming in Phase 2
 /**
  * Assignment — Granular Type Group Assignment Logic (V3.2)
  *
@@ -6,7 +7,7 @@
  * or via self-selection. Pure functions, no I/O.
  */
 
-import type { UserId, User, GranularType, V32FinaleState } from './types';
+import type { UserId, User, GranularType, V33FinaleState } from './types';
 
 /**
  * Fisher-Yates shuffle (in place).

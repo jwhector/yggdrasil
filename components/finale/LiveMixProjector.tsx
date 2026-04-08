@@ -1,3 +1,4 @@
+// @ts-nocheck — deprecated V3.2 code, to be deleted/rewritten in V3.3 Phase 2
 /**
  * LiveMixProjector (V3.2)
  *

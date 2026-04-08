@@ -23,7 +23,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_resolve: 'Resolve',
   finale_elegy: 'Finale — Elegy',
   finale_assignment: 'Finale — Assignment',
-  finale_live_mix: 'Finale — Live Mix',
+  finale_preview: 'Finale — Preview',
+  finale_playback: 'Finale — Playback',
   ended: 'Ended',
 };
 
@@ -35,7 +36,8 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   attempt_resolve: '#92400e',
   finale_elegy: '#0e7490',
   finale_assignment: '#0f766e',
-  finale_live_mix: '#5b21b6',
+  finale_preview: '#5b21b6',
+  finale_playback: '#7c3aed',
   ended: '#374151',
 };
 
@@ -60,7 +62,7 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
     : connectionState === 'connecting' || connectionState === 'reconnecting' ? '#fbbf24'
     : '#f87171';
 
-  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix';
+  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_preview' || phase === 'finale_playback';
 
   return (
     <div style={styles.panel}>
@@ -118,18 +120,18 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
             <>
               <StatCard label="Mode" value={finaleState.assignment.mode} />
               <StatCard
-                label="Groups"
-                value={String(finaleState.assignment.groups.size)}
+                label="Cells"
+                value={String(finaleState.quilt.cells.size)}
               />
               {finaleState.assignment.timerRemaining !== null && (
                 <StatCard label="Timer" value={`${Math.ceil(finaleState.assignment.timerRemaining / 1000)}s`} />
               )}
             </>
           )}
-          {finaleState.phase === 'live_mix' && (
+          {finaleState.phase === 'playback' && (
             <>
-              <StatCard label="Locked Types" value={String(finaleState.liveMix.lockedTypes.length)} />
-              <StatCard label="Loop" value={String(finaleState.liveMix.loopCount)} />
+              <StatCard label="Locked Cells" value={String(finaleState.remix.lockedCells.size)} />
+              <StatCard label="Loop" value={String(finaleState.quilt.loopCount)} />
             </>
           )}
         </div>

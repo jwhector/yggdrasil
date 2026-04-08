@@ -20,7 +20,7 @@ import type {
   ShowConfig,
   V32AttemptConfig,
   V32LayerConfig,
-  V32FinaleState,
+  V33FinaleState,
 } from '../../conductor/types';
 
 // ============================================================================
@@ -61,11 +61,23 @@ function createTestConfig(): ShowConfig {
     ],
     finale: {
       assignmentMode: 'auto',
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 5000,
@@ -88,26 +100,32 @@ function advanceToBuild(state: ShowState): void {
   processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
 }
 
-function makeMinimalFinaleState(timerRemaining: number | null = null): V32FinaleState {
+function makeMinimalFinaleState(timerRemaining: number | null = null): V33FinaleState {
   return {
     phase: 'assignment',
     availableFragments: [],
     allFragments: [],
+    quilt: {
+      rows: 6,
+      columns: 1,
+      barsPerCell: 8,
+      cells: new Map(),
+      columnOrder: [0],
+      playheadColumn: 0,
+      loopCount: 0,
+    },
+    availableSongs: [0, 1, 2],
+    trackMap: new Map(),
     assignment: {
       mode: timerRemaining !== null ? 'self_select' : 'auto',
-      groups: new Map(),
       timerRemaining,
     },
-    liveMix: {
-      votes: new Map(),
-      activeFragments: new Map(),
-      lockedTypes: [],
-
-      performerOverrides: new Map(),
+    preview: { lockedInUsers: new Set(), timerRemaining: null },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
       liveTracksActive: [],
-      transportStarted: false,
-      loopPosition: 0,
-      loopCount: 0,
     },
     npc: { currentMessage: null },
   };
@@ -470,11 +488,12 @@ describe('TimingEngine', () => {
     test('fires ASSIGNMENT_COMPLETE when self-select assignment timer expires', () => {
       state.phase = 'finale_assignment';
       state.finaleState = makeMinimalFinaleState(30000);
-      state.config.finale.assignmentTimerMs = 30000;
+      state.config.finale.quilt.assignmentTimerMs = 30000;
 
       timingEngine.onStateChanged(state, [{
         type: 'ASSIGNMENT_STARTED',
         mode: 'self_select',
+        quiltDimensions: { rows: 6, columns: 1 },
       }]);
 
       expect(sendCommand).not.toHaveBeenCalled();
@@ -491,6 +510,7 @@ describe('TimingEngine', () => {
       timingEngine.onStateChanged(state, [{
         type: 'ASSIGNMENT_STARTED',
         mode: 'auto',
+        quiltDimensions: { rows: 6, columns: 1 },
       }]);
 
       jest.advanceTimersByTime(60000);
@@ -498,20 +518,20 @@ describe('TimingEngine', () => {
       expect(sendCommand).not.toHaveBeenCalled();
     });
 
-    test('timer cleared on GROUPS_ASSIGNED', () => {
+    test('timer cleared on ALL_CELLS_ASSIGNED', () => {
       state.phase = 'finale_assignment';
       state.finaleState = makeMinimalFinaleState(30000);
-      state.config.finale.assignmentTimerMs = 30000;
+      state.config.finale.quilt.assignmentTimerMs = 30000;
 
       timingEngine.onStateChanged(state, [{
         type: 'ASSIGNMENT_STARTED',
         mode: 'self_select',
+        quiltDimensions: { rows: 6, columns: 1 },
       }]);
 
-      // Groups assigned early (force end)
+      // All cells assigned early (force end)
       timingEngine.onStateChanged(state, [{
-        type: 'GROUPS_ASSIGNED',
-        groups: new Map(),
+        type: 'ALL_CELLS_ASSIGNED',
       }]);
 
       jest.advanceTimersByTime(30000);

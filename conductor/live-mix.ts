@@ -1,3 +1,4 @@
+// @ts-nocheck — V3.2 live mix logic, to be deleted in Phase 2
 /**
  * Live Mix — Continuous Majority Tracking with Recency Tiebreak
  *

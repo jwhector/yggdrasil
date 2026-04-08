@@ -16,7 +16,7 @@ import { useShowState } from '@/hooks/useShowState';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
-import { LiveMixControls } from '@/components/controller/LiveMixControls';
+// TODO: V3.3 Phase 5 — import QuiltRemixControls
 import { NpcControls } from '@/components/controller/NpcControls';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
 
@@ -92,23 +92,7 @@ function ControllerContent() {
         <NpcControls fullState={fullState} sendCommand={sendCommand} />
       )}
 
-      {/* Live mix controls — per-type overrides, locks, vote distributions */}
-      {phase === 'finale_live_mix' && fullState.finaleState && (
-        <LiveMixControls
-          granularTypes={fullState.config.granularTypes ?? []}
-          allFragments={fullState.finaleState.allFragments ?? []}
-          activeFragments={(() => {
-            const af = fullState.finaleState.liveMix?.activeFragments;
-            if (!af) return [];
-            // Serialized format: [string, string][] tuple array
-            const arr = Array.isArray(af) ? af : Array.from((af as Map<string, string>).entries());
-            return arr.map(([granularType, fragmentId]: [string, string]) => ({ granularType, fragmentId }));
-          })()}
-          lockedTypes={fullState.finaleState.liveMix?.lockedTypes ?? []}
-          sendCommand={sendCommand}
-          socket={socket}
-        />
-      )}
+      {/* TODO: V3.3 Phase 5 — QuiltRemixControls for finale_playback */}
 
       {/* Emergency + audio — always visible */}
       <EmergencyControls

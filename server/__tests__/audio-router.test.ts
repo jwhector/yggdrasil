@@ -27,7 +27,7 @@ import type {
   V32LayerConfig,
   TrackBundle,
   Fragment,
-  V32FinaleState,
+  V33FinaleState,
   GainConfig,
 } from '../../conductor/types';
 
@@ -94,11 +94,23 @@ function createTestConfig(): ShowConfig {
     ],
     finale: {
       assignmentMode: 'auto' as const,
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 3000,
@@ -131,26 +143,29 @@ function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B
   };
 }
 
-function makeFinaleState(allFragments: Fragment[] = []): V32FinaleState {
+function makeFinaleState(allFragments: Fragment[] = []): V33FinaleState {
   return {
     phase: 'assignment',
     availableFragments: allFragments as any,
     allFragments: allFragments as any,
-    assignment: {
-      mode: 'auto',
-      groups: new Map(),
-      timerRemaining: null,
-    },
-    liveMix: {
-      votes: new Map(),
-      activeFragments: new Map(),
-      lockedTypes: [],
-
-      performerOverrides: new Map(),
-      liveTracksActive: [],
-      transportStarted: false,
-      loopPosition: 0,
+    quilt: {
+      rows: 6,
+      columns: 1,
+      barsPerCell: 8,
+      cells: new Map(),
+      columnOrder: [0],
+      playheadColumn: 0,
       loopCount: 0,
+    },
+    availableSongs: [0, 1, 2],
+    trackMap: new Map(),
+    assignment: { mode: 'auto', timerRemaining: null },
+    preview: { lockedInUsers: new Set(), timerRemaining: null },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
+      liveTracksActive: [],
     },
     npc: { currentMessage: null },
   };

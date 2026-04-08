@@ -1,9 +1,9 @@
 # Data Models & Conductor API
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
-> **Related:** [song-building.md](song-building.md) (doubt threshold, layer types), [finale.md](finale.md) (FinaleState type definition)
+> **Related:** [song-building.md](song-building.md) (doubt threshold, layer types), [finale.md](finale.md) (V33FinaleState type definition)
 
-**Note:** FinaleState is defined in [finale.md](finale.md) alongside its behavioral specification.
+**Note:** V33FinaleState, QuiltCell, and QuiltConfig are defined in [finale.md](finale.md) alongside their behavioral specification. GranularFragment is still used for the elegy wreckage display; V3.3 quilt phases use QuiltCell with songIndex.
 
 ---
 
@@ -27,7 +27,7 @@ interface ShowState {
   currentAttemptIndex: number;         // 0, 1, 2
   attempts: AttemptState[];            // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: V32FinaleState | null;   // Populated at finale_elegy
+  finaleState: V33FinaleState | null;   // Populated at finale_elegy
   config: ShowConfig;
   version: number;                     // Increments on every state change
   lastUpdated: number;
@@ -60,7 +60,7 @@ interface ShowConfig {
   granularTypes?: GranularType[];      // V3.2: master registry of granular types
   layerGroups?: LayerGroupConfig[];    // V3.2: layer group definitions (bones/flesh/spark)
   attempts: V32AttemptConfig[];        // Length 3
-  finale: V32FinaleConfig;
+  finale: V33FinaleConfig;
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;
@@ -115,13 +115,12 @@ interface GranularType {
   symbol: string;                     // e.g., "■"
 }
 
-interface V32FinaleConfig {
-  assignmentMode: 'auto' | 'self_select';  // How users are assigned to granular types
-  assignmentTimerMs: number;               // Only used when assignmentMode === 'self_select'
-  bothOptionsSurvive: boolean;             // When true, both options from voted layers are available in finale
-  crossSongConstraint: boolean;            // When false, each group picks independently across songs
+interface V33FinaleConfig {
+  assignmentMode: 'auto' | 'self_select';  // How users claim quilt cells
+  bothOptionsSurvive: boolean;             // When true, both options from voted layers are available in elegy
   audioPreviewPath: string;                // Base URL path for preview audio files
   npcMessages: NpcMessageConfig[];         // Event-driven NPC messages (event key -> text)
+  quilt: QuiltConfig;                      // See finale.md for QuiltConfig definition
 }
 
 interface NpcMessageConfig {
@@ -149,6 +148,7 @@ interface GainConfig {
   stepsPerBeat: number;
 }
 
+// Used for elegy wreckage display. V3.3 quilt phases use QuiltCell with songIndex instead.
 interface GranularFragment {
   id: string;
   songIndex: number;                   // 0, 1, 2
@@ -156,7 +156,7 @@ interface GranularFragment {
   granularType: string;               // Which specific type ('bass', 'drums', etc.)
   option: 'A' | 'B';
   chapter: Chapter;
-  trackIndex: number;                 // Ableton track index (config-driven)
+  trackIndices: number[];             // Ableton track indices (config-driven)
   wonVote: boolean;                   // true if this option won the blind vote
   previewAudioPath: string;           // URL path to preview audio file
 }
@@ -196,18 +196,29 @@ type ConductorCommand =
   | { type: 'SETUP_FINALE' }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
 
-  // Finale — Assignment
+  // Finale — Assignment (V3.3: cell claiming)
   | { type: 'START_ASSIGNMENT' }
-  | { type: 'SELECT_GRANULAR_TYPE'; userId: UserId; granularType: string }
+  | { type: 'CLAIM_CELL'; userId: UserId; cellId: string }
+  | { type: 'RELEASE_CELL'; userId: UserId }
   | { type: 'ASSIGNMENT_COMPLETE' }
 
-  // Finale — Live Mix
-  | { type: 'START_LIVE_MIX' }
-  | { type: 'SET_LIVE_MIX_PREFERENCE'; userId: UserId; granularType: string; fragmentId: string }
-  | { type: 'LOCK_GRANULAR_TYPE'; granularType: string }
-  | { type: 'UNLOCK_GRANULAR_TYPE'; granularType: string }
-  | { type: 'OVERRIDE_FRAGMENT'; granularType: string; fragmentId: string }
-  | { type: 'CLEAR_OVERRIDE'; granularType: string }
+  // Finale — Preview (V3.3)
+  | { type: 'START_PREVIEW' }
+  | { type: 'SET_CELL_SONG'; userId: UserId; songIndex: number }
+  | { type: 'LOCK_IN_CHOICE'; userId: UserId }
+  | { type: 'PREVIEW_COMPLETE' }
+
+  // Finale — Playback & Remix (V3.3)
+  | { type: 'START_PLAYBACK' }
+  | { type: 'MOVE_CELL'; userId: UserId; targetCellId: string }
+  | { type: 'CHANGE_CELL_SONG'; userId: UserId; songIndex: number }
+  | { type: 'REORDER_COLUMN'; fromIndex: number; toIndex: number }
+  | { type: 'SWAP_CELLS'; cellIdA: string; cellIdB: string }
+  | { type: 'LOCK_CELL'; cellId: string }
+  | { type: 'UNLOCK_CELL'; cellId: string }
+  | { type: 'MUTE_CELL'; cellId: string }
+  | { type: 'UNMUTE_CELL'; cellId: string }
+  | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
@@ -250,15 +261,26 @@ type ConductorEvent =
   | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: GranularFragment[]; allFragments: GranularFragment[] }
   | { type: 'NPC_MESSAGE'; message: string }
 
-  // Finale — Assignment
-  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
-  | { type: 'GROUPS_ASSIGNED'; groups: Map<string, UserId[]> }
+  // Finale — Assignment (V3.3: cell claiming)
+  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select'; quiltDimensions: { rows: number; columns: number } }
+  | { type: 'CELL_CLAIMED'; cellId: string; userId: UserId }
+  | { type: 'CELL_RELEASED'; cellId: string }
+  | { type: 'ALL_CELLS_ASSIGNED' }
 
-  // Finale — Live Mix
-  | { type: 'LIVE_MIX_STARTED'; initialFragments: Map<string, string> }
-  | { type: 'ACTIVE_FRAGMENT_CHANGED'; granularType: string; fragmentId: string; previousFragmentId: string }
-  | { type: 'GRANULAR_TYPE_LOCKED'; granularType: string }
-  | { type: 'GRANULAR_TYPE_UNLOCKED'; granularType: string }
+  // Finale — Preview (V3.3)
+  | { type: 'PREVIEW_STARTED' }
+  | { type: 'CELL_SONG_SET'; cellId: string; songIndex: number }
+  | { type: 'USER_LOCKED_IN'; userId: UserId }
+
+  // Finale — Playback & Remix (V3.3)
+  | { type: 'PLAYBACK_STARTED'; quilt: Map<string, QuiltCell>; columnOrder: number[] }
+  | { type: 'PLAYHEAD_ADVANCED'; columnIndex: number }
+  | { type: 'CELL_MOVED'; cellId: string; fromPosition: { row: number; col: number }; toPosition: { row: number; col: number }; swappedWithCellId: string | null }
+  | { type: 'COLUMN_REORDERED'; columnOrder: number[] }
+  | { type: 'CELLS_SWAPPED'; cellIdA: string; cellIdB: string }
+  | { type: 'CELL_LOCKED'; cellId: string }
+  | { type: 'CELL_MUTED'; cellId: string }
+  | { type: 'CELL_UNMUTED'; cellId: string }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
@@ -282,8 +304,11 @@ type AudioCue =
   | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
   | { type: 'collapse_gesture'; attemptIndex: number }
   | { type: 'rejection_gesture'; attemptIndex: number }
-  | { type: 'live_mix_crossfade'; granularType: string; incomingTrackIndex: number; outgoingTrackIndex: number }
-  | { type: 'live_mix_start'; activeTrackIndices: number[] }
+  | { type: 'quilt_playback_start'; initialColumn: number; trackIndices: number[] }
+  | { type: 'quilt_column_change'; columnIndex: number; trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] }
+  | { type: 'quilt_reorder'; newColumnOrder: number[] }
+  | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndex: number }
+  | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndex: number }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }
   | { type: 'reset_utilities' };

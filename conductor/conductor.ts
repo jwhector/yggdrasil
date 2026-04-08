@@ -33,18 +33,15 @@ import type {
   UserId,
   SeatId,
   User,
-  V32FinaleState,
+  V33FinaleState,
   V32LayerConfig,
   TrackBundle,
   GranularType,
 } from './types';
-import { MUTE_FRAGMENT_ID } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import { generateGranularFragments } from './fragments';
 import { getNpcMessage } from './npc';
-import { autoAssign, initializeSelfSelect, selectGranularType, assignUndecided } from './assignment';
-import { getActiveFragment } from './live-mix';
 
 // ============================================================================
 // State Initialization
@@ -164,29 +161,49 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Finale
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
-    // Assignment
+    // Assignment (V3.3: cell claiming)
     case 'START_ASSIGNMENT':
       return handleStartAssignment(state);
-    case 'SELECT_GRANULAR_TYPE':
-      return handleSelectGranularType(state, command.userId, command.granularType);
+    case 'CLAIM_CELL':
+      return []; // TODO: V3.3 Phase 2
+    case 'RELEASE_CELL':
+      return []; // TODO: V3.3 Phase 2
     case 'ASSIGNMENT_COMPLETE':
       return handleAssignmentComplete(state);
     case 'SEND_NPC_MESSAGE':
       return handleSendNpcMessage(state, command.message);
 
-    // Live Mix
-    case 'START_LIVE_MIX':
-      return handleStartLiveMix(state);
-    case 'SET_LIVE_MIX_PREFERENCE':
-      return handleSetLiveMixPreference(state, command.userId, command.granularType, command.fragmentId);
-    case 'LOCK_GRANULAR_TYPE':
-      return handleLockGranularType(state, command.granularType);
-    case 'UNLOCK_GRANULAR_TYPE':
-      return handleUnlockGranularType(state, command.granularType);
-    case 'OVERRIDE_FRAGMENT':
-      return handleOverrideFragment(state, command.granularType, command.fragmentId);
-    case 'CLEAR_OVERRIDE':
-      return handleClearOverride(state, command.granularType);
+    // Preview (V3.3)
+    case 'START_PREVIEW':
+      return []; // TODO: V3.3 Phase 2
+    case 'SET_CELL_SONG':
+      return []; // TODO: V3.3 Phase 2
+    case 'LOCK_IN_CHOICE':
+      return []; // TODO: V3.3 Phase 2
+    case 'PREVIEW_COMPLETE':
+      return []; // TODO: V3.3 Phase 2
+
+    // Playback & Remix (V3.3)
+    case 'START_PLAYBACK':
+      return []; // TODO: V3.3 Phase 2
+    case 'MOVE_CELL':
+      return []; // TODO: V3.3 Phase 2
+    case 'CHANGE_CELL_SONG':
+      return []; // TODO: V3.3 Phase 2
+    case 'REORDER_COLUMN':
+      return []; // TODO: V3.3 Phase 2
+    case 'SWAP_CELLS':
+      return []; // TODO: V3.3 Phase 2
+    case 'LOCK_CELL':
+      return []; // TODO: V3.3 Phase 2
+    case 'UNLOCK_CELL':
+      return []; // TODO: V3.3 Phase 2
+    case 'MUTE_CELL':
+      return []; // TODO: V3.3 Phase 2
+    case 'UNMUTE_CELL':
+      return []; // TODO: V3.3 Phase 2
+    case 'OVERRIDE_CELL_SONG':
+      return []; // TODO: V3.3 Phase 2
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -246,7 +263,8 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'attempt_resolve',     // attempt 2
   'finale_elegy',
   'finale_assignment',
-  'finale_live_mix',
+  'finale_preview',
+  'finale_playback',
   'ended',
 ];
 
@@ -327,8 +345,9 @@ function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number 
     case 'attempt_resolve': return 4 + attemptIndex * 3;
     case 'finale_elegy': return 11;
     case 'finale_assignment': return 12;
-    case 'finale_live_mix': return 13;
-    case 'ended': return 14;
+    case 'finale_preview': return 13;
+    case 'finale_playback': return 14;
+    case 'ended': return 15;
     default: return -1;
   }
 }
@@ -383,9 +402,7 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     events.push(...handleStartAssignment(state));
   }
 
-  if (nextPhase === 'finale_live_mix' && state.finaleState) {
-    events.push(...handleStartLiveMix(state));
-  }
+  // TODO: V3.3 Phase 2 — auto-start preview and playback transitions
 
   events.push({
     type: 'SHOW_PHASE_CHANGED',
@@ -1263,24 +1280,35 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
   );
   const availableFragments = allFragments.filter(f => f.wonVote);
 
+  // TODO: V3.3 Phase 2 — initialize quilt grid from audience size + config
   state.finaleState = {
     phase: 'elegy',
     availableFragments,
     allFragments,
+    quilt: {
+      rows: 6,
+      columns: 1, // TODO: V3.3 Phase 2 — derive from audience size
+      barsPerCell: config.quilt.loopBars,
+      cells: new Map(),
+      columnOrder: [0],
+      playheadColumn: 0,
+      loopCount: 0,
+    },
+    availableSongs: [0, 1, 2], // TODO: V3.3 Phase 2 — derive from attempt results
+    trackMap: new Map(),       // TODO: V3.3 Phase 2 — build from config
     assignment: {
       mode: config.assignmentMode,
-      groups: new Map(),
       timerRemaining: null,
     },
-    liveMix: {
-      votes: new Map(),
-      activeFragments: new Map(),
-      lockedTypes: [],
-      performerOverrides: new Map(),
+    preview: {
+      lockedInUsers: new Set(),
+      timerRemaining: null,
+    },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
       liveTracksActive: [],
-      transportStarted: false,
-      loopPosition: 0,
-      loopCount: 0,
     },
     npc: { currentMessage: null },
   };
@@ -1289,297 +1317,42 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
 }
 
 // ============================================================================
-// Assignment Handlers
+// Assignment Handlers (V3.3 — cell claiming)
 // ============================================================================
 
 function handleStartAssignment(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
 
   const config = state.config.finale;
-  const granularTypes = state.config.granularTypes ?? [];
+  state.finaleState.phase = 'assignment';
+  state.finaleState.assignment.mode = config.assignmentMode;
 
-  if (config.assignmentMode === 'auto') {
-    const groups = autoAssign(state.users, granularTypes);
-    state.finaleState.assignment = { mode: 'auto', groups, timerRemaining: null };
-    state.finaleState.phase = 'assignment';
-
-    const events: ConductorEvent[] = [
-      { type: 'ASSIGNMENT_STARTED', mode: 'auto' },
-      { type: 'GROUPS_ASSIGNED', groups },
-    ];
-    const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
-    if (npcMsg) {
-      state.finaleState.npc.currentMessage = npcMsg;
-      events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-    }
-    return events;
-  } else {
-    const assignment = initializeSelfSelect(granularTypes, config.assignmentTimerMs);
-    state.finaleState.assignment = assignment;
-    state.finaleState.phase = 'assignment';
-
-    const events: ConductorEvent[] = [{ type: 'ASSIGNMENT_STARTED', mode: 'self_select' }];
-    const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
-    if (npcMsg) {
-      state.finaleState.npc.currentMessage = npcMsg;
-      events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-    }
-    return events;
+  if (config.assignmentMode === 'self_select') {
+    state.finaleState.assignment.timerRemaining = config.quilt.assignmentTimerMs;
   }
-}
 
-function handleSelectGranularType(state: ShowState, userId: UserId, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.assignment.mode !== 'self_select') {
-    return [{ type: 'ERROR', message: 'Cannot select type in auto-assignment mode' }];
+  const quilt = state.finaleState.quilt;
+  const events: ConductorEvent[] = [
+    { type: 'ASSIGNMENT_STARTED', mode: config.assignmentMode, quiltDimensions: { rows: quilt.rows, columns: quilt.columns } },
+  ];
+  const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
+  if (npcMsg) {
+    state.finaleState.npc.currentMessage = npcMsg;
+    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
   }
-  selectGranularType(state.finaleState.assignment, userId, granularType);
-  return [{ type: 'GROUPS_ASSIGNED', groups: state.finaleState.assignment.groups }];
+  return events;
 }
 
 function handleAssignmentComplete(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.assignment.mode === 'self_select') {
-    const connectedUserIds: UserId[] = [];
-    for (const [userId, user] of state.users) {
-      if (user.connected) connectedUserIds.push(userId);
-    }
-    const granularTypes = state.config.granularTypes ?? [];
-    assignUndecided(state.finaleState.assignment, connectedUserIds, granularTypes);
-  }
-  return [{ type: 'GROUPS_ASSIGNED', groups: state.finaleState.assignment.groups }];
+  // TODO: V3.3 Phase 2 — assign remaining users to empty cells
+  return [{ type: 'ALL_CELLS_ASSIGNED' }];
 }
 
 function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
   state.finaleState.npc.currentMessage = message;
   return [{ type: 'NPC_MESSAGE', message }];
-}
-
-// ============================================================================
-// Live Mix Handlers
-// ============================================================================
-
-function handleStartLiveMix(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.phase = 'live_mix';
-
-  // Live mix starts muted — no initial fragments, no pre-set votes.
-  // Audio begins when a group first reaches majority on a fragment.
-  // The very first group to activate triggers Ableton transport.
-  state.finaleState.liveMix.activeFragments = new Map();
-  state.finaleState.liveMix.transportStarted = false;
-
-  // Initialize empty vote maps per granular type
-  for (const [granularType] of state.finaleState.assignment.groups) {
-    state.finaleState.liveMix.votes.set(granularType, new Map());
-  }
-
-  const events: ConductorEvent[] = [
-    { type: 'LIVE_MIX_STARTED', initialFragments: new Map() },
-  ];
-
-  const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'live_mix_start');
-  if (npcMsg) {
-    state.finaleState.npc.currentMessage = npcMsg;
-    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-  }
-
-  return events;
-}
-
-function handleSetLiveMixPreference(
-  state: ShowState,
-  userId: UserId,
-  granularType: string,
-  fragmentId: string,
-): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-
-  // Validate: user is assigned to this granular type
-  const members = fs.assignment.groups.get(granularType);
-  if (!members || !members.includes(userId)) {
-    return [{ type: 'ERROR', message: `User ${userId} is not assigned to ${granularType}` }];
-  }
-
-  // Validate: type is not locked
-  if (fs.liveMix.lockedTypes.includes(granularType)) {
-    return [{ type: 'ERROR', message: `${granularType} is locked` }];
-  }
-
-  // Validate: fragment exists in available fragments for this type (MUTE_FRAGMENT_ID is always valid)
-  const validFragment = fragmentId === MUTE_FRAGMENT_ID
-    || fs.availableFragments.some(f => f.id === fragmentId && f.granularType === granularType)
-    || (state.config.finale.bothOptionsSurvive && fs.allFragments.some(f => f.id === fragmentId && f.granularType === granularType));
-  if (!validFragment) {
-    return [{ type: 'ERROR', message: `Fragment ${fragmentId} not available for ${granularType}` }];
-  }
-
-  // Update vote
-  let typeVotes = fs.liveMix.votes.get(granularType);
-  if (!typeVotes) {
-    typeVotes = new Map();
-    fs.liveMix.votes.set(granularType, typeVotes);
-  }
-  typeVotes.set(userId, { fragmentId, timestamp: Date.now() });
-
-  // Recalculate active fragment for this type (skip if overridden)
-  if (fs.liveMix.performerOverrides.has(granularType)) {
-    return []; // Override takes precedence, vote is recorded but doesn't change audio
-  }
-
-  const newActive = getActiveFragment(typeVotes);
-  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-
-  if (newActive && newActive !== previousActive) {
-    fs.liveMix.activeFragments.set(granularType, newActive);
-
-    const events: ConductorEvent[] = [
-      { type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' },
-    ];
-
-    // First group to activate triggers Ableton transport (mute votes don't count)
-    if (!fs.liveMix.transportStarted && !previousActive && newActive !== MUTE_FRAGMENT_ID) {
-      fs.liveMix.transportStarted = true;
-      events.push({ type: 'AUDIO_CUE', cue: { type: 'transport', action: 'play' } });
-    }
-
-    // Crossfade audio — handle mute transitions
-    const outFrag = (previousActive && previousActive !== MUTE_FRAGMENT_ID)
-      ? fs.allFragments.find(f => f.id === previousActive)
-      : null;
-    const inFrag = (newActive !== MUTE_FRAGMENT_ID)
-      ? fs.allFragments.find(f => f.id === newActive)
-      : null;
-
-    if (inFrag || outFrag) {
-      events.push({
-        type: 'AUDIO_CUE',
-        cue: {
-          type: 'live_mix_crossfade',
-          granularType,
-          incomingTrackIndices: inFrag?.trackIndices ?? [],
-          outgoingTrackIndices: outFrag?.trackIndices ?? [],
-        },
-      });
-    }
-
-    return events;
-  }
-
-  return []; // Vote recorded, no majority shift
-}
-
-function handleLockGranularType(state: ShowState, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  if (fs.liveMix.lockedTypes.includes(granularType)) {
-    return []; // Already locked
-  }
-
-  fs.liveMix.lockedTypes.push(granularType);
-  return [{ type: 'GRANULAR_TYPE_LOCKED', granularType }];
-}
-
-function handleUnlockGranularType(state: ShowState, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  const idx = fs.liveMix.lockedTypes.indexOf(granularType);
-  if (idx === -1) return []; // Not locked
-
-  fs.liveMix.lockedTypes.splice(idx, 1);
-  const events: ConductorEvent[] = [{ type: 'GRANULAR_TYPE_UNLOCKED', granularType }];
-
-  // Recalculate — audience votes may have shifted while locked
-  if (!fs.liveMix.performerOverrides.has(granularType)) {
-    const typeVotes = fs.liveMix.votes.get(granularType);
-    if (typeVotes) {
-      const newActive = getActiveFragment(typeVotes);
-      const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-
-      if (newActive && newActive !== previousActive) {
-        fs.liveMix.activeFragments.set(granularType, newActive);
-        events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' });
-
-        const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
-        const inFrag = fs.allFragments.find(f => f.id === newActive);
-        if (inFrag) {
-          events.push({
-            type: 'AUDIO_CUE',
-            cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
-          });
-        }
-      }
-    }
-  }
-
-  return events;
-}
-
-function handleOverrideFragment(state: ShowState, granularType: string, fragmentId: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  fs.liveMix.performerOverrides.set(granularType, fragmentId);
-
-  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-  const events: ConductorEvent[] = [];
-
-  if (fragmentId !== previousActive) {
-    fs.liveMix.activeFragments.set(granularType, fragmentId);
-    events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId, previousFragmentId: previousActive ?? '' });
-
-    const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
-    const inFrag = fs.allFragments.find(f => f.id === fragmentId);
-    if (inFrag) {
-      events.push({
-        type: 'AUDIO_CUE',
-        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
-      });
-    }
-  }
-
-  return events;
-}
-
-function handleClearOverride(state: ShowState, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  if (!fs.liveMix.performerOverrides.has(granularType)) return [];
-
-  fs.liveMix.performerOverrides.delete(granularType);
-
-  // Recalculate from votes
-  const typeVotes = fs.liveMix.votes.get(granularType);
-  const newActive = typeVotes ? getActiveFragment(typeVotes) : null;
-  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-  const events: ConductorEvent[] = [];
-
-  if (newActive && newActive !== previousActive) {
-    fs.liveMix.activeFragments.set(granularType, newActive);
-    events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' });
-
-    const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
-    const inFrag = fs.allFragments.find(f => f.id === newActive);
-    if (inFrag) {
-      events.push({
-        type: 'AUDIO_CUE',
-        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
-      });
-    }
-  }
-
-  return events;
 }
 
 // ============================================================================

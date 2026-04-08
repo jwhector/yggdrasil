@@ -44,11 +44,23 @@ function createTestConfig(): ShowConfig {
     attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
       assignmentMode: 'auto',
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 5000,
@@ -142,40 +154,49 @@ describe('loadBackup', () => {
     expect(loaded.finaleState).toBeNull();
   });
 
-  test('preserves finaleState Maps (assignment groups, liveMix activeFragments)', () => {
+  test('preserves finaleState Maps/Sets (V3.3 quilt cells, trackMap, preview, remix)', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     state.finaleState = {
       phase: 'assignment',
       availableFragments: [],
       allFragments: [],
-      assignment: {
-        mode: 'auto',
-        groups: new Map([['bass', ['u1', 'u2']], ['drums', ['u3']]]),
-        timerRemaining: null,
-      },
-      liveMix: {
-        votes: new Map([['bass', new Map([['u1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
-        activeFragments: new Map([['bass', 'frag-0-0-A']]),
-        lockedTypes: [],
-
-        performerOverrides: new Map(),
-        liveTracksActive: [],
-        transportStarted: false,
-        loopPosition: 0,
+      quilt: {
+        rows: 6,
+        columns: 2,
+        barsPerCell: 4,
+        cells: new Map([
+          ['0:0', { id: '0:0', rowIndex: 0, columnIndex: 0, granularType: 'bass', songIndex: 1, chapter: 'love' as const, ownerId: 'u1' }],
+        ]),
+        columnOrder: [0, 1],
+        playheadColumn: 0,
         loopCount: 0,
+      },
+      availableSongs: [0, 1, 2],
+      trackMap: new Map([['bass', new Map([[0, 10], [1, 11]])]]),
+      assignment: { mode: 'auto', timerRemaining: null },
+      preview: { lockedInUsers: new Set(['u1']), timerRemaining: null },
+      remix: {
+        lockedCells: new Set(['0:0']),
+        mutedCells: new Set(),
+        lastMoveByUser: new Map([['u1', 2]]),
+        liveTracksActive: [],
       },
       npc: { currentMessage: null },
     };
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
-    expect(loaded.finaleState!.assignment.groups).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.assignment.groups.get('bass')).toEqual(['u1', 'u2']);
-    expect(loaded.finaleState!.liveMix.votes).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.liveMix.votes.get('bass')).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.liveMix.votes.get('bass')!.get('u1')!.fragmentId).toBe('frag-0-0-A');
-    expect(loaded.finaleState!.liveMix.activeFragments).toBeInstanceOf(Map);
-    expect(loaded.finaleState!.liveMix.activeFragments.get('bass')).toBe('frag-0-0-A');
+    const fs = loaded.finaleState!;
+    expect(fs.quilt.cells).toBeInstanceOf(Map);
+    expect(fs.quilt.cells.get('0:0')?.songIndex).toBe(1);
+    expect(fs.trackMap).toBeInstanceOf(Map);
+    expect(fs.trackMap.get('bass')!.get(1)).toBe(11);
+    expect(fs.preview.lockedInUsers).toBeInstanceOf(Set);
+    expect(fs.preview.lockedInUsers.has('u1')).toBe(true);
+    expect(fs.remix.lockedCells).toBeInstanceOf(Set);
+    expect(fs.remix.lockedCells.has('0:0')).toBe(true);
+    expect(fs.remix.lastMoveByUser).toBeInstanceOf(Map);
+    expect(fs.remix.lastMoveByUser.get('u1')).toBe(2);
   });
 
   test('throws for non-existent file', () => {

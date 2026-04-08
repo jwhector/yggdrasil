@@ -52,11 +52,23 @@ function createTestConfig(): ShowConfig {
     attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
       assignmentMode: 'auto',
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 5000,
@@ -159,7 +171,7 @@ describe('State persistence', () => {
     db.close();
   });
 
-  test('preserves finaleState Maps (assignment groups, liveMix votes, liveMix activeFragments)', () => {
+  test('preserves finaleState Maps/Sets (V3.3 quilt cells, trackMap, preview, remix)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
@@ -167,21 +179,30 @@ describe('State persistence', () => {
       phase: 'assignment',
       availableFragments: [],
       allFragments: [],
-      assignment: {
-        mode: 'auto',
-        groups: new Map([['bass', ['user-1', 'user-2']], ['drums', ['user-3']]]),
-        timerRemaining: null,
-      },
-      liveMix: {
-        votes: new Map([['bass', new Map([['user-1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
-        activeFragments: new Map([['bass', 'frag-0-0-A']]),
-        lockedTypes: [],
-
-        performerOverrides: new Map(),
-        liveTracksActive: [],
-        transportStarted: false,
-        loopPosition: 0,
+      quilt: {
+        rows: 6,
+        columns: 2,
+        barsPerCell: 4,
+        cells: new Map([
+          ['0:0', { id: '0:0', rowIndex: 0, columnIndex: 0, granularType: 'bass', songIndex: 1, chapter: 'love', ownerId: 'user-1' }],
+          ['1:0', { id: '1:0', rowIndex: 1, columnIndex: 0, granularType: 'drums', songIndex: null, chapter: null, ownerId: null }],
+        ]),
+        columnOrder: [0, 1],
+        playheadColumn: 0,
         loopCount: 0,
+      },
+      availableSongs: [0, 1, 2],
+      trackMap: new Map([
+        ['bass', new Map([[0, 10], [1, 11], [2, 12]])],
+        ['drums', new Map([[0, 20], [1, 21], [2, 22]])],
+      ]),
+      assignment: { mode: 'auto', timerRemaining: null },
+      preview: { lockedInUsers: new Set(['user-1']), timerRemaining: 15000 },
+      remix: {
+        lockedCells: new Set(['0:0']),
+        mutedCells: new Set(),
+        lastMoveByUser: new Map([['user-1', 3]]),
+        liveTracksActive: [],
       },
       npc: { currentMessage: 'Try again' },
     };
@@ -190,13 +211,23 @@ describe('State persistence', () => {
     const loaded = db.loadState('show-1');
 
     expect(loaded!.finaleState).not.toBeNull();
-    expect(loaded!.finaleState!.assignment.groups).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.assignment.groups.get('bass')).toEqual(['user-1', 'user-2']);
-    expect(loaded!.finaleState!.liveMix.votes).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.liveMix.votes.get('bass')).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.liveMix.votes.get('bass')!.get('user-1')!.fragmentId).toBe('frag-0-0-A');
-    expect(loaded!.finaleState!.liveMix.activeFragments).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.liveMix.activeFragments.get('bass')).toBe('frag-0-0-A');
+    const fs = loaded!.finaleState!;
+    // Quilt cells Map
+    expect(fs.quilt.cells).toBeInstanceOf(Map);
+    expect(fs.quilt.cells.get('0:0')?.songIndex).toBe(1);
+    expect(fs.quilt.cells.get('0:0')?.ownerId).toBe('user-1');
+    // Track map (nested Map)
+    expect(fs.trackMap).toBeInstanceOf(Map);
+    expect(fs.trackMap.get('bass')).toBeInstanceOf(Map);
+    expect(fs.trackMap.get('bass')!.get(1)).toBe(11);
+    // Preview Set
+    expect(fs.preview.lockedInUsers).toBeInstanceOf(Set);
+    expect(fs.preview.lockedInUsers.has('user-1')).toBe(true);
+    // Remix Sets and Map
+    expect(fs.remix.lockedCells).toBeInstanceOf(Set);
+    expect(fs.remix.lockedCells.has('0:0')).toBe(true);
+    expect(fs.remix.lastMoveByUser).toBeInstanceOf(Map);
+    expect(fs.remix.lastMoveByUser.get('user-1')).toBe(3);
 
     db.close();
   });

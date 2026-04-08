@@ -13,12 +13,6 @@ import { LayerDots } from '@/components/song-building/LayerDots';
 import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
-import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { AssignmentCards } from '@/components/finale/AssignmentCards';
-import { AssignmentIdentity } from '@/components/finale/AssignmentIdentity';
-import { LiveMixController } from '@/components/finale/LiveMixController';
-import { LiveMixSpectator } from '@/components/finale/LiveMixSpectator';
-import { useLiveMix } from '@/hooks/useLiveMix';
 import type { AudienceFinaleView, AudienceAttemptView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
@@ -107,7 +101,7 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix') && (
+      {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_preview' || phase === 'finale_playback') && (
         state.myFinale
           ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} granularTypes={state.config.granularTypes ?? []} />
           : <DarkListenScreen />
@@ -160,94 +154,30 @@ function FinaleAudienceView({
         >
           What remains
         </div>
-        <ElegyGrid
-          availableFragments={myFinale.myGroupFragments}
-          lockedFragments={[]}
-          variant="audience"
-        />
+        {/* TODO: V3.3 Phase 4 — elegy grid from quilt state */}
       </div>
     );
   }
 
-  // --- Assignment phase (V3.2) ---
+  // --- Assignment phase (V3.3: cell claiming) ---
   if (phase === 'finale_assignment') {
-    // After assignment completes, show identity
-    if (myFinale.assignmentTimerRemaining != null && myFinale.assignmentTimerRemaining <= 0 && myFinale.myGranularType !== null) {
-      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
-      if (gt) return <AssignmentIdentity granularType={gt} />;
-    }
-    // Auto-assignment: show identity immediately
-    if (myFinale.assignmentMode === 'auto' && myFinale.myGranularType !== null) {
-      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
-      if (gt) return <AssignmentIdentity granularType={gt} />;
-    }
-    return (
-      <AssignmentCards
-        myGranularType={myFinale.myGranularType}
-        granularTypes={granularTypes}
-        groupSizes={myFinale.groupSizes}
-        timerRemaining={myFinale.assignmentTimerRemaining ?? 0}
-        onSelect={(granularType) => emit('select_type', { granularType })}
-        socket={socket}
-      />
-    );
+    // TODO: V3.3 Phase 4 — QuiltGrid cell claim UI
+    return <DarkListenScreen />;
   }
 
-  // --- Live mix phase (V3.2) ---
-  if (phase === 'finale_live_mix') {
-    return (
-      <LiveMixView
-        myFinale={myFinale}
-        socket={socket}
-      />
-    );
+  // --- Preview phase (V3.3) ---
+  if (phase === 'finale_preview') {
+    // TODO: V3.3 Phase 4 — QuiltPreview UI
+    return <DarkListenScreen />;
+  }
+
+  // --- Playback phase (V3.3) ---
+  if (phase === 'finale_playback') {
+    // TODO: V3.3 Phase 4 — QuiltGrid + QuiltRemix UI
+    return <DarkListenScreen />;
   }
 
   return <DarkListenScreen />;
-}
-
-// ---------------------------------------------------------------------------
-// Live mix wrapper (needs hook call, so must be its own component)
-// ---------------------------------------------------------------------------
-
-function LiveMixView({
-  myFinale,
-  socket,
-}: {
-  myFinale: AudienceFinaleView;
-  socket: Socket | null;
-}) {
-  const liveMix = useLiveMix(socket, myFinale);
-
-  return (
-    <div
-      style={{
-        width: '100%',
-        minHeight: '100vh',
-        overflowY: 'auto',
-        padding: '24px 16px 48px',
-        boxSizing: 'border-box',
-      }}
-    >
-      {myFinale.myGranularType && (
-        <LiveMixController
-          fragments={liveMix.myGroupFragments}
-          myVote={liveMix.myVote}
-          activeFragment={liveMix.activeFragment}
-          voteDistribution={liveMix.voteDistribution}
-          totalVotes={liveMix.totalVotes}
-          isLocked={liveMix.isLocked}
-          isMuted={liveMix.isMuted}
-          granularType={myFinale.myGranularType}
-          onSelectFragment={liveMix.setPreference}
-        />
-      )}
-
-      <LiveMixSpectator
-        activeFragments={liveMix.otherTypesActive}
-      />
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------

@@ -63,36 +63,15 @@ export default function ProjectorPage() {
       );
     }
 
-    case 'finale_assignment': {
-      const fas = state.finaleState;
-      if (!fas) return <ProjectorDark />;
-      const assignmentTypes = state.config.granularTypes ?? [];
-      return (
-        <main style={projectorMainStyle}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', padding: '20px 40px' }}>
-            {assignmentTypes.map(gt => {
-              const size = fas.groupSizes.find(g => g.granularType === gt.id)?.count ?? 0;
-              return (
-                <div key={gt.id} style={{
-                  padding: '16px 24px',
-                  borderRadius: '10px',
-                  backgroundColor: `${gt.color}10`,
-                  border: `1px solid ${gt.color}30`,
-                  textAlign: 'center',
-                  minWidth: '120px',
-                }}>
-                  <div style={{ fontSize: '1.5rem', color: gt.color }}>{gt.symbol}</div>
-                  <div style={{ fontSize: '0.7rem', color: gt.color, marginTop: '4px' }}>{gt.label}</div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginTop: '8px' }}>{size}</div>
-                </div>
-              );
-            })}
-          </div>
-        </main>
-      );
-    }
+    case 'finale_assignment':
+      // TODO: V3.3 Phase 4 — QuiltGrid projector cell claim display
+      return <ProjectorDark />;
 
-    case 'finale_live_mix':
+    case 'finale_preview':
+      // TODO: V3.3 Phase 4 — QuiltGrid projector preview display
+      return <ProjectorDark />;
+
+    case 'finale_playback':
       return (
         <ProjectorCanvas
           state={state}
