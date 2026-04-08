@@ -410,9 +410,7 @@
   ],
   "finale": {
     "assignmentMode": "auto",
-    "assignmentTimerMs": 30000,
     "bothOptionsSurvive": true,
-    "crossSongConstraint": false,
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
       {
@@ -421,13 +419,35 @@
       },
       {
         "event": "assignment_start",
-        "text": "Find your voice."
+        "text": "Pick up a piece."
       },
       {
-        "event": "live_mix_start",
-        "text": "It's yours. Shape it."
+        "event": "preview_start",
+        "text": "Learn your voice."
+      },
+      {
+        "event": "first_playback",
+        "text": "Listen to what we built."
+      },
+      {
+        "event": "performer_returns",
+        "text": "He's back. But now it's ours too."
       }
-    ]
+    ],
+    "quilt": {
+      "maxColumns": 4,
+      "loopBars": 8,
+      "overflowMode": "spectator",
+      "previewTimerMs": 20000,
+      "assignmentTimerMs": 30000,
+      "audienceRemix": {
+        "enabled": true,
+        "scope": "own_cell",
+        "allowCrossRowSwaps": true,
+        "cooldownLoops": 1,
+        "allowSongChange": false
+      }
+    }
   },
   "timing": {
     "loopBoundaryBeats": 32,
