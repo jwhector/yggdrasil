@@ -132,6 +132,46 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Rationale:** 3 choices per song makes each choice a dramatic shift (choosing between full musical identities, not individual instruments). The 0.99 threshold at layer 2 means songs almost always collapse — the doubt wins, which is the narrative point. See MIGRATION-V3.2.md Change 2.
 **Impact:** `V32_LAYERS_PER_ATTEMPT = 3`. Existing `LAYERS_PER_ATTEMPT = 6` remains for V3.1 code.
 
+### R24: Cell model is song-choice based (V3.3)
+**Date:** 2026-04-07
+**Decision:** Quilt cells hold a song index (0, 1, 2), not a fragment ID. The grid position (row) determines the granular type. Track resolution: `trackMap[granularType][songIndex] → Ableton trackIndex`.
+**Rationale:** Simpler than fragment-based selection. A cell can move anywhere in the grid and always resolve correctly — the song choice travels with it, and the row determines the instrument. See `docs/finale.md`.
+
+### R25: Audience remix is fully configurable (V3.3)
+**Date:** 2026-04-07
+**Decision:** Master toggle to enable/disable audience remix, plus scope (own cell vs any cell), cross-row swaps, cooldown, and whether song choice can change during playback. All via `audienceRemix` in `QuiltConfig`.
+**Rationale:** Allows rapid playtesting of different interaction levels without code changes. Can range from "audience watches, performer remixes alone" to "full audience chaos."
+
+### R26: Cross-row swaps are allowed (V3.3)
+**Date:** 2026-04-07
+**Decision:** Moving a cell to a different row changes which instrument plays the song choice. Configurable via `allowCrossRowSwaps`.
+**Rationale:** Musically safe because track resolution always finds the correct audio (`trackMap[newGranularType][songIndex]`).
+
+### R27: Performer can override cell song choice (V3.3)
+**Date:** 2026-04-07
+**Decision:** The performer CAN force a specific song for any cell. Available as an emergency/creative tool, but default workflow is reorder/mute/swap.
+**Rationale:** Needed for live performance flexibility. The performer should never be stuck.
+
+### R28: Audience song choice locked after preview by default (V3.3)
+**Date:** 2026-04-07
+**Decision:** After the preview phase, audience song choices are locked. Configurable via `audienceRemix.allowSongChange`. Cell POSITION can always change (if audience remix is enabled).
+**Rationale:** Makes the preview choice consequential. Song change during playback is too chaotic for most shows but available as a config option.
+
+### R29: Loop length is 8 bars (V3.3)
+**Date:** 2026-04-07
+**Decision:** All quilt music is composed for 8-bar loops.
+**Rationale:** Standard loop length that works musically. Column count divides into this (1, 2, 4, or 8 bars per cell).
+
+### R30: Live seed / melody is a quilt row (V3.3)
+**Date:** 2026-04-07
+**Decision:** The live seed is one of the 6 granular type rows (melody/seed), audience-controllable like all other types. The performer's live instruments (vocal, synth, etc.) are separate tracks layered on top of the quilt, not part of the grid.
+**Rationale:** Treats all musical material equally. The performer's live playing is additive, not grid-constrained.
+
+### R31: Visual design should be modular (V3.3)
+**Date:** 2026-04-07
+**Decision:** Build quilt visualization for easy iteration — no locked visual commitments yet.
+**Rationale:** The quilt is a new interaction model. Visual design needs playtesting to discover what works.
+
 ---
 
 ## Open Decisions
@@ -163,6 +203,16 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Status:** Open
 **Questions:** When rotation freezes, what does the projector show? Does the performer get any special controls beyond what the controller already offers?
 **Blocked by:** Performance design / rehearsal
+
+### O9: Crossfade duration at quilt column boundaries
+**Status:** Open
+**Questions:** Hard cuts (0ms) vs smooth crossfade (~100ms) when playhead crosses column boundary and the track for a type changes? Needs playtesting.
+**Blocked by:** Audio playtesting
+
+### O10: Quilt visual design (projector + phone)
+**Status:** Open
+**Questions:** How to display the quilt grid on projector and phones during assignment, preview, and playback? Playhead visualization? Cell swap animations? Modular design per R31.
+**Blocked by:** Visual design collaboration
 
 ### O8: Ableton session template
 **Status:** Open

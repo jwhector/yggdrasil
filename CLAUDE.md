@@ -17,6 +17,28 @@
 
 ---
 
+## V3.3 "Quilt" Migration (In Progress)
+
+The finale has been redesigned from V3.2's Incredibox-style live mix to V3.3's **Quilt** model. See `docs/finale.md` for the authoritative spec (replaces the V3.2 finale spec). See `V33-MIGRATION-PLAN.md` for implementation phases.
+
+**Key concept changes:**
+- **Cells hold a song index (0, 1, 2)**, not a fragment ID. The cell's row determines the granular type; the song choice determines which song's version plays.
+- **Track resolution:** `trackMap[granularType][songIndex] → Ableton trackIndex` — config-driven lookup, no per-fragment tracking.
+- **Show phases:** `finale_live_mix` replaced by `finale_preview` (private song exploration) + `finale_playback` (quilt plays + performer/audience remix).
+
+**Files deprecated by V3.3** (to be deleted during implementation):
+- `conductor/live-mix.ts` — majority voting / recency tiebreak (replaced by quilt cell logic)
+- `conductor/assignment.ts` — granular type group assignment (replaced by cell claiming in quilt.ts)
+- `components/finale/LiveMixController.tsx` — audience tappable fragment cards
+- `components/finale/LiveMixSpectator.tsx` — read-only view of other types
+- `components/finale/LiveMixProjector.tsx` — projector consensus viz
+- `components/finale/AssignmentCards.tsx` — self-select type assignment UI
+- `components/finale/AssignmentIdentity.tsx` — post-assignment type identity display
+- `components/controller/LiveMixControls.tsx` — per-type overrides, locks, vote distributions
+- `hooks/useLiveMix.ts` — live mix state management
+
+---
+
 ## What This System Is
 
 Yggdrasil is an interactive live performance system where ~40 audience members build songs in real time via their phones. The show has 3 song-building attempts, each tied to a narrative chapter (Ambition, Love, Avoidance).

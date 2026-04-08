@@ -47,8 +47,11 @@ The audience is framed as the performer's inner council — parts of the subcons
 | **Blind Vote** | The song-building voting mechanic. Audience votes without seeing live split feedback. Results are revealed after the window closes. |
 | **Reveal** | The post-vote moment when the A/B split is shown, the threshold check is visualized, and the winning option locks in. |
 | **Song Rejection** | The performer's narrative act of rejecting a **completed** song (one that survived all layers without collapsing). Triggered manually via controller; accompanied by an OSC-triggered audio effect. Only applies when the song completes — collapsed songs are already dead. |
-| **Fragment** | An option from a reached layer during song-building, available in the finale. Which options survive is configurable via `bothOptionsSurvive` — when true, both A and B from voted layers are available; when false, only winners survive. |
+| **Fragment** | An option from a reached layer during song-building, available in the finale. Which options survive is configurable via `bothOptionsSurvive` — when true, both A and B from voted layers are available; when false, only winners survive. In V3.3, the quilt uses song indices rather than fragment IDs — see **Song Choice**. |
 | **Locked Fragment** | A fragment visible in the pre-game "elegy" display but not available during gameplay. Includes: both options from unreached layers (due to collapse), and losing options from voted layers when `bothOptionsSurvive` is false. Represents "what could have been." |
+| **Quilt** | (V3.3) The finale song structure — a grid where rows = granular types, columns = time slices. Each cell holds a song choice (0, 1, 2). The loop plays left to right across columns, switching active tracks per type at each column boundary. |
+| **Cell** | (V3.3) One position in the quilt grid (granular type × time slice). Claimed by one audience member during assignment. Holds a song choice that determines which song's audio plays for that type during that time slice. |
+| **Song Choice** | (V3.3) The song index (0, 1, or 2) stored in a quilt cell. Combined with the cell's row (granular type), it resolves to an Ableton track: `trackMap[granularType][songIndex] → trackIndex`. |
 | **NPC** | A system-controlled narrative voice displayed on audience phones during the finale. Reacts to key events (performer abandonment, assignment, live mix start). Terminal-style typeface. Event-driven. |
 | **Loop Boundary** | The downbeat of each 8-bar loop cycle. All audio changes are quantized to these boundaries. |
 | **Layer Group Identity** | Consistent color + symbol for each layer group, derived from its first granular type (bones→■, flesh→✦, spark→~). |
@@ -113,7 +116,7 @@ lobby → opener → attempt_story → attempt_build → attempt_resolve (if com
                                        ↓ (if collapsed)
                  attempt_story → attempt_build → attempt_resolve (if completed) →
                                        ↓ (if collapsed)
-                 finale_elegy → finale_assignment → finale_live_mix → ended
+                 finale_elegy → finale_assignment → finale_preview → finale_playback → ended
 ```
 
 ### Phase Details
@@ -126,8 +129,9 @@ type ShowPhase =
   | 'attempt_build'            // Song-building phase: 3 bundled layer groups (phones active)
   | 'attempt_resolve'          // Song completed; performer rejects it (phones dim/watch)
   | 'finale_elegy'             // Audience sees full fragment wreckage (phones passive)
-  | 'finale_assignment'        // Audience assigned to granular types (V3.2)
-  | 'finale_live_mix'          // Incredibox-style continuous collaborative mix (V3.2)
+  | 'finale_assignment'        // Audience claims quilt cells (V3.3)
+  | 'finale_preview'           // Private song exploration — room silent (V3.3)
+  | 'finale_playback'          // Quilt plays + performer/audience remix (V3.3)
   | 'ended';
 ```
 
@@ -145,9 +149,10 @@ type ShowPhase =
 | `attempt_build` (attempt 2) | `finale_elegy` | **Auto** on collapse, or Manual after rejection | Song 3 → finale regardless of outcome |
 | `attempt_resolve` | `attempt_story` | Manual | Performer triggers rejection + advance; increments attempt index |
 | `attempt_resolve` (attempt 2) | `finale_elegy` | Manual | After Song 3 rejection |
-| `finale_elegy` | `finale_assignment` | Manual | NPC announces assignment |
-| `finale_assignment` | `finale_live_mix` | **Auto** or Manual | When assignment timer expires |
-| `finale_live_mix` | `ended` | Manual | |
+| `finale_elegy` | `finale_assignment` | Manual | NPC announces cell claim |
+| `finale_assignment` | `finale_preview` | **Auto** or Manual | When assignment timer expires |
+| `finale_preview` | `finale_playback` | **Auto** or Manual | When all users lock in or timer expires |
+| `finale_playback` | `ended` | Manual | |
 
 ---
 
@@ -437,3 +442,30 @@ test('performer lock prevents audience from changing granular type fragment', ..
 - **New files**: `conductor/live-mix.ts`, `components/finale/AssignmentCards.tsx`, `components/finale/AssignmentIdentity.tsx`, `components/finale/LiveMixProjector.tsx`, `components/controller/LiveMixControls.tsx`.
 - **Deleted files**: AssemblyCards, GroupIdentity, DeliberationBoard, AudioPreview, CeremonyView, AltarReady, MixingMirror, MixingSurface, AssemblyControls, DeliberationControls, CeremonyControls, useAltarDetection.
 - **New DB table**: `finale_mix_events` for preference/lock/unlock/override event persistence.
+
+---
+
+## Appendix E: What Changed from V3.2 → V3.3
+
+**V3.3 "Quilt" migration in progress.** See `V33-MIGRATION-PLAN.md` for implementation phases and `docs/finale.md` for the authoritative spec.
+
+### Removed Systems
+- **Live mix majority voting**: Per-type majority voting with recency tiebreak. Replaced by quilt cell model — each cell has one owner making a direct song choice.
+- **Per-type group assignment**: Audience assigned to granular type groups (~6-7 people per type). Replaced by cell claiming — each person claims a single cell (type × time slice).
+- **`finale_live_mix` phase**: Single playback phase. Replaced by `finale_preview` (private exploration) + `finale_playback` (quilt plays + remix).
+- **Fragment-based selection**: Audience chose between specific fragments (options from song-building layers). Replaced by song choice (0, 1, 2) — simpler, and grid position determines everything else.
+- **`finale_mix_events` DB table**: Replaced by `finale_quilt_cells` + `finale_remix_events`.
+- **`finale_assignments` DB table**: Cell claim is the assignment (captured in `finale_quilt_cells.owner_id`).
+
+### New Systems
+- **Quilt grid**: 6 rows (granular types) × N columns (derived from audience size). Each cell = one person's assignment. The loop plays left to right across columns.
+- **Cell claiming**: Audience self-selects a cell in the grid (row + column). One cell per person. Timer-based with random assignment for unclaimed users.
+- **Preview phase** (`finale_preview`): Room is silent. Audience privately explores song options (1/2/3) for their cell via phone audio previews. Lock-in button commits choice.
+- **Playback & remix** (`finale_playback`): Quilt plays through. Configurable audience remix (move cells, swap positions, optionally change song choice). Performer can reorder columns, swap cells, lock/mute/override.
+- **Audience remix config** (`QuiltConfig.audienceRemix`): Master toggle, scope (own cell vs any cell), cross-row swaps, cooldown, song change permission. Allows rapid playtesting without code changes.
+
+### Changed Systems
+- **Assignment**: From granular type group selection to quilt cell claiming. Same self-select/auto modes, but now claiming a specific grid position rather than a type group.
+- **NPC event keys**: Updated for new phases — `preview_start`, `first_playback` replace live-mix-specific events.
+- **Audio cues**: `quilt_playback_start`, `quilt_column_change`, `quilt_reorder`, `quilt_mute_cell`, `quilt_unmute_cell` replace live mix audio cues.
+- **Show phase state machine**: `finale_live_mix` → `finale_preview` + `finale_playback`.

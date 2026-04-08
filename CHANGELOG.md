@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-04-07 — V3.3 "Quilt" finale redesign — context setup
+
+Spec installed as `docs/finale.md`. The V3.2 live mix finale is replaced by the Quilt model: a grid where rows = granular types, columns = time slices, and each cell holds a song choice (0, 1, 2). New phases: `finale_preview` (private exploration) + `finale_playback` (quilt plays + remix). See `V33-MIGRATION-PLAN.md` for implementation phases.
+
+- Updated CLAUDE.md with V3.3 migration section and deprecated file list
+- Updated ARCHITECTURE.md: terminology (Quilt, Cell, Song Choice), state machine (`finale_preview` + `finale_playback`), Appendix E
+- Updated DECISIONS.md: resolved decisions R24-R31, open questions O9-O10
+
 ## 2026-04-05 — Per-option chapter colors, audience build UI redesign, server-driven intrusive thoughts with projector physics
 
 **Context:** Three connected changes: (1) visual differentiation of A/B option choices throughout the show, (2) audience phone UI redesign for song-building matching a canvas-based mockup, (3) server-distributed intrusive thoughts that appear on both audience phones and the projector as physics-based membrane bubbles.
