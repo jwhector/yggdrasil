@@ -61,6 +61,7 @@ export interface SerializedFinaleState {
     liveTracksActive: string[];
   };
   npc: V33FinaleState['npc'];
+  arc?: V33FinaleState['arc'];
 }
 
 export interface SerializedShowState {
@@ -111,6 +112,7 @@ export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState 
       liveTracksActive: fs.remix.liveTracksActive,
     },
     npc: fs.npc,
+    arc: fs.arc,
   };
 }
 
@@ -144,6 +146,7 @@ export function deserializeFinaleState(data: SerializedFinaleState): V33FinaleSt
       liveTracksActive: data.remix.liveTracksActive,
     },
     npc: data.npc,
+    arc: data.arc ?? null,
   };
 }
 

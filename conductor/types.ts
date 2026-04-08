@@ -361,6 +361,10 @@ export type AudioCue =
   | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndex: number }
   /** V3.3: unmute a single cell's track */
   | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndex: number }
+  /** V3.3 Arc: staggered row group unmute during entry */
+  | { type: 'quilt_row_unmute'; granularTypes: string[]; trackIndices: number[] }
+  /** V3.3 Arc: staggered row group mute during exit */
+  | { type: 'quilt_row_mute'; granularTypes: string[]; trackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
   | { type: 'master_panic' }            // Authoritative: query Ableton for all tracks, mute every non-foldable, reset gains
@@ -422,6 +426,13 @@ export type ConductorCommand =
   | { type: 'MUTE_CELL'; cellId: string }
   | { type: 'UNMUTE_CELL'; cellId: string }
   | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }
+
+  // Finale — Arc (V3.3: automated playback arc)
+  | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }
+  | { type: 'ARC_RAW_COMPLETE' }
+  | { type: 'ARC_SORT_COMPLETE' }
+  | { type: 'ARC_EXIT_ROW_GROUP'; groupIndex: number }
+  | { type: 'ARC_COMPLETE' }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
@@ -488,6 +499,12 @@ export type ConductorEvent =
   | { type: 'CELL_UNLOCKED'; cellId: string }
   | { type: 'CELL_MUTED'; cellId: string }
   | { type: 'CELL_UNMUTED'; cellId: string }
+
+  // Finale — Arc (V3.3)
+  | { type: 'ARC_PHASE_CHANGED'; arcPhase: ArcPhase }
+  | { type: 'ARC_ROW_GROUP_ENTERED'; granularTypes: string[] }
+  | { type: 'ARC_SORT_APPLIED'; passIndex: number; previousCells: Map<string, QuiltCell> }
+  | { type: 'ARC_ROW_GROUP_EXITED'; granularTypes: string[] }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
@@ -650,6 +667,66 @@ export interface QuiltConfig {
   previewTimerMs: number;                          // Preview phase duration (default: 20000)
   assignmentTimerMs: number;                       // Assignment phase duration (default: 30000)
   audienceRemix: AudienceRemixConfig;
+  arc?: ArcConfig;                                 // Automated playback arc (sorting + staggered entry/exit)
+}
+
+// ============================================================================
+// Quilt Arc — Automated Sorting & Playback (V3.3)
+// ============================================================================
+
+/** Sub-phases within finale_playback when arc is active. */
+export type ArcPhase = 'entry' | 'raw' | 'sorting' | 'sorted_playback' | 'exit' | 'complete';
+
+/** Sort algorithm mode, auto-selected by grid loop duration. */
+export type SortMode = 'single_pass' | 'multi_pass';
+
+/** Energy profile for a single song (chapter). */
+export interface SongEnergyProfile {
+  songIndex: number;
+  energy: number;                                  // 0.0–1.0 (Ambition=1.0, Love=0.5, Avoidance=0.2)
+}
+
+/** Which row groups unmute/mute together and when. */
+export interface RowGroupSchedule {
+  granularTypes: string[];                         // e.g., ['drums', 'bass']
+  abletonLoopIndex: number;                        // 0-based: which 8-bar boundary triggers this group
+}
+
+/** Full arc configuration — nested under QuiltConfig.arc. */
+export interface ArcConfig {
+  enabled: boolean;                                // Master toggle for automated arc
+  cellSizeThreshold: number;                       // Columns >= this use halfLoopBarsPerCell (default: 4)
+  fullLoopBarsPerCell: number;                     // Bars per cell below threshold (default: 8)
+  halfLoopBarsPerCell: number;                     // Bars per cell at/above threshold (default: 4)
+  sortModeThresholdBars: number;                   // Grid loop >= this uses single-pass sort (default: 16)
+  songEnergy: SongEnergyProfile[];                 // Energy per song
+  rowWeight: Record<string, number>;               // granularType → energy multiplier (0.0–1.0)
+  rowPriority: string[];                           // Consolidation order (highest priority first)
+  entrySchedule: RowGroupSchedule[];               // Row groups + timing for staggered entry
+  exitSchedule: RowGroupSchedule[];                // Row groups + timing for staggered exit
+  multiPassTargets: number[];                      // Energy targets per pass in multi-pass mode [0.5, 1.0, 0.2]
+  allowCrossRowSort: boolean;                      // Whether sort can move cells across rows
+  allowSortMuting: boolean;                        // Whether sort can mute cells in cool-down zone
+}
+
+/** Computed arc timeline — derived from grid dimensions + ArcConfig. */
+export interface ArcSchedule {
+  sortMode: SortMode;
+  barsPerCell: number;
+  gridLoopBars: number;                            // columns * barsPerCell
+  entryAbletonLoops: number;                       // 8-bar loops needed for staggered entry
+  sortedPassCount: number;                         // 1 (single-pass) or N (multi-pass)
+  exitAbletonLoops: number;                        // 8-bar loops needed for staggered exit
+}
+
+/** Runtime arc state — tracked during finale_playback. */
+export interface ArcState {
+  phase: ArcPhase;
+  schedule: ArcSchedule;
+  currentPassIndex: number;                        // 0-based, relevant in multi-pass
+  enteredRowGroups: number[];                      // Indices into entrySchedule that have entered
+  exitedRowGroups: number[];                       // Indices into exitSchedule that have exited
+  gridLoopsInPhase: number;                        // Grid loops completed in current arc phase
 }
 
 /** Audience interaction config during playback (V3.3). */
@@ -733,6 +810,9 @@ export interface V33FinaleState {
   };
 
   npc: { currentMessage: string | null };
+
+  // Arc state (automated playback arc — sorting + staggered entry/exit)
+  arc: ArcState | null;                             // null when arc disabled or before playback starts
 }
 
 // ============================================================================
@@ -787,6 +867,8 @@ export interface AudienceFinaleView {
     playheadColumn: number;
   };
   availableSongs: number[];
+  // Arc state
+  arcPhase: ArcPhase | null;                           // Current arc sub-phase (null if arc disabled)
   // Assignment
   myCellId: string | null;                             // which cell the user owns
   assignmentMode: 'auto' | 'self_select';
@@ -841,6 +923,9 @@ export interface ProjectorFinaleView {
     loopCount: number;
   };
   availableSongs: number[];
+  // Arc state
+  arcPhase: ArcPhase | null;                           // Current arc sub-phase (null if arc disabled)
+  arcPassIndex: number | null;                         // Current sort pass (multi-pass mode)
   // Assignment
   assignmentMode: 'auto' | 'self_select';
   assignmentTimerRemaining: number | null;

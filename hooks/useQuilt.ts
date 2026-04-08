@@ -11,7 +11,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import type { AudienceFinaleView, ProjectorFinaleView, Chapter, UserId } from '@/conductor/types';
+import type { AudienceFinaleView, ProjectorFinaleView, Chapter, UserId, ArcPhase } from '@/conductor/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +43,7 @@ export interface UseQuiltReturn {
   availableSongs: number[];
   lockedCells: Set<string>;
   mutedCells: Set<string>;
+  arcPhase: ArcPhase | null;
   assignmentTimerRemaining: number | null;
   previewTimerRemaining: number | null;
   // Actions
@@ -200,6 +201,8 @@ export function useQuilt(
     socket?.emit('change_song', { songIndex });
   }, [socket]);
 
+  const arcPhase: ArcPhase | null = (myFinale && 'arcPhase' in myFinale ? myFinale.arcPhase : null) ?? null;
+
   return {
     grid,
     myCellId,
@@ -208,6 +211,7 @@ export function useQuilt(
     availableSongs,
     lockedCells,
     mutedCells,
+    arcPhase,
     assignmentTimerRemaining: myFinale?.assignmentTimerRemaining ?? null,
     previewTimerRemaining: (isAudience ? (myFinale as AudienceFinaleView).previewTimerRemaining : null) ?? null,
     claimCell,

@@ -37,6 +37,9 @@ import type {
   V32LayerConfig,
   TrackBundle,
   GranularType,
+  ArcConfig,
+  ArcPhase,
+  QuiltCell,
 } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
@@ -65,6 +68,15 @@ import {
   deriveAvailableSongs,
   findUserCell,
 } from './quilt';
+import {
+  computeBarsPerCell,
+  computeArcSchedule,
+  initArcState,
+  sortGrid,
+  applyPositionMap,
+  resolveAllTracksForRows,
+  resolveTracksForRows,
+} from './quilt-arc';
 
 // ============================================================================
 // State Initialization
@@ -230,6 +242,18 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleUnmuteCell(state, command.cellId);
     case 'OVERRIDE_CELL_SONG':
       return handleOverrideCellSong(state, command.cellId, command.songIndex);
+
+    // Arc (V3.3: automated playback arc)
+    case 'ARC_ENTRY_ROW_GROUP':
+      return handleArcEntryRowGroup(state, command.groupIndex);
+    case 'ARC_RAW_COMPLETE':
+      return handleArcRawComplete(state);
+    case 'ARC_SORT_COMPLETE':
+      return handleArcSortComplete(state);
+    case 'ARC_EXIT_ROW_GROUP':
+      return handleArcExitRowGroup(state, command.groupIndex);
+    case 'ARC_COMPLETE':
+      return handleArcComplete(state);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -1338,6 +1362,7 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
       liveTracksActive: [],
     },
     npc: { currentMessage: null },
+    arc: null,
   };
 
   // Derive available songs and track map from fragments
@@ -1507,34 +1532,78 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
   state.finaleState.quilt.playheadColumn = state.finaleState.quilt.columnOrder[0] ?? 0;
 
   const events: ConductorEvent[] = [];
-
-  // Resolve initial tracks for column 0
-  const initialTrackIndices: number[] = [];
   const quilt = state.finaleState.quilt;
   const trackMap = state.finaleState.trackMap;
   const mutedCells = state.finaleState.remix.mutedCells;
+  const arcConfig = state.config.finale.quilt.arc;
 
-  for (const cell of quilt.cells.values()) {
-    if (cell.columnIndex === quilt.playheadColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
-      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndex !== null) initialTrackIndices.push(trackIndex);
+  // Initialize arc if enabled
+  if (arcConfig?.enabled) {
+    const schedule = computeArcSchedule(quilt.columns, arcConfig);
+    state.finaleState.arc = initArcState(schedule);
+
+    // Only unmute first entry group's tracks (staggered entry)
+    const firstGroup = arcConfig.entrySchedule[0];
+    if (firstGroup) {
+      const initialTrackIndices = resolveAllTracksForRows(
+        quilt.cells, trackMap, firstGroup.granularTypes, mutedCells,
+      );
+
+      state.finaleState.arc.enteredRowGroups.push(0);
+
+      events.push({
+        type: 'PLAYBACK_STARTED',
+        quilt: new Map(quilt.cells),
+        columnOrder: [...quilt.columnOrder],
+      });
+
+      events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'entry' });
+
+      events.push({
+        type: 'ARC_ROW_GROUP_ENTERED',
+        granularTypes: firstGroup.granularTypes,
+      });
+
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: {
+          type: 'quilt_playback_start',
+          initialColumn: quilt.playheadColumn,
+          trackIndices: initialTrackIndices,
+        },
+      });
+
+      // If only one entry group, transition straight to raw
+      if (arcConfig.entrySchedule.length === 1) {
+        state.finaleState.arc.phase = 'raw';
+        events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'raw' });
+      }
     }
+  } else {
+    // No arc — unmute all tracks at once (original behavior)
+    const initialTrackIndices: number[] = [];
+    for (const cell of quilt.cells.values()) {
+      if (cell.columnIndex === quilt.playheadColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+        const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+        if (trackIndex !== null) initialTrackIndices.push(trackIndex);
+      }
+    }
+
+    events.push({
+      type: 'PLAYBACK_STARTED',
+      quilt: new Map(quilt.cells),
+      columnOrder: [...quilt.columnOrder],
+    });
+
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'quilt_playback_start',
+        initialColumn: quilt.playheadColumn,
+        trackIndices: initialTrackIndices,
+      },
+    });
   }
-
-  events.push({
-    type: 'PLAYBACK_STARTED',
-    quilt: new Map(quilt.cells),
-    columnOrder: [...quilt.columnOrder],
-  });
-
-  events.push({
-    type: 'AUDIO_CUE',
-    cue: {
-      type: 'quilt_playback_start',
-      initialColumn: quilt.playheadColumn,
-      trackIndices: initialTrackIndices,
-    },
-  });
 
   const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'first_playback');
   if (npcMsg) {
@@ -1551,24 +1620,35 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
   const quilt = state.finaleState.quilt;
   const trackMap = state.finaleState.trackMap;
   const mutedCells = state.finaleState.remix.mutedCells;
+  const arc = state.finaleState.arc;
   const previousColumn = quilt.playheadColumn;
+
+  // Determine which granular types are active (arc entry filtering)
+  const enteredTypes = getEnteredGranularTypes(state);
 
   // Build a map of granularType -> active trackIndex for the previous column
   const previousTracks = new Map<string, number>();
   for (const cell of quilt.cells.values()) {
     if (cell.columnIndex === previousColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
       const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
       if (trackIndex !== null) previousTracks.set(cell.granularType, trackIndex);
     }
   }
 
   // Advance playhead
-  const { columnIndex } = quiltAdvancePlayhead(quilt);
+  const { columnIndex, loopWrapped } = quiltAdvancePlayhead(quilt);
+
+  // Track grid loop completion for arc
+  if (loopWrapped && arc && arc.phase !== 'complete') {
+    arc.gridLoopsInPhase++;
+  }
 
   // Build a map of granularType -> active trackIndex for the new column
   const newTracks = new Map<string, number>();
   for (const cell of quilt.cells.values()) {
     if (cell.columnIndex === columnIndex && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
       const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
       if (trackIndex !== null) newTracks.set(cell.granularType, trackIndex);
     }
@@ -1597,6 +1677,219 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
   }
 
   return events;
+}
+
+/**
+ * Get the set of granular types that have entered during the arc.
+ * Returns null if arc is not active (meaning all types are active).
+ */
+function getEnteredGranularTypes(state: ShowState): Set<string> | null {
+  const arc = state.finaleState?.arc;
+  if (!arc) return null;
+
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return null;
+
+  // After entry phase, all types are active
+  if (arc.phase !== 'entry') return null;
+
+  const entered = new Set<string>();
+  for (const groupIndex of arc.enteredRowGroups) {
+    const group = arcConfig.entrySchedule[groupIndex];
+    if (group) {
+      for (const gt of group.granularTypes) {
+        entered.add(gt);
+      }
+    }
+  }
+  return entered;
+}
+
+// ============================================================================
+// Arc Handlers (V3.3: Automated Playback Arc)
+// ============================================================================
+
+function handleArcEntryRowGroup(state: ShowState, groupIndex: number): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'entry') return [];
+
+  const group = arcConfig.entrySchedule[groupIndex];
+  if (!group) return [{ type: 'ERROR', message: `Invalid entry group index: ${groupIndex}` }];
+
+  // Skip if already entered
+  if (arc.enteredRowGroups.includes(groupIndex)) return [];
+
+  arc.enteredRowGroups.push(groupIndex);
+
+  const trackIndices = resolveAllTracksForRows(
+    state.finaleState.quilt.cells,
+    state.finaleState.trackMap,
+    group.granularTypes,
+    state.finaleState.remix.mutedCells,
+  );
+
+  const events: ConductorEvent[] = [];
+
+  events.push({ type: 'ARC_ROW_GROUP_ENTERED', granularTypes: group.granularTypes });
+
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: { type: 'quilt_row_unmute', granularTypes: group.granularTypes, trackIndices },
+  });
+
+  // Check if all entry groups have entered
+  if (arc.enteredRowGroups.length >= arcConfig.entrySchedule.length) {
+    arc.phase = 'raw';
+    arc.gridLoopsInPhase = 0;
+    events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'raw' });
+  }
+
+  return events;
+}
+
+function handleArcRawComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'raw') return [];
+
+  const events: ConductorEvent[] = [];
+
+  // Snapshot cells before sort
+  const previousCells = new Map<string, QuiltCell>();
+  for (const [id, cell] of state.finaleState.quilt.cells) {
+    previousCells.set(id, { ...cell });
+  }
+
+  // Apply first sort
+  const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
+  const mode = arc.schedule.sortMode === 'single_pass' ? 'single' as const : 'multi' as const;
+  const targetEnergy = mode === 'multi' ? arcConfig.multiPassTargets[0] : undefined;
+
+  const positionMap = sortGrid(
+    state.finaleState.quilt.cells,
+    state.finaleState.quilt.columns,
+    state.finaleState.quilt.rows,
+    arcConfig,
+    mode,
+    targetEnergy,
+  );
+
+  applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+
+  arc.phase = 'sorted_playback';
+  arc.currentPassIndex = 0;
+  arc.gridLoopsInPhase = 0;
+
+  events.push({ type: 'ARC_SORT_APPLIED', passIndex: 0, previousCells });
+  events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'sorted_playback' });
+
+  return events;
+}
+
+function handleArcSortComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'sorted_playback') return [];
+
+  const events: ConductorEvent[] = [];
+
+  // Multi-pass: check if there are more passes
+  if (arc.schedule.sortMode === 'multi_pass') {
+    const nextPassIndex = arc.currentPassIndex + 1;
+
+    if (nextPassIndex < arc.schedule.sortedPassCount) {
+      // Re-sort for next pass
+      const previousCells = new Map<string, QuiltCell>();
+      for (const [id, cell] of state.finaleState.quilt.cells) {
+        previousCells.set(id, { ...cell });
+      }
+
+      const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
+      const targetEnergy = arcConfig.multiPassTargets[nextPassIndex] ?? 0.5;
+
+      const positionMap = sortGrid(
+        state.finaleState.quilt.cells,
+        state.finaleState.quilt.columns,
+        state.finaleState.quilt.rows,
+        arcConfig,
+        'multi',
+        targetEnergy,
+      );
+
+      applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+
+      arc.currentPassIndex = nextPassIndex;
+      arc.gridLoopsInPhase = 0;
+
+      events.push({ type: 'ARC_SORT_APPLIED', passIndex: nextPassIndex, previousCells });
+      return events;
+    }
+  }
+
+  // All passes done (or single-pass) → transition to exit
+  arc.phase = 'exit';
+  arc.gridLoopsInPhase = 0;
+  events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'exit' });
+
+  return events;
+}
+
+function handleArcExitRowGroup(state: ShowState, groupIndex: number): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'exit') return [];
+
+  const group = arcConfig.exitSchedule[groupIndex];
+  if (!group) return [{ type: 'ERROR', message: `Invalid exit group index: ${groupIndex}` }];
+
+  // Skip if already exited
+  if (arc.exitedRowGroups.includes(groupIndex)) return [];
+
+  arc.exitedRowGroups.push(groupIndex);
+
+  const trackIndices = resolveAllTracksForRows(
+    state.finaleState.quilt.cells,
+    state.finaleState.trackMap,
+    group.granularTypes,
+    state.finaleState.remix.mutedCells,
+  );
+
+  const events: ConductorEvent[] = [];
+
+  events.push({ type: 'ARC_ROW_GROUP_EXITED', granularTypes: group.granularTypes });
+
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: { type: 'quilt_row_mute', granularTypes: group.granularTypes, trackIndices },
+  });
+
+  // Check if all exit groups have exited
+  if (arc.exitedRowGroups.length >= arcConfig.exitSchedule.length) {
+    arc.phase = 'complete';
+    events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'complete' });
+  }
+
+  return events;
+}
+
+function handleArcComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [];
+
+  state.finaleState.arc.phase = 'complete';
+  return [{ type: 'ARC_PHASE_CHANGED', arcPhase: 'complete' }];
 }
 
 // ============================================================================

@@ -892,6 +892,21 @@ export function createAudioRouter(
     setGain(cue.trackIndex, 1.0);
   }
 
+  // V3.3 Arc: Staggered row group unmute during entry
+  function handleQuiltRowUnmute(cue: Extract<AudioCue, { type: 'quilt_row_unmute' }>): void {
+    for (const trackIndex of cue.trackIndices) {
+      unmuteTrack(trackIndex);
+      fadeGain(trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+    }
+  }
+
+  // V3.3 Arc: Staggered row group mute during exit
+  function handleQuiltRowMute(cue: Extract<AudioCue, { type: 'quilt_row_mute' }>): void {
+    for (const trackIndex of cue.trackIndices) {
+      fadeGain(trackIndex, 0, currentGainConfig.exitFadeBeats);
+    }
+  }
+
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
     if (cue.action === 'play') {
       oscBridge.send('/live/song/start_playing');
@@ -1098,6 +1113,12 @@ export function createAudioRouter(
             break;
           case 'quilt_unmute_cell':
             handleQuiltUnmuteCell(cue);
+            break;
+          case 'quilt_row_unmute':
+            handleQuiltRowUnmute(cue);
+            break;
+          case 'quilt_row_mute':
+            handleQuiltRowMute(cue);
             break;
           case 'transport':
             handleTransport(cue);

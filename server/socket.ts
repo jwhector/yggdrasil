@@ -800,6 +800,9 @@ export function filterStateForClient(
             loopCount: fs.quilt.loopCount,
           },
           availableSongs: fs.availableSongs,
+          // Arc state
+          arcPhase: fs.arc?.phase ?? null,
+          arcPassIndex: fs.arc?.currentPassIndex ?? null,
           // Assignment
           assignmentMode: fs.assignment.mode,
           assignmentTimerRemaining: fs.assignment.timerRemaining,
@@ -862,6 +865,8 @@ export function filterStateForClient(
             playheadColumn: fs.quilt.playheadColumn,
           },
           availableSongs: fs.availableSongs,
+          // Arc state
+          arcPhase: fs.arc?.phase ?? null,
           // Assignment
           myCellId,
           assignmentMode: fs.assignment.mode,

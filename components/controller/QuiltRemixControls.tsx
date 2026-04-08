@@ -120,6 +120,11 @@ export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControl
         <span style={styles.statItem}>Locked: {fs.remix.lockedCells.size}</span>
         <span style={styles.statItem}>Muted: {fs.remix.mutedCells.size}</span>
         <span style={styles.statItem}>Loop: {quilt.loopCount}</span>
+        {fs.arc && (
+          <span style={{ ...styles.statItem, color: '#7c3aed', fontWeight: 600 }}>
+            Arc: {fs.arc.phase}{fs.arc.schedule.sortMode === 'multi_pass' && fs.arc.phase === 'sorted_playback' ? ` (pass ${fs.arc.currentPassIndex + 1}/${fs.arc.schedule.sortedPassCount})` : ''}
+          </span>
+        )}
       </div>
     </section>
   );

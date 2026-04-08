@@ -13,7 +13,7 @@
 
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
 import type { QuiltCellView, QuiltGridState } from '@/hooks/useQuilt';
-import type { GranularType, LayerType } from '@/conductor/types';
+import type { GranularType, LayerType, ArcPhase } from '@/conductor/types';
 
 const ROW_ORDER: LayerType[] = ['bass', 'drums', 'pad', 'seed', 'harmony', 'fx'];
 
@@ -29,6 +29,10 @@ interface QuiltGridProps {
   mutedCells?: Set<string>;
   // Playback
   showPlayhead?: boolean;
+  // Arc
+  arcPhase?: ArcPhase | null;
+  /** Granular types that have entered (during arc entry phase). Null = all entered. */
+  enteredTypes?: Set<string> | null;
 }
 
 export function QuiltGrid({
@@ -40,6 +44,8 @@ export function QuiltGrid({
   lockedCells,
   mutedCells,
   showPlayhead = false,
+  arcPhase,
+  enteredTypes,
 }: QuiltGridProps) {
   const isProjector = variant === 'projector';
   const cellSize = isProjector ? 80 : 44;
@@ -109,6 +115,11 @@ export function QuiltGrid({
         const layerId = gt?.id ?? ROW_ORDER[rowIndex] ?? 'bass';
         const layer = getLayerIdentity(layerId);
 
+        // During arc entry, dim rows that haven't entered yet
+        const isRowEntered = !enteredTypes || enteredTypes.has(layerId);
+        const rowDimmed = arcPhase === 'entry' && !isRowEntered;
+        // During arc exit, dim rows that have exited (handled via muted cells in practice)
+
         return (
           <div
             key={rowIndex}
@@ -116,6 +127,8 @@ export function QuiltGrid({
               display: 'flex',
               alignItems: 'center',
               gap: `${gap}px`,
+              opacity: rowDimmed ? 0.2 : 1,
+              transition: 'opacity 0.5s ease',
             }}
           >
             {/* Row header */}

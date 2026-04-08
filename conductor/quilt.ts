@@ -18,6 +18,7 @@ import type {
   Chapter,
   V33FinaleState,
 } from './types';
+import { computeBarsPerCell } from './quilt-arc';
 
 // ============================================================================
 // Types
@@ -68,7 +69,10 @@ export function createQuiltGrid(
 ): QuiltGrid {
   const columns = deriveColumnCount(audienceSize, config);
   const rows = granularTypes.length; // Typically 6
-  const barsPerCell = config.loopBars / columns;
+  // Use arc-based cell size when arc config is present, otherwise fall back to divided
+  const barsPerCell = config.arc?.enabled
+    ? computeBarsPerCell(columns, config.arc)
+    : config.loopBars / columns;
 
   const cells = new Map<string, QuiltCell>();
   for (let r = 0; r < rows; r++) {

@@ -447,6 +447,40 @@
         "allowCrossRowSwaps": true,
         "cooldownLoops": 1,
         "allowSongChange": false
+      },
+      "arc": {
+        "enabled": true,
+        "cellSizeThreshold": 4,
+        "fullLoopBarsPerCell": 8,
+        "halfLoopBarsPerCell": 4,
+        "sortModeThresholdBars": 16,
+        "songEnergy": [
+          { "songIndex": 0, "energy": 1.0 },
+          { "songIndex": 1, "energy": 0.5 },
+          { "songIndex": 2, "energy": 0.2 }
+        ],
+        "rowWeight": {
+          "drums": 0.9,
+          "bass": 0.8,
+          "melody": 0.5,
+          "harmony": 0.4,
+          "pad": 0.3,
+          "fx": 0.2
+        },
+        "rowPriority": ["drums", "bass", "melody", "harmony", "pad", "fx"],
+        "entrySchedule": [
+          { "granularTypes": ["drums", "bass"], "abletonLoopIndex": 0 },
+          { "granularTypes": ["harmony", "melody"], "abletonLoopIndex": 1 },
+          { "granularTypes": ["pad", "fx"], "abletonLoopIndex": 2 }
+        ],
+        "exitSchedule": [
+          { "granularTypes": ["fx", "pad"], "abletonLoopIndex": 0 },
+          { "granularTypes": ["melody", "harmony"], "abletonLoopIndex": 1 },
+          { "granularTypes": ["bass", "drums"], "abletonLoopIndex": 2 }
+        ],
+        "multiPassTargets": [0.5, 1.0, 0.2],
+        "allowCrossRowSort": true,
+        "allowSortMuting": true
       }
     }
   },

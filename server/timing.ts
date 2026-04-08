@@ -353,9 +353,99 @@ export function createTimingEngine(
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Arc Scheduler (V3.3: automated playback arc)
+  // --------------------------------------------------------------------------
+
+  let arcTimers: NodeJS.Timeout[] = [];
+
+  /**
+   * Start the arc scheduler. Schedules all arc phase transitions using
+   * timeouts (fallback mode) based on the arc schedule.
+   *
+   * Arc timeline (in bars, all at current BPM):
+   *   Entry (entryAbletonLoops × 8 bars) → Raw (1 grid loop) →
+   *   Sort + Sorted Playback (sortedPassCount × grid loop) → Exit (exitAbletonLoops × 8 bars)
+   */
+  function startArcScheduler(state: ShowState): void {
+    clearArcTimers();
+
+    const arcConfig = state.config.finale.quilt.arc;
+    if (!arcConfig?.enabled || !state.finaleState?.arc) return;
+
+    const arc = state.finaleState.arc;
+    const schedule = arc.schedule;
+    const msPerBar = (60000 / currentBpm) * 4; // 4 beats per bar
+    const abletonLoopBars = 8; // Standard Ableton loop length
+
+    let accumulatedMs = 0;
+
+    // 1. Entry row groups: schedule each group at its Ableton loop boundary
+    //    (group 0 is already entered by handleStartPlayback)
+    for (const group of arcConfig.entrySchedule) {
+      if (group.abletonLoopIndex === 0) continue; // Already entered at start
+      const delayMs = group.abletonLoopIndex * abletonLoopBars * msPerBar;
+      const groupIndex = arcConfig.entrySchedule.indexOf(group);
+      const timer = setTimeout(() => {
+        if (!running) return;
+        sendCommand({ type: 'ARC_ENTRY_ROW_GROUP', groupIndex });
+      }, delayMs);
+      arcTimers.push(timer);
+    }
+
+    // Entry duration
+    accumulatedMs = arc.schedule.entryAbletonLoops * abletonLoopBars * msPerBar;
+
+    // 2. Raw playback complete: after entry + 1 grid loop
+    const rawCompleteMs = accumulatedMs + schedule.gridLoopBars * msPerBar;
+    arcTimers.push(setTimeout(() => {
+      if (!running) return;
+      sendCommand({ type: 'ARC_RAW_COMPLETE' });
+    }, rawCompleteMs));
+    accumulatedMs = rawCompleteMs;
+
+    // 3. Sort pass completions: after each grid loop of sorted playback
+    for (let pass = 0; pass < schedule.sortedPassCount; pass++) {
+      accumulatedMs += schedule.gridLoopBars * msPerBar;
+      const passCompleteMs = accumulatedMs;
+      arcTimers.push(setTimeout(() => {
+        if (!running) return;
+        sendCommand({ type: 'ARC_SORT_COMPLETE' });
+      }, passCompleteMs));
+    }
+
+    // 4. Exit row groups: schedule each group at its Ableton loop boundary after sorted playback
+    const exitStartMs = accumulatedMs;
+    for (const group of arcConfig.exitSchedule) {
+      const delayMs = exitStartMs + group.abletonLoopIndex * abletonLoopBars * msPerBar;
+      const groupIndex = arcConfig.exitSchedule.indexOf(group);
+      arcTimers.push(setTimeout(() => {
+        if (!running) return;
+        sendCommand({ type: 'ARC_EXIT_ROW_GROUP', groupIndex });
+      }, delayMs));
+    }
+
+    // 5. Arc complete: after all exit groups
+    const totalMs = exitStartMs + schedule.exitAbletonLoops * abletonLoopBars * msPerBar;
+    arcTimers.push(setTimeout(() => {
+      if (!running) return;
+      sendCommand({ type: 'ARC_COMPLETE' });
+    }, totalMs));
+
+    console.log(`[Timing] Arc scheduler started: entry=${schedule.entryAbletonLoops}×8bars, raw=${schedule.gridLoopBars}bars, sorted=${schedule.sortedPassCount}×${schedule.gridLoopBars}bars, exit=${schedule.exitAbletonLoops}×8bars, total=${Math.round(totalMs / 1000)}s`);
+  }
+
+  function clearArcTimers(): void {
+    for (const timer of arcTimers) {
+      clearTimeout(timer);
+    }
+    arcTimers = [];
+  }
+
   function clearAllFinaleTimers(): void {
     clearAssignmentTimer();
     clearPreviewTimer();
+    clearArcTimers();
   }
 
   // --------------------------------------------------------------------------
@@ -820,6 +910,8 @@ export function createTimingEngine(
 
       if (showPhaseEvent.phase === 'finale_playback') {
         startLoopTracking();
+        // Start arc scheduler if arc is enabled
+        startArcScheduler(state);
       }
     }
 
