@@ -869,9 +869,11 @@ export function filterStateForClient(
           // Preview
           previewTimerRemaining: fs.preview.timerRemaining,
           lockedIn: fs.preview.lockedInUsers.has(userId),
+          audioPreviewPath: state.config.finale.audioPreviewPath,
           // Remix
           lockedCells: Array.from(fs.remix.lockedCells),
           mutedCells: Array.from(fs.remix.mutedCells),
+          audienceRemix: state.config.finale.quilt.audienceRemix,
           // NPC
           npcMessage: fs.npc.currentMessage,
         };

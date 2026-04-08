@@ -13,6 +13,10 @@ import { LayerDots } from '@/components/song-building/LayerDots';
 import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
+import { useQuilt } from '@/hooks/useQuilt';
+import { QuiltGrid } from '@/components/finale/QuiltGrid';
+import { QuiltPreview } from '@/components/finale/QuiltPreview';
+import { QuiltRemix } from '@/components/finale/QuiltRemix';
 import type { AudienceFinaleView, AudienceAttemptView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
@@ -103,7 +107,13 @@ function AudienceContent() {
 
       {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_preview' || phase === 'finale_playback') && (
         state.myFinale
-          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} granularTypes={state.config.granularTypes ?? []} />
+          ? <FinaleAudienceView
+              myFinale={state.myFinale}
+              phase={phase}
+              socket={socket}
+              emit={emit}
+              granularTypes={state.config.granularTypes ?? []}
+            />
           : <DarkListenScreen />
       )}
 
@@ -131,6 +141,8 @@ function FinaleAudienceView({
   emit: (event: string, data: unknown) => void;
   granularTypes: GranularType[];
 }) {
+  const quilt = useQuilt(socket, myFinale);
+
   // --- Elegy phase: show all fragments non-interactively ---
   if (phase === 'finale_elegy') {
     return (
@@ -154,27 +166,129 @@ function FinaleAudienceView({
         >
           What remains
         </div>
-        {/* TODO: V3.3 Phase 4 — elegy grid from quilt state */}
       </div>
     );
   }
 
   // --- Assignment phase (V3.3: cell claiming) ---
-  if (phase === 'finale_assignment') {
-    // TODO: V3.3 Phase 4 — QuiltGrid cell claim UI
-    return <DarkListenScreen />;
+  if (phase === 'finale_assignment' && quilt.grid) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '16px 0',
+        }}
+      >
+        <div
+          style={{
+            fontSize: '0.6rem',
+            color: 'rgba(255,255,255,0.3)',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            marginBottom: '8px',
+          }}
+        >
+          {quilt.assignmentTimerRemaining !== null
+            ? `Pick a cell — ${Math.ceil(quilt.assignmentTimerRemaining / 1000)}s`
+            : 'Pick a cell'}
+        </div>
+        <QuiltGrid
+          grid={quilt.grid}
+          variant="audience"
+          granularTypes={granularTypes}
+          myCellId={quilt.myCellId}
+          onCellTap={(cellId) => {
+            if (quilt.myCellId === cellId) {
+              quilt.releaseCell();
+            } else {
+              if (quilt.myCellId) quilt.releaseCell();
+              quilt.claimCell(cellId);
+            }
+          }}
+        />
+        {quilt.myCellId && (
+          <div
+            style={{
+              marginTop: '12px',
+              fontSize: '0.6rem',
+              color: 'rgba(255,255,255,0.25)',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Cell claimed — tap another to switch
+          </div>
+        )}
+      </div>
+    );
   }
 
   // --- Preview phase (V3.3) ---
-  if (phase === 'finale_preview') {
-    // TODO: V3.3 Phase 4 — QuiltPreview UI
-    return <DarkListenScreen />;
+  if (phase === 'finale_preview' && quilt.grid && quilt.myCell) {
+    return (
+      <QuiltPreview
+        grid={quilt.grid}
+        myCell={quilt.myCell}
+        myCellId={quilt.myCellId!}
+        availableSongs={quilt.availableSongs}
+        lockedIn={quilt.lockedIn}
+        timerRemaining={quilt.previewTimerRemaining}
+        granularTypes={granularTypes}
+        audioPreviewPath={myFinale.audioPreviewPath}
+        onSetSong={quilt.setSong}
+        onLockIn={quilt.lockIn}
+      />
+    );
   }
 
   // --- Playback phase (V3.3) ---
-  if (phase === 'finale_playback') {
-    // TODO: V3.3 Phase 4 — QuiltGrid + QuiltRemix UI
-    return <DarkListenScreen />;
+  if (phase === 'finale_playback' && quilt.grid) {
+    // If audience remix is enabled and user has a cell, show remix UI
+    if (myFinale.audienceRemix.enabled && quilt.myCell) {
+      return (
+        <QuiltRemix
+          grid={quilt.grid}
+          myCell={quilt.myCell}
+          myCellId={quilt.myCellId!}
+          availableSongs={quilt.availableSongs}
+          granularTypes={granularTypes}
+          remixConfig={myFinale.audienceRemix}
+          lockedCells={quilt.lockedCells}
+          mutedCells={quilt.mutedCells}
+          onMoveCell={quilt.moveCell}
+          onChangeSong={quilt.changeSong}
+        />
+      );
+    }
+
+    // Spectator view (no cell or remix disabled): read-only grid with playhead
+    return (
+      <div
+        style={{
+          width: '100%',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px 0',
+        }}
+      >
+        <QuiltGrid
+          grid={quilt.grid}
+          variant="audience"
+          granularTypes={granularTypes}
+          myCellId={quilt.myCellId}
+          lockedCells={quilt.lockedCells}
+          mutedCells={quilt.mutedCells}
+          showPlayhead
+        />
+      </div>
+    );
   }
 
   return <DarkListenScreen />;

@@ -791,9 +791,11 @@ export interface AudienceFinaleView {
   // Preview
   previewTimerRemaining: number | null;
   lockedIn: boolean;                                   // whether user has locked in their song choice
+  audioPreviewPath: string;                            // base path for preview audio files
   // Remix
   lockedCells: string[];                               // performer-locked cell IDs
   mutedCells: string[];                                // performer-muted cell IDs
+  audienceRemix: AudienceRemixConfig;                  // remix interaction config
   // NPC
   npcMessage: string | null;
 }
