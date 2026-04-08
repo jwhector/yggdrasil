@@ -52,11 +52,23 @@ function createTestConfig(): ShowConfig {
     attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
       assignmentMode: 'auto',
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 5000,
@@ -159,7 +171,7 @@ describe('State persistence', () => {
     db.close();
   });
 
-  test('preserves finaleState Maps (assignment groups, liveMix votes, liveMix activeFragments)', () => {
+  test('preserves finaleState Maps/Sets (V3.3 quilt cells, trackMap, preview, remix)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
@@ -167,36 +179,57 @@ describe('State persistence', () => {
       phase: 'assignment',
       availableFragments: [],
       allFragments: [],
-      assignment: {
-        mode: 'auto',
-        groups: new Map([['bass', ['user-1', 'user-2']], ['drums', ['user-3']]]),
-        timerRemaining: null,
-      },
-      liveMix: {
-        votes: new Map([['bass', new Map([['user-1', { fragmentId: 'frag-0-0-A', timestamp: 1 }]])]]),
-        activeFragments: new Map([['bass', 'frag-0-0-A']]),
-        lockedTypes: [],
-
-        performerOverrides: new Map(),
-        liveTracksActive: [],
-        transportStarted: false,
-        loopPosition: 0,
+      quilt: {
+        rows: 6,
+        columns: 2,
+        barsPerCell: 4,
+        cells: new Map([
+          ['0:0', { id: '0:0', rowIndex: 0, columnIndex: 0, granularType: 'bass', songIndex: 1, chapter: 'love', ownerId: 'user-1' }],
+          ['1:0', { id: '1:0', rowIndex: 1, columnIndex: 0, granularType: 'drums', songIndex: null, chapter: null, ownerId: null }],
+        ]),
+        columnOrder: [0, 1],
+        playheadColumn: 0,
         loopCount: 0,
       },
+      availableSongs: [0, 1, 2],
+      trackMap: new Map([
+        ['bass', new Map([[0, 10], [1, 11], [2, 12]])],
+        ['drums', new Map([[0, 20], [1, 21], [2, 22]])],
+      ]),
+      assignment: { mode: 'auto', timerRemaining: null },
+      preview: { lockedInUsers: new Set(['user-1']), timerRemaining: 15000 },
+      remix: {
+        lockedCells: new Set(['0:0']),
+        mutedCells: new Set(),
+        lastMoveByUser: new Map([['user-1', 3]]),
+        liveTracksActive: [],
+      },
       npc: { currentMessage: 'Try again' },
+      elegyOptedIn: new Set(['user-1']),
+      arc: null,
     };
 
     db.saveState(state);
     const loaded = db.loadState('show-1');
 
     expect(loaded!.finaleState).not.toBeNull();
-    expect(loaded!.finaleState!.assignment.groups).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.assignment.groups.get('bass')).toEqual(['user-1', 'user-2']);
-    expect(loaded!.finaleState!.liveMix.votes).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.liveMix.votes.get('bass')).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.liveMix.votes.get('bass')!.get('user-1')!.fragmentId).toBe('frag-0-0-A');
-    expect(loaded!.finaleState!.liveMix.activeFragments).toBeInstanceOf(Map);
-    expect(loaded!.finaleState!.liveMix.activeFragments.get('bass')).toBe('frag-0-0-A');
+    const fs = loaded!.finaleState!;
+    // Quilt cells Map
+    expect(fs.quilt.cells).toBeInstanceOf(Map);
+    expect(fs.quilt.cells.get('0:0')?.songIndex).toBe(1);
+    expect(fs.quilt.cells.get('0:0')?.ownerId).toBe('user-1');
+    // Track map (nested Map)
+    expect(fs.trackMap).toBeInstanceOf(Map);
+    expect(fs.trackMap.get('bass')).toBeInstanceOf(Map);
+    expect(fs.trackMap.get('bass')!.get(1)).toBe(11);
+    // Preview Set
+    expect(fs.preview.lockedInUsers).toBeInstanceOf(Set);
+    expect(fs.preview.lockedInUsers.has('user-1')).toBe(true);
+    // Remix Sets and Map
+    expect(fs.remix.lockedCells).toBeInstanceOf(Set);
+    expect(fs.remix.lockedCells.has('0:0')).toBe(true);
+    expect(fs.remix.lastMoveByUser).toBeInstanceOf(Map);
+    expect(fs.remix.lastMoveByUser.get('user-1')).toBe(3);
 
     db.close();
   });
@@ -319,50 +352,54 @@ describe('User persistence', () => {
   });
 });
 
-describe('Finale persistence (V3.2)', () => {
-  test('saves a finale assignment', () => {
+describe('Quilt persistence (V3.3)', () => {
+  test('saves and retrieves a quilt cell', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
 
-    expect(() =>
-      db.saveFinaleAssignment('show-1', 'user-1', 'bass', false)
-    ).not.toThrow();
+    db.saveQuiltCell('show-1', '0:0', 'user-1', null);
+    db.saveQuiltCell('show-1', '1:0', 'user-2', 1);
+
+    const cells = db.getQuiltCells('show-1');
+    expect(cells).toHaveLength(2);
+    expect(cells[0].cellId).toBe('0:0');
+    expect(cells[0].userId).toBe('user-1');
+    expect(cells[0].songIndex).toBeNull();
+    expect(cells[1].songIndex).toBe(1);
 
     db.close();
   });
 
-  test('saves an auto-assigned finale assignment', () => {
+  test('upserts quilt cell on duplicate (show_id, cell_id)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
 
-    expect(() =>
-      db.saveFinaleAssignment('show-1', 'user-1', 'drums', true)
-    ).not.toThrow();
+    db.saveQuiltCell('show-1', '0:0', 'user-1', null);
+    db.saveQuiltCell('show-1', '0:0', 'user-1', 2); // update song
 
-    const assignments = db.getFinaleAssignments('show-1');
-    expect(assignments).toHaveLength(1);
-    expect(assignments[0].granularType).toBe('drums');
-    expect(assignments[0].autoAssigned).toBe(true);
+    const cells = db.getQuiltCells('show-1');
+    expect(cells).toHaveLength(1);
+    expect(cells[0].songIndex).toBe(2);
 
     db.close();
   });
 
-  test('retrieves all assignments for a show', () => {
+  test('saves and retrieves remix events', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
-    db.saveFinaleAssignment('show-1', 'user-1', 'bass', true);
-    db.saveFinaleAssignment('show-1', 'user-2', 'drums', true);
-    db.saveFinaleAssignment('show-1', 'user-3', 'bass', false);
+    db.saveRemixEvent('show-1', 'user-1', 'move', '{"from":"0:0","to":"1:0"}');
+    db.saveRemixEvent('show-1', null, 'lock', '{"cellId":"0:0"}');
 
-    const assignments = db.getFinaleAssignments('show-1');
-    expect(assignments).toHaveLength(3);
-    expect(assignments.map(a => a.granularType).sort()).toEqual(['bass', 'bass', 'drums']);
+    const events = db.getRemixEvents('show-1');
+    expect(events).toHaveLength(2);
+    expect(events[0].eventType).toBe('move');
+    expect(events[0].userId).toBe('user-1');
+    expect(events[1].eventType).toBe('lock');
+    expect(events[1].userId).toBeNull();
 
     db.close();
   });

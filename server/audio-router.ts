@@ -32,7 +32,6 @@ import type {
   ShowState,
   ConductorEvent,
   AudioCue,
-  TrackBundle,
   LayerType,
   GainConfig,
 } from '../conductor/types';
@@ -67,6 +66,7 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   lockInFadeBeats: 4,
   collapseFadeBeats: 8,
   ceremonySwellBeats: 4,
+  crossfadeBeats: 1,
   unityGainValue: 0,
   stepsPerBeat: 2,
 };
@@ -244,41 +244,41 @@ export function createAudioRouter(
   function setGain(trackIndex: number, gain: number): void {
     const clampedGain = Math.max(0, Math.min(1, gain));
 
-    // Unmute before any audible gain (so session view shows track as active)
-    if (clampedGain > 0) {
-      unmuteTrack(trackIndex);
-    }
-
     const deviceInfo = routerState.deviceCache.get(trackIndex);
     if (deviceInfo) {
       // Map internal gain (0=silent, 1=full) to Ableton Utility range (-1=muted, 0=0dB)
       // Formula: oscValue = -1 + gain * (unityGainValue + 1)
       const oscValue = -1 + clampedGain * (currentGainConfig.unityGainValue + 1);
-      oscBridge.send(
-        '/live/device/set/parameter/value',
-        trackIndex,
-        deviceInfo.utilityDeviceIndex,
-        deviceInfo.gainParamIndex,
-        oscValue,
-      );
+
+      if (clampedGain > 0) {
+        // Bundle unmute + gain set into one atomic OSC packet
+        oscBridge.sendBundle([
+          { address: '/live/track/set/mute', args: [trackIndex, 0] },
+          { address: '/live/device/set/parameter/value', args: [trackIndex, deviceInfo.utilityDeviceIndex, deviceInfo.gainParamIndex, oscValue] },
+        ]);
+        routerState.unmutedTracks.add(trackIndex);
+      } else {
+        // Bundle gain-to-zero + mute into one atomic OSC packet
+        oscBridge.sendBundle([
+          { address: '/live/device/set/parameter/value', args: [trackIndex, deviceInfo.utilityDeviceIndex, deviceInfo.gainParamIndex, oscValue] },
+          { address: '/live/track/set/mute', args: [trackIndex, 1] },
+        ]);
+        routerState.unmutedTracks.delete(trackIndex);
+      }
     } else {
       // Fallback: no Utility device — mute/unmute is the only lever
-      // (gain > 0 already unmuted above; gain === 0 will mute below)
-      if (!routerState.discoveryComplete) {
-        // Discovery hasn't run; this is expected during startup
+      if (clampedGain > 0) {
+        unmuteTrack(trackIndex);
       } else {
-        // Discovery ran but this track has no Utility device
+        muteTrack(trackIndex);
+      }
+      if (routerState.discoveryComplete) {
         console.warn(`[AudioRouter] Track ${trackIndex} has no cached Utility device — using mute/unmute fallback`);
       }
     }
 
     const gs = getOrCreateTrackGainState(trackIndex);
     gs.currentGain = clampedGain;
-
-    // Mute after gain reaches zero (so session view shows track as inactive)
-    if (clampedGain === 0) {
-      muteTrack(trackIndex);
-    }
   }
 
   /**
@@ -325,14 +325,28 @@ export function createAudioRouter(
     const startGain = gs.currentGain;
     const fromBeat = startBeat ?? (timingEngine.getCurrentBeat() + 1);
 
+    // Equal-power easing for perceptually smooth fades.
+    // easeProgress always maps 0→0, 1→1 (no transition → full transition).
+    // Fade-out: slow departure from full gain, accelerates toward silence.
+    // Fade-in: fast departure from silence, decelerates toward full gain.
+    // Both keep perceived loudness constant during overlapping crossfades.
+    const fadingOut = targetGain < startGain;
+    const easeProgress = (t: number): number => {
+      return fadingOut
+        ? 1 - Math.cos(t * Math.PI / 2)   // Slow start (stays loud), fast end (drops to silence)
+        : Math.sin(t * Math.PI / 2);       // Fast start (jumps from silence), slow end (eases into full)
+    };
+
     timingEngine.schedulePerBeat(
       fadeId,
       fromBeat,
       durationBeats,
       (beatIndex: number, totalBeats: number) => {
-        // On-beat step
+        // On-beat step — snap to target on final beat to avoid floating-point drift
         const progress = (beatIndex + 1) / totalBeats;
-        const newGain = startGain + (targetGain - startGain) * progress;
+        const newGain = progress >= 1.0
+          ? targetGain
+          : startGain + (targetGain - startGain) * easeProgress(progress);
         setGain(trackIndex, Math.max(0, Math.min(1, newGain)));
 
         // Sub-beat steps between this beat and the next
@@ -343,7 +357,8 @@ export function createAudioRouter(
           for (let s = 1; s < stepsPerBeat; s++) {
             const frac = s / stepsPerBeat;
             const subProgress = progress + (nextProgress - progress) * frac;
-            const subGain = startGain + (targetGain - startGain) * subProgress;
+            const easedSubProgress = easeProgress(subProgress);
+            const subGain = startGain + (targetGain - startGain) * easedSubProgress;
             const timer = setTimeout(() => {
               setGain(trackIndex, Math.max(0, Math.min(1, subGain)));
             }, beatMs * frac);
@@ -859,27 +874,51 @@ export function createAudioRouter(
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  // V3.2 live mix crossfade handler (stub — full implementation in live mix task)
-  function handleLiveMixCrossfade(cue: Extract<AudioCue, { type: 'live_mix_crossfade' }>): void {
+  // V3.3: Quilt playback start — unmute initial column tracks
+  function handleQuiltPlaybackStart(cue: Extract<AudioCue, { type: 'quilt_playback_start' }>): void {
     ensureTransportStarted();
-    // Fade out outgoing, fade in incoming (iterate all tracks in multi-track fragments)
-    for (const idx of cue.outgoingTrackIndices) {
-      fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
-    }
-    for (const idx of cue.incomingTrackIndices) {
-      unmuteTrack(idx);
-      setGain(idx, currentGainConfig.entryGain);
-      fadeGain(idx, 1.0, currentGainConfig.ceremonySwellBeats);
+    for (const trackIndex of cue.trackIndices) {
+      unmuteTrack(trackIndex);
+      setGain(trackIndex, 1.0);
     }
   }
 
-  // V3.2 live mix start handler (stub — full implementation in live mix task)
-  function handleLiveMixStart(cue: Extract<AudioCue, { type: 'live_mix_start' }>): void {
-    ensureTransportStarted();
-    for (const trackIndex of cue.activeTrackIndices) {
+  // V3.3: Quilt column change — crossfade tracks at column boundary
+  function handleQuiltColumnChange(cue: Extract<AudioCue, { type: 'quilt_column_change' }>): void {
+    const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
+    for (const change of cue.trackChanges) {
+      if (change.muteTrack !== null) {
+        fadeGain(change.muteTrack, 0, xfadeBeats);
+      }
+      if (change.unmuteTrack !== null) {
+        fadeGain(change.unmuteTrack, 1.0, xfadeBeats);
+      }
+    }
+  }
+
+  // V3.3: Quilt mute cell
+  function handleQuiltMuteCell(cue: Extract<AudioCue, { type: 'quilt_mute_cell' }>): void {
+    fadeGain(cue.trackIndex, 0, currentGainConfig.lockInFadeBeats);
+  }
+
+  // V3.3: Quilt unmute cell
+  function handleQuiltUnmuteCell(cue: Extract<AudioCue, { type: 'quilt_unmute_cell' }>): void {
+    unmuteTrack(cue.trackIndex);
+    setGain(cue.trackIndex, 1.0);
+  }
+
+  // V3.3 Arc: Staggered row group unmute during entry
+  function handleQuiltRowUnmute(cue: Extract<AudioCue, { type: 'quilt_row_unmute' }>): void {
+    for (const trackIndex of cue.trackIndices) {
       unmuteTrack(trackIndex);
-      setGain(trackIndex, currentGainConfig.entryGain);
-      fadeGain(trackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
+      fadeGain(trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+    }
+  }
+
+  // V3.3 Arc: Staggered row group mute during exit
+  function handleQuiltRowMute(cue: Extract<AudioCue, { type: 'quilt_row_mute' }>): void {
+    for (const trackIndex of cue.trackIndices) {
+      fadeGain(trackIndex, 0, currentGainConfig.exitFadeBeats);
     }
   }
 
@@ -1075,11 +1114,26 @@ export function createAudioRouter(
           case 'rejection_gesture':
             handleRejectionGesture(cue, state);
             break;
-          case 'live_mix_crossfade':
-            handleLiveMixCrossfade(cue);
+          case 'quilt_playback_start':
+            handleQuiltPlaybackStart(cue);
             break;
-          case 'live_mix_start':
-            handleLiveMixStart(cue);
+          case 'quilt_column_change':
+            handleQuiltColumnChange(cue);
+            break;
+          case 'quilt_reorder':
+            // No immediate audio change — takes effect at next column boundary
+            break;
+          case 'quilt_mute_cell':
+            handleQuiltMuteCell(cue);
+            break;
+          case 'quilt_unmute_cell':
+            handleQuiltUnmuteCell(cue);
+            break;
+          case 'quilt_row_unmute':
+            handleQuiltRowUnmute(cue);
+            break;
+          case 'quilt_row_mute':
+            handleQuiltRowMute(cue);
             break;
           case 'transport':
             handleTransport(cue);

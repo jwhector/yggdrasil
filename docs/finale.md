@@ -1,4 +1,4 @@
-# Finale System — Detailed Mechanics (V3.2)
+# Finale System — Detailed Mechanics (V3.3 — "The Quilt")
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
 > **Related:** [song-building.md](song-building.md) (fragment generation rules), [data-models.md](data-models.md) (conductor commands/events)
@@ -7,161 +7,502 @@
 
 ## Overview
 
-The finale has three sub-phases:
+The finale has four sub-phases:
 1. **Elegy** — audience observes the wreckage of all three songs
-2. **Assignment** — audience is assigned to granular type groups (auto or self-select)
-3. **Live Mix** — Incredibox-style continuous collaborative mixing; each group controls one granular type
+2. **Assignment** — each audience member claims a single cell in the quilt (row + column position)
+3. **Preview** — room is silent; audience privately explores song options (Song 1/2/3) for their cell
+4. **Playback & Remix** — the quilt plays through; audience and performer collaboratively rearrange cells in real time
+
+## Core Concept: The Quilt
+
+The finale song is represented as a **grid** (the "quilt"):
+- **Rows** = granular types (bass, drums, pad, melody, harmony, fx) — 6 rows
+- **Columns** = time slices along the 8-bar loop
+- **Cells** = one person's assignment (one granular type × one time slice)
+
+Each cell holds a **song choice** — Song 1 (Ambition), Song 2 (Love), or Song 3 (Avoidance). The cell's grid position determines everything else: the row tells the system which granular type, and the song choice tells it which song's version to play. So `row=bass, songChoice=2` resolves to "Song 2's bass track" in Ableton. The cell is visually just a **chapter color** — amber, coral, or teal.
+
+The completed quilt is a patchwork of chapter colors. The loop plays left to right, and at each column boundary the active tracks can change per type based on each cell's song choice. The audience sees the arrangement as a color pattern and hears it as a shifting collage of three songs' material.
+
+### Scaling
+
+Column count is derived from audience size:
+
+| Audience | Columns | Bars per cell | Cells total |
+|----------|---------|---------------|-------------|
+| 6        | 1       | 8             | 6           |
+| 12       | 2       | 4             | 12          |
+| 24       | 4       | 2             | 24          |
+| 36       | 6       | ~1.3 (→ use irregular splits or cap at 4 cols + overflow) | 36 |
+| 48       | 8       | 1             | 48          |
+
+**Minimum cell size: 1 bar.** Below 1 bar, fragment switches become inaudible.
+
+**Overflow handling:** When audience size exceeds `6 × maxColumns`, extra users are assigned as **spectators** — they watch the quilt form and hear the result but don't own a cell. Alternatively, column count can be increased beyond 8 by extending the loop (e.g., 16-bar loop = up to 96 cells). This is configurable.
+
+**Configuration:** See `QuiltConfig` in the Finale State section below.
 
 ## Narrative Setup
 
-After Song 3's resolution (collapse or rejection), the performer "abandons" the stage — stepping back, giving up, unable to finish anything. Lights shift to red. Every audience member's phone receives an NPC message in terminal-style typeface. The NPC represents the "inner council" gaining consciousness and refusing to let the creator give up: *"He's gone. We need to do this ourselves."*
-
-This frames the finale as a mutiny — the audience acting without the performer, each part of the mind finding its role, proving integration was always possible.
+Unchanged from V3.2. After Song 3's resolution, the performer "abandons" the stage. NPC message: *"He's gone. We need to do this ourselves."* The finale is framed as the audience reassembling what the performer destroyed.
 
 ## Phase 1: Finale Elegy
 
-An optional 10-15 second observational moment. Phones show the full grid of all granular fragments from all three songs:
-- Winning fragments glow with their chapter color
-- Losing fragments are cracked, dimmed, desaturated
-- Organized by granular type (6 rows)
-- NPC narrates: acknowledges what survived and what was lost
-- No interaction — pure narrative beat
-- Transitions to assignment when NPC rallies the audience (manual or auto-timed)
+Unchanged from V3.2. 10-15 second observational moment. Full fragment grid displayed. NPC narrates what survived and what was lost. No interaction.
 
-## Phase 2: Assignment
+## Phase 2: Assignment (Cell Claim)
 
-Each audience member is assigned to one granular type group (~6-7 people per group for 40 audience members across 6 types). Two modes are supported, selected via config:
+Each audience member claims a single cell in the quilt. The quilt grid is displayed on both phones and projector.
 
-### Auto Mode (`assignmentMode: 'auto'`)
+### Self-Select Flow
 
-The system shuffles all connected users and distributes them evenly (round-robin) across the configured granular types. Assignment is instant — no timer, no user interaction. Users are notified of their assignment and the show proceeds to live mix.
+1. The empty quilt grid appears — 6 rows × N columns. Each cell shows its granular type symbol and time slice label (e.g., "Bass — Bars 1-2").
+2. Users tap a cell to claim it. Claimed cells show the claimer's presence (color fill or avatar dot). One cell per person.
+3. Cells fill up in real time. Full cells are greyed out / unavailable.
+4. **Soft constraint:** When a granular type row is full (all columns claimed), it visually closes. Users who haven't claimed yet are funneled toward open cells.
+5. **Timer:** Configurable (default: 30 seconds). When it expires, unclaimed users are randomly assigned to remaining empty cells. Any cells still empty after all users are assigned remain empty (that time slice for that type will be silent — which is musically valid).
+6. Users can switch cells freely before the timer expires (releasing their current cell).
 
-### Self-Select Mode (`assignmentMode: 'self_select'`)
+### Auto Mode
 
-**Phone UI:** Tappable cards for each granular type, each displaying the type's symbol, color, and label (from config). Live group size counts update in real time as people choose. Users can switch freely before the timer expires.
+System distributes users across cells round-robin. Instant, no interaction.
 
-**Timer:** Configurable duration (default: 30 seconds via `assignmentTimerMs`). When the timer expires:
-1. Any user who has not selected a type is **randomly assigned** round-robin across all types
-2. The system transitions to the live mix phase
+### Song Availability
 
-**Projector:** Shows the groups forming in real time — animated member counts, granular type symbols growing/pulsing as people join. Timer prominent.
+Which songs are available as choices depends on what survived song-building. A song must have reached at least one layer (producing at least one locked-in result) to be available. In practice, all three songs will almost always be available since even a song that collapses at layer 1 still has its layer 0 result. The cell just stores a song index (0, 1, 2) — the system resolves the correct Ableton track via `granularType + songIndex → trackIndex` lookup from config.
 
-### Fragment Decomposition
+**Track resolution:** Each cell's audio is determined by its current grid position plus its song choice:
+```
+trackIndex = config.trackMap[cell.row (granularType)][cell.songChoice (songIndex)]
+```
+This means a cell can move anywhere in the grid and always resolve correctly — the song choice travels with it, and the row it lands in determines which instrument plays.
 
-Song-building produces layer group results (e.g., "Bones Option A won in Song 1"). The assignment phase decomposes these into **granular fragments** — one per granular track per option. For example, "Bones A" from Song 1 decomposes into separate bass and drums fragments. Each granular type group sees only fragments of their type.
+## Phase 3: Preview (Sandbox)
 
-Which fragments are available depends on `bothOptionsSurvive`:
-- **true** (default): Both winner and loser options from voted layers are available
-- **false**: Only winning options survive to the finale
+**Room is silent.** No Ableton playback. Everyone privately explores their song options on their phone.
 
-## Phase 3: Live Mix
+Each cell owner's phone shows:
+- Their cell position in the quilt (type + time slice), highlighted in the mini grid
+- 3 tappable cards — one per song/chapter (Ambition, Love, Avoidance), each showing the chapter color and label
+- Tapping a card plays a **private audio preview** on the phone speaker — the mp3 preview file for that song's version of their cell's current granular type (resolved from row position)
+- A "LOCK IN" button to commit their choice
 
-The core finale experience. Each audience member's phone becomes a live controller for their assigned granular type.
+**Preview duration:** Configurable timer (default: 20-30 seconds). Enough time to tap through 3 options and pick a favorite.
 
-### Audience Phone UI
+**Important boundary:** Once the preview phase ends and playback begins, **no more private previews.** This separation keeps the discovery phase clean and the performance phase consequential.
 
-Each user sees tappable fragment cards for their granular type — one per available fragment (typically 1-6, depending on how many songs reached their type's layer group). Tapping a card sets their **preference** for which fragment should play.
+**Transition:** Preview ends when timer expires OR when all users have locked in (whichever comes first). Any user who hasn't locked in gets their most recently previewed song (or a random one if they previewed nothing).
 
-The group's **majority determines what the room hears** in real time:
-- The system tracks each user's current preference per granular type
-- The fragment with the most votes in each type group is the **active fragment** — this is what Ableton plays
-- When the majority shifts, a **crossfade** happens at the next bar boundary
-- **Recency tiebreak:** On a 50/50 split, the most recently cast vote wins
+## Phase 4: Playback & Performer Remix
 
-### Performer Controls
+### First Reveal
 
-The performer (via controller) can:
-- **Lock** a granular type — freezes the active fragment, audience votes are ignored
-- **Unlock** a granular type — returns to audience majority control
-- **Override** a granular type — force a specific fragment regardless of votes
-- **Clear override** — return to audience majority
+The quilt plays through for the first time. By default, **song choices are locked** after preview (configurable via `audienceRemix.allowSongChange`). The loop starts from column 1 and plays left to right. At each column boundary, the active tracks per type switch according to each cell's song choice. Everyone hears the collective composition for the first time simultaneously.
+
+**Column timing** is configurable via `QuiltConfig.columnTiming`:
+- `'divided'` — All columns play within one loop. Advance interval = `loopBoundaryBeats / columns`. E.g., 4 columns in an 8-bar loop = 2 bars per column.
+- `'half_loop'` — Each column plays for half a loop. Advance interval = `loopBoundaryBeats / 2`. E.g., 4 columns take 2 full loops to cycle through.
+- `'full_loop'` — Each column gets a full loop. Advance interval = `loopBoundaryBeats`. E.g., 4 columns take 4 full loops to cycle through.
+
+The projector shows the quilt with a **playhead** sweeping left to right, highlighting the current column. Each cell glows with its chapter color (amber/coral/teal). The audience sees and hears their creation unfold.
+
+### Audience Remix
+
+**Configurable via `audienceRemix` in QuiltConfig.** Can be fully disabled (`enabled: false`) for a performer-only remix experience, or tuned to taste.
+
+When enabled, audience members can drag cells during playback:
+
+- **Scope `own_cell`:** You can only move your own cell. Other cells are visible but not draggable.
+- **Scope `any_cell`:** You can drag any cell to any position. More chaotic, more collaborative.
+- **Same-row moves** change WHEN a song choice plays in the timeline
+- **Cross-row moves** (when `allowCrossRowSwaps: true`) change WHICH INSTRUMENT plays that song choice (e.g., moving from bass to drums means your Song 2 choice now plays Song 2's drums instead of Song 2's bass)
+- **Swapping:** If the destination cell is occupied, the two cells swap positions. Both owners see the swap reflected on their phones.
+- **Cooldown:** Each user can only move a cell once per `cooldownLoops` loops (default: 1). Set to 0 for no cooldown.
+- **Song change** (when `allowSongChange: true`): Audience can also change which song their cell plays during playback, not just its position. Default is false — song choice is locked after preview.
+- **Changes take effect at the next loop boundary** (quantized).
+- **Performer-locked cells** cannot be moved by the audience regardless of config.
+
+### Performer Remix
+
+The performer comes back to the stage. Their interface (on the controller) shows the full quilt grid. The performer can:
+
+- **Reorder columns:** Drag a column to a new position. The loop now plays in the new order. Takes effect at the next loop boundary.
+- **Swap any cells:** Drag any cell to any position (not limited to their own). Two cells trade positions.
+- **Lock a cell:** Freeze a cell so it can't be moved by the audience or affected by column reorders.
+- **Mute a cell:** Temporarily silence a cell (the type goes silent during that time slice).
+- **Override a cell's song choice:** Force a specific song for a cell (emergency/creative tool).
+- **Play live:** Live performance tracks (vocal, synth, etc.) layered over the quilt.
+
+The audience watches on the projector as their quilt gets rearranged in real time — both by each other and by the performer. The performer is curating alongside the audience. The metaphor completes: the subconscious and the ego are collaborating, both reshaping the same material.
 
 ### Audio Behavior
 
-- **Muted start:** Live mix begins fully silent — no transport, no audio
-- Audio activates per-type: when a group first reaches majority on a fragment, that type's audio starts
-- The **first group to reach majority** triggers Ableton transport playback
-- Individual granular tracks are controlled independently (not bundled)
-- Crossfades happen at bar boundaries (quantized to loop position)
-- The performer returns and plays live over the shifting foundation
-- Live performance tracks (vocal mic, live synth, etc.) are toggled separately
+- **Live seed / melody is a quilt row.** It is one of the 6 granular type rows (melody/seed), audience-controllable like all other types. Audience members can claim melody cells, choose a song, and move them around the grid like any other cell.
+- **Track resolution:** At each column boundary, the system resolves each cell's audio via `config.trackMap[granularType][songIndex]`. This lookup is position-dependent — if a cell has been swapped to a new row, the new row's granular type is used with the cell's song choice.
+- **Quantized changes:** All cell swaps and column reorders take effect at the next loop boundary.
+- **Crossfade on column transitions:** When the playhead crosses a column boundary and the track for a type changes, both the outgoing and incoming tracks fade simultaneously over `crossfadeBeats` (default: 1 beat). Both directions use `fadeGain()` so in-flight fades are cancelled cleanly if a track reappears mid-fade. Configurable via `GainConfig.crossfadeBeats`.
+- **Silent cells:** If a cell is empty or muted, that granular type is silent during that time slice. This is musically valid — silence is part of the composition.
+- **Ableton implementation:** At each column boundary, the system mutes/unmutes the appropriate tracks per type. Only one track per type is ever unmuted at a time within a column.
 
-### High-Frequency State
+### Automated Playback Arc
 
-Live mix state (`mix_state`) is broadcast at ~4 Hz as a dedicated socket event, NOT through `state_sync`. Contains:
-- Per-type active fragment
-- Per-type vote distribution (detailed for user's own type, summary for others)
+When the arc system is enabled (`QuiltConfig.arc.enabled`), playback follows an automated 4-phase sequence instead of looping indefinitely. The performer plays live over the top — no manual interaction required.
 
-### Projector Display
+**Cell size threshold:** Below 4 columns → 8 bars/cell (full Ableton loop). 4+ columns → 4 bars/cell (half loop). This keeps grid loop duration in a musical sweet spot. Configurable via `arc.cellSizeThreshold`.
 
-Shows all granular types with:
-- Active fragment per type (highlighted with chapter color)
-- Vote distribution visualization (consensus strength)
-- Locked types marked
-- Loop position indicator
+**Song energy profiles:** Each song has an inherent energy level: Song 0 (Ambition) = 1.0, Song 1 (Love) = 0.5, Song 2 (Avoidance) = 0.2. Configurable via `arc.songEnergy`.
 
-## NPC System (Finale)
+**Row weight:** Different granular types have different impact on perceived energy. Drums (0.9) and bass (0.8) dominate the feel; pad (0.3) and fx (0.2) are textural. The sorting algorithm uses weighted energy: `songEnergy[songIndex] * rowWeight[granularType]`. Configurable via `arc.rowWeight`.
 
-The NPC is a narrative voice during the finale, delivered via terminal-style typeface on audience phones and the projector.
+#### Arc Phase 1: Entry (staggered unmute)
+Rows unmute in pairs over 2-3 Ableton loops. Foundation first, texture last:
+- Ableton loop 1: drums + bass
+- Ableton loop 2: melody + harmony
+- Ableton loop 3: pad + fx
 
-**Delivery:** Text appears briefly, disappears between messages. No auto-scrolling history — each message replaces the last.
+Entry groups fire on actual Ableton loop boundaries (beat-driven, not timer-based). Configurable via `arc.entrySchedule`.
 
-**Control model:** Event-driven messages for key moments + manual overrides from controller.
+#### Arc Phase 2: Raw Playback (1 grid loop)
+The full unmodified audience composition plays through once. All 6 rows active. This is the moment the audience hears exactly what they collectively created.
 
-**Event-driven messages (configurable text in `default-show.json`):**
-- Performer abandonment: "He's gone. We need to do this ourselves."
-- Assignment start: "Find your voice."
-- Live mix start: "It's yours. Shape it."
+#### Arc Phase 3: Sort + Sorted Playback
+After the raw grid loop completes, the system sorts the grid. Two modes, auto-selected by grid loop duration:
 
-**Manual overrides:** Performer has a bank of pre-written NPC lines on the controller, organized by phase, plus a free-text input for improvised lines.
+**Single-pass** (grid loop ≥ 16 bars): Divides columns into 3 zones — opening (medium energy), climax (high energy), cool-down (low energy). The algorithm treats all cells as a shared pool. Rows are filled in priority order: drums picks first from the best-fitting cells for each zone, then bass, etc. Lower-priority rows absorb fragmentation.
 
-**Pacing:** NPC should NOT speak at every moment. The silence between messages — filled by music shifting and evolving under audience control — is where the emotional weight lives.
+**Multi-pass** (grid loop < 16 bars): Re-sorts between grid loops, targeting a different energy level each pass (medium → high → cool-down). Configurable via `arc.multiPassTargets`.
+
+Key sorting rules:
+- **Song choices are never changed.** Sorting reorders cells, not content.
+- **Cross-row movement allowed.** A cell can move to a different row (configurable via `arc.allowCrossRowSort`).
+- **Empty cells are zero energy.** They naturally migrate to cool-down zones.
+- **Tiered consolidation.** High-weight rows (drums, bass) get first pick → best consolidation. Low-weight rows (pad, fx) absorb fragmentation.
+
+The sort can also be triggered manually by the performer via the "Sort Grid" button (`TRIGGER_SORT` command).
+
+**Sort animation:** Cells animate to new positions over 500ms (CSS transitions on absolutely-positioned elements keyed by owner ID).
+
+#### Arc Phase 4: Exit (staggered mute)
+Reverse of entry — texture first, foundation last:
+- Ableton loop 1: fx + pad
+- Ableton loop 2: melody + harmony
+- Ableton loop 3: bass + drums → silence
+
+Exit groups fire on Ableton loop boundaries. Configurable via `arc.exitSchedule`.
+
+#### Timing
+All arc timing is beat-driven (Ableton is source of truth):
+- **Column advances:** fire on beat boundaries via OSC beat events
+- **Entry/exit groups:** fire on Ableton loop boundaries (every 32 beats)
+- **Raw→sort and sort→exit transitions:** triggered by the conductor when the playhead wraps a grid loop (no timer needed)
+
+### Climax & Ending
+
+The performer settles the quilt into its final arrangement. Optionally:
+- The performer locks all cells (the arrangement is "finished")
+- The quilt loops in its final form while the performer plays a closing live piece over it
+- NPC final message (e.g., "This is what we sound like together.")
+- Fade to end
+
+## NPC System
+
+Unchanged from V3.2. Event-driven messages at key moments + manual overrides from controller.
+
+**Updated event keys:**
+- `performer_abandonment`: "He's gone. We need to do this ourselves."
+- `assignment_start`: "Pick up a piece."
+- `preview_start`: "Learn your voice."
+- `first_playback`: "Listen to what we built."
+- `performer_returns`: "He's back. But now it's ours too."
 
 ## Finale State
 
 ```typescript
-interface V32FinaleState {
-  phase: 'elegy' | 'assignment' | 'live_mix';
+interface V33FinaleState {
+  phase: 'elegy' | 'assignment' | 'preview' | 'playback';
 
-  // Fragment availability (GranularFragments decomposed from layer group results)
-  availableFragments: GranularFragment[];   // Available to each granular group
-  allFragments: GranularFragment[];         // All fragments including locked (for performer)
+  // Quilt structure
+  quilt: {
+    rows: number;                                 // Always 6 (granular types)
+    columns: number;                              // Derived from audience size
+    barsPerCell: number;                          // Derived: loopBars / columns
+    cells: Map<string, QuiltCell>;                // cellId -> cell state (cellId = `${rowIndex}:${columnIndex}`)
+    columnOrder: number[];                        // Current column playback order (performer can reorder)
+    playheadColumn: number;                       // Current column index being played
+    loopCount: number;
+  };
+
+  // Song availability
+  availableSongs: number[];                       // Song indices available as choices (e.g., [0, 1, 2])
+
+  // Track resolution map
+  trackMap: Map<string, Map<number, number>>;     // granularType -> songIndex -> Ableton trackIndex
 
   // Assignment state
   assignment: {
     mode: 'auto' | 'self_select';
-    groups: Map<string, UserId[]>;          // granularTypeId -> user IDs
-    timerRemaining: number | null;          // Only populated in self_select mode
+    timerRemaining: number | null;
   };
 
-  // Live mix state
-  liveMix: {
-    votes: Map<string, Map<UserId, LiveMixVote>>;  // granularTypeId -> (userId -> vote)
-    activeFragments: Map<string, string>;           // granularTypeId -> fragmentId (current majority)
-    lockedTypes: string[];                          // Performer-locked granular types
-    performerOverrides: Map<string, string>;        // granularTypeId -> fragmentId (performer forced)
-    liveTracksActive: string[];                     // Live performance track IDs
-    loopPosition: number;                           // 0.0 to 1.0 within current loop
-    loopCount: number;
+  // Preview state
+  preview: {
+    lockedInUsers: Set<UserId>;                   // Users who have committed their choice
+    timerRemaining: number | null;
+  };
+
+  // Remix state (both audience and performer)
+  remix: {
+    lockedCells: Set<string>;                     // cellIds the performer has locked (audience can't move)
+    mutedCells: Set<string>;                      // cellIds the performer has muted
+    lastMoveByUser: Map<UserId, number>;          // userId -> loopCount of last move (for cooldown)
+    liveTracksActive: string[];                   // Live performance track IDs
   };
 
   npc: { currentMessage: string | null };
 }
 
-interface LiveMixVote {
-  fragmentId: string;
-  timestamp: number;          // For recency tiebreak
-}
-
-interface GranularFragment {
-  id: string;
-  songIndex: number;
-  layerGroupId: string;       // Which bundle this came from ('bones', 'flesh', 'spark')
-  granularType: string;       // Which specific type ('bass', 'drums', etc.)
-  option: 'A' | 'B';
-  chapter: Chapter;
-  trackIndex: number;         // Ableton track index for this specific granular track
-  wonVote: boolean;
-  previewAudioPath: string;
+interface QuiltCell {
+  id: string;                                     // `${rowIndex}:${columnIndex}`
+  rowIndex: number;                               // Current row position (may change via swaps)
+  columnIndex: number;                            // Current column position (may change via swaps)
+  granularType: string;                           // Derived from current rowIndex
+  songIndex: number | null;                       // 0, 1, or 2 — the song choice. null if no choice yet.
+  chapter: Chapter | null;                        // Derived from songIndex
+  ownerId: UserId | null;                         // null if unclaimed
 }
 ```
+
+## Quilt Config
+
+```typescript
+interface QuiltConfig {
+  maxColumns: number;                              // Max time slices (default: 4, max: 8)
+  barsPerCell: number;                             // Derived: loopBars / columns
+  loopBars: number;                                // Total loop length (default: 8)
+  columnTiming: 'divided' | 'half_loop' | 'full_loop'; // How fast the playhead advances (see below)
+  overflowMode: 'spectator' | 'extend_loop';      // What happens when cells are full
+  previewTimerMs: number;                          // Preview phase duration (default: 20000)
+  assignmentTimerMs: number;                       // Assignment phase duration (default: 30000)
+
+  // Audience interaction during playback
+  audienceRemix: {
+    enabled: boolean;                              // Master toggle — false = audience watches only, performer remixes alone
+    scope: 'own_cell' | 'any_cell';                // Can audience move only their own cell, or drag any cell?
+    allowCrossRowSwaps: boolean;                   // Whether audience can swap across rows (default: true). Only applies when enabled=true.
+    cooldownLoops: number;                         // Loops between allowed audience cell moves (default: 1). 0 = no cooldown.
+    allowSongChange: boolean;                      // Can audience change their cell's song choice during playback? (default: false — song is locked after preview)
+  };
+}
+```
+
+## Conductor Commands (Finale — V3.3)
+
+```typescript
+type FinaleCommand =
+  // Setup & NPC (unchanged)
+  | { type: 'SETUP_FINALE' }
+  | { type: 'SEND_NPC_MESSAGE'; message: string }
+
+  // Assignment
+  | { type: 'START_ASSIGNMENT' }
+  | { type: 'CLAIM_CELL'; userId: UserId; cellId: string }
+  | { type: 'RELEASE_CELL'; userId: UserId }
+  | { type: 'ASSIGNMENT_COMPLETE' }
+
+  // Preview
+  | { type: 'START_PREVIEW' }
+  | { type: 'SET_CELL_SONG'; userId: UserId; songIndex: number }
+  | { type: 'LOCK_IN_CHOICE'; userId: UserId }
+  | { type: 'PREVIEW_COMPLETE' }
+
+  // Playback & Remix (audience + performer)
+  | { type: 'START_PLAYBACK' }
+  | { type: 'MOVE_CELL'; userId: UserId; targetCellId: string }     // Audience: move cell (swap if occupied). Validated against audienceRemix config (enabled, scope, cooldown, cross-row).
+  | { type: 'CHANGE_CELL_SONG'; userId: UserId; songIndex: number } // Audience: change own cell's song during playback. Only valid when audienceRemix.allowSongChange=true.
+  | { type: 'REORDER_COLUMN'; fromIndex: number; toIndex: number }  // Performer only
+  | { type: 'SWAP_CELLS'; cellIdA: string; cellIdB: string }        // Performer: swap any two cells
+  | { type: 'LOCK_CELL'; cellId: string }                           // Performer: prevent audience moves
+  | { type: 'UNLOCK_CELL'; cellId: string }
+  | { type: 'MUTE_CELL'; cellId: string }
+  | { type: 'UNMUTE_CELL'; cellId: string }
+  | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }  // Performer: force a song choice
+
+  // Arc (automated playback arc)
+  | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }   // Timing engine: unmute next row group during entry
+  | { type: 'ARC_EXIT_ROW_GROUP'; groupIndex: number }    // Timing engine: mute next row group during exit
+  | { type: 'ARC_COMPLETE' }                               // Timing engine: arc finished
+  | { type: 'TRIGGER_SORT' }                               // Performer: manually sort the grid
+```
+
+## Conductor Events (Finale — V3.3)
+
+```typescript
+type FinaleEvent =
+  // Setup & NPC
+  | { type: 'FINALE_SETUP_COMPLETE'; availableSongs: number[]; trackMap: Map<string, Map<number, number>>; quiltDimensions: { rows: number; columns: number; barsPerCell: number } }
+  | { type: 'NPC_MESSAGE'; message: string }
+
+  // Assignment
+  | { type: 'CELL_CLAIMED'; cellId: string; userId: UserId }
+  | { type: 'CELL_RELEASED'; cellId: string }
+  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select'; quiltDimensions: { rows: number; columns: number } }
+  | { type: 'ALL_CELLS_ASSIGNED' }
+
+  // Preview
+  | { type: 'PREVIEW_STARTED' }
+  | { type: 'CELL_SONG_SET'; cellId: string; songIndex: number }
+  | { type: 'USER_LOCKED_IN'; userId: UserId }
+
+  // Playback & Remix
+  | { type: 'PLAYBACK_STARTED'; quilt: Map<string, QuiltCell>; columnOrder: number[] }
+  | { type: 'PLAYHEAD_ADVANCED'; columnIndex: number }
+  | { type: 'CELL_MOVED'; cellId: string; fromPosition: { row: number; col: number }; toPosition: { row: number; col: number }; swappedWithCellId: string | null }
+  | { type: 'COLUMN_REORDERED'; columnOrder: number[] }
+  | { type: 'CELLS_SWAPPED'; cellIdA: string; cellIdB: string }
+  | { type: 'CELL_LOCKED'; cellId: string }
+  | { type: 'CELL_MUTED'; cellId: string }
+  | { type: 'CELL_UNMUTED'; cellId: string }
+
+  // Arc
+  | { type: 'ARC_PHASE_CHANGED'; arcPhase: ArcPhase }                    // entry | raw | sorting | sorted_playback | exit | complete
+  | { type: 'ARC_ROW_GROUP_ENTERED'; granularTypes: string[] }
+  | { type: 'ARC_SORT_APPLIED'; passIndex: number; previousCells: Map<string, QuiltCell> }
+  | { type: 'ARC_ROW_GROUP_EXITED'; granularTypes: string[] }
+
+  // Audio
+  | { type: 'AUDIO_CUE'; cue: QuiltAudioCue }
+```
+
+## Audio Cues (V3.3)
+
+```typescript
+type QuiltAudioCue =
+  | { type: 'quilt_playback_start'; initialColumn: number; trackIndices: number[] }
+  | { type: 'quilt_column_change'; columnIndex: number; trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] }
+  | { type: 'quilt_reorder'; newColumnOrder: number[] }
+  | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndex: number }
+  | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndex: number }
+  // Arc: staggered entry/exit
+  | { type: 'quilt_row_unmute'; granularTypes: string[]; trackIndices: number[] }
+  | { type: 'quilt_row_mute'; granularTypes: string[]; trackIndices: number[] }
+```
+
+## WebSocket Events (V3.3 changes)
+
+### Client → Server
+
+| Event | Payload | Sender |
+|-------|---------|--------|
+| `claim_cell` | `{ cellId }` | Audience (assignment) |
+| `release_cell` | — | Audience (assignment) |
+| `set_song` | `{ songIndex }` | Audience (preview) |
+| `lock_in` | — | Audience (preview) |
+| `move_cell` | `{ targetCellId }` | Audience (playback — validated against audienceRemix config) |
+| `change_song` | `{ songIndex }` | Audience (playback — only when audienceRemix.allowSongChange=true) |
+
+### Server → Client
+
+| Event | Payload | Recipients |
+|-------|---------|------------|
+| `quilt_state` | `{ cells, columnOrder, playheadColumn }` | All (~2 Hz during assignment, ~4 Hz during playback) |
+| `cell_claimed` | `{ cellId, userId }` | All (during assignment) |
+| `cell_moved` | `{ cellId, fromPosition, toPosition, swappedWithCellId }` | All (during playback) |
+| `playhead_update` | `{ columnIndex }` | All (during playback, on column boundary) |
+| `column_reordered` | `{ columnOrder }` | All (during remix) |
+
+### Removed from V3.2
+
+| Removed Event | Replacement |
+|---------------|-------------|
+| `set_preference` | `set_song` (during preview only) |
+| `select_type` | `claim_cell` (cell includes type via row) |
+| `mix_state` | `quilt_state` |
+| `type_locked` / `type_unlocked` | `cell_locked` / `cell_muted` (per-cell, not per-type) |
+
+## Persistence (V3.3)
+
+### New Table
+
+```sql
+CREATE TABLE finale_quilt_cells (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  cell_id TEXT NOT NULL,              -- e.g., '0:0', '2:3' (rowIndex:columnIndex)
+  row_index INTEGER NOT NULL,
+  column_index INTEGER NOT NULL,
+  owner_id TEXT,                      -- NULL if unclaimed
+  song_index INTEGER,                 -- 0, 1, or 2. NULL if no choice yet.
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+
+CREATE TABLE finale_remix_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT,                       -- NULL for performer actions, userId for audience moves
+  event_type TEXT NOT NULL CHECK(event_type IN ('move', 'reorder', 'swap', 'lock', 'unlock', 'mute', 'unmute', 'override')),
+  payload JSON NOT NULL,              -- Event-specific data
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+```
+
+### Removed Tables
+- `finale_mix_events` (V3.2 live mix voting) — replaced by `finale_quilt_cells` and `finale_remix_events`
+- `finale_assignments` — cell claim is the assignment (captured in `finale_quilt_cells.owner_id`)
+
+## Show Phase State Machine (V3.3 update)
+
+```
+... → finale_elegy → finale_assignment → finale_preview → finale_playback → ended
+```
+
+```typescript
+type ShowPhase =
+  | 'lobby'
+  | 'opener'
+  | 'attempt_story'
+  | 'attempt_build'
+  | 'attempt_resolve'
+  | 'finale_elegy'
+  | 'finale_assignment'       // Cell claim phase
+  | 'finale_preview'          // Private fragment exploration (NEW)
+  | 'finale_playback'         // Quilt plays + performer remix (REPLACES finale_live_mix)
+  | 'ended';
+```
+
+## Projector Display
+
+### During Assignment
+The quilt grid, cells filling up in real time as audience claims them. Each claimed cell pulses with the granular type's color. Unclaimed cells are dim outlines. Timer visible.
+
+### During Preview
+The quilt grid, cells lighting up with chapter colors as users make their song choices. Room is silent — visual anticipation only.
+
+### During Playback
+The quilt grid as a patchwork of chapter colors (amber/coral/teal). A **playhead bar** sweeps left to right across columns. Cells animate when swapped — both audience and performer moves are visible in real time. Muted cells dim. Locked cells show a lock icon. The audience watches the pattern shift as people drag cells around and the performer rearranges.
+
+## Resolved Decisions
+
+- **Cell model is song-choice based.** Cells hold a song index (0, 1, 2), not a fragment ID. The grid position (row) determines which granular type plays. Track resolution: `trackMap[granularType][songIndex] → Ableton trackIndex`.
+- **Audience remix is fully configurable.** Master toggle to enable/disable, scope (own cell vs any cell), cross-row swaps, cooldown, and whether song choice can change during playback. All via `audienceRemix` in `QuiltConfig`. This allows rapid playtesting of different interaction levels without code changes.
+- **Cross-row swaps are allowed** (configurable via `allowCrossRowSwaps`). Moving a cell to a different row changes which instrument plays the song choice. Musically safe because track resolution always finds the correct audio.
+- **Performer fragment override:** Yes — the performer CAN override a cell's song choice. Available as an emergency/creative tool, but default workflow is reorder/mute/swap.
+- **Audience song choice is final after preview by default.** Configurable via `audienceRemix.allowSongChange`. When false (default), the song a cell plays doesn't change unless the performer overrides it. When true, audience can change their cell's song during playback. Cell POSITION can always change (if audience remix is enabled).
+- **Loop length is 8 bars.** All music is composed for 8-bar loops.
+- **Live seed / melody is a quilt row.** It is one of the 6 granular type rows, audience-controllable like everything else. The performer's live instruments (vocal, synth, etc.) are separate tracks layered on top of the quilt, not part of the grid.
+- **Visual design should be intentionally modular** — build for easy iteration, no locked visual commitments yet.
+- **Song energy profiles** (V3.3 arc): Song 0 (Ambition) = 1.0, Song 1 (Love) = 0.5, Song 2 (Avoidance) = 0.2. Configurable. Reflects the existing musical material.
+- **Row weight for sorting** (V3.3 arc): drums=0.9, bass=0.8, melody=0.5, harmony=0.4, pad=0.3, fx=0.2. Rhythm section dominates perceived energy; texture rows absorb sorting fragmentation.
+- **Cell size threshold** (V3.3 arc): ≥4 columns use 4-bar cells; <4 columns use 8-bar cells. Keeps grid loop duration in a musical sweet spot (~16-32 bars).
+- **Sort mode selection** (V3.3 arc): grid loop ≥16 bars = single-pass (3 zones); <16 bars = multi-pass (3 passes with different energy targets). Based on grid loop duration, not column count.
+- **Finale timing is Ableton-driven** (V3.3 arc): Column advances and arc phase transitions use Ableton beat events as source of truth, not wall-clock timers. Prevents drift.
+- **No vertical unity optimization** (V3.3 arc): The sorting algorithm does not try to align columns to the same song. The zone-based sorting with shared pool naturally produces inter-row variety, which sounds more interesting than all-same-song columns.
+
+## Open Questions
+
+- [x] ~~Exact crossfade duration at column boundaries~~ — Implemented via `GainConfig.crossfadeBeats` (default: 1 beat). Both fade-out and fade-in use `fadeGain()` for smooth, cancellation-safe transitions.
+- [ ] Projector and phone visual design for the quilt (modular, easy to iterate)
+- [ ] Can the performer pause/cancel the arc mid-playback?
+- [ ] Interaction between manual performer remix controls and the automatic arc (do manual changes persist through sorts?)

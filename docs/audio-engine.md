@@ -1,7 +1,7 @@
 # Audio Engine, Musical Design & Ableton Integration
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
-> **Related:** [song-building.md](song-building.md) (collapse/rejection audio), [finale.md](finale.md) (live mix audio behavior)
+> **Related:** [song-building.md](song-building.md) (collapse/rejection audio), [finale.md](finale.md) (quilt playback audio behavior)
 
 ---
 
@@ -111,12 +111,13 @@ Each fragment clip must be exported as a standalone audio file for in-browser pr
 - Rejection effect on return track activates (TBD: distinct from collapse effect — configurable)
 - After effect completes, all tracks for this attempt are muted
 
-**Finale — Live mix (V3.2):**
-- When live mix starts: unmute initial active fragment tracks per granular type (via `live_mix_start` cue)
-- When majority shifts for a type: crossfade at next bar boundary (via `live_mix_crossfade` cue)
-- Individual granular tracks controlled independently (not bundled)
-- Performer lock freezes a type's active fragment; override forces a specific fragment
-- Crossfade: fade out outgoing track, fade in incoming track, ~1 bar overlap
+**Finale — Quilt playback (V3.3):**
+- When playback starts: unmute initial column tracks per granular type (via `quilt_playback_start` cue)
+- At each column boundary: mute/unmute tracks per type based on cell song choices (via `quilt_column_change` cue)
+- Column reorder: no immediate audio change — takes effect at next column boundary (via `quilt_reorder` cue)
+- Performer mute/unmute: per-cell track control (via `quilt_mute_cell` / `quilt_unmute_cell` cues)
+- Track resolution: `trackMap[granularType][songIndex] → trackIndex` (config-driven lookup)
+- Crossfade at column boundaries: both outgoing and incoming tracks fade via `fadeGain()` over `GainConfig.crossfadeBeats` (default: 1 beat). In-flight fades are cancelled safely if a track reappears mid-fade.
 
 ### OSC Protocol
 
@@ -185,7 +186,7 @@ MOCK_BPM=120
 
 COLLAPSE_ANIMATION_MS=5000
 
-# Finale — Assignment (V3.2)
+# Finale — Assignment (V3.3)
 FINALE_ASSIGNMENT_MODE=auto
 FINALE_ASSIGNMENT_TIMER_MS=30000
 

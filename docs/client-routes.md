@@ -35,18 +35,27 @@
 - NPC text narrates: "This is what we have left. This is what we lost."
 - Duration: ~10–15 seconds, purely observational, no interaction
 
-**Finale — Assignment (V3.2):**
-- Each audience member is assigned to a granular type (bass, drums, seed, pad, harmony, fx)
-- Assignment mode configurable: auto (system assigns) or self-select
-- Screen shows assigned type with symbol, color, and label
+**Finale — Assignment (V3.3 — Cell Claim):**
+- Empty quilt grid appears: 6 rows (granular types) x N columns (time slices)
+- Users tap a cell to claim it; claimed cells show presence indicator
+- One cell per person; tap another cell to switch
+- Timer counts down; unclaimed users auto-assigned when timer expires
+- Full cells greyed out / unavailable
 
-**Finale — Live Mix (V3.2):**
-- Phone becomes a live controller — tappable fragment cards for the assigned granular type
-- Group's majority determines what the room hears in real time
-- Crossfades happen at bar boundaries
-- NPC text appears at key moments
+**Finale — Preview (V3.3 — Sandbox):**
+- Room is silent. Each cell owner's phone shows:
+  - Cell position in mini quilt grid (highlighted)
+  - 3 tappable song cards (Ambition/Love/Avoidance) with chapter colors
+  - Tapping a card plays a private audio preview on the phone speaker
+  - "LOCK IN" button to commit song choice
+- Timer counts down; unconfirmed users get their last-previewed song
 
-> **Note:** V3.2 finale implementation is complete. V3.1 finale code (assembly, deliberation, ceremony) has been removed.
+**Finale — Playback (V3.3 — Quilt):**
+- Quilt grid with playhead sweeping left to right across columns
+- Own cell highlighted; chapter colors fill cells based on song choices
+- When audience remix is enabled: tap another cell to swap positions
+- Cooldown indicator between moves; song change UI when allowed
+- Spectators (no cell / remix disabled): read-only grid with playhead
 
 ### `/projector` — Public Display
 
@@ -69,11 +78,20 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 - Full fragment grid with winners glowing, losers/locked dimmed
 - NPC text displayed prominently
 
-**Finale — Live Mix (V3.2):**
-- All granular types displayed with consensus visualization
-- Per-type: which fragment is currently active, vote distributions
-- Visual energy/density increases as mix evolves
-- Performer's live layer shown when active
+**Finale — Assignment (V3.3):**
+- Quilt grid with cells filling up in real time as audience claims them
+- Each claimed cell pulses with the granular type's color
+- Unclaimed cells are dim outlines; timer visible
+
+**Finale — Preview (V3.3):**
+- Quilt grid with cells lighting up with chapter colors as users make song choices
+- Room is silent — visual anticipation only
+
+**Finale — Playback (V3.3):**
+- Quilt grid as patchwork of chapter colors (amber/coral/teal)
+- Playhead bar sweeps left to right across columns
+- Cells animate when swapped — both audience and performer moves visible in real time
+- Muted cells dim; locked cells show lock icon
 
 ### `/controller` — Performer/Operator Interface
 
@@ -88,7 +106,7 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 | **Threshold** | Read-only current threshold, Last vote's winning proportion, FORCE_COLLAPSE |
 | **Song Rejection** | Trigger rejection effect (OSC command to Ableton) — only for completed songs |
 | **Audio** | Transport Play/Stop, Hard Mute/Panic, Reset Utilities (all gains to 0 dB), Per-layer force on/off |
-| **Finale — Live Mix** | Per-type overrides, locks, vote distributions (V3.2) |
+| **Finale — Quilt** | Phase actions (Start Assignment/Preview/Playback), full quilt grid with per-cell lock/unlock/mute/unmute/override song, column reorder arrows, cell swap selector (V3.3) |
 | **NPC** | Bank of pre-written NPC lines (organized by phase), Free-text input for improvised lines, Fire button |
 | **Live Performance** | Toggle live input tracks (vocal, synth, etc.) |
 | **Emergency** | Pause/Resume show, Export/Import state as JSON, Force reconnect all clients, Reset to lobby |
@@ -97,8 +115,8 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 - Connected clients count
 - Vote counts A vs B, time remaining
 - Threshold status per attempt
-- Assignment: group sizes per granular type, assignment mode
-- Live mix: per-type active fragments, vote distributions, locked types, loop position
+- Assignment: cell claim progress, unclaimed count
+- Quilt: per-cell song choices, locked/muted cells, column order, playhead position, loop count
 - System health: WebSocket status, Ableton OSC status, error log tail
 
 ---

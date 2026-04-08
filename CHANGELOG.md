@@ -1,5 +1,159 @@
 # CHANGELOG
 
+## 2026-04-08 — V3.3 Quilt Arc: Sorting, Timing, Animation
+
+Automated playback arc system for the quilt finale — staggered entry/exit, energy-based sorting, and sort animation.
+
+### New: `conductor/quilt-arc.ts`
+- Pure functions for arc scheduling, cell energy scoring, and sorting algorithm
+- Shared pool sorting: all cells treated as one pool, rows filled in priority order (drums first → best consolidation)
+- Single-pass (3 zones: medium/high/cooldown) and multi-pass modes
+- Weighted energy: `songEnergy[songIndex] * rowWeight[granularType]` — rhythm section dominates perceived energy
+- Cell size threshold: ≥4 columns → 4 bars/cell, <4 → 8 bars/cell
+
+### New: Arc types and config
+- Added `ArcPhase`, `ArcConfig`, `ArcSchedule`, `ArcState` types to `conductor/types.ts`
+- Added arc config block to `config/default-show.json` (song energy, row weights, entry/exit schedules)
+- Added `arc` field to `V33FinaleState`, serialization, and client view types
+
+### New: Conductor arc integration (`conductor/conductor.ts`)
+- `handleStartPlayback` initializes arc, staggered entry (first row group only)
+- `handleAdvanceQuiltColumn` is arc-aware: filters by entered rows, triggers raw→sort and sort→exit transitions on grid loop wraps
+- Arc handlers: `handleArcEntryRowGroup`, `handleArcRawComplete`, `handleArcSortComplete`, `handleArcExitRowGroup`, `handleArcComplete`
+- `handleTriggerSort`: performer can manually sort the grid during playback
+
+### New: Beat-driven arc timing (`server/timing.ts`)
+- Replaced setTimeout-based arc scheduler with `startArcTracking` / `handleArcBeat`
+- Entry/exit row groups fire on actual Ableton loop boundaries (beat-counted, not wall-clock)
+- Raw→sort and sort→exit transitions driven by conductor grid loop wraps (no timer needed)
+- Fixed fractional `loopBeats` issue: `Math.round()` prevents float comparison drift
+
+### New: Audio routing (`server/audio-router.ts`)
+- `handleQuiltRowUnmute`: fade-in with `entrySwellBeats` for staggered entry
+- `handleQuiltRowMute`: fade-out with `exitFadeBeats` for staggered exit
+
+### New: Sort animation (`components/finale/QuiltGrid.tsx`)
+- Rewrote to absolute positioning with owner-keyed cells
+- CSS `transition: left 0.5s ease, top 0.5s ease` animates cell position changes during sort
+- Row headers absolutely positioned alongside cells
+
+### UI updates
+- `useQuilt` hook exposes `arcPhase`
+- `QuiltGrid` dims un-entered rows during arc entry phase
+- `QuiltRemixControls` shows arc phase/pass indicator + "Sort Grid" button
+- `filterStateForClient` sends `arcPhase`/`arcPassIndex` to projector and audience
+
+### Documentation
+- Updated `docs/finale.md`: added Automated Playback Arc section, arc commands/events/audio cues
+- Updated `DECISIONS.md`: R32-R37 (song energy, row weight, cell size, sort mode, timing, vertical unity)
+
+### Tests
+- 44 new tests in `conductor/__tests__/quilt-arc.test.ts`
+- 377 tests passing across 13 suites, `tsc --noEmit` clean
+
+## 2026-04-08 — V3.3 Phase 6: Cleanup + finalize migration
+
+Final cleanup phase for the V3.3 "Quilt" migration. All phases complete.
+
+### Config updates
+- Updated `default-show.json` description to reference quilt-based finale (was "Incredibox-style")
+
+### Stale reference audit
+- Fixed `conductor/conductor.ts` comment: `finale_live_mix` → `finale_preview` + `finale_playback`
+- Fixed `server/index.ts` backup phase list: added `finale_preview` + `finale_playback`, removed `finale_live_mix`
+- Fixed `server/__tests__/timing.test.ts`: replaced all `finale_live_mix` references with `finale_playback`, updated stale stub tests to expect `ADVANCE_QUILT_COLUMN` command
+- Updated `db/schema.sql` header to V3.3
+
+### Doc pass
+- Updated `ARCHITECTURE.md`: V3.2 → V3.3 header, quilt-based finale description, updated folder structure (removed LiveMix/assignment files, added Quilt files), updated test name examples, marked V3.3 appendix as complete
+- Updated `CLAUDE.md`: removed V3.3 migration section (migration done), rewrote finale paragraph for quilt model, updated folder structure, updated show phase state machine, updated common patterns (quilt state replaces mix state)
+
+### Tests
+- 333 tests passing across 12 suites, `tsc --noEmit` clean
+
+## 2026-04-07 — V3.3 Phase 3: Server wiring + persistence
+
+Wired the V3.3 quilt conductor to the server layer: sockets, persistence, audio routing, and timing.
+
+### Updated: `server/socket.ts`
+- Removed V3.2 events: `select_type`, `set_preference`, `group_update`, `mix_state`, `assigned`, `type_locked`/`type_unlocked`
+- Added V3.3 client→server: `claim_cell`, `release_cell`, `set_song`, `lock_in`, `move_cell`, `change_song`
+- Added V3.3 server→client: `quilt_state` (~4 Hz), `cell_claimed`, `cell_moved`, `playhead_update`, `column_reordered`
+- Replaced `mix_state` broadcast with `quilt_state` broadcast (unified interval)
+- Updated state filtering for projector and audience to use quilt grid instead of live mix data
+- Removed `getLoopPosition` parameter (no longer needed)
+
+### Updated: `server/persistence.ts`
+- Replaced `saveFinaleAssignment`/`getFinaleAssignments`/`saveMixEvent`/`getMixEvents` with `saveQuiltCell`/`getQuiltCells`/`saveRemixEvent`/`getRemixEvents`
+- Added migration v6: `finale_quilt_cells` (with UNIQUE on show_id+cell_id for upsert) and `finale_remix_events`
+
+### Updated: `db/schema.sql`
+- Added `finale_quilt_cells` and `finale_remix_events` table definitions
+- Marked `finale_assignments` and `finale_mix_events` as deprecated
+
+### Updated: `server/audio-router.ts`
+- Removed `live_mix_crossfade` and `live_mix_start` handlers
+- Added `quilt_playback_start`, `quilt_column_change`, `quilt_reorder`, `quilt_mute_cell`, `quilt_unmute_cell` handlers
+
+### Updated: `server/timing.ts`
+- Replaced all `finale_live_mix` references with `finale_playback`
+- Added preview timer: starts on `PREVIEW_STARTED`, fires `PREVIEW_COMPLETE` + `ADVANCE_PHASE` on expiry
+- Added early preview completion when all users lock in
+- Added preview timer recovery on server restart
+
+### Tests
+- Updated persistence tests: replaced V3.2 assignment tests with V3.3 quilt cell + remix event tests
+- Updated audio-router tests: replaced `live_mix_crossfade`/`live_mix_start` with `quilt_playback_start`/`quilt_column_change`/`quilt_mute_cell`/`quilt_unmute_cell`
+- 333 tests passing across 12 suites, `tsc --noEmit` clean
+
+### Docs
+- Updated `docs/server-protocol.md`: new event tables, schema, recovery notes
+- Updated `docs/audio-engine.md`: quilt playback section replaces live mix section
+
+## 2026-04-07 — V3.3 Phase 2: Quilt conductor logic
+
+Pure conductor implementation for the V3.3 Quilt finale. All functions are pure (no I/O) and fully tested.
+
+### New: `conductor/quilt.ts`
+- `createQuiltGrid()` — initializes grid (6 rows × N columns) scaled to audience size
+- Cell claiming: `claimCell`, `releaseCell`, `assignRemainingUsers`
+- Preview: `setCellSong`, `lockInChoice`, `assignDefaultSongs`
+- Audience remix: `moveCell` (validates scope, cooldown, cross-row, locked cells), `changeCellSong`
+- Performer operations: `reorderColumn`, `swapCells`, `lockCell/unlockCell`, `muteCell/unmuteCell`, `overrideCellSong`
+- Track resolution: `resolveTrack(trackMap, granularType, songIndex) → trackIndex`
+- Playhead: `advancePlayhead` (follows columnOrder, wraps with loopCount)
+- Helpers: `buildTrackMap`, `deriveAvailableSongs`, `deriveColumnCount`
+
+### Updated: `conductor/conductor.ts`
+- All V3.3 command handlers wired up (CLAIM_CELL, RELEASE_CELL, SET_CELL_SONG, LOCK_IN_CHOICE, START_PREVIEW, PREVIEW_COMPLETE, START_PLAYBACK, MOVE_CELL, CHANGE_CELL_SONG, REORDER_COLUMN, SWAP_CELLS, LOCK_CELL, UNLOCK_CELL, MUTE_CELL, UNMUTE_CELL, OVERRIDE_CELL_SONG)
+- Phase transitions: finale_assignment → finale_preview → finale_playback auto-triggered on ADVANCE_PHASE
+- SETUP_FINALE now initializes quilt grid from audience size, derives availableSongs and trackMap from fragments
+- ASSIGNMENT_COMPLETE assigns remaining unclaimed users to empty cells
+
+### Rewritten: `conductor/assignment.ts`
+- V3.3 cell-claiming model: `autoAssignCells` (round-robin into quilt grid), `getUnclaimedUsers`
+- Old V3.2 type-group assignment functions removed
+
+### Deleted: `conductor/live-mix.ts`
+- V3.2 majority voting / recency tiebreak logic removed (replaced by quilt cell logic)
+
+### Tests
+- New: `conductor/__tests__/quilt.test.ts` — 56 tests covering all quilt pure functions
+- Rewritten: `conductor/__tests__/assignment.test.ts` — 9 tests for V3.3 cell assignment
+- Deleted: `conductor/__tests__/live-mix.test.ts`
+- All 331 tests passing across 12 suites, `tsc --noEmit` clean
+
+### Types
+- Added `CELL_UNLOCKED` event to `ConductorEvent` union
+
+## 2026-04-07 — V3.3 "Quilt" finale redesign — context setup
+
+Spec installed as `docs/finale.md`. The V3.2 live mix finale is replaced by the Quilt model: a grid where rows = granular types, columns = time slices, and each cell holds a song choice (0, 1, 2). New phases: `finale_preview` (private exploration) + `finale_playback` (quilt plays + remix). See `V33-MIGRATION-PLAN.md` for implementation phases.
+
+- Updated CLAUDE.md with V3.3 migration section and deprecated file list
+- Updated ARCHITECTURE.md: terminology (Quilt, Cell, Song Choice), state machine (`finale_preview` + `finale_playback`), Appendix E
+- Updated DECISIONS.md: resolved decisions R24-R31, open questions O9-O10
+
 ## 2026-04-05 — Per-option chapter colors, audience build UI redesign, server-driven intrusive thoughts with projector physics
 
 **Context:** Three connected changes: (1) visual differentiation of A/B option choices throughout the show, (2) audience phone UI redesign for song-building matching a canvas-based mockup, (3) server-distributed intrusive thoughts that appear on both audience phones and the projector as physics-based membrane bubbles.

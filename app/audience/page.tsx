@@ -13,12 +13,11 @@ import { LayerDots } from '@/components/song-building/LayerDots';
 import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts';
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
-import { ElegyGrid } from '@/components/finale/ElegyGrid';
-import { AssignmentCards } from '@/components/finale/AssignmentCards';
-import { AssignmentIdentity } from '@/components/finale/AssignmentIdentity';
-import { LiveMixController } from '@/components/finale/LiveMixController';
-import { LiveMixSpectator } from '@/components/finale/LiveMixSpectator';
-import { useLiveMix } from '@/hooks/useLiveMix';
+import { useQuilt } from '@/hooks/useQuilt';
+import { QuiltGrid } from '@/components/finale/QuiltGrid';
+import { QuiltPreview } from '@/components/finale/QuiltPreview';
+import { QuiltRemix } from '@/components/finale/QuiltRemix';
+import { NpcDisplay } from '@/components/finale/NpcDisplay';
 import type { AudienceFinaleView, AudienceAttemptView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
@@ -107,9 +106,15 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_live_mix') && (
+      {(phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_preview' || phase === 'finale_playback') && (
         state.myFinale
-          ? <FinaleAudienceView myFinale={state.myFinale} phase={phase} socket={socket} emit={emit} granularTypes={state.config.granularTypes ?? []} />
+          ? <FinaleAudienceView
+              myFinale={state.myFinale}
+              phase={phase}
+              socket={socket}
+              emit={emit}
+              granularTypes={state.config.granularTypes ?? []}
+            />
           : <DarkListenScreen />
       )}
 
@@ -137,117 +142,173 @@ function FinaleAudienceView({
   emit: (event: string, data: unknown) => void;
   granularTypes: GranularType[];
 }) {
-  // --- Elegy phase: show all fragments non-interactively ---
+  const quilt = useQuilt(socket, myFinale);
+
+  // --- Elegy phase: NPC briefing + opt-in ---
   if (phase === 'finale_elegy') {
+    return (
+      <ElegyBriefing
+        socket={socket}
+        optedIn={myFinale.optedIn}
+        optInCount={myFinale.optInCount}
+        onOptIn={() => emit('elegy_opt_in', {})}
+      />
+    );
+  }
+
+  // --- Non-opted-in users: minimal "Listen." screen for all subsequent phases ---
+  if (!myFinale.optedIn) {
     return (
       <div
         style={{
           width: '100%',
           minHeight: '100vh',
-          overflowY: 'auto',
-          paddingBottom: '32px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#000',
         }}
       >
         <div
           style={{
-            textAlign: 'center',
-            padding: '24px 16px 8px',
-            fontSize: '0.65rem',
-            color: 'rgba(255,255,255,0.25)',
-            letterSpacing: '0.15em',
+            color: 'rgba(255,255,255,0.2)',
+            fontSize: '0.8rem',
+            letterSpacing: '0.2em',
             textTransform: 'uppercase',
           }}
         >
-          What remains
+          Listen.
         </div>
-        <ElegyGrid
-          availableFragments={myFinale.myGroupFragments}
-          lockedFragments={[]}
+      </div>
+    );
+  }
+
+  // --- Assignment phase (V3.3: cell claiming) ---
+  if (phase === 'finale_assignment' && quilt.grid) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '16px 0',
+        }}
+      >
+        <div
+          style={{
+            fontSize: '0.6rem',
+            color: 'rgba(255,255,255,0.3)',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            marginBottom: '8px',
+          }}
+        >
+          {quilt.assignmentTimerRemaining !== null
+            ? `Pick a cell — ${Math.ceil(quilt.assignmentTimerRemaining / 1000)}s`
+            : 'Pick a cell'}
+        </div>
+        <QuiltGrid
+          grid={quilt.grid}
           variant="audience"
+          granularTypes={granularTypes}
+          myCellId={quilt.myCellId}
+          onCellTap={(cellId) => {
+            if (quilt.myCellId === cellId) {
+              // Tap own cell → release it
+              quilt.releaseCell();
+            } else {
+              // Only attempt to claim if the target cell is unclaimed
+              const targetCell = quilt.grid?.cells.find(c => c.id === cellId);
+              if (targetCell?.ownerId !== null) return; // Already claimed by someone else
+              if (quilt.myCellId) quilt.releaseCell();
+              quilt.claimCell(cellId);
+            }
+          }}
+        />
+        {quilt.myCellId && (
+          <div
+            style={{
+              marginTop: '12px',
+              fontSize: '0.6rem',
+              color: 'rgba(255,255,255,0.25)',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Cell claimed — tap another to switch
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // --- Preview phase (V3.3) ---
+  if (phase === 'finale_preview' && quilt.grid && quilt.myCell) {
+    return (
+      <QuiltPreview
+        grid={quilt.grid}
+        myCell={quilt.myCell}
+        myCellId={quilt.myCellId!}
+        availableSongs={quilt.availableSongs}
+        lockedIn={quilt.lockedIn}
+        timerRemaining={quilt.previewTimerRemaining}
+        granularTypes={granularTypes}
+        audioPreviewPath={myFinale.audioPreviewPath}
+        onSetSong={quilt.setSong}
+        onLockIn={quilt.lockIn}
+      />
+    );
+  }
+
+  // --- Playback phase (V3.3) ---
+  if (phase === 'finale_playback' && quilt.grid) {
+    // If audience remix is enabled and user has a cell, show remix UI
+    if (myFinale.audienceRemix.enabled && quilt.myCell) {
+      return (
+        <QuiltRemix
+          grid={quilt.grid}
+          myCell={quilt.myCell}
+          myCellId={quilt.myCellId!}
+          availableSongs={quilt.availableSongs}
+          granularTypes={granularTypes}
+          remixConfig={myFinale.audienceRemix}
+          lockedCells={quilt.lockedCells}
+          mutedCells={quilt.mutedCells}
+          onMoveCell={quilt.moveCell}
+          onChangeSong={quilt.changeSong}
+        />
+      );
+    }
+
+    // Spectator view (no cell or remix disabled): read-only grid with playhead
+    return (
+      <div
+        style={{
+          width: '100%',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px 0',
+        }}
+      >
+        <QuiltGrid
+          grid={quilt.grid}
+          variant="audience"
+          granularTypes={granularTypes}
+          myCellId={quilt.myCellId}
+          lockedCells={quilt.lockedCells}
+          mutedCells={quilt.mutedCells}
+          showPlayhead
         />
       </div>
     );
   }
 
-  // --- Assignment phase (V3.2) ---
-  if (phase === 'finale_assignment') {
-    // After assignment completes, show identity
-    if (myFinale.assignmentTimerRemaining != null && myFinale.assignmentTimerRemaining <= 0 && myFinale.myGranularType !== null) {
-      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
-      if (gt) return <AssignmentIdentity granularType={gt} />;
-    }
-    // Auto-assignment: show identity immediately
-    if (myFinale.assignmentMode === 'auto' && myFinale.myGranularType !== null) {
-      const gt = granularTypes.find(t => t.id === myFinale.myGranularType);
-      if (gt) return <AssignmentIdentity granularType={gt} />;
-    }
-    return (
-      <AssignmentCards
-        myGranularType={myFinale.myGranularType}
-        granularTypes={granularTypes}
-        groupSizes={myFinale.groupSizes}
-        timerRemaining={myFinale.assignmentTimerRemaining ?? 0}
-        onSelect={(granularType) => emit('select_type', { granularType })}
-        socket={socket}
-      />
-    );
-  }
-
-  // --- Live mix phase (V3.2) ---
-  if (phase === 'finale_live_mix') {
-    return (
-      <LiveMixView
-        myFinale={myFinale}
-        socket={socket}
-      />
-    );
-  }
-
   return <DarkListenScreen />;
-}
-
-// ---------------------------------------------------------------------------
-// Live mix wrapper (needs hook call, so must be its own component)
-// ---------------------------------------------------------------------------
-
-function LiveMixView({
-  myFinale,
-  socket,
-}: {
-  myFinale: AudienceFinaleView;
-  socket: Socket | null;
-}) {
-  const liveMix = useLiveMix(socket, myFinale);
-
-  return (
-    <div
-      style={{
-        width: '100%',
-        minHeight: '100vh',
-        overflowY: 'auto',
-        padding: '24px 16px 48px',
-        boxSizing: 'border-box',
-      }}
-    >
-      {myFinale.myGranularType && (
-        <LiveMixController
-          fragments={liveMix.myGroupFragments}
-          myVote={liveMix.myVote}
-          activeFragment={liveMix.activeFragment}
-          voteDistribution={liveMix.voteDistribution}
-          totalVotes={liveMix.totalVotes}
-          isLocked={liveMix.isLocked}
-          isMuted={liveMix.isMuted}
-          granularType={myFinale.myGranularType}
-          onSelectFragment={liveMix.setPreference}
-        />
-      )}
-
-      <LiveMixSpectator
-        activeFragments={liveMix.otherTypesActive}
-      />
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -517,6 +578,95 @@ function PauseOverlay() {
       <p style={{ color: 'rgba(255,255,255,0.4)', letterSpacing: '0.15em', fontSize: '0.9rem' }}>
         PAUSED
       </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Elegy Briefing — NPC terminal text + opt-in button
+// ---------------------------------------------------------------------------
+
+function ElegyBriefing({
+  socket,
+  optedIn,
+  optInCount,
+  onOptIn,
+}: {
+  socket: Socket | null;
+  optedIn: boolean;
+  optInCount: number;
+  onOptIn: () => void;
+}) {
+  return (
+    <div
+      style={{
+        width: '100%',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#000',
+        padding: '24px 20px',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* NPC terminal text — performer triggers via SEND_NPC_MESSAGE */}
+      <div style={{ width: '100%', maxWidth: 360, marginBottom: '32px' }}>
+        <NpcDisplay socket={socket} fadeDurationMs={999999} />
+      </div>
+
+      {/* Opt-in button */}
+      {!optedIn ? (
+        <button
+          onClick={onOptIn}
+          style={{
+            padding: '14px 32px',
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.3)',
+            background: 'rgba(255,255,255,0.08)',
+            color: '#fff',
+            fontSize: '1rem',
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease, border-color 0.2s ease',
+          }}
+        >
+          R E B U I L D
+        </button>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <div
+            style={{
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: '0.75rem',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Waiting for the mind to coalesce...
+          </div>
+          {optInCount > 0 && (
+            <div
+              style={{
+                color: 'rgba(255,255,255,0.25)',
+                fontSize: '0.65rem',
+                letterSpacing: '0.08em',
+              }}
+            >
+              {optInCount} {optInCount === 1 ? 'councillor' : 'councillors'} coalesced
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

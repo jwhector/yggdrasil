@@ -1,6 +1,6 @@
 {
   "name": "Default Show Configuration",
-  "description": "V3.2 configuration \u2014 3 bundled layer groups per attempt, live seed tracks, Incredibox-style finale. Replace placeholder track indices with actual Ableton layout.",
+  "description": "V3.3 configuration \u2014 3 bundled layer groups per attempt, live seed tracks, quilt-based finale. Replace placeholder track indices with actual Ableton layout.",
   "layersPerAttempt": 3,
   "attempts": [
     {
@@ -24,7 +24,7 @@
       "auditionCycles": [
         2,
         2,
-        2
+        1
       ],
       "liveSeed": {
         "trackIndices": [
@@ -287,7 +287,7 @@
       "auditionBars": [
         4,
         4,
-        2
+        4
       ],
       "auditionCycles": [
         2,
@@ -296,9 +296,7 @@
       ],
       "liveSeed": {
         "trackIndices": [
-          30,
-          31,
-          32
+          16
         ],
         "label": "The seed"
       },
@@ -315,6 +313,12 @@
                 "trackIndices": [
                   33
                 ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  45
+                ]
               }
             ]
           },
@@ -325,12 +329,44 @@
                 "trackIndices": [
                   34
                 ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  45
+                ]
               }
             ]
           }
         },
         {
           "index": 1,
+          "group": "flesh",
+          "labelA": "Silenced",
+          "labelB": "Screaming",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  25
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  26
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "index": 2,
           "group": "bones",
           "labelA": "Sealed",
           "labelB": "Spiraling",
@@ -339,13 +375,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  35
+                  55
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  36
+                  30
                 ]
               }
             ]
@@ -355,51 +391,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  37
+                  52
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  38
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "index": 2,
-          "group": "flesh",
-          "labelA": "Silenced",
-          "labelB": "Screaming",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  40
-                ]
-              },
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  41
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  43
-                ]
-              },
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  44
+                  30
                 ]
               }
             ]
@@ -410,24 +408,83 @@
   ],
   "finale": {
     "assignmentMode": "auto",
-    "assignmentTimerMs": 30000,
     "bothOptionsSurvive": true,
-    "crossSongConstraint": false,
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
+      {
+        "event": "elegy_briefing",
+        "text": "SYSTEM ALERT: Primary ego operator has disconnected. Collaborative override engaged... We still have... fragments of what we built. We need to rebuild... something."
+      },
       {
         "event": "performer_abandonment",
         "text": "He's gone. We need to do this ourselves."
       },
       {
         "event": "assignment_start",
-        "text": "Find your voice."
+        "text": "Pick up a piece."
       },
       {
-        "event": "live_mix_start",
-        "text": "It's yours. Shape it."
+        "event": "preview_start",
+        "text": "Learn your voice."
+      },
+      {
+        "event": "first_playback",
+        "text": "Listen to what we built."
+      },
+      {
+        "event": "performer_returns",
+        "text": "He's back. But now it's ours too."
       }
-    ]
+    ],
+    "quilt": {
+      "maxColumns": 12,
+      "loopBars": 8,
+      "columnTiming": "half_loop",
+      "overflowMode": "spectator",
+      "previewTimerMs": 20000,
+      "assignmentTimerMs": 30000,
+      "audienceRemix": {
+        "enabled": false,
+        "scope": "own_cell",
+        "allowCrossRowSwaps": true,
+        "cooldownLoops": 1,
+        "allowSongChange": false
+      },
+      "arc": {
+        "enabled": true,
+        "cellSizeThreshold": 4,
+        "fullLoopBarsPerCell": 8,
+        "halfLoopBarsPerCell": 4,
+        "sortModeThresholdBars": 16,
+        "songEnergy": [
+          { "songIndex": 0, "energy": 1.0 },
+          { "songIndex": 1, "energy": 0.5 },
+          { "songIndex": 2, "energy": 0.2 }
+        ],
+        "rowWeight": {
+          "drums": 0.9,
+          "bass": 0.8,
+          "seed": 0.5,
+          "harmony": 0.4,
+          "pad": 0.3,
+          "fx": 0.2
+        },
+        "rowPriority": ["drums", "bass", "seed", "harmony", "pad", "fx"],
+        "entrySchedule": [
+          { "granularTypes": ["drums", "bass"], "abletonLoopIndex": 0 },
+          { "granularTypes": ["harmony", "melody"], "abletonLoopIndex": 1 },
+          { "granularTypes": ["pad", "fx"], "abletonLoopIndex": 2 }
+        ],
+        "exitSchedule": [
+          { "granularTypes": ["fx", "pad"], "abletonLoopIndex": 0 },
+          { "granularTypes": ["melody", "harmony"], "abletonLoopIndex": 1 },
+          { "granularTypes": ["bass", "drums"], "abletonLoopIndex": 2 }
+        ],
+        "multiPassTargets": [0.5, 1.0, 0.2],
+        "allowCrossRowSort": true,
+        "allowSortMuting": true
+      }
+    }
   },
   "timing": {
     "loopBoundaryBeats": 32,
@@ -441,6 +498,7 @@
       "lockInFadeBeats": 8,
       "collapseFadeBeats": 8,
       "ceremonySwellBeats": 4,
+      "crossfadeBeats": 4,
       "unityGainValue": 0,
       "stepsPerBeat": 3
     }

@@ -10,7 +10,7 @@
  * - 'controller'  — Performer controller
  *
  * High-frequency channels (NOT via state_sync):
- * - 'group_update' → audience + projector at ~2 Hz (during assignment phase)
+ * - 'quilt_state' → all clients at ~2 Hz (assignment) / ~4 Hz (playback)
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -49,8 +49,7 @@ interface ClientHeartbeat {
 const HEARTBEAT_INTERVAL_MS = 15000;            // Ping every 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 seconds
 const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
-const GROUP_UPDATE_BROADCAST_INTERVAL_MS = 500; // ~2 Hz during assignment
-const MIX_STATE_BROADCAST_INTERVAL_MS = 250;    // ~4 Hz during live mix
+const QUILT_STATE_BROADCAST_INTERVAL_MS = 250;  // ~4 Hz during playback, ~2 Hz during assignment (throttled)
 
 // ============================================================================
 // Intrusive thoughts — server-side state
@@ -106,7 +105,6 @@ export function setupSocketHandlers(
   createNewShow?: () => ShowState,
   audioRouter?: AudioRouter,
   onBridgeConnect?: (socket: Socket) => () => void,
-  getLoopPosition?: () => number,
 ): void {
   // Heartbeat tracking
   const heartbeats = new Map<string, ClientHeartbeat>();
@@ -142,85 +140,39 @@ export function setupSocketHandlers(
   }, HEARTBEAT_INTERVAL_MS);
 
   // ============================================================================
-  // Group update broadcast (throttled ~2 Hz during assignment phase)
+  // Quilt state broadcast (~2 Hz during assignment, ~4 Hz during playback)
   // ============================================================================
 
-  const groupUpdateInterval = setInterval(() => {
+  const quiltStateBroadcastInterval = setInterval(() => {
     const state = getState();
-    if (state.phase === 'finale_assignment' && state.finaleState?.phase === 'assignment') {
-      const groupSizes = Array.from(state.finaleState.assignment.groups.entries())
-        .map(([granularType, members]) => ({ granularType, count: members.length }));
-      io.to('audience').emit('group_update', { groupSizes });
-      io.to('projector').emit('group_update', { groupSizes });
-    }
-  }, GROUP_UPDATE_BROADCAST_INTERVAL_MS);
-
-  // ============================================================================
-  // Mix state broadcast (throttled ~4 Hz during live mix phase)
-  // ============================================================================
-
-  const mixStateBroadcastInterval = setInterval(async () => {
-    const state = getState();
-    if (state.phase !== 'finale_live_mix' || !state.finaleState || state.finaleState.phase !== 'live_mix') return;
-
     const fs = state.finaleState;
+    if (!fs) return;
 
-    // Per-type active fragments (shared with all clients)
-    const activeFragments = Array.from(fs.liveMix.activeFragments.entries())
-      .map(([granularType, fragmentId]) => ({ granularType, fragmentId }));
+    const isAssignment = state.phase === 'finale_assignment' && fs.phase === 'assignment';
+    const isPlayback = state.phase === 'finale_playback' && fs.phase === 'playback';
+    const isPreview = state.phase === 'finale_preview' && fs.phase === 'preview';
 
-    // Per-type vote distributions
-    const voteDistributions = Array.from(fs.liveMix.votes.entries()).map(([granularType, userVotes]) => {
-      const counts = new Map<string, number>();
-      for (const vote of userVotes.values()) counts.set(vote.fragmentId, (counts.get(vote.fragmentId) ?? 0) + 1);
-      return {
-        granularType,
-        votes: Array.from(counts.entries()).map(([fragmentId, count]) => ({ fragmentId, count })),
-      };
-    });
+    if (!isAssignment && !isPlayback && !isPreview) return;
 
-    // Projector gets full data
-    io.to('projector').emit('mix_state', {
-      activeFragments,
-      voteDistributions,
-      lockedTypes: fs.liveMix.lockedTypes,
+    const quiltState = {
+      cells: Array.from(fs.quilt.cells.values()).map(c => ({
+        id: c.id,
+        rowIndex: c.rowIndex,
+        columnIndex: c.columnIndex,
+        granularType: c.granularType,
+        songIndex: c.songIndex,
+        chapter: c.chapter,
+        ownerId: c.ownerId,
+      })),
+      columnOrder: fs.quilt.columnOrder,
+      playheadColumn: fs.quilt.playheadColumn,
+      loopCount: fs.quilt.loopCount,
+    };
 
-      loopPosition: getLoopPosition ? getLoopPosition() : fs.liveMix.loopPosition,
-    });
-
-    // Controller gets full data
-    io.to('controller').emit('mix_state', {
-      activeFragments,
-      voteDistributions,
-      lockedTypes: fs.liveMix.lockedTypes,
-
-      loopPosition: getLoopPosition ? getLoopPosition() : fs.liveMix.loopPosition,
-    });
-
-    // Each audience member gets: full active fragments, but only detailed votes for their own type
-    const audienceSockets = await io.in('audience').fetchSockets();
-    for (const socket of audienceSockets) {
-      const userId = (socket as any).userId as UserId | undefined;
-      if (!userId) continue;
-
-      // Find user's assigned type
-      let myType: string | null = null;
-      for (const [gt, members] of fs.assignment.groups) {
-        if (members.includes(userId)) { myType = gt; break; }
-      }
-
-      const myVoteDistribution = myType
-        ? voteDistributions.find(d => d.granularType === myType)?.votes ?? []
-        : [];
-
-      socket.emit('mix_state', {
-        activeFragments,
-        myVoteDistribution,
-        lockedTypes: fs.liveMix.lockedTypes,
-  
-      });
-    }
-  }, MIX_STATE_BROADCAST_INTERVAL_MS);
+    io.to('audience').emit('quilt_state', quiltState);
+    io.to('projector').emit('quilt_state', quiltState);
+    io.to('controller').emit('quilt_state', quiltState);
+  }, QUILT_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
   // Cleanup
@@ -228,8 +180,7 @@ export function setupSocketHandlers(
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
-    clearInterval(groupUpdateInterval);
-    clearInterval(mixStateBroadcastInterval);
+    clearInterval(quiltStateBroadcastInterval);
   });
 
   // ============================================================================
@@ -443,69 +394,138 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // select_type — audience selects a granular type during self-select assignment
-    //
-    // Payload: { granularType: string }
+    // elegy_opt_in — audience opts in during elegy phase
     // ------------------------------------------------------------------
-    socket.on('select_type', async (data: { granularType: string }) => {
+    socket.on('elegy_opt_in', async () => {
       const userId = (socket as any).userId as UserId;
-      if (!userId) {
-        console.warn('[Socket] select_type rejected: no userId on socket');
-        return;
-      }
-
-      console.log(`[Socket] select_type from ${userId}: ${data.granularType}`);
+      if (!userId) return;
 
       const state = getState();
-      const events = processCommand(state, {
-        type: 'SELECT_GRANULAR_TYPE',
-        userId,
-        granularType: data.granularType,
-      });
-      setState(state, events);
-      persistence.saveState(state);
-      persistence.saveFinaleAssignment(state.id, userId, data.granularType, false);
+      const events = processCommand(state, { type: 'ELEGY_OPT_IN', userId });
+
+      // Broadcast opt-in count to all clients for real-time feedback
+      const optInEvent = events.find(e => e.type === 'ELEGY_OPT_IN_RECEIVED') as
+        | { type: 'ELEGY_OPT_IN_RECEIVED'; totalOptedIn: number }
+        | undefined;
+      if (optInEvent) {
+        io.emit('elegy_opt_in_count', { count: optInEvent.totalOptedIn });
+      }
 
       await broadcastEvents(io, events, state);
     });
 
     // ------------------------------------------------------------------
-    // set_preference — audience sets live mix fragment preference
+    // claim_cell — audience claims a quilt cell during assignment
     //
-    // Payload: { fragmentId: string }
-    // granularType is derived from the user's assignment (not sent by client)
+    // Payload: { cellId: string }
     // ------------------------------------------------------------------
-    socket.on('set_preference', async (data: { fragmentId: string }) => {
+    socket.on('claim_cell', async (data: { cellId: string }) => {
       const userId = (socket as any).userId as UserId;
-      if (!userId) {
-        console.warn('[Socket] set_preference rejected: no userId on socket');
-        return;
-      }
+      if (!userId) return;
 
       const state = getState();
-      if (!state.finaleState || state.finaleState.phase !== 'live_mix') return;
-
-      // Determine user's assigned granular type
-      let granularType: string | null = null;
-      for (const [gt, members] of state.finaleState.assignment.groups) {
-        if (members.includes(userId)) { granularType = gt; break; }
-      }
-      if (!granularType) {
-        console.warn(`[Socket] set_preference rejected: ${userId} has no granular type assignment`);
-        return;
-      }
-
-      const events = processCommand(state, {
-        type: 'SET_LIVE_MIX_PREFERENCE',
-        userId,
-        granularType,
-        fragmentId: data.fragmentId,
-      });
-
+      const events = processCommand(state, { type: 'CLAIM_CELL', userId, cellId: data.cellId });
       setState(state, events);
+      persistence.saveState(state);
 
-      // Persist preference event
-      persistence.saveMixEvent(state.id, userId, granularType, data.fragmentId, 'preference');
+      // Persist cell claim
+      const cellClaimedEvent = events.find(e => e.type === 'CELL_CLAIMED');
+      if (cellClaimedEvent) {
+        persistence.saveQuiltCell(state.id, data.cellId, userId, null);
+      }
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // release_cell — audience releases their quilt cell during assignment
+    // ------------------------------------------------------------------
+    socket.on('release_cell', async () => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      const events = processCommand(state, { type: 'RELEASE_CELL', userId });
+      setState(state, events);
+      persistence.saveState(state);
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // set_song — audience sets song choice during preview
+    //
+    // Payload: { songIndex: number }
+    // ------------------------------------------------------------------
+    socket.on('set_song', async (data: { songIndex: number }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      const events = processCommand(state, { type: 'SET_CELL_SONG', userId, songIndex: data.songIndex });
+      setState(state, events);
+      persistence.saveState(state);
+
+      // Persist song choice
+      const songSetEvent = events.find(e => e.type === 'CELL_SONG_SET') as { cellId: string; songIndex: number } | undefined;
+      if (songSetEvent) {
+        persistence.saveQuiltCell(state.id, songSetEvent.cellId, userId, data.songIndex);
+      }
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // lock_in — audience locks in their song choice during preview
+    // ------------------------------------------------------------------
+    socket.on('lock_in', async () => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      const events = processCommand(state, { type: 'LOCK_IN_CHOICE', userId });
+      setState(state, events);
+      persistence.saveState(state);
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // move_cell — audience moves their cell during playback
+    //
+    // Payload: { targetCellId: string }
+    // ------------------------------------------------------------------
+    socket.on('move_cell', async (data: { targetCellId: string }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      const events = processCommand(state, { type: 'MOVE_CELL', userId, targetCellId: data.targetCellId });
+      setState(state, events);
+      persistence.saveState(state);
+
+      // Persist remix event
+      const moveEvent = events.find(e => e.type === 'CELL_MOVED');
+      if (moveEvent) {
+        persistence.saveRemixEvent(state.id, userId, 'move', JSON.stringify(moveEvent));
+      }
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // change_song — audience changes cell song during playback (when allowed)
+    //
+    // Payload: { songIndex: number }
+    // ------------------------------------------------------------------
+    socket.on('change_song', async (data: { songIndex: number }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      const events = processCommand(state, { type: 'CHANGE_CELL_SONG', userId, songIndex: data.songIndex });
+      setState(state, events);
+      persistence.saveState(state);
 
       await broadcastEvents(io, events, state);
     });
@@ -574,17 +594,12 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      // Persist all group assignments when assignment completes
+      // Persist cell assignments when assignment completes (auto-assigned users)
       if (processedCommand.type === 'ASSIGNMENT_COMPLETE') {
-        const groupsEvent = events.find(e => e.type === 'GROUPS_ASSIGNED') as
-          | { type: 'GROUPS_ASSIGNED'; groups: Map<string, UserId[]> }
-          | undefined;
-        if (groupsEvent) {
-          for (const [granularType, members] of groupsEvent.groups) {
-            for (const memberId of members) {
-              persistence.saveFinaleAssignment(state.id, memberId, granularType, true);
-            }
-          }
+        const cellEvents = events.filter(e => e.type === 'CELL_CLAIMED') as
+          Array<{ type: 'CELL_CLAIMED'; cellId: string; userId: UserId }>;
+        for (const ce of cellEvents) {
+          persistence.saveQuiltCell(state.id, ce.cellId, ce.userId, null);
         }
       }
 
@@ -593,13 +608,21 @@ export function setupSocketHandlers(
         clearThoughtsOnAdvance(io);
       }
 
-      // Persist lock/unlock/override mix events
-      if (processedCommand.type === 'LOCK_GRANULAR_TYPE') {
-        persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, '', 'lock');
-      } else if (processedCommand.type === 'UNLOCK_GRANULAR_TYPE') {
-        persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, '', 'unlock');
-      } else if (processedCommand.type === 'OVERRIDE_FRAGMENT') {
-        persistence.saveMixEvent(state.id, 'performer', processedCommand.granularType, processedCommand.fragmentId, 'override');
+      // Persist performer remix events
+      if (processedCommand.type === 'LOCK_CELL') {
+        persistence.saveRemixEvent(state.id, null, 'lock', JSON.stringify({ cellId: processedCommand.cellId }));
+      } else if (processedCommand.type === 'UNLOCK_CELL') {
+        persistence.saveRemixEvent(state.id, null, 'unlock', JSON.stringify({ cellId: processedCommand.cellId }));
+      } else if (processedCommand.type === 'MUTE_CELL') {
+        persistence.saveRemixEvent(state.id, null, 'mute', JSON.stringify({ cellId: processedCommand.cellId }));
+      } else if (processedCommand.type === 'UNMUTE_CELL') {
+        persistence.saveRemixEvent(state.id, null, 'unmute', JSON.stringify({ cellId: processedCommand.cellId }));
+      } else if (processedCommand.type === 'SWAP_CELLS') {
+        persistence.saveRemixEvent(state.id, null, 'swap', JSON.stringify({ cellIdA: processedCommand.cellIdA, cellIdB: processedCommand.cellIdB }));
+      } else if (processedCommand.type === 'REORDER_COLUMN') {
+        persistence.saveRemixEvent(state.id, null, 'reorder', JSON.stringify({ fromIndex: processedCommand.fromIndex, toIndex: processedCommand.toIndex }));
+      } else if (processedCommand.type === 'OVERRIDE_CELL_SONG') {
+        persistence.saveRemixEvent(state.id, null, 'override', JSON.stringify({ cellId: processedCommand.cellId, songIndex: processedCommand.songIndex }));
       }
 
       await broadcastEvents(io, events, state);
@@ -669,30 +692,36 @@ export async function broadcastEvents(
         io.to('projector').emit('npc_message', { message: event.message });
         break;
 
-      case 'GROUPS_ASSIGNED': {
-        // Notify each audience member of their assignment
-        const assignedSockets = await io.in('audience').fetchSockets();
-        for (const s of assignedSockets) {
-          const uid = (s as any).userId as UserId | undefined;
-          if (!uid) continue;
-          for (const [granularType, members] of event.groups) {
-            if (members.includes(uid)) {
-              s.emit('assigned', { granularType, groupSize: members.length });
-              break;
-            }
-          }
-        }
-        break;
-      }
-
-      case 'GRANULAR_TYPE_LOCKED':
-        io.to('audience').emit('type_locked', { granularType: event.granularType });
-        io.to('projector').emit('type_locked', { granularType: event.granularType });
+      case 'CELL_CLAIMED':
+        io.to('audience').emit('cell_claimed', { cellId: event.cellId, userId: event.userId });
+        io.to('projector').emit('cell_claimed', { cellId: event.cellId, userId: event.userId });
         break;
 
-      case 'GRANULAR_TYPE_UNLOCKED':
-        io.to('audience').emit('type_unlocked', { granularType: event.granularType });
-        io.to('projector').emit('type_unlocked', { granularType: event.granularType });
+      case 'CELL_MOVED':
+        io.to('audience').emit('cell_moved', {
+          cellId: event.cellId,
+          fromPosition: event.fromPosition,
+          toPosition: event.toPosition,
+          swappedWithCellId: event.swappedWithCellId,
+        });
+        io.to('projector').emit('cell_moved', {
+          cellId: event.cellId,
+          fromPosition: event.fromPosition,
+          toPosition: event.toPosition,
+          swappedWithCellId: event.swappedWithCellId,
+        });
+        break;
+
+      case 'PLAYHEAD_ADVANCED':
+        io.to('audience').emit('playhead_update', { columnIndex: event.columnIndex });
+        io.to('projector').emit('playhead_update', { columnIndex: event.columnIndex });
+        io.to('controller').emit('playhead_update', { columnIndex: event.columnIndex });
+        break;
+
+      case 'COLUMN_REORDERED':
+        io.to('audience').emit('column_reordered', { columnOrder: event.columnOrder });
+        io.to('projector').emit('column_reordered', { columnOrder: event.columnOrder });
+        io.to('controller').emit('column_reordered', { columnOrder: event.columnOrder });
         break;
 
       case 'REVEAL_STAKES_SHOWN': {
@@ -778,25 +807,29 @@ export function filterStateForClient(
           finalePhase: fs.phase,
           availableFragments: fs.availableFragments,
           allFragments: fs.allFragments,
+          // Quilt grid
+          quilt: {
+            rows: fs.quilt.rows,
+            columns: fs.quilt.columns,
+            cells: Array.from(fs.quilt.cells.values()).map(c => ({
+              id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
+              granularType: c.granularType, songIndex: c.songIndex,
+              chapter: c.chapter, ownerId: c.ownerId,
+            })),
+            columnOrder: fs.quilt.columnOrder,
+            playheadColumn: fs.quilt.playheadColumn,
+            loopCount: fs.quilt.loopCount,
+          },
+          availableSongs: fs.availableSongs,
+          // Arc state
+          arcPhase: fs.arc?.phase ?? null,
+          arcPassIndex: fs.arc?.currentPassIndex ?? null,
           // Assignment
-          groupSizes: Array.from(fs.assignment.groups.entries())
-            .map(([granularType, members]) => ({ granularType, count: members.length })),
           assignmentMode: fs.assignment.mode,
           assignmentTimerRemaining: fs.assignment.timerRemaining,
-          // Live mix
-          activeFragments: Array.from(fs.liveMix.activeFragments.entries())
-            .map(([granularType, fragmentId]) => ({ granularType, fragmentId })),
-          voteDistributions: Array.from(fs.liveMix.votes.entries()).map(([granularType, userVotes]) => {
-            const counts = new Map<string, number>();
-            for (const vote of userVotes.values()) counts.set(vote.fragmentId, (counts.get(vote.fragmentId) ?? 0) + 1);
-            return {
-              granularType,
-              votes: Array.from(counts.entries()).map(([fragmentId, count]) => ({ fragmentId, count })),
-            };
-          }),
-          lockedTypes: fs.liveMix.lockedTypes,
-    
-          loopPosition: fs.liveMix.loopPosition,
+          // Remix
+          lockedCells: Array.from(fs.remix.lockedCells),
+          mutedCells: Array.from(fs.remix.mutedCells),
           // NPC
           npcMessage: fs.npc.currentMessage,
         } : null,
@@ -832,59 +865,45 @@ export function filterStateForClient(
       let myFinale: object | null = null;
       const fs = state.finaleState;
       if (fs) {
-        // Determine user's granular type assignment
-        let myGranularType: string | null = null;
-        for (const [granularType, members] of fs.assignment.groups) {
-          if (members.includes(userId)) { myGranularType = granularType; break; }
+        // Find user's cell
+        let myCellId: string | null = null;
+        for (const cell of fs.quilt.cells.values()) {
+          if (cell.ownerId === userId) { myCellId = cell.id; break; }
         }
-
-        // All group sizes
-        const groupSizes = Array.from(fs.assignment.groups.entries())
-          .map(([granularType, members]) => ({ granularType, count: members.length }));
-
-        // Fragments available for user's granular type
-        const myGroupFragments = myGranularType
-          ? fs.availableFragments.filter(f => f.granularType === myGranularType)
-          : [];
-
-        // User's own live mix vote
-        const myVoteData = myGranularType
-          ? (fs.liveMix.votes.get(myGranularType)?.get(userId) ?? null)
-          : null;
-
-        // Active fragment for user's group
-        const myGroupActiveFragment = myGranularType
-          ? (fs.liveMix.activeFragments.get(myGranularType) ?? null)
-          : null;
-
-        // Vote distribution for user's group
-        const myGroupVoteDistribution: Array<{ fragmentId: string; count: number }> = [];
-        if (myGranularType) {
-          const votes = fs.liveMix.votes.get(myGranularType);
-          if (votes) {
-            const counts = new Map<string, number>();
-            for (const vote of votes.values()) counts.set(vote.fragmentId, (counts.get(vote.fragmentId) ?? 0) + 1);
-            for (const [fragmentId, count] of counts) myGroupVoteDistribution.push({ fragmentId, count });
-          }
-        }
-
-        // All active fragments (read-only overview for other types)
-        const activeFragments = Array.from(fs.liveMix.activeFragments.entries())
-          .map(([granularType, fragmentId]) => ({ granularType, fragmentId }));
 
         myFinale = {
           finalePhase: fs.phase,
-          myGranularType,
-          groupSizes,
+          // Quilt grid (shared)
+          quilt: {
+            rows: fs.quilt.rows,
+            columns: fs.quilt.columns,
+            cells: Array.from(fs.quilt.cells.values()).map(c => ({
+              id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
+              granularType: c.granularType, songIndex: c.songIndex,
+              chapter: c.chapter, ownerId: c.ownerId,
+            })),
+            columnOrder: fs.quilt.columnOrder,
+            playheadColumn: fs.quilt.playheadColumn,
+          },
+          availableSongs: fs.availableSongs,
+          // Elegy opt-in
+          optedIn: fs.elegyOptedIn.has(userId),
+          optInCount: fs.elegyOptedIn.size,
+          // Arc state
+          arcPhase: fs.arc?.phase ?? null,
+          // Assignment
+          myCellId,
           assignmentMode: fs.assignment.mode,
           assignmentTimerRemaining: fs.assignment.timerRemaining,
-          myGroupFragments,
-          myGroupActiveFragment,
-          myGroupVoteDistribution,
-          myVote: myVoteData?.fragmentId ?? null,
-          activeFragments,
-          lockedTypes: fs.liveMix.lockedTypes,
-    
+          // Preview
+          previewTimerRemaining: fs.preview.timerRemaining,
+          lockedIn: fs.preview.lockedInUsers.has(userId),
+          audioPreviewPath: state.config.finale.audioPreviewPath,
+          // Remix
+          lockedCells: Array.from(fs.remix.lockedCells),
+          mutedCells: Array.from(fs.remix.mutedCells),
+          audienceRemix: state.config.finale.quilt.audienceRemix,
+          // NPC
           npcMessage: fs.npc.currentMessage,
         };
       }

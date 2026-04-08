@@ -27,7 +27,7 @@ import type {
   V32LayerConfig,
   TrackBundle,
   Fragment,
-  V32FinaleState,
+  V33FinaleState,
   GainConfig,
 } from '../../conductor/types';
 
@@ -94,11 +94,23 @@ function createTestConfig(): ShowConfig {
     ],
     finale: {
       assignmentMode: 'auto' as const,
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 3000,
@@ -131,26 +143,29 @@ function makeFragment(attemptIndex: number, layerIndex: number, option: 'A' | 'B
   };
 }
 
-function makeFinaleState(allFragments: Fragment[] = []): V32FinaleState {
+function makeFinaleState(allFragments: Fragment[] = []): V33FinaleState {
   return {
     phase: 'assignment',
     availableFragments: allFragments as any,
     allFragments: allFragments as any,
-    assignment: {
-      mode: 'auto',
-      groups: new Map(),
-      timerRemaining: null,
-    },
-    liveMix: {
-      votes: new Map(),
-      activeFragments: new Map(),
-      lockedTypes: [],
-
-      performerOverrides: new Map(),
-      liveTracksActive: [],
-      transportStarted: false,
-      loopPosition: 0,
+    quilt: {
+      rows: 6,
+      columns: 1,
+      barsPerCell: 8,
+      cells: new Map(),
+      columnOrder: [0],
+      playheadColumn: 0,
       loopCount: 0,
+    },
+    availableSongs: [0, 1, 2],
+    trackMap: new Map(),
+    assignment: { mode: 'auto', timerRemaining: null },
+    preview: { lockedInUsers: new Set(), timerRemaining: null },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
+      liveTracksActive: [],
     },
     npc: { currentMessage: null },
   };
@@ -527,35 +542,17 @@ describe('AudioRouter', () => {
   });
 
   // --------------------------------------------------------------------------
-  // live_mix_crossfade
+  // quilt_playback_start (V3.3)
   // --------------------------------------------------------------------------
 
-  describe('live_mix_crossfade', () => {
-    test('fades out outgoing track and fades in incoming track', () => {
-      sendCue(router, state, {
-        type: 'live_mix_crossfade',
-        granularType: 'bass',
-        incomingTrackIndices: [4],
-        outgoingTrackIndices: [2],
-      });
-
-      // Outgoing faded out (instant = muted), incoming unmuted
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // fade out
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0); // bring in
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // live_mix_start
-  // --------------------------------------------------------------------------
-
-  describe('live_mix_start', () => {
-    test('unmutes all active tracks', async () => {
+  describe('quilt_playback_start', () => {
+    test('unmutes initial column tracks', async () => {
       jest.useFakeTimers();
 
       sendCue(router, state, {
-        type: 'live_mix_start',
-        activeTrackIndices: [0, 4, 8],
+        type: 'quilt_playback_start',
+        initialColumn: 0,
+        trackIndices: [0, 4, 8],
       });
 
       // Advance past waitForOSC timeout and flush microtasks
@@ -567,6 +564,57 @@ describe('AudioRouter', () => {
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 8, 0);
       jest.useRealTimers();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // quilt_column_change (V3.3)
+  // --------------------------------------------------------------------------
+
+  describe('quilt_column_change', () => {
+    test('mutes outgoing and unmutes incoming tracks at column boundary', () => {
+      sendCue(router, state, {
+        type: 'quilt_column_change',
+        columnIndex: 1,
+        trackChanges: [
+          { granularType: 'bass', muteTrack: 2, unmuteTrack: 4 },
+          { granularType: 'drums', muteTrack: null, unmuteTrack: 6 },
+        ],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // mute outgoing
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0); // unmute incoming
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // unmute new
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // quilt_mute_cell / quilt_unmute_cell (V3.3)
+  // --------------------------------------------------------------------------
+
+  describe('quilt_mute_cell', () => {
+    test('mutes the specified track', () => {
+      sendCue(router, state, {
+        type: 'quilt_mute_cell',
+        granularType: 'bass',
+        columnIndex: 0,
+        trackIndex: 4,
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
+    });
+  });
+
+  describe('quilt_unmute_cell', () => {
+    test('unmutes the specified track', () => {
+      sendCue(router, state, {
+        type: 'quilt_unmute_cell',
+        granularType: 'bass',
+        columnIndex: 0,
+        trackIndex: 4,
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
     });
   });
 

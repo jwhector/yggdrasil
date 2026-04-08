@@ -61,11 +61,24 @@ function createTestConfig(
     ],
     finale: {
       assignmentMode: 'auto',
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        columnTiming: 'divided' as const,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     granularTypes: [
       { id: 'bass', label: 'Bass', color: '#000', symbol: '■' },
@@ -159,7 +172,7 @@ describe('Show Phase Transitions', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 15; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -178,7 +191,8 @@ describe('Show Phase Transitions', () => {
       'attempt_resolve',     // attempt 2
       'finale_elegy',
       'finale_assignment',
-      'finale_live_mix',
+      'finale_preview',
+      'finale_playback',
       'ended',
     ]);
   });

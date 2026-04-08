@@ -20,7 +20,7 @@ import type {
   ShowConfig,
   V32AttemptConfig,
   V32LayerConfig,
-  V32FinaleState,
+  V33FinaleState,
 } from '../../conductor/types';
 
 // ============================================================================
@@ -61,11 +61,23 @@ function createTestConfig(): ShowConfig {
     ],
     finale: {
       assignmentMode: 'auto',
-      assignmentTimerMs: 30000,
       bothOptionsSurvive: true,
-      crossSongConstraint: false,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
+      quilt: {
+        maxColumns: 4,
+        loopBars: 8,
+        overflowMode: 'spectator' as const,
+        previewTimerMs: 20000,
+        assignmentTimerMs: 30000,
+        audienceRemix: {
+          enabled: true,
+          scope: 'own_cell' as const,
+          allowCrossRowSwaps: true,
+          cooldownLoops: 1,
+          allowSongChange: false,
+        },
+      },
     },
     timing: {
       revealSequenceDurationMs: 5000,
@@ -88,26 +100,32 @@ function advanceToBuild(state: ShowState): void {
   processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
 }
 
-function makeMinimalFinaleState(timerRemaining: number | null = null): V32FinaleState {
+function makeMinimalFinaleState(timerRemaining: number | null = null): V33FinaleState {
   return {
     phase: 'assignment',
     availableFragments: [],
     allFragments: [],
+    quilt: {
+      rows: 6,
+      columns: 1,
+      barsPerCell: 8,
+      cells: new Map(),
+      columnOrder: [0],
+      playheadColumn: 0,
+      loopCount: 0,
+    },
+    availableSongs: [0, 1, 2],
+    trackMap: new Map(),
     assignment: {
       mode: timerRemaining !== null ? 'self_select' : 'auto',
-      groups: new Map(),
       timerRemaining,
     },
-    liveMix: {
-      votes: new Map(),
-      activeFragments: new Map(),
-      lockedTypes: [],
-
-      performerOverrides: new Map(),
+    preview: { lockedInUsers: new Set(), timerRemaining: null },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
       liveTracksActive: [],
-      transportStarted: false,
-      loopPosition: 0,
-      loopCount: 0,
     },
     npc: { currentMessage: null },
   };
@@ -470,11 +488,12 @@ describe('TimingEngine', () => {
     test('fires ASSIGNMENT_COMPLETE when self-select assignment timer expires', () => {
       state.phase = 'finale_assignment';
       state.finaleState = makeMinimalFinaleState(30000);
-      state.config.finale.assignmentTimerMs = 30000;
+      state.config.finale.quilt.assignmentTimerMs = 30000;
 
       timingEngine.onStateChanged(state, [{
         type: 'ASSIGNMENT_STARTED',
         mode: 'self_select',
+        quiltDimensions: { rows: 6, columns: 1 },
       }]);
 
       expect(sendCommand).not.toHaveBeenCalled();
@@ -491,6 +510,7 @@ describe('TimingEngine', () => {
       timingEngine.onStateChanged(state, [{
         type: 'ASSIGNMENT_STARTED',
         mode: 'auto',
+        quiltDimensions: { rows: 6, columns: 1 },
       }]);
 
       jest.advanceTimersByTime(60000);
@@ -498,20 +518,20 @@ describe('TimingEngine', () => {
       expect(sendCommand).not.toHaveBeenCalled();
     });
 
-    test('timer cleared on GROUPS_ASSIGNED', () => {
+    test('timer cleared on ALL_CELLS_ASSIGNED', () => {
       state.phase = 'finale_assignment';
       state.finaleState = makeMinimalFinaleState(30000);
-      state.config.finale.assignmentTimerMs = 30000;
+      state.config.finale.quilt.assignmentTimerMs = 30000;
 
       timingEngine.onStateChanged(state, [{
         type: 'ASSIGNMENT_STARTED',
         mode: 'self_select',
+        quiltDimensions: { rows: 6, columns: 1 },
       }]);
 
-      // Groups assigned early (force end)
+      // All cells assigned early (force end)
       timingEngine.onStateChanged(state, [{
-        type: 'GROUPS_ASSIGNED',
-        groups: new Map(),
+        type: 'ALL_CELLS_ASSIGNED',
       }]);
 
       jest.advanceTimersByTime(30000);
@@ -521,7 +541,7 @@ describe('TimingEngine', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Loop Boundary (Live Mix — fallback mode, stub)
+  // Loop Boundary (Playback — fallback mode, stub)
   // --------------------------------------------------------------------------
 
   describe('loop boundary (fallback mode)', () => {
@@ -534,27 +554,26 @@ describe('TimingEngine', () => {
       timingEngine.start();
     });
 
-    test('loop tracking starts on live_mix phase (stub — no commands yet)', () => {
-      state.phase = 'finale_live_mix';
+    test('loop tracking fires ADVANCE_QUILT_COLUMN on playback phase', () => {
+      state.phase = 'finale_playback';
 
       timingEngine.onStateChanged(state, [{
         type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_live_mix',
+        phase: 'finale_playback',
       }]);
 
       // 8 bars × 4 beats/bar × (60000ms / 120bpm) = 16000ms
       jest.advanceTimersByTime(16000);
 
-      // Stub: no command sent yet (live mix task will add this)
-      expect(sendCommand).not.toHaveBeenCalled();
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_QUILT_COLUMN' });
     });
 
     test('stops loop tracking on show phase change', () => {
-      state.phase = 'finale_live_mix';
+      state.phase = 'finale_playback';
 
       timingEngine.onStateChanged(state, [{
         type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_live_mix',
+        phase: 'finale_playback',
       }]);
 
       // Phase changes away
@@ -571,7 +590,7 @@ describe('TimingEngine', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Loop Boundary (Live Mix — OSC mode, stub)
+  // Loop Boundary (Playback — OSC mode, stub)
   // --------------------------------------------------------------------------
 
   describe('loop boundary (OSC mode)', () => {
@@ -590,12 +609,12 @@ describe('TimingEngine', () => {
       timingEngine.start();
     });
 
-    test('loop tracking starts on live_mix phase (stub — no commands yet)', () => {
-      state.phase = 'finale_live_mix';
+    test('loop tracking fires ADVANCE_QUILT_COLUMN on playback phase', () => {
+      state.phase = 'finale_playback';
 
       timingEngine.onStateChanged(state, [{
         type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_live_mix',
+        phase: 'finale_playback',
       }]);
 
       // Beat 1 sets baseline
@@ -604,14 +623,13 @@ describe('TimingEngine', () => {
         timingEngine.onOSCMessage('/live/song/get/beat', [i]);
       }
 
-      // Stub: no command sent yet (live mix task will add this)
-      expect(sendCommand).not.toHaveBeenCalled();
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_QUILT_COLUMN' });
     });
 
     test('does not fire loop boundary when in attempt_build phase', () => {
       advanceToBuild(state);
 
-      // Loop state not started (no SHOW_PHASE_CHANGED to finale_live_mix)
+      // Loop state not started (no SHOW_PHASE_CHANGED to finale_playback)
       for (let i = 1; i <= 64; i++) {
         timingEngine.onOSCMessage('/live/song/get/beat', [i]);
       }

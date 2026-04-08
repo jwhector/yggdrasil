@@ -373,20 +373,7 @@ async function main() {
         return cleanup;
       }
     : undefined;
-  // Compute live loop position from timing engine beat tracking
-  const getLoopPosition = (): number => {
-    if (!timingEngine) return 0;
-    const bp = timingEngine.getCurrentBeatPosition();
-    if (!bp) return 0;
-    const loopBeats = getState().config.timing.loopBoundaryBeats || 32;
-    if (bp.rawBeat !== undefined) {
-      return bp.rawBeat / loopBeats;
-    }
-    const beatsIntoLoop = bp.barInLoop * 4 + bp.beatInBar;
-    return Math.min(beatsIntoLoop / loopBeats, 1);
-  };
-
-  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter, onBridgeConnect, getLoopPosition);
+  setupSocketHandlers(io, getState, setState, persistence, createNewShow, audioRouter, onBridgeConnect);
 
   // Start OSC bridge and timing engine
   try {
@@ -429,7 +416,7 @@ async function main() {
       const state = getState();
 
       // Only backup during active show phases
-      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assignment', 'finale_live_mix'];
+      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback'];
       if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);

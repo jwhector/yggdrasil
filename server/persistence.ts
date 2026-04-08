@@ -195,6 +195,45 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    name: 'v33_quilt_tables',
+    up: (db) => {
+      // V3.3: Quilt cell state (replaces finale_assignments)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS finale_quilt_cells (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          cell_id TEXT NOT NULL,
+          owner_id TEXT,
+          song_index INTEGER,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id),
+          UNIQUE(show_id, cell_id)
+        )
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_finale_quilt_cells_show ON finale_quilt_cells(show_id)
+      `);
+
+      // V3.3: Remix events (replaces finale_mix_events)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS finale_remix_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          user_id TEXT,
+          event_type TEXT NOT NULL CHECK(event_type IN ('move', 'reorder', 'swap', 'lock', 'unlock', 'mute', 'unmute', 'override')),
+          payload JSON NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id)
+        )
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_finale_remix_events_show ON finale_remix_events(show_id)
+      `);
+    },
+  },
 ];
 
 /**
@@ -229,10 +268,12 @@ export interface PersistenceLayer {
   getLatestShow(): ShowState | null;
   saveLayerVote(vote: LayerVote, showId: ShowId): void;
   saveUser(user: User, showId: ShowId): void;
-  saveFinaleAssignment(showId: ShowId, userId: UserId, granularType: string, autoAssigned: boolean): void;
-  getFinaleAssignments(showId: ShowId): Array<{ userId: UserId; granularType: string; autoAssigned: boolean }>;
-  saveMixEvent(showId: ShowId, userId: UserId, granularType: string, fragmentId: string, eventType: string): void;
-  getMixEvents(showId: ShowId): Array<{ userId: UserId; granularType: string; fragmentId: string; eventType: string; createdAt: string }>;
+  // V3.3: Quilt cell persistence
+  saveQuiltCell(showId: ShowId, cellId: string, userId: UserId, songIndex: number | null): void;
+  getQuiltCells(showId: ShowId): Array<{ cellId: string; userId: UserId; songIndex: number | null }>;
+  // V3.3: Remix event persistence (audience + performer actions)
+  saveRemixEvent(showId: ShowId, userId: UserId | null, eventType: string, payload: string): void;
+  getRemixEvents(showId: ShowId): Array<{ userId: UserId | null; eventType: string; payload: string; createdAt: string }>;
   getUsersByShow(showId: ShowId): Pick<User, 'id' | 'seatId'>[];
   close(): void;
 }
@@ -290,22 +331,28 @@ export function createPersistence(dbPath: string): PersistenceLayer {
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    insertFinaleAssignment: db.prepare(`
-      INSERT INTO finale_assignments (show_id, user_id, granular_type, auto_assigned, created_at)
+    // V3.3: Quilt cells — upsert on (show_id, cell_id)
+    upsertQuiltCell: db.prepare(`
+      INSERT INTO finale_quilt_cells (show_id, cell_id, owner_id, song_index, created_at, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(show_id, cell_id) DO UPDATE SET
+        owner_id = excluded.owner_id,
+        song_index = excluded.song_index,
+        updated_at = CURRENT_TIMESTAMP
+    `),
+
+    getQuiltCells: db.prepare(`
+      SELECT cell_id, owner_id, song_index FROM finale_quilt_cells WHERE show_id = ?
+    `),
+
+    // V3.3: Remix events
+    insertRemixEvent: db.prepare(`
+      INSERT INTO finale_remix_events (show_id, user_id, event_type, payload, created_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
 
-    getFinaleAssignments: db.prepare(`
-      SELECT user_id, granular_type, auto_assigned FROM finale_assignments WHERE show_id = ?
-    `),
-
-    insertMixEvent: db.prepare(`
-      INSERT INTO finale_mix_events (show_id, user_id, granular_type, fragment_id, event_type, created_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `),
-
-    getMixEvents: db.prepare(`
-      SELECT user_id, granular_type, fragment_id, event_type, created_at FROM finale_mix_events WHERE show_id = ? ORDER BY created_at ASC
+    getRemixEvents: db.prepare(`
+      SELECT user_id, event_type, payload, created_at FROM finale_remix_events WHERE show_id = ? ORDER BY created_at ASC
     `),
   };
 
@@ -371,48 +418,45 @@ export function createPersistence(dbPath: string): PersistenceLayer {
     },
 
     /**
-     * Save a user's granular type assignment during finale.
-     * autoAssigned = true when auto-mode or timer expired.
+     * Save or update a quilt cell (V3.3).
      */
-    saveFinaleAssignment(showId: ShowId, userId: UserId, granularType: string, autoAssigned: boolean): void {
-      stmts.insertFinaleAssignment.run(showId, userId, granularType, autoAssigned ? 1 : 0);
+    saveQuiltCell(showId: ShowId, cellId: string, userId: UserId, songIndex: number | null): void {
+      stmts.upsertQuiltCell.run(showId, cellId, userId, songIndex);
     },
 
     /**
-     * Get all finale assignments for a show (for recovery).
+     * Get all quilt cells for a show (for recovery).
      */
-    getFinaleAssignments(showId: ShowId): Array<{ userId: UserId; granularType: string; autoAssigned: boolean }> {
-      const rows = stmts.getFinaleAssignments.all(showId) as Array<{
-        user_id: UserId;
-        granular_type: string;
-        auto_assigned: number;
+    getQuiltCells(showId: ShowId): Array<{ cellId: string; userId: UserId; songIndex: number | null }> {
+      const rows = stmts.getQuiltCells.all(showId) as Array<{
+        cell_id: string;
+        owner_id: UserId;
+        song_index: number | null;
       }>;
-      return rows.map(r => ({ userId: r.user_id, granularType: r.granular_type, autoAssigned: r.auto_assigned === 1 }));
+      return rows.map(r => ({ cellId: r.cell_id, userId: r.owner_id, songIndex: r.song_index }));
     },
 
     /**
-     * Save a live mix event (preference change, lock, unlock, override).
+     * Save a remix event (V3.3 — audience moves + performer operations).
      */
-    saveMixEvent(showId: ShowId, userId: UserId, granularType: string, fragmentId: string, eventType: string): void {
-      stmts.insertMixEvent.run(showId, userId, granularType, fragmentId, eventType);
+    saveRemixEvent(showId: ShowId, userId: UserId | null, eventType: string, payload: string): void {
+      stmts.insertRemixEvent.run(showId, userId, eventType, payload);
     },
 
     /**
-     * Get all mix events for a show (for recovery / analysis).
+     * Get all remix events for a show (for recovery / analysis).
      */
-    getMixEvents(showId: ShowId): Array<{ userId: UserId; granularType: string; fragmentId: string; eventType: string; createdAt: string }> {
-      const rows = stmts.getMixEvents.all(showId) as Array<{
-        user_id: UserId;
-        granular_type: string;
-        fragment_id: string;
+    getRemixEvents(showId: ShowId): Array<{ userId: UserId | null; eventType: string; payload: string; createdAt: string }> {
+      const rows = stmts.getRemixEvents.all(showId) as Array<{
+        user_id: UserId | null;
         event_type: string;
+        payload: string;
         created_at: string;
       }>;
       return rows.map(r => ({
         userId: r.user_id,
-        granularType: r.granular_type,
-        fragmentId: r.fragment_id,
         eventType: r.event_type,
+        payload: r.payload,
         createdAt: r.created_at,
       }));
     },

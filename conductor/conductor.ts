@@ -1,5 +1,5 @@
 /**
- * Conductor — Pure State Machine (V3.2)
+ * Conductor — Pure State Machine (V3.3)
  *
  * The conductor is the heart of the system. It receives commands, validates them,
  * updates state, and emits events. It has no I/O — all side effects are handled
@@ -9,7 +9,7 @@
  *
  * Show flow:
  *   lobby → opener → (attempt_story → attempt_build → attempt_resolve) ×3 →
- *   finale_elegy → finale_assignment → finale_live_mix → ended
+ *   finale_elegy → finale_assignment → finale_preview → finale_playback → ended
  *
  * Song-building layer flow:
  *   locked → auditioning → revealing → locked_in | collapsed
@@ -33,18 +33,51 @@ import type {
   UserId,
   SeatId,
   User,
-  V32FinaleState,
+  V33FinaleState,
   V32LayerConfig,
   TrackBundle,
   GranularType,
+  ArcConfig,
+  ArcPhase,
+  QuiltCell,
 } from './types';
-import { MUTE_FRAGMENT_ID } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import { generateGranularFragments } from './fragments';
 import { getNpcMessage } from './npc';
-import { autoAssign, initializeSelfSelect, selectGranularType, assignUndecided } from './assignment';
-import { getActiveFragment } from './live-mix';
+import {
+  createQuiltGrid,
+  claimCell as quiltClaimCell,
+  releaseCell as quiltReleaseCell,
+  setCellSong as quiltSetCellSong,
+  lockInChoice as quiltLockInChoice,
+  assignDefaultSongs,
+  assignRemainingUsers,
+  moveCell as quiltMoveCell,
+  changeCellSong as quiltChangeCellSong,
+  reorderColumn as quiltReorderColumn,
+  swapCells as quiltSwapCells,
+  lockCell as quiltLockCell,
+  unlockCell as quiltUnlockCell,
+  muteCell as quiltMuteCell,
+  unmuteCell as quiltUnmuteCell,
+  overrideCellSong as quiltOverrideCellSong,
+  advancePlayhead as quiltAdvancePlayhead,
+  peekNextColumn as quiltPeekNextColumn,
+  resolveTrack,
+  buildTrackMap,
+  deriveAvailableSongs,
+  findUserCell,
+} from './quilt';
+import {
+  computeBarsPerCell,
+  computeArcSchedule,
+  initArcState,
+  sortGrid,
+  applyPositionMap,
+  resolveAllTracksForRows,
+  resolveTracksForRows,
+} from './quilt-arc';
 
 // ============================================================================
 // State Initialization
@@ -59,6 +92,7 @@ export const DEFAULT_GAIN_CONFIG = {
   lockInFadeBeats: 8,
   collapseFadeBeats: 8,
   ceremonySwellBeats: 4,
+  crossfadeBeats: 1,
   unityGainValue: 0.5,
   stepsPerBeat: 2,
 } as const;
@@ -164,29 +198,67 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Finale
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
-    // Assignment
+    case 'ELEGY_OPT_IN':
+      return handleElegyOptIn(state, command.userId);
+    // Assignment (V3.3: cell claiming)
     case 'START_ASSIGNMENT':
       return handleStartAssignment(state);
-    case 'SELECT_GRANULAR_TYPE':
-      return handleSelectGranularType(state, command.userId, command.granularType);
+    case 'CLAIM_CELL':
+      return handleClaimCell(state, command.userId, command.cellId);
+    case 'RELEASE_CELL':
+      return handleReleaseCell(state, command.userId);
     case 'ASSIGNMENT_COMPLETE':
       return handleAssignmentComplete(state);
     case 'SEND_NPC_MESSAGE':
       return handleSendNpcMessage(state, command.message);
 
-    // Live Mix
-    case 'START_LIVE_MIX':
-      return handleStartLiveMix(state);
-    case 'SET_LIVE_MIX_PREFERENCE':
-      return handleSetLiveMixPreference(state, command.userId, command.granularType, command.fragmentId);
-    case 'LOCK_GRANULAR_TYPE':
-      return handleLockGranularType(state, command.granularType);
-    case 'UNLOCK_GRANULAR_TYPE':
-      return handleUnlockGranularType(state, command.granularType);
-    case 'OVERRIDE_FRAGMENT':
-      return handleOverrideFragment(state, command.granularType, command.fragmentId);
-    case 'CLEAR_OVERRIDE':
-      return handleClearOverride(state, command.granularType);
+    // Preview (V3.3)
+    case 'START_PREVIEW':
+      return handleStartPreview(state);
+    case 'SET_CELL_SONG':
+      return handleSetCellSong(state, command.userId, command.songIndex);
+    case 'LOCK_IN_CHOICE':
+      return handleLockInChoice(state, command.userId);
+    case 'PREVIEW_COMPLETE':
+      return handlePreviewComplete(state);
+
+    // Playback & Remix (V3.3)
+    case 'START_PLAYBACK':
+      return handleStartPlayback(state);
+    case 'PREPARE_COLUMN_CROSSFADE':
+      return handlePrepareColumnCrossfade(state);
+    case 'ADVANCE_QUILT_COLUMN':
+      return handleAdvanceQuiltColumn(state);
+    case 'MOVE_CELL':
+      return handleMoveCell(state, command.userId, command.targetCellId);
+    case 'CHANGE_CELL_SONG':
+      return handleChangeCellSong(state, command.userId, command.songIndex);
+    case 'REORDER_COLUMN':
+      return handleReorderColumn(state, command.fromIndex, command.toIndex);
+    case 'SWAP_CELLS':
+      return handleSwapCells(state, command.cellIdA, command.cellIdB);
+    case 'LOCK_CELL':
+      return handleLockCell(state, command.cellId);
+    case 'UNLOCK_CELL':
+      return handleUnlockCell(state, command.cellId);
+    case 'MUTE_CELL':
+      return handleMuteCell(state, command.cellId);
+    case 'UNMUTE_CELL':
+      return handleUnmuteCell(state, command.cellId);
+    case 'OVERRIDE_CELL_SONG':
+      return handleOverrideCellSong(state, command.cellId, command.songIndex);
+
+    // Arc (V3.3: automated playback arc)
+    case 'ARC_ENTRY_ROW_GROUP':
+      return handleArcEntryRowGroup(state, command.groupIndex);
+    case 'ARC_EXIT_ROW_GROUP':
+      return handleArcExitRowGroup(state, command.groupIndex);
+    case 'ARC_COMPLETE':
+      return handleArcComplete(state);
+    case 'TRIGGER_SORT':
+      return handleTriggerSort(state);
+    case 'SIMULATE_FINALE_GRID':
+      return handleSimulateFinaleGrid(state, command.audienceCount);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -246,7 +318,8 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'attempt_resolve',     // attempt 2
   'finale_elegy',
   'finale_assignment',
-  'finale_live_mix',
+  'finale_preview',
+  'finale_playback',
   'ended',
 ];
 
@@ -327,8 +400,9 @@ function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number 
     case 'attempt_resolve': return 4 + attemptIndex * 3;
     case 'finale_elegy': return 11;
     case 'finale_assignment': return 12;
-    case 'finale_live_mix': return 13;
-    case 'ended': return 14;
+    case 'finale_preview': return 13;
+    case 'finale_playback': return 14;
+    case 'ended': return 15;
     default: return -1;
   }
 }
@@ -383,8 +457,12 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     events.push(...handleStartAssignment(state));
   }
 
-  if (nextPhase === 'finale_live_mix' && state.finaleState) {
-    events.push(...handleStartLiveMix(state));
+  if (nextPhase === 'finale_preview' && state.finaleState) {
+    events.push(...handleStartPreview(state));
+  }
+
+  if (nextPhase === 'finale_playback' && state.finaleState) {
+    events.push(...handleStartPlayback(state));
   }
 
   events.push({
@@ -1263,33 +1341,60 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
   );
   const availableFragments = allFragments.filter(f => f.wonVote);
 
+  // Grid creation is deferred to handleStartAssignment (sized by opt-in count).
+  // Create a minimal placeholder grid (1 cell) so the quilt field is never undefined.
+  const granularTypes = state.config.granularTypes ?? [];
+  const placeholderGrid = createQuiltGrid(1, config.quilt, granularTypes);
+
   state.finaleState = {
     phase: 'elegy',
     availableFragments,
     allFragments,
+    elegyOptedIn: new Set(),
+    quilt: placeholderGrid,
+    availableSongs: [],
+    trackMap: new Map(),
     assignment: {
       mode: config.assignmentMode,
-      groups: new Map(),
       timerRemaining: null,
     },
-    liveMix: {
-      votes: new Map(),
-      activeFragments: new Map(),
-      lockedTypes: [],
-      performerOverrides: new Map(),
+    preview: {
+      lockedInUsers: new Set(),
+      timerRemaining: null,
+    },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
       liveTracksActive: [],
-      transportStarted: false,
-      loopPosition: 0,
-      loopCount: 0,
     },
     npc: { currentMessage: null },
+    arc: null,
   };
+
+  // Derive available songs and track map from fragments
+  state.finaleState.availableSongs = deriveAvailableSongs(state.finaleState);
+  state.finaleState.trackMap = buildTrackMap(state.finaleState);
 
   return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments, allFragments }];
 }
 
+function handleElegyOptIn(state: ShowState, userId: UserId): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'elegy') return [{ type: 'ERROR', message: 'Opt-in only during elegy phase' }];
+  if (state.finaleState.elegyOptedIn.has(userId)) return []; // Already opted in
+
+  state.finaleState.elegyOptedIn.add(userId);
+
+  return [{
+    type: 'ELEGY_OPT_IN_RECEIVED',
+    userId,
+    totalOptedIn: state.finaleState.elegyOptedIn.size,
+  }];
+}
+
 // ============================================================================
-// Assignment Handlers
+// Assignment Handlers (V3.3 — cell claiming)
 // ============================================================================
 
 function handleStartAssignment(state: ShowState): ConductorEvent[] {
@@ -1298,56 +1403,845 @@ function handleStartAssignment(state: ShowState): ConductorEvent[] {
   const config = state.config.finale;
   const granularTypes = state.config.granularTypes ?? [];
 
-  if (config.assignmentMode === 'auto') {
-    const groups = autoAssign(state.users, granularTypes);
-    state.finaleState.assignment = { mode: 'auto', groups, timerRemaining: null };
-    state.finaleState.phase = 'assignment';
+  // Create the real quilt grid now, sized by opt-in count (or all connected users as fallback)
+  const optInCount = state.finaleState.elegyOptedIn.size;
+  const audienceSize = optInCount > 0 ? optInCount : countConnectedUsers(state);
+  state.finaleState.quilt = createQuiltGrid(audienceSize, config.quilt, granularTypes);
 
-    const events: ConductorEvent[] = [
-      { type: 'ASSIGNMENT_STARTED', mode: 'auto' },
-      { type: 'GROUPS_ASSIGNED', groups },
-    ];
-    const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
-    if (npcMsg) {
-      state.finaleState.npc.currentMessage = npcMsg;
-      events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-    }
-    return events;
-  } else {
-    const assignment = initializeSelfSelect(granularTypes, config.assignmentTimerMs);
-    state.finaleState.assignment = assignment;
-    state.finaleState.phase = 'assignment';
+  state.finaleState.phase = 'assignment';
+  state.finaleState.assignment.mode = config.assignmentMode;
 
-    const events: ConductorEvent[] = [{ type: 'ASSIGNMENT_STARTED', mode: 'self_select' }];
-    const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
-    if (npcMsg) {
-      state.finaleState.npc.currentMessage = npcMsg;
-      events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-    }
-    return events;
+  if (config.assignmentMode === 'self_select') {
+    state.finaleState.assignment.timerRemaining = config.quilt.assignmentTimerMs;
   }
-}
 
-function handleSelectGranularType(state: ShowState, userId: UserId, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.assignment.mode !== 'self_select') {
-    return [{ type: 'ERROR', message: 'Cannot select type in auto-assignment mode' }];
+  const quilt = state.finaleState.quilt;
+  const events: ConductorEvent[] = [
+    { type: 'ASSIGNMENT_STARTED', mode: config.assignmentMode, quiltDimensions: { rows: quilt.rows, columns: quilt.columns } },
+  ];
+  const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
+  if (npcMsg) {
+    state.finaleState.npc.currentMessage = npcMsg;
+    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
   }
-  selectGranularType(state.finaleState.assignment, userId, granularType);
-  return [{ type: 'GROUPS_ASSIGNED', groups: state.finaleState.assignment.groups }];
+  return events;
 }
 
 function handleAssignmentComplete(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.assignment.mode === 'self_select') {
-    const connectedUserIds: UserId[] = [];
-    for (const [userId, user] of state.users) {
-      if (user.connected) connectedUserIds.push(userId);
-    }
-    const granularTypes = state.config.granularTypes ?? [];
-    assignUndecided(state.finaleState.assignment, connectedUserIds, granularTypes);
+
+  const events: ConductorEvent[] = [];
+
+  // Assign remaining unclaimed users to empty cells
+  const claimedUserIds = new Set<UserId>();
+  for (const cell of state.finaleState.quilt.cells.values()) {
+    if (cell.ownerId) claimedUserIds.add(cell.ownerId);
   }
-  return [{ type: 'GROUPS_ASSIGNED', groups: state.finaleState.assignment.groups }];
+  const unclaimedUserIds: UserId[] = [];
+  for (const [userId, user] of state.users) {
+    if (user.connected && !claimedUserIds.has(userId)) {
+      unclaimedUserIds.push(userId);
+    }
+  }
+
+  if (unclaimedUserIds.length > 0) {
+    const result = assignRemainingUsers(state.finaleState.quilt, unclaimedUserIds);
+    for (const assignment of result.assignments) {
+      events.push({ type: 'CELL_CLAIMED', cellId: assignment.cellId, userId: assignment.userId });
+    }
+  }
+
+  state.finaleState.assignment.timerRemaining = null;
+  events.push({ type: 'ALL_CELLS_ASSIGNED' });
+  return events;
+}
+
+// ============================================================================
+// Cell Claiming (Assignment Phase)
+// ============================================================================
+
+function handleClaimCell(state: ShowState, userId: UserId, cellId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'assignment') {
+    return [{ type: 'ERROR', message: 'Can only claim cells during assignment phase' }];
+  }
+
+  const result = quiltClaimCell(state.finaleState.quilt, userId, cellId);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  return [{ type: 'CELL_CLAIMED', cellId, userId }];
+}
+
+function handleReleaseCell(state: ShowState, userId: UserId): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'assignment') {
+    return [{ type: 'ERROR', message: 'Can only release cells during assignment phase' }];
+  }
+
+  const cell = findUserCell(state.finaleState.quilt, userId);
+  if (!cell) return [{ type: 'ERROR', message: `User ${userId} does not own any cell` }];
+
+  const result = quiltReleaseCell(state.finaleState.quilt, userId);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  return [{ type: 'CELL_RELEASED', cellId: cell.id }];
+}
+
+// ============================================================================
+// Preview Phase
+// ============================================================================
+
+function handleStartPreview(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  state.finaleState.phase = 'preview';
+  state.finaleState.preview.timerRemaining = state.config.finale.quilt.previewTimerMs;
+
+  const events: ConductorEvent[] = [{ type: 'PREVIEW_STARTED' }];
+  const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'preview_start');
+  if (npcMsg) {
+    state.finaleState.npc.currentMessage = npcMsg;
+    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
+  }
+  return events;
+}
+
+function handleSetCellSong(state: ShowState, userId: UserId, songIndex: number): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'preview') {
+    return [{ type: 'ERROR', message: 'Can only set song during preview phase' }];
+  }
+  if (state.finaleState.preview.lockedInUsers.has(userId)) {
+    return [{ type: 'ERROR', message: 'User already locked in' }];
+  }
+
+  const result = quiltSetCellSong(
+    state.finaleState.quilt, userId, songIndex, state.finaleState.availableSongs,
+  );
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  const cell = findUserCell(state.finaleState.quilt, userId)!;
+  return [{ type: 'CELL_SONG_SET', cellId: cell.id, songIndex }];
+}
+
+function handleLockInChoice(state: ShowState, userId: UserId): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'preview') {
+    return [{ type: 'ERROR', message: 'Can only lock in during preview phase' }];
+  }
+
+  const result = quiltLockInChoice(
+    state.finaleState.quilt, userId, state.finaleState.preview.lockedInUsers,
+  );
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+  if (result.alreadyLocked) return [];
+
+  return [{ type: 'USER_LOCKED_IN', userId }];
+}
+
+function handlePreviewComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  // Assign default songs to users who didn't choose
+  assignDefaultSongs(state.finaleState.quilt, state.finaleState.availableSongs);
+  state.finaleState.preview.timerRemaining = null;
+
+  return [];
+}
+
+// ============================================================================
+// Playback Phase
+// ============================================================================
+
+function handleStartPlayback(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  state.finaleState.phase = 'playback';
+  state.finaleState.quilt.playheadColumn = state.finaleState.quilt.columnOrder[0] ?? 0;
+
+  const events: ConductorEvent[] = [];
+  const quilt = state.finaleState.quilt;
+  const trackMap = state.finaleState.trackMap;
+  const mutedCells = state.finaleState.remix.mutedCells;
+  const arcConfig = state.config.finale.quilt.arc;
+
+  // Initialize arc if enabled
+  if (arcConfig?.enabled) {
+    const schedule = computeArcSchedule(quilt.columns, arcConfig);
+    state.finaleState.arc = initArcState(schedule);
+
+    // Only unmute first entry group's tracks (staggered entry)
+    const firstGroup = arcConfig.entrySchedule[0];
+    if (firstGroup) {
+      const initialTrackIndices = resolveAllTracksForRows(
+        quilt.cells, trackMap, firstGroup.granularTypes, mutedCells,
+      );
+
+      state.finaleState.arc.enteredRowGroups.push(0);
+
+      events.push({
+        type: 'PLAYBACK_STARTED',
+        quilt: new Map(quilt.cells),
+        columnOrder: [...quilt.columnOrder],
+      });
+
+      events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'entry' });
+
+      events.push({
+        type: 'ARC_ROW_GROUP_ENTERED',
+        granularTypes: firstGroup.granularTypes,
+      });
+
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: {
+          type: 'quilt_playback_start',
+          initialColumn: quilt.playheadColumn,
+          trackIndices: initialTrackIndices,
+        },
+      });
+
+      // If only one entry group, transition straight to raw
+      if (arcConfig.entrySchedule.length === 1) {
+        state.finaleState.arc.phase = 'raw';
+        events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'raw' });
+      }
+    }
+  } else {
+    // No arc — unmute all tracks at once (original behavior)
+    const initialTrackIndices: number[] = [];
+    for (const cell of quilt.cells.values()) {
+      if (cell.columnIndex === quilt.playheadColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+        const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+        if (trackIndex !== null) initialTrackIndices.push(trackIndex);
+      }
+    }
+
+    events.push({
+      type: 'PLAYBACK_STARTED',
+      quilt: new Map(quilt.cells),
+      columnOrder: [...quilt.columnOrder],
+    });
+
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'quilt_playback_start',
+        initialColumn: quilt.playheadColumn,
+        trackIndices: initialTrackIndices,
+      },
+    });
+  }
+
+  const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'first_playback');
+  if (npcMsg) {
+    state.finaleState.npc.currentMessage = npcMsg;
+    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
+  }
+
+  return events;
+}
+
+/**
+ * Fires crossfadeBeats before the column boundary.
+ * Peeks at the next column, computes track diffs, and emits audio cues
+ * so the crossfade completes by the time the boundary arrives.
+ * Does NOT advance the playhead.
+ */
+function handlePrepareColumnCrossfade(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
+
+  const quilt = state.finaleState.quilt;
+  const trackMap = state.finaleState.trackMap;
+  const mutedCells = state.finaleState.remix.mutedCells;
+  const currentColumn = quilt.playheadColumn;
+  const nextColumn = quiltPeekNextColumn(quilt);
+
+  if (currentColumn === nextColumn) return []; // Single column — no crossfade needed
+
+  const enteredTypes = getEnteredGranularTypes(state);
+
+  // Current column's active tracks
+  const currentTracks = new Map<string, number>();
+  for (const cell of quilt.cells.values()) {
+    if (cell.columnIndex === currentColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
+      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndex !== null) currentTracks.set(cell.granularType, trackIndex);
+    }
+  }
+
+  // Next column's active tracks
+  const nextTracks = new Map<string, number>();
+  for (const cell of quilt.cells.values()) {
+    if (cell.columnIndex === nextColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
+      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndex !== null) nextTracks.set(cell.granularType, trackIndex);
+    }
+  }
+
+  // Compute track changes
+  const trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] = [];
+  const allTypes = new Set([...currentTracks.keys(), ...nextTracks.keys()]);
+  for (const gt of allTypes) {
+    const prev = currentTracks.get(gt) ?? null;
+    const next = nextTracks.get(gt) ?? null;
+    if (prev !== next) {
+      trackChanges.push({ granularType: gt, muteTrack: prev, unmuteTrack: next });
+    }
+  }
+
+  if (trackChanges.length === 0) return [];
+
+  return [{
+    type: 'AUDIO_CUE',
+    cue: { type: 'quilt_column_change', columnIndex: nextColumn, trackChanges },
+  }];
+}
+
+function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
+
+  const quilt = state.finaleState.quilt;
+  const arc = state.finaleState.arc;
+
+  // Advance playhead
+  const { columnIndex, loopWrapped } = quiltAdvancePlayhead(quilt);
+
+  // Track grid loop completion for arc + trigger phase transitions
+  const arcPhaseEvents: ConductorEvent[] = [];
+  if (loopWrapped && arc && arc.phase !== 'complete') {
+    arc.gridLoopsInPhase++;
+
+    // Raw phase complete: after 1 grid loop, trigger sort
+    if (arc.phase === 'raw' && arc.gridLoopsInPhase >= 1) {
+      arcPhaseEvents.push(...handleArcRawComplete(state));
+    }
+    // Sorted playback: after each grid loop, check if pass/phase is done
+    else if (arc.phase === 'sorted_playback') {
+      arcPhaseEvents.push(...handleArcSortComplete(state));
+    }
+  }
+
+  const events: ConductorEvent[] = [];
+
+  events.push({ type: 'PLAYHEAD_ADVANCED', columnIndex });
+
+  // Append arc phase transition events (sort applied, phase changed, etc.)
+  events.push(...arcPhaseEvents);
+
+  return events;
+}
+
+/**
+ * Get the set of granular types that have entered during the arc.
+ * Returns null if arc is not active (meaning all types are active).
+ */
+function getEnteredGranularTypes(state: ShowState): Set<string> | null {
+  const arc = state.finaleState?.arc;
+  if (!arc) return null;
+
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return null;
+
+  // After entry phase, all types are active
+  if (arc.phase !== 'entry') return null;
+
+  const entered = new Set<string>();
+  for (const groupIndex of arc.enteredRowGroups) {
+    const group = arcConfig.entrySchedule[groupIndex];
+    if (group) {
+      for (const gt of group.granularTypes) {
+        entered.add(gt);
+      }
+    }
+  }
+  return entered;
+}
+
+// ============================================================================
+// Arc Handlers (V3.3: Automated Playback Arc)
+// ============================================================================
+
+function handleArcEntryRowGroup(state: ShowState, groupIndex: number): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'entry') return [];
+
+  const group = arcConfig.entrySchedule[groupIndex];
+  if (!group) return [{ type: 'ERROR', message: `Invalid entry group index: ${groupIndex}` }];
+
+  // Skip if already entered
+  if (arc.enteredRowGroups.includes(groupIndex)) return [];
+
+  arc.enteredRowGroups.push(groupIndex);
+
+  const trackIndices = resolveAllTracksForRows(
+    state.finaleState.quilt.cells,
+    state.finaleState.trackMap,
+    group.granularTypes,
+    state.finaleState.remix.mutedCells,
+  );
+
+  const events: ConductorEvent[] = [];
+
+  events.push({ type: 'ARC_ROW_GROUP_ENTERED', granularTypes: group.granularTypes });
+
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: { type: 'quilt_row_unmute', granularTypes: group.granularTypes, trackIndices },
+  });
+
+  // Check if all entry groups have entered
+  if (arc.enteredRowGroups.length >= arcConfig.entrySchedule.length) {
+    arc.phase = 'raw';
+    arc.gridLoopsInPhase = 0;
+    events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'raw' });
+  }
+
+  return events;
+}
+
+function handleArcRawComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'raw') return [];
+
+  const events: ConductorEvent[] = [];
+
+  // Snapshot cells before sort
+  const previousCells = new Map<string, QuiltCell>();
+  for (const [id, cell] of state.finaleState.quilt.cells) {
+    previousCells.set(id, { ...cell });
+  }
+
+  // Apply first sort
+  const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
+  const mode = arc.schedule.sortMode === 'single_pass' ? 'single' as const : 'multi' as const;
+  const targetEnergy = mode === 'multi' ? arcConfig.multiPassTargets[0] : undefined;
+
+  const positionMap = sortGrid(
+    state.finaleState.quilt.cells,
+    state.finaleState.quilt.columns,
+    state.finaleState.quilt.rows,
+    arcConfig,
+    mode,
+    targetEnergy,
+  );
+
+  applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+
+  arc.phase = 'sorted_playback';
+  arc.currentPassIndex = 0;
+  arc.gridLoopsInPhase = 0;
+
+  events.push({ type: 'ARC_SORT_APPLIED', passIndex: 0, previousCells });
+  events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'sorted_playback' });
+
+  return events;
+}
+
+function handleArcSortComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'sorted_playback') return [];
+
+  const events: ConductorEvent[] = [];
+
+  // Multi-pass: check if there are more passes
+  if (arc.schedule.sortMode === 'multi_pass') {
+    const nextPassIndex = arc.currentPassIndex + 1;
+
+    if (nextPassIndex < arc.schedule.sortedPassCount) {
+      // Re-sort for next pass
+      const previousCells = new Map<string, QuiltCell>();
+      for (const [id, cell] of state.finaleState.quilt.cells) {
+        previousCells.set(id, { ...cell });
+      }
+
+      const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
+      const targetEnergy = arcConfig.multiPassTargets[nextPassIndex] ?? 0.5;
+
+      const positionMap = sortGrid(
+        state.finaleState.quilt.cells,
+        state.finaleState.quilt.columns,
+        state.finaleState.quilt.rows,
+        arcConfig,
+        'multi',
+        targetEnergy,
+      );
+
+      applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+
+      arc.currentPassIndex = nextPassIndex;
+      arc.gridLoopsInPhase = 0;
+
+      events.push({ type: 'ARC_SORT_APPLIED', passIndex: nextPassIndex, previousCells });
+      return events;
+    }
+  }
+
+  // All passes done (or single-pass) → transition to exit
+  arc.phase = 'exit';
+  arc.gridLoopsInPhase = 0;
+  events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'exit' });
+
+  return events;
+}
+
+function handleArcExitRowGroup(state: ShowState, groupIndex: number): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+
+  const arc = state.finaleState.arc;
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig?.enabled) return [];
+  if (arc.phase !== 'exit') return [];
+
+  const group = arcConfig.exitSchedule[groupIndex];
+  if (!group) return [{ type: 'ERROR', message: `Invalid exit group index: ${groupIndex}` }];
+
+  // Skip if already exited
+  if (arc.exitedRowGroups.includes(groupIndex)) return [];
+
+  arc.exitedRowGroups.push(groupIndex);
+
+  const trackIndices = resolveAllTracksForRows(
+    state.finaleState.quilt.cells,
+    state.finaleState.trackMap,
+    group.granularTypes,
+    state.finaleState.remix.mutedCells,
+  );
+
+  const events: ConductorEvent[] = [];
+
+  events.push({ type: 'ARC_ROW_GROUP_EXITED', granularTypes: group.granularTypes });
+
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: { type: 'quilt_row_mute', granularTypes: group.granularTypes, trackIndices },
+  });
+
+  // Check if all exit groups have exited
+  if (arc.exitedRowGroups.length >= arcConfig.exitSchedule.length) {
+    arc.phase = 'complete';
+    events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'complete' });
+  }
+
+  return events;
+}
+
+function handleArcComplete(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState?.arc) return [];
+
+  state.finaleState.arc.phase = 'complete';
+  return [{ type: 'ARC_PHASE_CHANGED', arcPhase: 'complete' }];
+}
+
+function handleTriggerSort(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState || state.finaleState.phase !== 'playback') {
+    return [{ type: 'ERROR', message: 'Can only sort during playback' }];
+  }
+
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig) return [{ type: 'ERROR', message: 'Arc config not found' }];
+
+  // Snapshot cells before sort
+  const previousCells = new Map(
+    [...state.finaleState.quilt.cells].map(([id, cell]) => [id, { ...cell }]),
+  );
+
+  const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
+
+  const positionMap = sortGrid(
+    state.finaleState.quilt.cells,
+    state.finaleState.quilt.columns,
+    state.finaleState.quilt.rows,
+    arcConfig,
+    'single',
+  );
+
+  if (positionMap.size === 0) {
+    return []; // Nothing to sort
+  }
+
+  applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+
+  return [{ type: 'ARC_SORT_APPLIED', passIndex: 0, previousCells }];
+}
+
+/**
+ * Simulate a populated finale grid for testing. Creates a quilt grid sized for
+ * the given audience count, fills it with fake users and random song choices,
+ * and sets up finale state ready for playback. Skips elegy/assignment/preview.
+ */
+function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): ConductorEvent[] {
+  const config = state.config.finale;
+  const granularTypes = state.config.granularTypes ?? [];
+
+  // Create the grid
+  const quiltGrid = createQuiltGrid(audienceCount, config.quilt, granularTypes);
+
+  // Build fragments from actual config option A tracks (real Ableton track indices)
+  const attemptConfigs = state.config.attempts;
+  const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
+  const availableFragments: import('./types').GranularFragment[] = [];
+
+  for (let songIndex = 0; songIndex < attemptConfigs.length; songIndex++) {
+    const attemptConfig = attemptConfigs[songIndex];
+    const chapter = chapters[songIndex] ?? 'ambition';
+
+    // Extract option A tracks from each layer
+    for (const layerConfig of attemptConfig.layers) {
+      for (const track of layerConfig.optionA.tracks) {
+        availableFragments.push({
+          id: `sim-${songIndex}-${layerConfig.group}-${track.granularType}-A`,
+          songIndex,
+          layerGroupId: layerConfig.group,
+          granularType: track.granularType,
+          option: 'A',
+          chapter,
+          trackIndices: track.trackIndices,
+          wonVote: true,
+          previewAudioPath: '',
+        });
+      }
+    }
+
+    // Include live seed tracks
+    if (attemptConfig.liveSeed?.trackIndices?.length) {
+      availableFragments.push({
+        id: `sim-${songIndex}-seed-seed-A`,
+        songIndex,
+        layerGroupId: 'seed',
+        granularType: 'seed',
+        option: 'A',
+        chapter,
+        trackIndices: attemptConfig.liveSeed.trackIndices,
+        wonVote: true,
+        previewAudioPath: '',
+      });
+    }
+  }
+
+  // Initialize finale state
+  state.finaleState = {
+    phase: 'playback',
+    availableFragments,
+    allFragments: availableFragments,
+    elegyOptedIn: new Set(),
+    quilt: quiltGrid,
+    availableSongs: [0, 1, 2],
+    trackMap: new Map(),
+    assignment: { mode: 'auto', timerRemaining: null },
+    preview: { lockedInUsers: new Set(), timerRemaining: null },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
+      liveTracksActive: [],
+    },
+    npc: { currentMessage: null },
+    arc: null,
+  };
+
+  // Build track map from synthetic fragments
+  state.finaleState.trackMap = buildTrackMap(state.finaleState);
+
+  // Fill cells with fake users and random song choices
+  const availableSongs = [0, 1, 2];
+  let userIndex = 0;
+  for (const cell of quiltGrid.cells.values()) {
+    if (userIndex < audienceCount) {
+      cell.ownerId = `sim-user-${userIndex}`;
+      const randomSong = availableSongs[Math.floor(Math.random() * availableSongs.length)];
+      cell.songIndex = randomSong;
+      cell.chapter = chapters[randomSong];
+      userIndex++;
+    }
+    // Remaining cells stay empty (null owner, null song) — valid silent cells
+  }
+
+  // Set up playhead
+  quiltGrid.playheadColumn = quiltGrid.columnOrder[0] ?? 0;
+
+  const events: ConductorEvent[] = [];
+
+  events.push({
+    type: 'PLAYBACK_STARTED',
+    quilt: new Map(quiltGrid.cells),
+    columnOrder: [...quiltGrid.columnOrder],
+  });
+
+  return events;
+}
+
+// ============================================================================
+// Audience Remix (Playback Phase)
+// ============================================================================
+
+function handleMoveCell(state: ShowState, userId: UserId, targetCellId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'playback') {
+    return [{ type: 'ERROR', message: 'Can only move cells during playback phase' }];
+  }
+
+  const sourceCell = findUserCell(state.finaleState.quilt, userId);
+  if (!sourceCell) return [{ type: 'ERROR', message: `User ${userId} does not own any cell` }];
+  const fromPosition = { row: sourceCell.rowIndex, col: sourceCell.columnIndex };
+
+  const targetCell = state.finaleState.quilt.cells.get(targetCellId);
+  const swappedWithCellId = targetCell?.ownerId ? targetCellId : null;
+
+  const result = quiltMoveCell(
+    state.finaleState.quilt,
+    userId,
+    targetCellId,
+    state.config.finale.quilt.audienceRemix,
+    state.finaleState.remix.lockedCells,
+    state.finaleState.remix.lastMoveByUser,
+    state.finaleState.quilt.loopCount,
+  );
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  // After swap, the source cell has moved to the target position
+  const movedCell = findUserCell(state.finaleState.quilt, userId)!;
+  return [{
+    type: 'CELL_MOVED',
+    cellId: movedCell.id,
+    fromPosition,
+    toPosition: { row: movedCell.rowIndex, col: movedCell.columnIndex },
+    swappedWithCellId,
+  }];
+}
+
+function handleChangeCellSong(state: ShowState, userId: UserId, songIndex: number): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'playback') {
+    return [{ type: 'ERROR', message: 'Can only change song during playback phase' }];
+  }
+
+  const result = quiltChangeCellSong(
+    state.finaleState.quilt,
+    userId,
+    songIndex,
+    state.config.finale.quilt.audienceRemix,
+    state.finaleState.availableSongs,
+    state.finaleState.remix.lockedCells,
+  );
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  const cell = findUserCell(state.finaleState.quilt, userId)!;
+  return [{ type: 'CELL_SONG_SET', cellId: cell.id, songIndex }];
+}
+
+// ============================================================================
+// Performer Remix (Playback Phase)
+// ============================================================================
+
+function handleReorderColumn(state: ShowState, fromIndex: number, toIndex: number): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'playback') {
+    return [{ type: 'ERROR', message: 'Can only reorder columns during playback phase' }];
+  }
+
+  const result = quiltReorderColumn(state.finaleState.quilt, fromIndex, toIndex);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  return [
+    { type: 'COLUMN_REORDERED', columnOrder: [...state.finaleState.quilt.columnOrder] },
+    { type: 'AUDIO_CUE', cue: { type: 'quilt_reorder', newColumnOrder: [...state.finaleState.quilt.columnOrder] } },
+  ];
+}
+
+function handleSwapCells(state: ShowState, cellIdA: string, cellIdB: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'playback') {
+    return [{ type: 'ERROR', message: 'Can only swap cells during playback phase' }];
+  }
+
+  const result = quiltSwapCells(state.finaleState.quilt, cellIdA, cellIdB);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  return [{ type: 'CELLS_SWAPPED', cellIdA, cellIdB }];
+}
+
+function handleLockCell(state: ShowState, cellId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = quiltLockCell(state.finaleState.remix.lockedCells, cellId, state.finaleState.quilt);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
+
+  return [{ type: 'CELL_LOCKED', cellId }];
+}
+
+function handleUnlockCell(state: ShowState, cellId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = quiltUnlockCell(state.finaleState.remix.lockedCells, cellId);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
+
+  return [{ type: 'CELL_UNLOCKED', cellId }];
+}
+
+function handleMuteCell(state: ShowState, cellId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = quiltMuteCell(state.finaleState.remix.mutedCells, cellId, state.finaleState.quilt);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
+
+  const cell = state.finaleState.quilt.cells.get(cellId);
+  const events: ConductorEvent[] = [{ type: 'CELL_MUTED', cellId }];
+  if (cell && cell.songIndex !== null) {
+    const trackIndex = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
+    if (trackIndex !== null) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'quilt_mute_cell', granularType: cell.granularType, columnIndex: cell.columnIndex, trackIndex },
+      });
+    }
+  }
+  return events;
+}
+
+function handleUnmuteCell(state: ShowState, cellId: string): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = quiltUnmuteCell(state.finaleState.remix.mutedCells, cellId);
+  if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
+
+  const cell = state.finaleState.quilt.cells.get(cellId);
+  const events: ConductorEvent[] = [{ type: 'CELL_UNMUTED', cellId }];
+  if (cell && cell.songIndex !== null) {
+    const trackIndex = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
+    if (trackIndex !== null) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'quilt_unmute_cell', granularType: cell.granularType, columnIndex: cell.columnIndex, trackIndex },
+      });
+    }
+  }
+  return events;
+}
+
+function handleOverrideCellSong(state: ShowState, cellId: string, songIndex: number): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = quiltOverrideCellSong(
+    state.finaleState.quilt, cellId, songIndex, state.finaleState.availableSongs,
+  );
+  if (!result.ok) return [{ type: 'ERROR', message: result.error }];
+
+  return [{ type: 'CELL_SONG_SET', cellId, songIndex }];
 }
 
 function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent[] {
@@ -1357,238 +2251,21 @@ function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent
 }
 
 // ============================================================================
-// Live Mix Handlers
-// ============================================================================
-
-function handleStartLiveMix(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  state.finaleState.phase = 'live_mix';
-
-  // Live mix starts muted — no initial fragments, no pre-set votes.
-  // Audio begins when a group first reaches majority on a fragment.
-  // The very first group to activate triggers Ableton transport.
-  state.finaleState.liveMix.activeFragments = new Map();
-  state.finaleState.liveMix.transportStarted = false;
-
-  // Initialize empty vote maps per granular type
-  for (const [granularType] of state.finaleState.assignment.groups) {
-    state.finaleState.liveMix.votes.set(granularType, new Map());
-  }
-
-  const events: ConductorEvent[] = [
-    { type: 'LIVE_MIX_STARTED', initialFragments: new Map() },
-  ];
-
-  const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'live_mix_start');
-  if (npcMsg) {
-    state.finaleState.npc.currentMessage = npcMsg;
-    events.push({ type: 'NPC_MESSAGE', message: npcMsg });
-  }
-
-  return events;
-}
-
-function handleSetLiveMixPreference(
-  state: ShowState,
-  userId: UserId,
-  granularType: string,
-  fragmentId: string,
-): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-
-  // Validate: user is assigned to this granular type
-  const members = fs.assignment.groups.get(granularType);
-  if (!members || !members.includes(userId)) {
-    return [{ type: 'ERROR', message: `User ${userId} is not assigned to ${granularType}` }];
-  }
-
-  // Validate: type is not locked
-  if (fs.liveMix.lockedTypes.includes(granularType)) {
-    return [{ type: 'ERROR', message: `${granularType} is locked` }];
-  }
-
-  // Validate: fragment exists in available fragments for this type (MUTE_FRAGMENT_ID is always valid)
-  const validFragment = fragmentId === MUTE_FRAGMENT_ID
-    || fs.availableFragments.some(f => f.id === fragmentId && f.granularType === granularType)
-    || (state.config.finale.bothOptionsSurvive && fs.allFragments.some(f => f.id === fragmentId && f.granularType === granularType));
-  if (!validFragment) {
-    return [{ type: 'ERROR', message: `Fragment ${fragmentId} not available for ${granularType}` }];
-  }
-
-  // Update vote
-  let typeVotes = fs.liveMix.votes.get(granularType);
-  if (!typeVotes) {
-    typeVotes = new Map();
-    fs.liveMix.votes.set(granularType, typeVotes);
-  }
-  typeVotes.set(userId, { fragmentId, timestamp: Date.now() });
-
-  // Recalculate active fragment for this type (skip if overridden)
-  if (fs.liveMix.performerOverrides.has(granularType)) {
-    return []; // Override takes precedence, vote is recorded but doesn't change audio
-  }
-
-  const newActive = getActiveFragment(typeVotes);
-  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-
-  if (newActive && newActive !== previousActive) {
-    fs.liveMix.activeFragments.set(granularType, newActive);
-
-    const events: ConductorEvent[] = [
-      { type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' },
-    ];
-
-    // First group to activate triggers Ableton transport (mute votes don't count)
-    if (!fs.liveMix.transportStarted && !previousActive && newActive !== MUTE_FRAGMENT_ID) {
-      fs.liveMix.transportStarted = true;
-      events.push({ type: 'AUDIO_CUE', cue: { type: 'transport', action: 'play' } });
-    }
-
-    // Crossfade audio — handle mute transitions
-    const outFrag = (previousActive && previousActive !== MUTE_FRAGMENT_ID)
-      ? fs.allFragments.find(f => f.id === previousActive)
-      : null;
-    const inFrag = (newActive !== MUTE_FRAGMENT_ID)
-      ? fs.allFragments.find(f => f.id === newActive)
-      : null;
-
-    if (inFrag || outFrag) {
-      events.push({
-        type: 'AUDIO_CUE',
-        cue: {
-          type: 'live_mix_crossfade',
-          granularType,
-          incomingTrackIndices: inFrag?.trackIndices ?? [],
-          outgoingTrackIndices: outFrag?.trackIndices ?? [],
-        },
-      });
-    }
-
-    return events;
-  }
-
-  return []; // Vote recorded, no majority shift
-}
-
-function handleLockGranularType(state: ShowState, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  if (fs.liveMix.lockedTypes.includes(granularType)) {
-    return []; // Already locked
-  }
-
-  fs.liveMix.lockedTypes.push(granularType);
-  return [{ type: 'GRANULAR_TYPE_LOCKED', granularType }];
-}
-
-function handleUnlockGranularType(state: ShowState, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  const idx = fs.liveMix.lockedTypes.indexOf(granularType);
-  if (idx === -1) return []; // Not locked
-
-  fs.liveMix.lockedTypes.splice(idx, 1);
-  const events: ConductorEvent[] = [{ type: 'GRANULAR_TYPE_UNLOCKED', granularType }];
-
-  // Recalculate — audience votes may have shifted while locked
-  if (!fs.liveMix.performerOverrides.has(granularType)) {
-    const typeVotes = fs.liveMix.votes.get(granularType);
-    if (typeVotes) {
-      const newActive = getActiveFragment(typeVotes);
-      const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-
-      if (newActive && newActive !== previousActive) {
-        fs.liveMix.activeFragments.set(granularType, newActive);
-        events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' });
-
-        const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
-        const inFrag = fs.allFragments.find(f => f.id === newActive);
-        if (inFrag) {
-          events.push({
-            type: 'AUDIO_CUE',
-            cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
-          });
-        }
-      }
-    }
-  }
-
-  return events;
-}
-
-function handleOverrideFragment(state: ShowState, granularType: string, fragmentId: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  fs.liveMix.performerOverrides.set(granularType, fragmentId);
-
-  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-  const events: ConductorEvent[] = [];
-
-  if (fragmentId !== previousActive) {
-    fs.liveMix.activeFragments.set(granularType, fragmentId);
-    events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId, previousFragmentId: previousActive ?? '' });
-
-    const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
-    const inFrag = fs.allFragments.find(f => f.id === fragmentId);
-    if (inFrag) {
-      events.push({
-        type: 'AUDIO_CUE',
-        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
-      });
-    }
-  }
-
-  return events;
-}
-
-function handleClearOverride(state: ShowState, granularType: string): ConductorEvent[] {
-  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'live_mix') return [{ type: 'ERROR', message: 'Not in live_mix phase' }];
-
-  const fs = state.finaleState;
-  if (!fs.liveMix.performerOverrides.has(granularType)) return [];
-
-  fs.liveMix.performerOverrides.delete(granularType);
-
-  // Recalculate from votes
-  const typeVotes = fs.liveMix.votes.get(granularType);
-  const newActive = typeVotes ? getActiveFragment(typeVotes) : null;
-  const previousActive = fs.liveMix.activeFragments.get(granularType) ?? null;
-  const events: ConductorEvent[] = [];
-
-  if (newActive && newActive !== previousActive) {
-    fs.liveMix.activeFragments.set(granularType, newActive);
-    events.push({ type: 'ACTIVE_FRAGMENT_CHANGED', granularType, fragmentId: newActive, previousFragmentId: previousActive ?? '' });
-
-    const outFrag = previousActive ? fs.allFragments.find(f => f.id === previousActive) : null;
-    const inFrag = fs.allFragments.find(f => f.id === newActive);
-    if (inFrag) {
-      events.push({
-        type: 'AUDIO_CUE',
-        cue: { type: 'live_mix_crossfade', granularType, incomingTrackIndices: inFrag.trackIndices, outgoingTrackIndices: outFrag?.trackIndices ?? [] },
-      });
-    }
-  }
-
-  return events;
-}
-
-// ============================================================================
 // Utilities
 // ============================================================================
 
 /** Get the current attempt, or null if none. */
 function currentAttempt(state: ShowState): AttemptState | null {
   return state.attempts[state.currentAttemptIndex] ?? null;
+}
+
+/** Count connected users. */
+function countConnectedUsers(state: ShowState): number {
+  let count = 0;
+  for (const user of state.users.values()) {
+    if (user.connected) count++;
+  }
+  return count;
 }
 
 /** Get the TrackBundle for the given option on the current layer. */
