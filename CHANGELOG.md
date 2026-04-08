@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## 2026-04-07 — V3.3 Phase 2: Quilt conductor logic
+
+Pure conductor implementation for the V3.3 Quilt finale. All functions are pure (no I/O) and fully tested.
+
+### New: `conductor/quilt.ts`
+- `createQuiltGrid()` — initializes grid (6 rows × N columns) scaled to audience size
+- Cell claiming: `claimCell`, `releaseCell`, `assignRemainingUsers`
+- Preview: `setCellSong`, `lockInChoice`, `assignDefaultSongs`
+- Audience remix: `moveCell` (validates scope, cooldown, cross-row, locked cells), `changeCellSong`
+- Performer operations: `reorderColumn`, `swapCells`, `lockCell/unlockCell`, `muteCell/unmuteCell`, `overrideCellSong`
+- Track resolution: `resolveTrack(trackMap, granularType, songIndex) → trackIndex`
+- Playhead: `advancePlayhead` (follows columnOrder, wraps with loopCount)
+- Helpers: `buildTrackMap`, `deriveAvailableSongs`, `deriveColumnCount`
+
+### Updated: `conductor/conductor.ts`
+- All V3.3 command handlers wired up (CLAIM_CELL, RELEASE_CELL, SET_CELL_SONG, LOCK_IN_CHOICE, START_PREVIEW, PREVIEW_COMPLETE, START_PLAYBACK, MOVE_CELL, CHANGE_CELL_SONG, REORDER_COLUMN, SWAP_CELLS, LOCK_CELL, UNLOCK_CELL, MUTE_CELL, UNMUTE_CELL, OVERRIDE_CELL_SONG)
+- Phase transitions: finale_assignment → finale_preview → finale_playback auto-triggered on ADVANCE_PHASE
+- SETUP_FINALE now initializes quilt grid from audience size, derives availableSongs and trackMap from fragments
+- ASSIGNMENT_COMPLETE assigns remaining unclaimed users to empty cells
+
+### Rewritten: `conductor/assignment.ts`
+- V3.3 cell-claiming model: `autoAssignCells` (round-robin into quilt grid), `getUnclaimedUsers`
+- Old V3.2 type-group assignment functions removed
+
+### Deleted: `conductor/live-mix.ts`
+- V3.2 majority voting / recency tiebreak logic removed (replaced by quilt cell logic)
+
+### Tests
+- New: `conductor/__tests__/quilt.test.ts` — 56 tests covering all quilt pure functions
+- Rewritten: `conductor/__tests__/assignment.test.ts` — 9 tests for V3.3 cell assignment
+- Deleted: `conductor/__tests__/live-mix.test.ts`
+- All 331 tests passing across 12 suites, `tsc --noEmit` clean
+
+### Types
+- Added `CELL_UNLOCKED` event to `ConductorEvent` union
+
 ## 2026-04-07 — V3.3 "Quilt" finale redesign — context setup
 
 Spec installed as `docs/finale.md`. The V3.2 live mix finale is replaced by the Quilt model: a grid where rows = granular types, columns = time slices, and each cell holds a song choice (0, 1, 2). New phases: `finale_preview` (private exploration) + `finale_playback` (quilt plays + remix). See `V33-MIGRATION-PLAN.md` for implementation phases.

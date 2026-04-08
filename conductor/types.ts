@@ -483,6 +483,7 @@ export type ConductorEvent =
   | { type: 'COLUMN_REORDERED'; columnOrder: number[] }
   | { type: 'CELLS_SWAPPED'; cellIdA: string; cellIdB: string }
   | { type: 'CELL_LOCKED'; cellId: string }
+  | { type: 'CELL_UNLOCKED'; cellId: string }
   | { type: 'CELL_MUTED'; cellId: string }
   | { type: 'CELL_UNMUTED'; cellId: string }
 
