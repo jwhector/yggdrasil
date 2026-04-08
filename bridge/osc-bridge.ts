@@ -24,7 +24,7 @@ dotenvConfig({ path: resolve(process.cwd(), '.env') });
 
 import * as dgram from 'dgram';
 import { io, Socket } from 'socket.io-client';
-import { encodeOSCMessage, encodeOSCBundle, decodeOSCMessage } from '../lib/osc-codec';
+import { encodeOSCMessage, decodeOSCMessage } from '../lib/osc-codec';
 
 // Configuration
 const SERVER_URL = process.env.SERVER_URL;
@@ -114,24 +114,6 @@ socket.on('osc_send', (data: { address: string; args: any[] }) => {
   }
 });
 
-// Listen for OSC bundles from server → encode as single UDP packet to Ableton
-socket.on('osc_send_bundle', (data: { messages: { address: string; args: any[] }[] }) => {
-  if (!data?.messages?.length) return;
-
-  messagesSent += data.messages.length;
-  console.log(`[Bridge] Server → Ableton: bundle with ${data.messages.length} messages`);
-
-  try {
-    const buffer = encodeOSCBundle(data.messages);
-    sendSocket.send(buffer, OSC_SEND_PORT, ABLETON_HOST, (err) => {
-      if (err) {
-        console.error('[Bridge] UDP bundle send error:', err);
-      }
-    });
-  } catch (err) {
-    console.error('[Bridge] Bundle encode error:', err);
-  }
-});
 
 // ============================================================================
 // Start UDP receive socket

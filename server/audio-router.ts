@@ -244,34 +244,26 @@ export function createAudioRouter(
   function setGain(trackIndex: number, gain: number): void {
     const clampedGain = Math.max(0, Math.min(1, gain));
 
+    // Unmute before any audible gain (so session view shows track as active)
+    if (clampedGain > 0) {
+      unmuteTrack(trackIndex);
+    }
+
     const deviceInfo = routerState.deviceCache.get(trackIndex);
     if (deviceInfo) {
       // Map internal gain (0=silent, 1=full) to Ableton Utility range (-1=muted, 0=0dB)
       // Formula: oscValue = -1 + gain * (unityGainValue + 1)
       const oscValue = -1 + clampedGain * (currentGainConfig.unityGainValue + 1);
-
-      if (clampedGain > 0) {
-        // Bundle unmute + gain set into one atomic OSC packet
-        oscBridge.sendBundle([
-          { address: '/live/track/set/mute', args: [trackIndex, 0] },
-          { address: '/live/device/set/parameter/value', args: [trackIndex, deviceInfo.utilityDeviceIndex, deviceInfo.gainParamIndex, oscValue] },
-        ]);
-        routerState.unmutedTracks.add(trackIndex);
-      } else {
-        // Bundle gain-to-zero + mute into one atomic OSC packet
-        oscBridge.sendBundle([
-          { address: '/live/device/set/parameter/value', args: [trackIndex, deviceInfo.utilityDeviceIndex, deviceInfo.gainParamIndex, oscValue] },
-          { address: '/live/track/set/mute', args: [trackIndex, 1] },
-        ]);
-        routerState.unmutedTracks.delete(trackIndex);
-      }
+      oscBridge.send(
+        '/live/device/set/parameter/value',
+        trackIndex,
+        deviceInfo.utilityDeviceIndex,
+        deviceInfo.gainParamIndex,
+        oscValue,
+      );
     } else {
       // Fallback: no Utility device — mute/unmute is the only lever
-      if (clampedGain > 0) {
-        unmuteTrack(trackIndex);
-      } else {
-        muteTrack(trackIndex);
-      }
+      // (gain > 0 already unmuted above; gain === 0 will mute below)
       if (routerState.discoveryComplete) {
         console.warn(`[AudioRouter] Track ${trackIndex} has no cached Utility device — using mute/unmute fallback`);
       }
@@ -279,6 +271,11 @@ export function createAudioRouter(
 
     const gs = getOrCreateTrackGainState(trackIndex);
     gs.currentGain = clampedGain;
+
+    // Mute after gain reaches zero (so session view shows track as inactive)
+    if (clampedGain === 0) {
+      muteTrack(trackIndex);
+    }
   }
 
   /**
