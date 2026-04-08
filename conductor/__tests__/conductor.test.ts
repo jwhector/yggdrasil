@@ -67,6 +67,7 @@ function createTestConfig(
       quilt: {
         maxColumns: 4,
         loopBars: 8,
+        columnTiming: 'divided' as const,
         overflowMode: 'spectator' as const,
         previewTimerMs: 20000,
         assignmentTimerMs: 30000,

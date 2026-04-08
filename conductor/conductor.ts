@@ -79,6 +79,7 @@ export const DEFAULT_GAIN_CONFIG = {
   lockInFadeBeats: 8,
   collapseFadeBeats: 8,
   ceremonySwellBeats: 4,
+  crossfadeBeats: 1,
   unityGainValue: 0.5,
   stepsPerBeat: 2,
 } as const;
@@ -209,6 +210,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Playback & Remix (V3.3)
     case 'START_PLAYBACK':
       return handleStartPlayback(state);
+    case 'ADVANCE_QUILT_COLUMN':
+      return handleAdvanceQuiltColumn(state);
     case 'MOVE_CELL':
       return handleMoveCell(state, command.userId, command.targetCellId);
     case 'CHANGE_CELL_SONG':
@@ -1537,6 +1540,60 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
   if (npcMsg) {
     state.finaleState.npc.currentMessage = npcMsg;
     events.push({ type: 'NPC_MESSAGE', message: npcMsg });
+  }
+
+  return events;
+}
+
+function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
+
+  const quilt = state.finaleState.quilt;
+  const trackMap = state.finaleState.trackMap;
+  const mutedCells = state.finaleState.remix.mutedCells;
+  const previousColumn = quilt.playheadColumn;
+
+  // Build a map of granularType -> active trackIndex for the previous column
+  const previousTracks = new Map<string, number>();
+  for (const cell of quilt.cells.values()) {
+    if (cell.columnIndex === previousColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndex !== null) previousTracks.set(cell.granularType, trackIndex);
+    }
+  }
+
+  // Advance playhead
+  const { columnIndex } = quiltAdvancePlayhead(quilt);
+
+  // Build a map of granularType -> active trackIndex for the new column
+  const newTracks = new Map<string, number>();
+  for (const cell of quilt.cells.values()) {
+    if (cell.columnIndex === columnIndex && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndex !== null) newTracks.set(cell.granularType, trackIndex);
+    }
+  }
+
+  // Compute track changes: only include types where the track actually changed
+  const trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] = [];
+  const allTypes = new Set([...previousTracks.keys(), ...newTracks.keys()]);
+  for (const gt of allTypes) {
+    const prev = previousTracks.get(gt) ?? null;
+    const next = newTracks.get(gt) ?? null;
+    if (prev !== next) {
+      trackChanges.push({ granularType: gt, muteTrack: prev, unmuteTrack: next });
+    }
+  }
+
+  const events: ConductorEvent[] = [];
+
+  events.push({ type: 'PLAYHEAD_ADVANCED', columnIndex });
+
+  if (trackChanges.length > 0) {
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: { type: 'quilt_column_change', columnIndex, trackChanges },
+    });
   }
 
   return events;

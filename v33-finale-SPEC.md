@@ -99,11 +99,6 @@ Each cell owner's phone shows:
 
 The quilt plays through for the first time. By default, **song choices are locked** after preview (configurable via `audienceRemix.allowSongChange`). The loop starts from column 1 and plays left to right. At each column boundary, the active tracks per type switch according to each cell's song choice. Everyone hears the collective composition for the first time simultaneously.
 
-**Column timing** is configurable via `QuiltConfig.columnTiming`:
-- `'divided'` — All columns play within one loop. Advance interval = `loopBoundaryBeats / columns`. E.g., 4 columns in an 8-bar loop = 2 bars per column.
-- `'half_loop'` — Each column plays for half a loop. Advance interval = `loopBoundaryBeats / 2`. E.g., 4 columns take 2 full loops to cycle through.
-- `'full_loop'` — Each column gets a full loop. Advance interval = `loopBoundaryBeats`. E.g., 4 columns take 4 full loops to cycle through.
-
 The projector shows the quilt with a **playhead** sweeping left to right, highlighting the current column. Each cell glows with its chapter color (amber/coral/teal). The audience sees and hears their creation unfold.
 
 ### Audience Remix
@@ -140,7 +135,7 @@ The audience watches on the projector as their quilt gets rearranged in real tim
 - **Live seed / melody is a quilt row.** It is one of the 6 granular type rows (melody/seed), audience-controllable like all other types. Audience members can claim melody cells, choose a song, and move them around the grid like any other cell.
 - **Track resolution:** At each column boundary, the system resolves each cell's audio via `config.trackMap[granularType][songIndex]`. This lookup is position-dependent — if a cell has been swapped to a new row, the new row's granular type is used with the cell's song choice.
 - **Quantized changes:** All cell swaps and column reorders take effect at the next loop boundary.
-- **Crossfade on column transitions:** When the playhead crosses a column boundary and the track for a type changes, both the outgoing and incoming tracks fade simultaneously over `crossfadeBeats` (default: 1 beat). Both directions use `fadeGain()` so in-flight fades are cancelled cleanly if a track reappears mid-fade. Configurable via `GainConfig.crossfadeBeats`.
+- **Crossfade on column transitions:** When the playhead crosses a column boundary and the track for a type changes, a brief crossfade (configurable, default ~100ms) smooths the transition.
 - **Silent cells:** If a cell is empty or muted, that granular type is silent during that time slice. This is musically valid — silence is part of the composition.
 - **Ableton implementation:** At each column boundary, the system mutes/unmutes the appropriate tracks per type. Only one track per type is ever unmuted at a time within a column.
 
@@ -225,9 +220,8 @@ interface QuiltCell {
 ```typescript
 interface QuiltConfig {
   maxColumns: number;                              // Max time slices (default: 4, max: 8)
-  barsPerCell: number;                             // Derived: loopBars / columns
+  barsPerCell: number;                             // Derived: 8 / columns, or configurable
   loopBars: number;                                // Total loop length (default: 8)
-  columnTiming: 'divided' | 'half_loop' | 'full_loop'; // How fast the playhead advances (see below)
   overflowMode: 'spectator' | 'extend_loop';      // What happens when cells are full
   previewTimerMs: number;                          // Preview phase duration (default: 20000)
   assignmentTimerMs: number;                       // Assignment phase duration (default: 30000)
@@ -429,5 +423,5 @@ The quilt grid as a patchwork of chapter colors (amber/coral/teal). A **playhead
 
 ## Open Questions
 
-- [x] ~~Exact crossfade duration at column boundaries~~ — Implemented via `GainConfig.crossfadeBeats` (default: 1 beat). Both fade-out and fade-in use `fadeGain()` for smooth, cancellation-safe transitions.
+- [ ] Exact crossfade duration at column boundaries (needs playtesting — 0ms for hard cuts vs 100ms for smooth)
 - [ ] Projector and phone visual design for the quilt (modular, easy to iterate)

@@ -117,7 +117,7 @@ Each fragment clip must be exported as a standalone audio file for in-browser pr
 - Column reorder: no immediate audio change — takes effect at next column boundary (via `quilt_reorder` cue)
 - Performer mute/unmute: per-cell track control (via `quilt_mute_cell` / `quilt_unmute_cell` cues)
 - Track resolution: `trackMap[granularType][songIndex] → trackIndex` (config-driven lookup)
-- Crossfade at column boundaries: configurable duration (default ~100ms), smooths transitions
+- Crossfade at column boundaries: both outgoing and incoming tracks fade via `fadeGain()` over `GainConfig.crossfadeBeats` (default: 1 beat). In-flight fades are cancelled safely if a track reappears mid-fade.
 
 ### OSC Protocol
 

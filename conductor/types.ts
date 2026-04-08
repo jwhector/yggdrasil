@@ -323,6 +323,7 @@ export interface GainConfig {
   lockInFadeBeats: number;      // Beats to fade out the loser on lock-in (default 4)
   collapseFadeBeats: number;    // Beats to fade all attempt tracks on collapse (default 8)
   ceremonySwellBeats: number;   // Beats for ceremony fragment swell-in (default 4)
+  crossfadeBeats: number;       // Beats for quilt column crossfade — both fade-out and fade-in (default 1)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
   stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
 }
@@ -411,6 +412,7 @@ export type ConductorCommand =
 
   // Finale — Playback & Remix (V3.3)
   | { type: 'START_PLAYBACK' }
+  | { type: 'ADVANCE_QUILT_COLUMN' }
   | { type: 'MOVE_CELL'; userId: UserId; targetCellId: string }
   | { type: 'CHANGE_CELL_SONG'; userId: UserId; songIndex: number }
   | { type: 'REORDER_COLUMN'; fromIndex: number; toIndex: number }
@@ -643,6 +645,7 @@ export interface V33FinaleConfig {
 export interface QuiltConfig {
   maxColumns: number;                              // Max time slices (default: 4, max: 8)
   loopBars: number;                                // Total loop length (default: 8)
+  columnTiming: 'divided' | 'half_loop' | 'full_loop'; // 'divided' = all columns in one loop, 'half_loop' = each column is half a loop, 'full_loop' = one column per loop
   overflowMode: 'spectator' | 'extend_loop';      // What happens when cells are full
   previewTimerMs: number;                          // Preview phase duration (default: 20000)
   assignmentTimerMs: number;                       // Assignment phase duration (default: 30000)

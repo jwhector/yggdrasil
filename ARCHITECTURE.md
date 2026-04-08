@@ -463,6 +463,8 @@ test('performer lock prevents audience from changing granular type fragment', ..
 - **Preview phase** (`finale_preview`): Room is silent. Audience privately explores song options (1/2/3) for their cell via phone audio previews. Lock-in button commits choice.
 - **Playback & remix** (`finale_playback`): Quilt plays through. Configurable audience remix (move cells, swap positions, optionally change song choice). Performer can reorder columns, swap cells, lock/mute/override.
 - **Audience remix config** (`QuiltConfig.audienceRemix`): Master toggle, scope (own cell vs any cell), cross-row swaps, cooldown, song change permission. Allows rapid playtesting without code changes.
+- **Column timing** (`QuiltConfig.columnTiming`): `'divided'` (all columns in one loop), `'half_loop'` (each column = half a loop), or `'full_loop'` (each column = one full loop).
+- **Column crossfade** (`GainConfig.crossfadeBeats`): Both outgoing and incoming tracks fade simultaneously via `fadeGain()`. In-flight fades are cancelled safely if a track reappears mid-fade.
 
 ### Changed Systems
 - **Assignment**: From granular type group selection to quilt cell claiming. Same self-select/auto modes, but now claiming a specific grid position rather than a type group.

@@ -534,8 +534,15 @@ export function createTimingEngine(
   function startLoopTracking(): void {
     stopLoopTracking();
 
-    const loopBeats = configuredLoopBoundaryBeats;
-    const loopBars = configuredLoopBoundaryBeats / BEATS_PER_BAR;
+    const state = getState();
+    const columns = state.finaleState?.quilt.columns ?? 1;
+    const columnTiming = state.config.finale.quilt.columnTiming ?? 'divided';
+    const loopBeats = columnTiming === 'divided'
+      ? configuredLoopBoundaryBeats / columns
+      : columnTiming === 'half_loop'
+        ? configuredLoopBoundaryBeats / 2
+        : configuredLoopBoundaryBeats;
+    const loopBars = loopBeats / BEATS_PER_BAR;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
       // OSC mode: track beats
@@ -556,8 +563,7 @@ export function createTimingEngine(
           stopLoopTracking();
           return;
         }
-        // TODO: Live mix loop boundary handling (V3.2 live mix task)
-        console.log('[Timing] Loop boundary (live mix)');
+        sendCommand({ type: 'ADVANCE_QUILT_COLUMN' });
       }, intervalMs);
 
       console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
@@ -712,8 +718,7 @@ export function createTimingEngine(
     const beatsSinceBoundary = monotonicBeat - loopState.lastBoundaryBeat;
     if (beatsSinceBoundary >= loopState.loopBeats) {
       loopState.lastBoundaryBeat = monotonicBeat;
-      // TODO: Live mix loop boundary handling (V3.2 live mix task)
-      console.log(`[Timing] Loop boundary at monotonic beat ${monotonicBeat} (live mix)`);
+      sendCommand({ type: 'ADVANCE_QUILT_COLUMN' });
     }
   }
 

@@ -49,6 +49,7 @@ function makeConfig(overrides?: Partial<QuiltConfig>): QuiltConfig {
   return {
     maxColumns: 4,
     loopBars: 8,
+    columnTiming: 'divided',
     overflowMode: 'spectator',
     previewTimerMs: 20000,
     assignmentTimerMs: 30000,

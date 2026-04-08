@@ -66,6 +66,7 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   lockInFadeBeats: 4,
   collapseFadeBeats: 8,
   ceremonySwellBeats: 4,
+  crossfadeBeats: 1,
   unityGainValue: 0,
   stepsPerBeat: 2,
 };
@@ -243,41 +244,41 @@ export function createAudioRouter(
   function setGain(trackIndex: number, gain: number): void {
     const clampedGain = Math.max(0, Math.min(1, gain));
 
-    // Unmute before any audible gain (so session view shows track as active)
-    if (clampedGain > 0) {
-      unmuteTrack(trackIndex);
-    }
-
     const deviceInfo = routerState.deviceCache.get(trackIndex);
     if (deviceInfo) {
       // Map internal gain (0=silent, 1=full) to Ableton Utility range (-1=muted, 0=0dB)
       // Formula: oscValue = -1 + gain * (unityGainValue + 1)
       const oscValue = -1 + clampedGain * (currentGainConfig.unityGainValue + 1);
-      oscBridge.send(
-        '/live/device/set/parameter/value',
-        trackIndex,
-        deviceInfo.utilityDeviceIndex,
-        deviceInfo.gainParamIndex,
-        oscValue,
-      );
+
+      if (clampedGain > 0) {
+        // Bundle unmute + gain set into one atomic OSC packet
+        oscBridge.sendBundle([
+          { address: '/live/track/set/mute', args: [trackIndex, 0] },
+          { address: '/live/device/set/parameter/value', args: [trackIndex, deviceInfo.utilityDeviceIndex, deviceInfo.gainParamIndex, oscValue] },
+        ]);
+        routerState.unmutedTracks.add(trackIndex);
+      } else {
+        // Bundle gain-to-zero + mute into one atomic OSC packet
+        oscBridge.sendBundle([
+          { address: '/live/device/set/parameter/value', args: [trackIndex, deviceInfo.utilityDeviceIndex, deviceInfo.gainParamIndex, oscValue] },
+          { address: '/live/track/set/mute', args: [trackIndex, 1] },
+        ]);
+        routerState.unmutedTracks.delete(trackIndex);
+      }
     } else {
       // Fallback: no Utility device — mute/unmute is the only lever
-      // (gain > 0 already unmuted above; gain === 0 will mute below)
-      if (!routerState.discoveryComplete) {
-        // Discovery hasn't run; this is expected during startup
+      if (clampedGain > 0) {
+        unmuteTrack(trackIndex);
       } else {
-        // Discovery ran but this track has no Utility device
+        muteTrack(trackIndex);
+      }
+      if (routerState.discoveryComplete) {
         console.warn(`[AudioRouter] Track ${trackIndex} has no cached Utility device — using mute/unmute fallback`);
       }
     }
 
     const gs = getOrCreateTrackGainState(trackIndex);
     gs.currentGain = clampedGain;
-
-    // Mute after gain reaches zero (so session view shows track as inactive)
-    if (clampedGain === 0) {
-      muteTrack(trackIndex);
-    }
   }
 
   /**
@@ -867,15 +868,15 @@ export function createAudioRouter(
     }
   }
 
-  // V3.3: Quilt column change — mute/unmute tracks at column boundary
+  // V3.3: Quilt column change — crossfade tracks at column boundary
   function handleQuiltColumnChange(cue: Extract<AudioCue, { type: 'quilt_column_change' }>): void {
+    const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
     for (const change of cue.trackChanges) {
       if (change.muteTrack !== null) {
-        fadeGain(change.muteTrack, 0, currentGainConfig.lockInFadeBeats);
+        fadeGain(change.muteTrack, 0, xfadeBeats);
       }
       if (change.unmuteTrack !== null) {
-        unmuteTrack(change.unmuteTrack);
-        setGain(change.unmuteTrack, 1.0);
+        fadeGain(change.unmuteTrack, 1.0, xfadeBeats);
       }
     }
   }

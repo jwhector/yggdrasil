@@ -144,6 +144,7 @@ interface GainConfig {
   lockInFadeBeats: number;
   collapseFadeBeats: number;
   ceremonySwellBeats: number;    // Beats to swell ceremony-activated fragments
+  crossfadeBeats: number;        // Beats for quilt column crossfade (default: 1)
   unityGainValue: number;
   stepsPerBeat: number;
 }
