@@ -197,6 +197,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Finale
     case 'SETUP_FINALE':
       return handleSetupFinale(state);
+    case 'ELEGY_OPT_IN':
+      return handleElegyOptIn(state, command.userId);
     // Assignment (V3.3: cell claiming)
     case 'START_ASSIGNMENT':
       return handleStartAssignment(state);
@@ -1336,16 +1338,18 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
   );
   const availableFragments = allFragments.filter(f => f.wonVote);
 
+  // Grid creation is deferred to handleStartAssignment (sized by opt-in count).
+  // Create a minimal placeholder grid (1 cell) so the quilt field is never undefined.
   const granularTypes = state.config.granularTypes ?? [];
-  const audienceSize = countConnectedUsers(state);
-  const quiltGrid = createQuiltGrid(audienceSize, config.quilt, granularTypes);
+  const placeholderGrid = createQuiltGrid(1, config.quilt, granularTypes);
 
   state.finaleState = {
     phase: 'elegy',
     availableFragments,
     allFragments,
-    quilt: quiltGrid,
-    availableSongs: [], // Derived after state is set
+    elegyOptedIn: new Set(),
+    quilt: placeholderGrid,
+    availableSongs: [],
     trackMap: new Map(),
     assignment: {
       mode: config.assignmentMode,
@@ -1372,6 +1376,20 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
   return [{ type: 'FINALE_SETUP_COMPLETE', availableFragments, allFragments }];
 }
 
+function handleElegyOptIn(state: ShowState, userId: UserId): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'elegy') return [{ type: 'ERROR', message: 'Opt-in only during elegy phase' }];
+  if (state.finaleState.elegyOptedIn.has(userId)) return []; // Already opted in
+
+  state.finaleState.elegyOptedIn.add(userId);
+
+  return [{
+    type: 'ELEGY_OPT_IN_RECEIVED',
+    userId,
+    totalOptedIn: state.finaleState.elegyOptedIn.size,
+  }];
+}
+
 // ============================================================================
 // Assignment Handlers (V3.3 — cell claiming)
 // ============================================================================
@@ -1380,6 +1398,13 @@ function handleStartAssignment(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
 
   const config = state.config.finale;
+  const granularTypes = state.config.granularTypes ?? [];
+
+  // Create the real quilt grid now, sized by opt-in count (or all connected users as fallback)
+  const optInCount = state.finaleState.elegyOptedIn.size;
+  const audienceSize = optInCount > 0 ? optInCount : countConnectedUsers(state);
+  state.finaleState.quilt = createQuiltGrid(audienceSize, config.quilt, granularTypes);
+
   state.finaleState.phase = 'assignment';
   state.finaleState.assignment.mode = config.assignmentMode;
 
@@ -1945,25 +1970,46 @@ function handleTriggerSort(state: ShowState): ConductorEvent[] {
 function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): ConductorEvent[] {
   const config = state.config.finale;
   const granularTypes = state.config.granularTypes ?? [];
-  const gtIds = granularTypes.map(gt => gt.id);
 
   // Create the grid
   const quiltGrid = createQuiltGrid(audienceCount, config.quilt, granularTypes);
 
-  // Synthesize fragments for all 3 songs × all granular types
-  // Uses placeholder track indices (100 + songIndex * 10 + typeIndex)
+  // Build fragments from actual config option A tracks (real Ableton track indices)
+  const attemptConfigs = state.config.attempts;
+  const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
   const availableFragments: import('./types').GranularFragment[] = [];
-  for (let songIndex = 0; songIndex < 3; songIndex++) {
-    const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
-    for (let t = 0; t < gtIds.length; t++) {
+
+  for (let songIndex = 0; songIndex < attemptConfigs.length; songIndex++) {
+    const attemptConfig = attemptConfigs[songIndex];
+    const chapter = chapters[songIndex] ?? 'ambition';
+
+    // Extract option A tracks from each layer
+    for (const layerConfig of attemptConfig.layers) {
+      for (const track of layerConfig.optionA.tracks) {
+        availableFragments.push({
+          id: `sim-${songIndex}-${layerConfig.group}-${track.granularType}-A`,
+          songIndex,
+          layerGroupId: layerConfig.group,
+          granularType: track.granularType,
+          option: 'A',
+          chapter,
+          trackIndices: track.trackIndices,
+          wonVote: true,
+          previewAudioPath: '',
+        });
+      }
+    }
+
+    // Include live seed tracks
+    if (attemptConfig.liveSeed?.trackIndices?.length) {
       availableFragments.push({
-        id: `sim-${songIndex}-${gtIds[t]}`,
+        id: `sim-${songIndex}-seed-seed-A`,
         songIndex,
-        layerGroupId: 'simulated',
-        granularType: gtIds[t],
+        layerGroupId: 'seed',
+        granularType: 'seed',
         option: 'A',
-        chapter: chapters[songIndex],
-        trackIndices: [100 + songIndex * 10 + t],
+        chapter,
+        trackIndices: attemptConfig.liveSeed.trackIndices,
         wonVote: true,
         previewAudioPath: '',
       });
@@ -1975,6 +2021,7 @@ function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): Cond
     phase: 'playback',
     availableFragments,
     allFragments: availableFragments,
+    elegyOptedIn: new Set(),
     quilt: quiltGrid,
     availableSongs: [0, 1, 2],
     trackMap: new Map(),
@@ -2001,7 +2048,6 @@ function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): Cond
       cell.ownerId = `sim-user-${userIndex}`;
       const randomSong = availableSongs[Math.floor(Math.random() * availableSongs.length)];
       cell.songIndex = randomSong;
-      const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
       cell.chapter = chapters[randomSong];
       userIndex++;
     }

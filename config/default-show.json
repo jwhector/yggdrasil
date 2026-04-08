@@ -287,7 +287,7 @@
       "auditionBars": [
         4,
         4,
-        2
+        4
       ],
       "auditionCycles": [
         2,
@@ -296,9 +296,7 @@
       ],
       "liveSeed": {
         "trackIndices": [
-          30,
-          31,
-          32
+          16
         ],
         "label": "The seed"
       },
@@ -315,6 +313,12 @@
                 "trackIndices": [
                   33
                 ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  45
+                ]
               }
             ]
           },
@@ -325,12 +329,44 @@
                 "trackIndices": [
                   34
                 ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  45
+                ]
               }
             ]
           }
         },
         {
           "index": 1,
+          "group": "flesh",
+          "labelA": "Silenced",
+          "labelB": "Screaming",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  25
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  26
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "index": 2,
           "group": "bones",
           "labelA": "Sealed",
           "labelB": "Spiraling",
@@ -339,13 +375,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  35
+                  55
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  36
+                  30
                 ]
               }
             ]
@@ -355,51 +391,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  37
+                  52
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  38
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "index": 2,
-          "group": "flesh",
-          "labelA": "Silenced",
-          "labelB": "Screaming",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  40
-                ]
-              },
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  41
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  43
-                ]
-              },
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  44
+                  30
                 ]
               }
             ]
@@ -413,6 +411,10 @@
     "bothOptionsSurvive": true,
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
+      {
+        "event": "elegy_briefing",
+        "text": "SYSTEM ALERT: Primary ego operator has disconnected. Collaborative override engaged... We still have... fragments of what we built. We need to rebuild... something."
+      },
       {
         "event": "performer_abandonment",
         "text": "He's gone. We need to do this ourselves."

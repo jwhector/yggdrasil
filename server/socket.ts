@@ -394,6 +394,27 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
+    // elegy_opt_in — audience opts in during elegy phase
+    // ------------------------------------------------------------------
+    socket.on('elegy_opt_in', async () => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      const events = processCommand(state, { type: 'ELEGY_OPT_IN', userId });
+
+      // Broadcast opt-in count to all clients for real-time feedback
+      const optInEvent = events.find(e => e.type === 'ELEGY_OPT_IN_RECEIVED') as
+        | { type: 'ELEGY_OPT_IN_RECEIVED'; totalOptedIn: number }
+        | undefined;
+      if (optInEvent) {
+        io.emit('elegy_opt_in_count', { count: optInEvent.totalOptedIn });
+      }
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
     // claim_cell — audience claims a quilt cell during assignment
     //
     // Payload: { cellId: string }
@@ -865,6 +886,9 @@ export function filterStateForClient(
             playheadColumn: fs.quilt.playheadColumn,
           },
           availableSongs: fs.availableSongs,
+          // Elegy opt-in
+          optedIn: fs.elegyOptedIn.has(userId),
+          optInCount: fs.elegyOptedIn.size,
           // Arc state
           arcPhase: fs.arc?.phase ?? null,
           // Assignment

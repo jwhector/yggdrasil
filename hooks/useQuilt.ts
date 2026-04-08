@@ -96,9 +96,13 @@ export function useQuilt(
         if (!prev) return prev;
         return {
           ...prev,
-          cells: prev.cells.map(c =>
-            c.id === data.cellId ? { ...c, ownerId: data.userId } : c
-          ),
+          cells: prev.cells.map(c => {
+            // Set owner on the newly claimed cell
+            if (c.id === data.cellId) return { ...c, ownerId: data.userId };
+            // Clear any previous cell this user owned (they switched)
+            if (c.ownerId === data.userId) return { ...c, ownerId: null };
+            return c;
+          }),
         };
       });
     };

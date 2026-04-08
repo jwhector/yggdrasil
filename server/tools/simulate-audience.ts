@@ -30,6 +30,10 @@ const MIN_DISMISS_DELAY_MS = 1500;   // Fastest a user would swipe
 const MAX_DISMISS_DELAY_MS = 8000;   // Slowest
 const DISMISS_STAGGER_MS = 200;      // Per-thought within a user
 
+// V3.3 elegy opt-in timing
+const OPT_IN_MIN_DELAY_MS = 2000;
+const OPT_IN_MAX_DELAY_MS = 10000;
+
 // V3.3 quilt simulation timing
 const CELL_CLAIM_MIN_DELAY_MS = 500;
 const CELL_CLAIM_MAX_DELAY_MS = 5000;
@@ -66,7 +70,8 @@ interface ClientState {
   myVote: 'A' | 'B' | null;
   thoughts: { id: string; text: string }[];
   thoughtsDismissed: number;
-  // V3.3 quilt state
+  // V3.3 elegy + quilt state
+  optedIn: boolean;
   claimedCellId: string | null;
   songChoice: number | null;
   lockedIn: boolean;
@@ -80,6 +85,7 @@ let stats = {
   thoughtsReceived: 0,
   thoughtsDismissed: 0,
   // V3.3 stats
+  optedIn: 0,
   cellsClaimed: 0,
   cellsReleased: 0,
   songChoicesSet: 0,
@@ -115,6 +121,7 @@ function createClient(index: number): ClientState {
     myVote: null,
     thoughts: [],
     thoughtsDismissed: 0,
+    optedIn: false,
     claimedCellId: null,
     songChoice: null,
     lockedIn: false,
@@ -163,6 +170,21 @@ function createClient(index: number): ClientState {
     // Detect phase transitions for logging
     if (prevPhase !== client.phase && index === 0) {
       log(`Phase transition: ${prevPhase} → ${client.phase}`);
+    }
+
+    // Auto opt-in during elegy phase (staggered)
+    if (client.phase === 'finale_elegy' && !client.optedIn) {
+      const delay = randomDelay(OPT_IN_MIN_DELAY_MS, OPT_IN_MAX_DELAY_MS);
+      setTimeout(() => {
+        if (client.phase === 'finale_elegy' && !client.optedIn) {
+          socket.emit('elegy_opt_in');
+          client.optedIn = true;
+          stats.optedIn++;
+          if (index < 5) {
+            log(`Client ${index}: opted in`);
+          }
+        }
+      }, delay);
     }
   });
 
@@ -317,10 +339,11 @@ setInterval(() => {
   const quiltLine = stats.quiltStateBroadcasts > 0
     ? `, quilt_state: ${stats.quiltStateBroadcasts}, playhead: ${stats.playheadAdvances} advances`
     : '';
+  const optInLine = stats.optedIn > 0 ? `, opted-in: ${stats.optedIn}` : '';
   const claimLine = stats.cellsClaimed > 0
     ? `, cells: ${stats.cellsClaimed} claimed, songs: ${stats.songChoicesSet} set, locked: ${stats.lockedIn}, moves: ${stats.cellMoves}`
     : '';
-  log(`Stats: ${stats.connected} connected, ${stats.votes} votes, ${stats.thoughtsReceived}/${stats.thoughtsDismissed} thoughts${quiltLine}${claimLine}`);
+  log(`Stats: ${stats.connected} connected, ${stats.votes} votes, ${stats.thoughtsReceived}/${stats.thoughtsDismissed} thoughts${optInLine}${quiltLine}${claimLine}`);
 }, 5000);
 
 // Graceful shutdown

@@ -38,6 +38,7 @@ export interface SerializedFinaleState {
   phase: V33FinaleState['phase'];
   availableFragments: V33FinaleState['availableFragments'];
   allFragments: V33FinaleState['allFragments'];
+  elegyOptedIn?: string[];
   quilt: {
     rows: number;
     columns: number;
@@ -87,6 +88,7 @@ export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState 
     phase: fs.phase,
     availableFragments: fs.availableFragments,
     allFragments: fs.allFragments,
+    elegyOptedIn: Array.from(fs.elegyOptedIn),
     quilt: {
       rows: fs.quilt.rows,
       columns: fs.quilt.columns,
@@ -121,6 +123,7 @@ export function deserializeFinaleState(data: SerializedFinaleState): V33FinaleSt
     phase: data.phase,
     availableFragments: data.availableFragments,
     allFragments: data.allFragments,
+    elegyOptedIn: new Set(data.elegyOptedIn ?? []),
     quilt: {
       rows: data.quilt.rows,
       columns: data.quilt.columns,

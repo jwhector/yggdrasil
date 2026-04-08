@@ -205,6 +205,8 @@ describe('State persistence', () => {
         liveTracksActive: [],
       },
       npc: { currentMessage: 'Try again' },
+      elegyOptedIn: new Set(['user-1']),
+      arc: null,
     };
 
     db.saveState(state);

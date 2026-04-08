@@ -79,6 +79,29 @@ export function NpcControls({ fullState, sendCommand }: NpcControlsProps) {
         </div>
       )}
 
+      {/* Config-driven show messages (from npcMessages in show config) */}
+      {fullState.config.finale?.npcMessages?.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <div style={{ ...styles.categoryLabel, marginBottom: '4px' }}>Show Messages</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {fullState.config.finale.npcMessages.map((msg: { event: string; text: string }) => (
+              <button
+                key={msg.event}
+                onClick={() => sendMessage(msg.text)}
+                style={{
+                  ...styles.lineBtn,
+                  borderColor: 'rgba(124, 58, 237, 0.4)',
+                  background: 'rgba(124, 58, 237, 0.1)',
+                }}
+                title={msg.text}
+              >
+                {msg.event}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Line bank */}
       <div style={styles.lineBankGrid}>
         {NPC_LINE_BANK.map(({ category, lines }) => (

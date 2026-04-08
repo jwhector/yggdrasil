@@ -128,7 +128,7 @@ export function QuiltGrid({
       }
     }
 
-    if (movedCount >= 2 && animPhase === 'idle') {
+    if (movedCount >= 2 && animPhase === 'idle' && arcPhase != null) {
       // Multiple cells moved simultaneously = sort (not a single swap)
       // Generate random scatter offsets
       const scatterRange = isProjector ? 30 : 15;
@@ -181,7 +181,7 @@ export function QuiltGrid({
     if (!ownerId || animPhase === 'idle') {
       return {
         transform: 'scale(1) translate(0px, 0px)',
-        transition: `left ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), top ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease, background-color 0.2s ease, border-color 0.2s ease, opacity 0.3s ease`,
+        transition: 'background-color 0.2s ease, border-color 0.2s ease, opacity 0.3s ease',
       };
     }
 
@@ -359,9 +359,13 @@ function QuiltCellTile({
   onTap?: () => void;
 }) {
   const hasSong = cell.songIndex !== null && cell.chapter !== null;
-  const isClaimed = cell.ownerId !== null;
   const chapter = cell.chapter ? getChapterIdentity(cell.chapter) : null;
-  const bgColor = hasSong ? chapter!.color : (isClaimed ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)');
+  const isClaimed = cell.ownerId !== null;
+  const bgColor = hasSong
+    ? chapter!.color
+    : isClaimed
+      ? 'rgba(255,255,255,0.12)'
+      : 'rgba(255,255,255,0.04)';
 
   // Merge base opacity with animation opacity
   const baseOpacity = rowDimmed ? 0.2 : (isMuted ? 0.3 : 1);

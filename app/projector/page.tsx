@@ -49,19 +49,7 @@ export default function ProjectorPage() {
       return <ProjectorCanvas state={state} currentAttempt={currentAttempt} auditionProgress={auditionProgress} />;
 
     case 'finale_elegy': {
-      const fs = state.finaleState;
-      if (!fs) return <ProjectorDark />;
-      const availableIds = new Set(fs.availableFragments.map(f => f.id));
-      const losers = fs.allFragments.filter(f => !availableIds.has(f.id));
-      return (
-        <main style={projectorMainStyle}>
-          <ElegyGrid
-            availableFragments={fs.availableFragments}
-            lockedFragments={losers}
-            variant="projector"
-          />
-        </main>
-      );
+      return <ElegyAlarm />;
     }
 
     case 'finale_assignment': {
@@ -149,5 +137,25 @@ const projectorMainStyle: React.CSSProperties = {
 
 function ProjectorDark() {
   return <div style={{ minHeight: '100vh', width: '100vw', backgroundColor: '#000' }} />;
+}
+
+function ElegyAlarm() {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        width: '100vw',
+        backgroundColor: '#000',
+        animation: 'elegy-alarm 1.2s ease-in-out infinite alternate',
+      }}
+    >
+      <style>{`
+        @keyframes elegy-alarm {
+          0% { background-color: rgba(220, 38, 38, 0.04); }
+          100% { background-color: rgba(220, 38, 38, 0.25); }
+        }
+      `}</style>
+    </div>
+  );
 }
 

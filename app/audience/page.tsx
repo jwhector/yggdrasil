@@ -17,6 +17,7 @@ import { useQuilt } from '@/hooks/useQuilt';
 import { QuiltGrid } from '@/components/finale/QuiltGrid';
 import { QuiltPreview } from '@/components/finale/QuiltPreview';
 import { QuiltRemix } from '@/components/finale/QuiltRemix';
+import { NpcDisplay } from '@/components/finale/NpcDisplay';
 import type { AudienceFinaleView, AudienceAttemptView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
@@ -143,28 +144,40 @@ function FinaleAudienceView({
 }) {
   const quilt = useQuilt(socket, myFinale);
 
-  // --- Elegy phase: show all fragments non-interactively ---
+  // --- Elegy phase: NPC briefing + opt-in ---
   if (phase === 'finale_elegy') {
+    return (
+      <ElegyBriefing
+        socket={socket}
+        optedIn={myFinale.optedIn}
+        optInCount={myFinale.optInCount}
+        onOptIn={() => emit('elegy_opt_in', {})}
+      />
+    );
+  }
+
+  // --- Non-opted-in users: minimal "Listen." screen for all subsequent phases ---
+  if (!myFinale.optedIn) {
     return (
       <div
         style={{
           width: '100%',
           minHeight: '100vh',
-          overflowY: 'auto',
-          paddingBottom: '32px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#000',
         }}
       >
         <div
           style={{
-            textAlign: 'center',
-            padding: '24px 16px 8px',
-            fontSize: '0.65rem',
-            color: 'rgba(255,255,255,0.25)',
-            letterSpacing: '0.15em',
+            color: 'rgba(255,255,255,0.2)',
+            fontSize: '0.8rem',
+            letterSpacing: '0.2em',
             textTransform: 'uppercase',
           }}
         >
-          What remains
+          Listen.
         </div>
       </div>
     );
@@ -203,8 +216,12 @@ function FinaleAudienceView({
           myCellId={quilt.myCellId}
           onCellTap={(cellId) => {
             if (quilt.myCellId === cellId) {
+              // Tap own cell → release it
               quilt.releaseCell();
             } else {
+              // Only attempt to claim if the target cell is unclaimed
+              const targetCell = quilt.grid?.cells.find(c => c.id === cellId);
+              if (targetCell?.ownerId !== null) return; // Already claimed by someone else
               if (quilt.myCellId) quilt.releaseCell();
               quilt.claimCell(cellId);
             }
@@ -561,6 +578,95 @@ function PauseOverlay() {
       <p style={{ color: 'rgba(255,255,255,0.4)', letterSpacing: '0.15em', fontSize: '0.9rem' }}>
         PAUSED
       </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Elegy Briefing — NPC terminal text + opt-in button
+// ---------------------------------------------------------------------------
+
+function ElegyBriefing({
+  socket,
+  optedIn,
+  optInCount,
+  onOptIn,
+}: {
+  socket: Socket | null;
+  optedIn: boolean;
+  optInCount: number;
+  onOptIn: () => void;
+}) {
+  return (
+    <div
+      style={{
+        width: '100%',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#000',
+        padding: '24px 20px',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* NPC terminal text — performer triggers via SEND_NPC_MESSAGE */}
+      <div style={{ width: '100%', maxWidth: 360, marginBottom: '32px' }}>
+        <NpcDisplay socket={socket} fadeDurationMs={999999} />
+      </div>
+
+      {/* Opt-in button */}
+      {!optedIn ? (
+        <button
+          onClick={onOptIn}
+          style={{
+            padding: '14px 32px',
+            borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.3)',
+            background: 'rgba(255,255,255,0.08)',
+            color: '#fff',
+            fontSize: '1rem',
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease, border-color 0.2s ease',
+          }}
+        >
+          R E B U I L D
+        </button>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <div
+            style={{
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: '0.75rem',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Waiting for the mind to coalesce...
+          </div>
+          {optInCount > 0 && (
+            <div
+              style={{
+                color: 'rgba(255,255,255,0.25)',
+                fontSize: '0.65rem',
+                letterSpacing: '0.08em',
+              }}
+            >
+              {optInCount} {optInCount === 1 ? 'councillor' : 'councillors'} coalesced
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

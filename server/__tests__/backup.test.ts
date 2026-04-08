@@ -182,6 +182,8 @@ describe('loadBackup', () => {
         liveTracksActive: [],
       },
       npc: { currentMessage: null },
+      elegyOptedIn: new Set(['u1']),
+      arc: null,
     };
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));

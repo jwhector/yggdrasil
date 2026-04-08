@@ -402,6 +402,9 @@ export type ConductorCommand =
   | { type: 'SETUP_FINALE' }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
 
+  // Finale — Elegy opt-in (V3.3)
+  | { type: 'ELEGY_OPT_IN'; userId: UserId }
+
   // Finale — Assignment (V3.3: cell claiming)
   | { type: 'START_ASSIGNMENT' }
   | { type: 'CLAIM_CELL'; userId: UserId; cellId: string }
@@ -477,6 +480,9 @@ export type ConductorEvent =
   // Finale — Setup
   | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: GranularFragment[]; allFragments: GranularFragment[] }
   | { type: 'NPC_MESSAGE'; message: string }
+
+  // Finale — Elegy opt-in (V3.3)
+  | { type: 'ELEGY_OPT_IN_RECEIVED'; userId: UserId; totalOptedIn: number }
 
   // Finale — Assignment (V3.3: cell claiming)
   | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select'; quiltDimensions: { rows: number; columns: number } }
@@ -772,6 +778,9 @@ export interface V33FinaleState {
   availableFragments: GranularFragment[];
   allFragments: GranularFragment[];
 
+  // Elegy opt-in
+  elegyOptedIn: Set<UserId>;                          // Users who opted in during elegy
+
   // Quilt structure
   quilt: {
     rows: number;                                   // Always 6 (granular types)
@@ -867,6 +876,9 @@ export interface AudienceFinaleView {
     playheadColumn: number;
   };
   availableSongs: number[];
+  // Elegy opt-in
+  optedIn: boolean;                                    // Whether this user opted in during elegy
+  optInCount: number;                                  // Total opted-in users
   // Arc state
   arcPhase: ArcPhase | null;                           // Current arc sub-phase (null if arc disabled)
   // Assignment
