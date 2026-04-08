@@ -1,4 +1,4 @@
--- Yggdrasil Database Schema (V3.2)
+-- Yggdrasil Database Schema (V3.3)
 -- SQLite with WAL mode for crash resilience
 
 PRAGMA journal_mode=WAL;

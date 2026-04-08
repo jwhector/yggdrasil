@@ -1,5 +1,5 @@
 /**
- * Conductor — Pure State Machine (V3.2)
+ * Conductor — Pure State Machine (V3.3)
  *
  * The conductor is the heart of the system. It receives commands, validates them,
  * updates state, and emits events. It has no I/O — all side effects are handled
@@ -9,7 +9,7 @@
  *
  * Show flow:
  *   lobby → opener → (attempt_story → attempt_build → attempt_resolve) ×3 →
- *   finale_elegy → finale_assignment → finale_live_mix → ended
+ *   finale_elegy → finale_assignment → finale_preview → finale_playback → ended
  *
  * Song-building layer flow:
  *   locked → auditioning → revealing → locked_in | collapsed

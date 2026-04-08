@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2026-04-08 — V3.3 Phase 6: Cleanup + finalize migration
+
+Final cleanup phase for the V3.3 "Quilt" migration. All phases complete.
+
+### Config updates
+- Updated `default-show.json` description to reference quilt-based finale (was "Incredibox-style")
+
+### Stale reference audit
+- Fixed `conductor/conductor.ts` comment: `finale_live_mix` → `finale_preview` + `finale_playback`
+- Fixed `server/index.ts` backup phase list: added `finale_preview` + `finale_playback`, removed `finale_live_mix`
+- Fixed `server/__tests__/timing.test.ts`: replaced all `finale_live_mix` references with `finale_playback`, updated stale stub tests to expect `ADVANCE_QUILT_COLUMN` command
+- Updated `db/schema.sql` header to V3.3
+
+### Doc pass
+- Updated `ARCHITECTURE.md`: V3.2 → V3.3 header, quilt-based finale description, updated folder structure (removed LiveMix/assignment files, added Quilt files), updated test name examples, marked V3.3 appendix as complete
+- Updated `CLAUDE.md`: removed V3.3 migration section (migration done), rewrote finale paragraph for quilt model, updated folder structure, updated show phase state machine, updated common patterns (quilt state replaces mix state)
+
+### Tests
+- 333 tests passing across 12 suites, `tsc --noEmit` clean
+
 ## 2026-04-07 — V3.3 Phase 3: Server wiring + persistence
 
 Wired the V3.3 quilt conductor to the server layer: sockets, persistence, audio routing, and timing.

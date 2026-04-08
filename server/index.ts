@@ -416,7 +416,7 @@ async function main() {
       const state = getState();
 
       // Only backup during active show phases
-      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assignment', 'finale_live_mix'];
+      const activePhases = ['attempt_story', 'attempt_build', 'attempt_resolve', 'finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback'];
       if (activePhases.includes(state.phase)) {
         try {
           const backupPath = createAndPruneBackup(state, BACKUPS_DIR, MAX_BACKUPS);

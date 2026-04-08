@@ -1,6 +1,6 @@
 {
   "name": "Default Show Configuration",
-  "description": "V3.3 configuration \u2014 3 bundled layer groups per attempt, live seed tracks, Incredibox-style finale. Replace placeholder track indices with actual Ableton layout.",
+  "description": "V3.3 configuration \u2014 3 bundled layer groups per attempt, live seed tracks, quilt-based finale. Replace placeholder track indices with actual Ableton layout.",
   "layersPerAttempt": 3,
   "attempts": [
     {

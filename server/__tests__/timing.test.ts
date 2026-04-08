@@ -541,7 +541,7 @@ describe('TimingEngine', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Loop Boundary (Live Mix — fallback mode, stub)
+  // Loop Boundary (Playback — fallback mode, stub)
   // --------------------------------------------------------------------------
 
   describe('loop boundary (fallback mode)', () => {
@@ -554,27 +554,26 @@ describe('TimingEngine', () => {
       timingEngine.start();
     });
 
-    test('loop tracking starts on live_mix phase (stub — no commands yet)', () => {
-      state.phase = 'finale_live_mix';
+    test('loop tracking fires ADVANCE_QUILT_COLUMN on playback phase', () => {
+      state.phase = 'finale_playback';
 
       timingEngine.onStateChanged(state, [{
         type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_live_mix',
+        phase: 'finale_playback',
       }]);
 
       // 8 bars × 4 beats/bar × (60000ms / 120bpm) = 16000ms
       jest.advanceTimersByTime(16000);
 
-      // Stub: no command sent yet (live mix task will add this)
-      expect(sendCommand).not.toHaveBeenCalled();
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_QUILT_COLUMN' });
     });
 
     test('stops loop tracking on show phase change', () => {
-      state.phase = 'finale_live_mix';
+      state.phase = 'finale_playback';
 
       timingEngine.onStateChanged(state, [{
         type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_live_mix',
+        phase: 'finale_playback',
       }]);
 
       // Phase changes away
@@ -591,7 +590,7 @@ describe('TimingEngine', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Loop Boundary (Live Mix — OSC mode, stub)
+  // Loop Boundary (Playback — OSC mode, stub)
   // --------------------------------------------------------------------------
 
   describe('loop boundary (OSC mode)', () => {
@@ -610,12 +609,12 @@ describe('TimingEngine', () => {
       timingEngine.start();
     });
 
-    test('loop tracking starts on live_mix phase (stub — no commands yet)', () => {
-      state.phase = 'finale_live_mix';
+    test('loop tracking fires ADVANCE_QUILT_COLUMN on playback phase', () => {
+      state.phase = 'finale_playback';
 
       timingEngine.onStateChanged(state, [{
         type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_live_mix',
+        phase: 'finale_playback',
       }]);
 
       // Beat 1 sets baseline
@@ -624,14 +623,13 @@ describe('TimingEngine', () => {
         timingEngine.onOSCMessage('/live/song/get/beat', [i]);
       }
 
-      // Stub: no command sent yet (live mix task will add this)
-      expect(sendCommand).not.toHaveBeenCalled();
+      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_QUILT_COLUMN' });
     });
 
     test('does not fire loop boundary when in attempt_build phase', () => {
       advanceToBuild(state);
 
-      // Loop state not started (no SHOW_PHASE_CHANGED to finale_live_mix)
+      // Loop state not started (no SHOW_PHASE_CHANGED to finale_playback)
       for (let i = 1; i <= 64; i++) {
         timingEngine.onOSCMessage('/live/song/get/beat', [i]);
       }

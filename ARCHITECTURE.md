@@ -1,18 +1,18 @@
-# Solo Show — Technical Architecture Specification (V3.2)
+# Solo Show — Technical Architecture Specification (V3.3)
 
 ## Document Purpose
-This document and the `docs/` directory are the **authoritative source of truth** for the Solo Show system architecture. It supersedes the V3.1 spec and reflects the V3.2 redesign of song-building (3 bundled layer groups instead of 6 individual layers) and the finale rewrite (Incredibox-style live mix replacing assembly/deliberation/ceremony).
+This document and the `docs/` directory are the **authoritative source of truth** for the Solo Show system architecture. It supersedes the V3.2 spec and reflects the V3.3 "Quilt" redesign of the finale (quilt-based collaborative composition replacing Incredibox-style live mix).
 
 **When this document or any file in `docs/` conflicts with code, the spec is correct and the code should be updated.**
 
-**V3.2 migration complete.** See `MIGRATION-V3.2.md` for the original implementation plan and `MIGRATION-V3.2-TODO.md` for final status.
+**V3.3 migration complete.** See `V33-MIGRATION-PLAN.md` for the implementation plan and `docs/finale.md` for the authoritative quilt spec.
 
 ---
 
 ## Project Overview
 
 ### What This Is
-An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. Each song starts with a **live seed** — a prerecorded loop the performer theatrically "plays" — then the audience makes 3 binary A/B choices per song. Each choice selects between **bundled layer groups** (e.g., "The Foundation" = bass + drums), making each vote a big audible vibe shift. Each layer has a **doubt threshold** — if the winning vote proportion falls below it, the song collapses. Thresholds: `[0.50, 0.66, 0.99]`. Songs that survive all 3 layers are narratively rejected by the performer (self-sabotage). In the finale (V3.2 rewrite in progress), the audience — abandoned by the performer — is assigned to granular types and controls a live Incredibox-style collaborative mix. The performer returns to play live over the shifting foundation.
+An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. Each song starts with a **live seed** — a prerecorded loop the performer theatrically "plays" — then the audience makes 3 binary A/B choices per song. Each choice selects between **bundled layer groups** (e.g., "The Foundation" = bass + drums), making each vote a big audible vibe shift. Each layer has a **doubt threshold** — if the winning vote proportion falls below it, the song collapses. Thresholds: `[0.50, 0.66, 0.99]`. Songs that survive all 3 layers are narratively rejected by the performer (self-sabotage). In the finale, the audience — abandoned by the performer — each claims a cell in a **quilt** (a grid of granular types × time slices), chooses which song's material to play, and collaboratively rearranges the composition in real time alongside the returning performer.
 
 ### Core Metaphor
 > **"If I can build a song, I can build a life."**
@@ -25,7 +25,7 @@ The audience is framed as the performer's inner council — parts of the subcons
 3. **Central timing, distributed choice.** The system runs on a master musical clock: audience controls *what* and *how*, not *when*.
 4. **Legibility over complexity.** Binary choices, consistent visual cues, minimal UI.
 5. **Safety constraints.** All musical actions are quantized and bounded so outputs remain coherent.
-6. **Finale = collective agency.** After the performer abandons the stage, each audience member controls one piece of the final song. The group's majority determines what the room hears in real time.
+6. **Finale = collective agency.** After the performer abandons the stage, each audience member claims one cell of the quilt and chooses which song's material fills it. The audience and returning performer collaboratively rearrange the composition in real time.
 7. **Projector tells the story, phone is the instrument.** Visual narrative lives on the projector; audience phones are input devices and personal audio preview tools.
 
 ---
@@ -174,7 +174,7 @@ Read the sections above first, then load only the docs relevant to your task:
 | File | Contents |
 |------|----------|
 | [docs/song-building.md](docs/song-building.md) | Layer structure, staggered ordering, blind vote, doubt thresholds, collapse, rejection, fragment generation |
-| [docs/finale.md](docs/finale.md) | Finale sub-phases (elegy, assignment, live mix), NPC system, FinaleState type |
+| [docs/finale.md](docs/finale.md) | Finale sub-phases (elegy, assignment, preview, playback), quilt model, NPC system, V33FinaleState type |
 | [docs/data-models.md](docs/data-models.md) | TypeScript interfaces (User, ShowState, ShowConfig, Fragment), Conductor commands & events, VoteResult |
 | [docs/client-routes.md](docs/client-routes.md) | /audience, /projector, /controller UI specs, visual identity system (colors, symbols) |
 | [docs/audio-engine.md](docs/audio-engine.md) | Musical design spec, track layout, playback modes, OSC protocol, environment variables |
@@ -206,9 +206,9 @@ solo-show/
 │   ├── conductor.ts             # State machine (show phases + layer phases)
 │   ├── voting.ts                # Blind vote tallying
 │   ├── threshold.ts             # Doubt threshold check
-│   ├── assignment.ts            # Granular type assignment (auto/self-select)
-│   ├── live-mix.ts              # Majority voting, recency tiebreak, initial fragment selection
-│   ├── fragments.ts             # Fragment generation from attempt results
+│   ├── quilt.ts                 # Quilt grid management (V3.3 — cell claiming, song choice, column advancement)
+│   ├── assignment.ts            # Cell assignment (auto round-robin / self-select claiming)
+│   ├── fragments.ts             # Fragment generation from attempt results (for elegy display)
 │   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
 │   ├── npc.ts                   # NPC event-driven message logic
 │   ├── types.ts                 # Shared type definitions
@@ -259,17 +259,15 @@ solo-show/
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
 │   │   ├── ElegyGrid.tsx        # Full fragment wreckage display
-│   │   ├── AssignmentCards.tsx  # Self-select assignment UI (config-driven)
-│   │   ├── AssignmentIdentity.tsx # Post-assignment type identity display
-│   │   ├── LiveMixController.tsx # Audience phone: tappable fragment cards
-│   │   ├── LiveMixSpectator.tsx  # Read-only view of other types
-│   │   ├── LiveMixProjector.tsx  # Projector: all types + consensus viz
+│   │   ├── QuiltGrid.tsx        # Quilt grid — assignment cell claiming + visual grid (V3.3)
+│   │   ├── QuiltPreview.tsx     # Preview phase — song choice cards + audio preview (V3.3)
+│   │   ├── QuiltRemix.tsx       # Playback phase — draggable quilt cells + playhead (V3.3)
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
 │   └── controller/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
-│       ├── LiveMixControls.tsx  # Per-type overrides, locks, vote distributions
+│       ├── QuiltRemixControls.tsx # Quilt performer controls — reorder, swap, lock, mute, override (V3.3)
 │       ├── NpcControls.tsx      # NPC line bank + manual fire
 │       ├── EmergencyControls.tsx # Audio panic, state export/import, reset
 │       └── MetricsPanel.tsx     # Telemetry dashboard
@@ -277,7 +275,7 @@ solo-show/
 ├── hooks/
 │   ├── useSocket.ts             # Socket.IO connection + reconnection
 │   ├── useShowState.ts          # Client-side state management
-│   ├── useLiveMix.ts            # Live mix state management
+│   ├── useQuilt.ts              # Quilt state management (V3.3 — quilt_state, cell events, playhead)
 │   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
 │   ├── useAudioPreview.ts       # In-browser audio preview playback
 │   ├── useIntrusiveThoughts.ts  # Audience: server-assigned thought subscription + dismiss
@@ -299,7 +297,7 @@ solo-show/
 │   └── ableton-layout.json      # Track index mappings + Utility device config
 │
 ├── db/
-│   └── schema.sql               # SQLite schema (V3.2)
+│   └── schema.sql               # SQLite schema (V3.3)
 │
 ├── next.config.js
 ├── tsconfig.json
@@ -320,12 +318,12 @@ test('blind vote does not expose split during voting window', ...)
 test('doubt thresholds escalate per layer index', ...)
 test('completed attempt transitions to attempt_resolve for rejection', ...)
 test('unreached layers are marked as locked fragments in finale', ...)
-test('auto-assignment distributes users evenly across granular types', ...)
-test('self-select mode allows switching groups before timer expires', ...)
+test('auto-assignment distributes users evenly across quilt cells', ...)
+test('self-select mode allows switching cells before timer expires', ...)
 test('undecided users are randomly assigned when assignment timer expires', ...)
-test('majority flip triggers crossfade at next bar boundary', ...)
-test('recency tiebreak resolves 50/50 split in live mix', ...)
-test('performer lock prevents audience from changing granular type fragment', ...)
+test('column advance triggers track changes at column boundary', ...)
+test('cell swap updates both cell positions in quilt grid', ...)
+test('performer lock prevents audience from moving cell', ...)
 ```
 
 ---
@@ -340,7 +338,7 @@ test('performer lock prevents audience from changing granular type fragment', ..
 - [ ] NPC text library (event-driven messages per phase)
 - [ ] Projector visual design and animations (especially live mix consensus visualization)
 - [ ] Live performance track configuration
-- [ ] **Live mix crossfade duration:** How many bars for crossfade when majority shifts? Needs playtesting.
+- [x] ~~**Crossfade duration:** Implemented via `GainConfig.crossfadeBeats` (default: 1 beat).~~
 
 ---
 
@@ -433,21 +431,16 @@ test('performer lock prevents audience from changing granular type fragment', ..
 - **Stagger table**: Each group (bones/flesh/spark) appears at position 0 in exactly one song across the 3 attempts.
 - **`LAYERS_PER_ATTEMPT`**: Changed from 6 to 3.
 
-### Finale Redesign (Complete)
-- **Assembly/Deliberation/Ceremony removed**: Replaced by automatic granular type assignment + continuous Incredibox-style live mix.
+### Finale Redesign (Superseded by V3.3)
+- **Assembly/Deliberation/Ceremony removed**: Replaced by automatic granular type assignment + Incredibox-style live mix.
 - **New phases**: `finale_assignment` (auto/self-select into granular types), `finale_live_mix` (continuous collaborative mixing).
-- **Removed phases**: `finale_assembly`, `finale_deliberation`, `finale_ceremony`, `finale_performer_mix`.
-- **No altar, no ambassadors, no deliberation rounds**: Just continuous collaborative mixing where each audience member's phone is a live controller.
-- **Live mix conductor logic**: Majority voting with recency tiebreak, performer lock/unlock/override controls, initial fragment selection by highest winning proportion, crossfades at bar boundaries.
-- **New files**: `conductor/live-mix.ts`, `components/finale/AssignmentCards.tsx`, `components/finale/AssignmentIdentity.tsx`, `components/finale/LiveMixProjector.tsx`, `components/controller/LiveMixControls.tsx`.
-- **Deleted files**: AssemblyCards, GroupIdentity, DeliberationBoard, AudioPreview, CeremonyView, AltarReady, MixingMirror, MixingSurface, AssemblyControls, DeliberationControls, CeremonyControls, useAltarDetection.
-- **New DB table**: `finale_mix_events` for preference/lock/unlock/override event persistence.
+- **Note:** The V3.2 live mix finale was superseded by the V3.3 "Quilt" model. See Appendix E.
 
 ---
 
 ## Appendix E: What Changed from V3.2 → V3.3
 
-**V3.3 "Quilt" migration in progress.** See `V33-MIGRATION-PLAN.md` for implementation phases and `docs/finale.md` for the authoritative spec.
+**V3.3 "Quilt" migration complete.** See `V33-MIGRATION-PLAN.md` for implementation phases and `docs/finale.md` for the authoritative spec.
 
 ### Removed Systems
 - **Live mix majority voting**: Per-type majority voting with recency tiebreak. Replaced by quilt cell model — each cell has one owner making a direct song choice.
