@@ -5,17 +5,30 @@
  *
  * Renders the 6×N quilt grid with absolute positioning so cells can animate
  * between positions during sorting. Cells are keyed by ownerId (stable across
- * sorts) so React preserves DOM nodes → CSS transitions handle the movement.
+ * sorts) so React preserves DOM nodes.
+ *
+ * Sort animation is a 3-phase sequence:
+ *   1. Scatter — cells shrink + drift to random offsets (grid "breaks apart")
+ *   2. Travel — cells glide to their new positions (still small)
+ *   3. Land — cells scale back up and settle into place
  *
  * During assignment: cells are tappable to claim. During playback: playhead
  * sweeps across columns. Locked/muted cells show indicators.
  */
 
+import { useRef, useState, useEffect } from 'react';
 import { getChapterIdentity, getLayerIdentity } from '@/lib/identity';
 import type { QuiltCellView, QuiltGridState } from '@/hooks/useQuilt';
 import type { GranularType, LayerType, ArcPhase } from '@/conductor/types';
 
 const ROW_ORDER: LayerType[] = ['bass', 'drums', 'pad', 'seed', 'harmony', 'fx'];
+
+// Animation timing (ms)
+const SCATTER_DURATION = 1000;
+const TRAVEL_DURATION = 4000;
+const LAND_DURATION = 1000;
+
+type SortAnimPhase = 'idle' | 'scatter' | 'travel' | 'land';
 
 interface QuiltGridProps {
   grid: QuiltGridState;
@@ -73,6 +86,129 @@ export function QuiltGrid({
   }
   function cellY(rowIndex: number): number {
     return playheadHeight + rowIndex * (cellSize + gap);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sort animation state
+  // ---------------------------------------------------------------------------
+
+  const [animPhase, setAnimPhase] = useState<SortAnimPhase>('idle');
+
+  // Track previous ownerId → position mapping to detect sorts
+  const prevPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  // Random scatter offsets per cell (generated once per sort)
+  const scatterOffsetsRef = useRef<Map<string, { dx: number; dy: number }>>(new Map());
+
+  // Build current position map
+  const currentPositions = new Map<string, { x: number; y: number }>();
+  for (const cell of grid.cells) {
+    if (cell.ownerId) {
+      currentPositions.set(cell.ownerId, {
+        x: cellX(cell.columnIndex),
+        y: cellY(cell.rowIndex),
+      });
+    }
+  }
+
+  // Detect position changes (sort happened)
+  useEffect(() => {
+    const prev = prevPositionsRef.current;
+    if (prev.size === 0) {
+      // First render — just record positions
+      prevPositionsRef.current = new Map(currentPositions);
+      return;
+    }
+
+    // Check if any owned cell moved
+    let movedCount = 0;
+    for (const [ownerId, pos] of currentPositions) {
+      const prevPos = prev.get(ownerId);
+      if (prevPos && (prevPos.x !== pos.x || prevPos.y !== pos.y)) {
+        movedCount++;
+      }
+    }
+
+    if (movedCount >= 2 && animPhase === 'idle') {
+      // Multiple cells moved simultaneously = sort (not a single swap)
+      // Generate random scatter offsets
+      const scatterRange = isProjector ? 30 : 15;
+      const offsets = new Map<string, { dx: number; dy: number }>();
+      for (const cell of grid.cells) {
+        if (cell.ownerId) {
+          offsets.set(cell.ownerId, {
+            dx: (Math.random() - 0.5) * scatterRange * 2,
+            dy: (Math.random() - 0.5) * scatterRange * 2,
+          });
+        }
+      }
+      scatterOffsetsRef.current = offsets;
+
+      // Start scatter phase
+      setAnimPhase('scatter');
+    }
+
+    prevPositionsRef.current = new Map(currentPositions);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grid.cells]);
+
+  // Drive animation phase transitions
+  useEffect(() => {
+    if (animPhase === 'idle') return;
+
+    const durations: Record<SortAnimPhase, number> = {
+      idle: 0,
+      scatter: SCATTER_DURATION,
+      travel: TRAVEL_DURATION,
+      land: LAND_DURATION,
+    };
+
+    const next: Record<SortAnimPhase, SortAnimPhase> = {
+      idle: 'idle',
+      scatter: 'travel',
+      travel: 'land',
+      land: 'idle',
+    };
+
+    const timer = setTimeout(() => {
+      setAnimPhase(next[animPhase]);
+    }, durations[animPhase]);
+
+    return () => clearTimeout(timer);
+  }, [animPhase]);
+
+  // Compute per-cell animation transforms
+  function getCellAnimStyle(ownerId: string | null): React.CSSProperties {
+    if (!ownerId || animPhase === 'idle') {
+      return {
+        transform: 'scale(1) translate(0px, 0px)',
+        transition: `left ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), top ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease, background-color 0.2s ease, border-color 0.2s ease, opacity 0.3s ease`,
+      };
+    }
+
+    const offset = scatterOffsetsRef.current.get(ownerId) ?? { dx: 0, dy: 0 };
+
+    switch (animPhase) {
+      case 'scatter':
+        return {
+          transform: `scale(0.7) translate(${offset.dx}px, ${offset.dy}px)`,
+          transition: `transform ${SCATTER_DURATION}ms cubic-bezier(0.2, 0, 0.6, 1), left 0ms, top 0ms, background-color 0.2s ease, border-color 0.2s ease, opacity ${SCATTER_DURATION}ms ease`,
+          opacity: 0.7,
+        };
+      case 'travel':
+        return {
+          transform: `scale(0.7) translate(0px, 0px)`,
+          transition: `left ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), top ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${TRAVEL_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, border-color 0.2s ease, opacity ${TRAVEL_DURATION}ms ease`,
+          opacity: 0.85,
+        };
+      case 'land':
+        return {
+          transform: 'scale(1) translate(0px, 0px)',
+          transition: `transform ${LAND_DURATION}ms cubic-bezier(0, 0, 0.2, 1.2), left 0ms, top 0ms, background-color 0.2s ease, border-color 0.2s ease, opacity ${LAND_DURATION}ms ease`,
+          opacity: 1,
+        };
+      default:
+        return {};
+    }
   }
 
   return (
@@ -167,6 +303,7 @@ export function QuiltGrid({
 
         // Stable key: ownerId for owned cells, position-based for empty
         const stableKey = cell.ownerId ?? `empty-${cell.id}`;
+        const animStyle = getCellAnimStyle(cell.ownerId);
 
         return (
           <QuiltCellTile
@@ -181,6 +318,7 @@ export function QuiltGrid({
             isMuted={mutedCells?.has(cell.id) ?? false}
             isPlayheadColumn={showPlayhead && cell.columnIndex === grid.playheadColumn}
             rowDimmed={rowDimmed}
+            animStyle={animStyle}
             onTap={onCellTap ? () => onCellTap(cell.id) : undefined}
           />
         );
@@ -190,7 +328,7 @@ export function QuiltGrid({
 }
 
 // ---------------------------------------------------------------------------
-// Cell tile (absolutely positioned with CSS transitions for sort animation)
+// Cell tile (absolutely positioned with sort animation)
 // ---------------------------------------------------------------------------
 
 function QuiltCellTile({
@@ -204,6 +342,7 @@ function QuiltCellTile({
   isMuted,
   isPlayheadColumn,
   rowDimmed,
+  animStyle,
   onTap,
 }: {
   cell: QuiltCellView;
@@ -216,12 +355,19 @@ function QuiltCellTile({
   isMuted: boolean;
   isPlayheadColumn: boolean;
   rowDimmed: boolean;
+  animStyle: React.CSSProperties;
   onTap?: () => void;
 }) {
   const hasSong = cell.songIndex !== null && cell.chapter !== null;
   const isClaimed = cell.ownerId !== null;
   const chapter = cell.chapter ? getChapterIdentity(cell.chapter) : null;
   const bgColor = hasSong ? chapter!.color : (isClaimed ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)');
+
+  // Merge base opacity with animation opacity
+  const baseOpacity = rowDimmed ? 0.2 : (isMuted ? 0.3 : 1);
+  const finalOpacity = (animStyle.opacity != null)
+    ? baseOpacity * (animStyle.opacity as number)
+    : baseOpacity;
 
   return (
     <div
@@ -239,17 +385,19 @@ function QuiltCellTile({
           : isPlayheadColumn
             ? '1px solid rgba(255,255,255,0.25)'
             : '1px solid rgba(255,255,255,0.06)',
-        opacity: rowDimmed ? 0.2 : (isMuted ? 0.3 : 1),
+        opacity: finalOpacity,
         cursor: onTap ? 'pointer' : 'default',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        // Sort animation: left/top transitions for position changes
-        transition: 'left 0.5s ease, top 0.5s ease, background-color 0.2s ease, border-color 0.2s ease, opacity 0.3s ease',
         boxShadow: isPlayheadColumn && hasSong && !isMuted
           ? `0 0 ${isProjector ? 12 : 6}px ${chapter!.color}44`
           : 'none',
         boxSizing: 'border-box',
+        // Animation style (transform + transition from parent)
+        ...animStyle,
+        // Override opacity from animStyle since we computed it above
+        ...(animStyle.opacity != null ? { opacity: finalOpacity } : {}),
       }}
     >
       {/* Lock icon */}

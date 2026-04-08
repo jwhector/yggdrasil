@@ -467,7 +467,7 @@
           "pad": 0.3,
           "fx": 0.2
         },
-        "rowPriority": ["drums", "bass", "melody", "harmony", "pad", "fx"],
+        "rowPriority": ["drums", "bass", "seed", "harmony", "pad", "fx"],
         "entrySchedule": [
           { "granularTypes": ["drums", "bass"], "abletonLoopIndex": 0 },
           { "granularTypes": ["harmony", "melody"], "abletonLoopIndex": 1 },

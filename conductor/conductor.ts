@@ -252,6 +252,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleArcComplete(state);
     case 'TRIGGER_SORT':
       return handleTriggerSort(state);
+    case 'SIMULATE_FINALE_GRID':
+      return handleSimulateFinaleGrid(state, command.audienceCount);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -1933,6 +1935,91 @@ function handleTriggerSort(state: ShowState): ConductorEvent[] {
   applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
 
   return [{ type: 'ARC_SORT_APPLIED', passIndex: 0, previousCells }];
+}
+
+/**
+ * Simulate a populated finale grid for testing. Creates a quilt grid sized for
+ * the given audience count, fills it with fake users and random song choices,
+ * and sets up finale state ready for playback. Skips elegy/assignment/preview.
+ */
+function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): ConductorEvent[] {
+  const config = state.config.finale;
+  const granularTypes = state.config.granularTypes ?? [];
+  const gtIds = granularTypes.map(gt => gt.id);
+
+  // Create the grid
+  const quiltGrid = createQuiltGrid(audienceCount, config.quilt, granularTypes);
+
+  // Synthesize fragments for all 3 songs × all granular types
+  // Uses placeholder track indices (100 + songIndex * 10 + typeIndex)
+  const availableFragments: import('./types').GranularFragment[] = [];
+  for (let songIndex = 0; songIndex < 3; songIndex++) {
+    const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
+    for (let t = 0; t < gtIds.length; t++) {
+      availableFragments.push({
+        id: `sim-${songIndex}-${gtIds[t]}`,
+        songIndex,
+        layerGroupId: 'simulated',
+        granularType: gtIds[t],
+        option: 'A',
+        chapter: chapters[songIndex],
+        trackIndices: [100 + songIndex * 10 + t],
+        wonVote: true,
+        previewAudioPath: '',
+      });
+    }
+  }
+
+  // Initialize finale state
+  state.finaleState = {
+    phase: 'playback',
+    availableFragments,
+    allFragments: availableFragments,
+    quilt: quiltGrid,
+    availableSongs: [0, 1, 2],
+    trackMap: new Map(),
+    assignment: { mode: 'auto', timerRemaining: null },
+    preview: { lockedInUsers: new Set(), timerRemaining: null },
+    remix: {
+      lockedCells: new Set(),
+      mutedCells: new Set(),
+      lastMoveByUser: new Map(),
+      liveTracksActive: [],
+    },
+    npc: { currentMessage: null },
+    arc: null,
+  };
+
+  // Build track map from synthetic fragments
+  state.finaleState.trackMap = buildTrackMap(state.finaleState);
+
+  // Fill cells with fake users and random song choices
+  const availableSongs = [0, 1, 2];
+  let userIndex = 0;
+  for (const cell of quiltGrid.cells.values()) {
+    if (userIndex < audienceCount) {
+      cell.ownerId = `sim-user-${userIndex}`;
+      const randomSong = availableSongs[Math.floor(Math.random() * availableSongs.length)];
+      cell.songIndex = randomSong;
+      const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
+      cell.chapter = chapters[randomSong];
+      userIndex++;
+    }
+    // Remaining cells stay empty (null owner, null song) — valid silent cells
+  }
+
+  // Set up playhead
+  quiltGrid.playheadColumn = quiltGrid.columnOrder[0] ?? 0;
+
+  const events: ConductorEvent[] = [];
+
+  events.push({
+    type: 'PLAYBACK_STARTED',
+    quilt: new Map(quiltGrid.cells),
+    columnOrder: [...quiltGrid.columnOrder],
+  });
+
+  return events;
 }
 
 // ============================================================================

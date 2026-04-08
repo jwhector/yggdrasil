@@ -95,6 +95,9 @@ function ControllerContent() {
         </>
       )}
 
+      {/* Test tools — simulate finale grid (always visible) */}
+      <SimulateFinaleSection sendCommand={sendCommand} />
+
       {/* Emergency + audio — always visible */}
       <EmergencyControls
         fullState={fullState}
@@ -102,6 +105,53 @@ function ControllerContent() {
         sendCommand={sendCommand}
       />
     </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Simulate finale grid (test tool)
+// ---------------------------------------------------------------------------
+
+function SimulateFinaleSection({ sendCommand }: { sendCommand: (cmd: import('@/conductor/types').ConductorCommand) => void }) {
+  const [count, setCount] = useState(24);
+
+  return (
+    <section style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem', fontWeight: 500 }}>Test:</span>
+        <input
+          type="number"
+          min={6}
+          max={72}
+          value={count}
+          onChange={e => setCount(Math.max(6, Math.min(72, parseInt(e.target.value) || 6)))}
+          style={{
+            width: 48,
+            padding: '4px 6px',
+            borderRadius: 4,
+            border: '1px solid rgba(255,255,255,0.15)',
+            background: 'rgba(255,255,255,0.06)',
+            color: '#e5e7eb',
+            fontSize: '0.75rem',
+            textAlign: 'center',
+          }}
+        />
+        <button
+          onClick={() => sendCommand({ type: 'SIMULATE_FINALE_GRID', audienceCount: count })}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 4,
+            border: '1px solid rgba(34, 197, 94, 0.4)',
+            background: 'rgba(34, 197, 94, 0.1)',
+            color: '#86efac',
+            fontSize: '0.75rem',
+            cursor: 'pointer',
+          }}
+        >
+          Simulate Finale Grid
+        </button>
+      </div>
+    </section>
   );
 }
 

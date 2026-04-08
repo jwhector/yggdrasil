@@ -432,6 +432,7 @@ export type ConductorCommand =
   | { type: 'ARC_EXIT_ROW_GROUP'; groupIndex: number }
   | { type: 'ARC_COMPLETE' }
   | { type: 'TRIGGER_SORT' }
+  | { type: 'SIMULATE_FINALE_GRID'; audienceCount: number }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }

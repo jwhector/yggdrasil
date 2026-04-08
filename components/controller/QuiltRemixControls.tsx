@@ -109,8 +109,8 @@ export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControl
         })}
       </div>
 
-      {/* Sort + Swap tools */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+      {/* Sort + Simulate tools */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
         <button
           onClick={() => sendCommand({ type: 'TRIGGER_SORT' })}
           style={{
@@ -126,6 +126,7 @@ export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControl
         >
           Sort Grid
         </button>
+        <SimulateGridTool sendCommand={sendCommand} />
       </div>
       <SwapTool cells={cells} sendCommand={sendCommand} />
 
@@ -485,6 +486,55 @@ function MenuButton({ label, color, onClick }: { label: string; color: string; o
     >
       {label}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Simulate grid tool — generate random grid for testing
+// ---------------------------------------------------------------------------
+
+function SimulateGridTool({
+  sendCommand,
+}: {
+  sendCommand: (cmd: ConductorCommand) => void;
+}) {
+  const [count, setCount] = useState(24);
+
+  return (
+    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+      <input
+        type="number"
+        min={6}
+        max={72}
+        value={count}
+        onChange={e => setCount(Math.max(6, Math.min(72, parseInt(e.target.value) || 6)))}
+        style={{
+          width: 48,
+          padding: '5px 6px',
+          borderRadius: 6,
+          border: '1px solid rgba(255,255,255,0.15)',
+          background: 'rgba(255,255,255,0.06)',
+          color: '#e5e7eb',
+          fontSize: '0.8rem',
+          textAlign: 'center',
+        }}
+      />
+      <button
+        onClick={() => sendCommand({ type: 'SIMULATE_FINALE_GRID', audienceCount: count })}
+        style={{
+          padding: '6px 14px',
+          borderRadius: 6,
+          border: '1px solid rgba(34, 197, 94, 0.5)',
+          background: 'rgba(34, 197, 94, 0.15)',
+          color: '#86efac',
+          fontSize: '0.8rem',
+          cursor: 'pointer',
+          fontWeight: 500,
+        }}
+      >
+        Simulate Grid
+      </button>
+    </div>
   );
 }
 
