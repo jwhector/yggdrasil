@@ -873,7 +873,14 @@ export function createAudioRouter(
 
   // V3.3: Quilt playback start — unmute initial column tracks
   function handleQuiltPlaybackStart(cue: Extract<AudioCue, { type: 'quilt_playback_start' }>): void {
-    ensureTransportStarted();
+    if (cue.jumpToBeatZero) {
+      oscBridge.send('/live/song/stop_playing');
+      oscBridge.send('/live/song/set/current_song_time', 0);
+      oscBridge.send('/live/song/start_playing');
+      routerState.transportStarted = true;
+    } else {
+      ensureTransportStarted();
+    }
     for (const trackIndex of cue.trackIndices) {
       unmuteTrack(trackIndex);
       setGain(trackIndex, 1.0);
@@ -884,24 +891,42 @@ export function createAudioRouter(
   function handleQuiltColumnChange(cue: Extract<AudioCue, { type: 'quilt_column_change' }>): void {
     const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
     for (const change of cue.trackChanges) {
-      if (change.muteTrack !== null) {
-        fadeGain(change.muteTrack, 0, xfadeBeats);
+      for (const ti of change.muteTracks) {
+        fadeGain(ti, 0, xfadeBeats);
       }
-      if (change.unmuteTrack !== null) {
-        fadeGain(change.unmuteTrack, 1.0, xfadeBeats);
+      for (const ti of change.unmuteTracks) {
+        fadeGain(ti, 1.0, xfadeBeats);
+      }
+    }
+
+    // Safety mute: silence any tracks that are unmuted but shouldn't be active
+    // for the incoming column. Catches bleedthrough from edge cases (swaps,
+    // reorders, or missed mutes from prior columns).
+    const expected = new Set(cue.expectedTracks);
+    // Also keep tracks that are actively being crossfaded out (they'll reach 0 on their own)
+    for (const change of cue.trackChanges) {
+      for (const ti of change.muteTracks) expected.add(ti);
+    }
+    for (const trackIndex of routerState.unmutedTracks) {
+      if (!expected.has(trackIndex)) {
+        setGain(trackIndex, 0);
       }
     }
   }
 
   // V3.3: Quilt mute cell
   function handleQuiltMuteCell(cue: Extract<AudioCue, { type: 'quilt_mute_cell' }>): void {
-    fadeGain(cue.trackIndex, 0, currentGainConfig.lockInFadeBeats);
+    for (const ti of cue.trackIndices) {
+      fadeGain(ti, 0, currentGainConfig.lockInFadeBeats);
+    }
   }
 
   // V3.3: Quilt unmute cell
   function handleQuiltUnmuteCell(cue: Extract<AudioCue, { type: 'quilt_unmute_cell' }>): void {
-    unmuteTrack(cue.trackIndex);
-    setGain(cue.trackIndex, 1.0);
+    for (const ti of cue.trackIndices) {
+      unmuteTrack(ti);
+      setGain(ti, 1.0);
+    }
   }
 
   // V3.3 Arc: Staggered row group unmute during entry

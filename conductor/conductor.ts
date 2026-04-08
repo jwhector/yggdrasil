@@ -1612,8 +1612,8 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
     const initialTrackIndices: number[] = [];
     for (const cell of quilt.cells.values()) {
       if (cell.columnIndex === quilt.playheadColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
-        const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-        if (trackIndex !== null) initialTrackIndices.push(trackIndex);
+        const trackIndices = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+        if (trackIndices !== null) initialTrackIndices.push(...trackIndices);
       }
     }
 
@@ -1629,6 +1629,7 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
         type: 'quilt_playback_start',
         initialColumn: quilt.playheadColumn,
         trackIndices: initialTrackIndices,
+        jumpToBeatZero: true,
       },
     });
   }
@@ -1662,41 +1663,43 @@ function handlePrepareColumnCrossfade(state: ShowState): ConductorEvent[] {
   const enteredTypes = getEnteredGranularTypes(state);
 
   // Current column's active tracks
-  const currentTracks = new Map<string, number>();
+  const currentTracks = new Map<string, number[]>();
   for (const cell of quilt.cells.values()) {
     if (cell.columnIndex === currentColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
       if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
-      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndex !== null) currentTracks.set(cell.granularType, trackIndex);
+      const trackIndices = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndices !== null) currentTracks.set(cell.granularType, trackIndices);
     }
   }
 
   // Next column's active tracks
-  const nextTracks = new Map<string, number>();
+  const nextTracks = new Map<string, number[]>();
   for (const cell of quilt.cells.values()) {
     if (cell.columnIndex === nextColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
       if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
-      const trackIndex = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndex !== null) nextTracks.set(cell.granularType, trackIndex);
+      const trackIndices = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndices !== null) nextTracks.set(cell.granularType, trackIndices);
     }
   }
 
   // Compute track changes
-  const trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] = [];
+  const trackChanges: { granularType: string; muteTracks: number[]; unmuteTracks: number[] }[] = [];
   const allTypes = new Set([...currentTracks.keys(), ...nextTracks.keys()]);
   for (const gt of allTypes) {
-    const prev = currentTracks.get(gt) ?? null;
-    const next = nextTracks.get(gt) ?? null;
-    if (prev !== next) {
-      trackChanges.push({ granularType: gt, muteTrack: prev, unmuteTrack: next });
+    const prev = currentTracks.get(gt) ?? [];
+    const next = nextTracks.get(gt) ?? [];
+    const prevStr = prev.join(',');
+    const nextStr = next.join(',');
+    if (prevStr !== nextStr) {
+      trackChanges.push({ granularType: gt, muteTracks: prev, unmuteTracks: next });
     }
   }
 
-  if (trackChanges.length === 0) return [];
+  const expectedTracks = [...nextTracks.values()].flat();
 
   return [{
     type: 'AUDIO_CUE',
-    cue: { type: 'quilt_column_change', columnIndex: nextColumn, trackChanges },
+    cue: { type: 'quilt_column_change', columnIndex: nextColumn, trackChanges, expectedTracks },
   }];
 }
 
@@ -2202,11 +2205,11 @@ function handleMuteCell(state: ShowState, cellId: string): ConductorEvent[] {
   const cell = state.finaleState.quilt.cells.get(cellId);
   const events: ConductorEvent[] = [{ type: 'CELL_MUTED', cellId }];
   if (cell && cell.songIndex !== null) {
-    const trackIndex = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
-    if (trackIndex !== null) {
+    const trackIndices = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
+    if (trackIndices !== null) {
       events.push({
         type: 'AUDIO_CUE',
-        cue: { type: 'quilt_mute_cell', granularType: cell.granularType, columnIndex: cell.columnIndex, trackIndex },
+        cue: { type: 'quilt_mute_cell', granularType: cell.granularType, columnIndex: cell.columnIndex, trackIndices },
       });
     }
   }
@@ -2222,11 +2225,11 @@ function handleUnmuteCell(state: ShowState, cellId: string): ConductorEvent[] {
   const cell = state.finaleState.quilt.cells.get(cellId);
   const events: ConductorEvent[] = [{ type: 'CELL_UNMUTED', cellId }];
   if (cell && cell.songIndex !== null) {
-    const trackIndex = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
-    if (trackIndex !== null) {
+    const trackIndices = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
+    if (trackIndices !== null) {
       events.push({
         type: 'AUDIO_CUE',
-        cue: { type: 'quilt_unmute_cell', granularType: cell.granularType, columnIndex: cell.columnIndex, trackIndex },
+        cue: { type: 'quilt_unmute_cell', granularType: cell.granularType, columnIndex: cell.columnIndex, trackIndices },
       });
     }
   }

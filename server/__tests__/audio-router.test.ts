@@ -577,9 +577,10 @@ describe('AudioRouter', () => {
         type: 'quilt_column_change',
         columnIndex: 1,
         trackChanges: [
-          { granularType: 'bass', muteTrack: 2, unmuteTrack: 4 },
-          { granularType: 'drums', muteTrack: null, unmuteTrack: 6 },
+          { granularType: 'bass', muteTracks: [2], unmuteTracks: [4] },
+          { granularType: 'drums', muteTracks: [], unmuteTracks: [6] },
         ],
+        expectedTracks: [4, 6],
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // mute outgoing
@@ -598,7 +599,7 @@ describe('AudioRouter', () => {
         type: 'quilt_mute_cell',
         granularType: 'bass',
         columnIndex: 0,
-        trackIndex: 4,
+        trackIndices: [4],
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
@@ -611,7 +612,7 @@ describe('AudioRouter', () => {
         type: 'quilt_unmute_cell',
         granularType: 'bass',
         columnIndex: 0,
-        trackIndex: 4,
+        trackIndices: [4],
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);

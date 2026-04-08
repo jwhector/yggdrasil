@@ -112,8 +112,8 @@
         {
           "index": 2,
           "group": "spark",
-          "labelA": "Bright. Sharp.",
-          "labelB": "Dark. Soft.",
+          "labelA": "YOU WIN!",
+          "labelB": "REV IT UP!",
           "optionA": {
             "tracks": [
               {
@@ -349,7 +349,7 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  25
+                  23
                 ]
               }
             ]
@@ -359,7 +359,7 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  26
+                  24
                 ]
               }
             ]
@@ -451,7 +451,7 @@
         "allowSongChange": false
       },
       "arc": {
-        "enabled": true,
+        "enabled": false,
         "cellSizeThreshold": 4,
         "fullLoopBarsPerCell": 8,
         "halfLoopBarsPerCell": 4,

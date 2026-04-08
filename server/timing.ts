@@ -672,6 +672,11 @@ export function createTimingEngine(
   function startLoopTracking(): void {
     stopLoopTracking();
 
+    // Reset beat baseline so rawToMonotonic handles the jump to beat 0 cleanly
+    previousRawBeat = -1;
+    beatWrapOffset = 0;
+    currentAbsoluteBeat = 0;
+
     const state = getState();
     const columns = state.finaleState?.quilt.columns ?? 1;
     const columnTiming = state.config.finale.quilt.columnTiming ?? 'divided';

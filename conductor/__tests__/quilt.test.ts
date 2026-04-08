@@ -576,24 +576,31 @@ describe('overrideCellSong', () => {
 // ============================================================================
 
 describe('resolveTrack', () => {
-  test('resolves granularType + songIndex to track index', () => {
-    const trackMap = new Map<string, Map<number, number>>([
-      ['bass', new Map([[0, 10], [1, 11], [2, 12]])],
-      ['drums', new Map([[0, 20], [1, 21], [2, 22]])],
+  test('resolves granularType + songIndex to track indices', () => {
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['bass', new Map([[0, [10]], [1, [11]], [2, [12]]])],
+      ['drums', new Map([[0, [20]], [1, [21]], [2, [22]]])],
     ]);
-    expect(resolveTrack(trackMap, 'bass', 0)).toBe(10);
-    expect(resolveTrack(trackMap, 'bass', 2)).toBe(12);
-    expect(resolveTrack(trackMap, 'drums', 1)).toBe(21);
+    expect(resolveTrack(trackMap, 'bass', 0)).toEqual([10]);
+    expect(resolveTrack(trackMap, 'bass', 2)).toEqual([12]);
+    expect(resolveTrack(trackMap, 'drums', 1)).toEqual([21]);
+  });
+
+  test('resolves multiple track indices for grouped tracks', () => {
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['fx', new Map([[0, [60, 61]]])],
+    ]);
+    expect(resolveTrack(trackMap, 'fx', 0)).toEqual([60, 61]);
   });
 
   test('returns null for unknown granular type', () => {
-    const trackMap = new Map<string, Map<number, number>>();
+    const trackMap = new Map<string, Map<number, number[]>>();
     expect(resolveTrack(trackMap, 'bass', 0)).toBeNull();
   });
 
   test('returns null for unknown song index', () => {
-    const trackMap = new Map<string, Map<number, number>>([
-      ['bass', new Map([[0, 10]])],
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['bass', new Map([[0, [10]]])],
     ]);
     expect(resolveTrack(trackMap, 'bass', 5)).toBeNull();
   });
