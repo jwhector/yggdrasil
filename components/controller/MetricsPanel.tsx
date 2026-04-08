@@ -116,22 +116,40 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
       {isFinalePhase && finaleState && (
         <div style={styles.row}>
           <StatCard label="Finale Phase" value={finaleState.phase} />
+          <StatCard label="Grid" value={`${finaleState.quilt.rows}\u00D7${finaleState.quilt.columns}`} />
+          <StatCard
+            label="Claimed"
+            value={`${Array.from(finaleState.quilt.cells.values()).filter(c => c.ownerId !== null).length} / ${finaleState.quilt.cells.size}`}
+          />
+          <StatCard
+            label="Songs Set"
+            value={String(Array.from(finaleState.quilt.cells.values()).filter(c => c.songIndex !== null).length)}
+          />
           {finaleState.phase === 'assignment' && (
             <>
               <StatCard label="Mode" value={finaleState.assignment.mode} />
-              <StatCard
-                label="Cells"
-                value={String(finaleState.quilt.cells.size)}
-              />
               {finaleState.assignment.timerRemaining !== null && (
-                <StatCard label="Timer" value={`${Math.ceil(finaleState.assignment.timerRemaining / 1000)}s`} />
+                <StatCard label="Timer" value={`${Math.ceil(finaleState.assignment.timerRemaining / 1000)}s`} color="#fbbf24" />
+              )}
+            </>
+          )}
+          {finaleState.phase === 'preview' && (
+            <>
+              <StatCard
+                label="Locked In"
+                value={`${finaleState.preview.lockedInUsers.size} / ${Array.from(finaleState.quilt.cells.values()).filter(c => c.ownerId !== null).length}`}
+              />
+              {finaleState.preview.timerRemaining !== null && (
+                <StatCard label="Timer" value={`${Math.ceil(finaleState.preview.timerRemaining / 1000)}s`} color="#fbbf24" />
               )}
             </>
           )}
           {finaleState.phase === 'playback' && (
             <>
-              <StatCard label="Locked Cells" value={String(finaleState.remix.lockedCells.size)} />
+              <StatCard label="Locked" value={String(finaleState.remix.lockedCells.size)} color="#fbbf24" />
+              <StatCard label="Muted" value={String(finaleState.remix.mutedCells.size)} color={finaleState.remix.mutedCells.size > 0 ? '#f87171' : undefined} />
               <StatCard label="Loop" value={String(finaleState.quilt.loopCount)} />
+              <StatCard label="Playhead" value={`Col ${finaleState.quilt.playheadColumn + 1}`} color="#7c3aed" />
             </>
           )}
         </div>

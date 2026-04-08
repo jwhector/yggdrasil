@@ -16,14 +16,14 @@ import { useShowState } from '@/hooks/useShowState';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
-// TODO: V3.3 Phase 5 — import QuiltRemixControls
+import { QuiltRemixControls } from '@/components/controller/QuiltRemixControls';
 import { NpcControls } from '@/components/controller/NpcControls';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
 
 const SHOW_ID = 'default-show';
 const PASSCODE = process.env.NEXT_PUBLIC_CONTROLLER_PASSCODE ?? '';
 
-const FINALE_PHASES = new Set(['finale_elegy', 'finale_assignment', 'finale_live_mix']);
+const FINALE_PHASES = new Set(['finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback']);
 
 // ---------------------------------------------------------------------------
 // Entry point — passcode gate
@@ -89,10 +89,11 @@ function ControllerContent() {
 
       {/* Finale controls */}
       {isFinale && (
-        <NpcControls fullState={fullState} sendCommand={sendCommand} />
+        <>
+          <QuiltRemixControls fullState={fullState} sendCommand={sendCommand} />
+          <NpcControls fullState={fullState} sendCommand={sendCommand} />
+        </>
       )}
-
-      {/* TODO: V3.3 Phase 5 — QuiltRemixControls for finale_playback */}
 
       {/* Emergency + audio — always visible */}
       <EmergencyControls

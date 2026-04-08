@@ -106,7 +106,7 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 | **Threshold** | Read-only current threshold, Last vote's winning proportion, FORCE_COLLAPSE |
 | **Song Rejection** | Trigger rejection effect (OSC command to Ableton) — only for completed songs |
 | **Audio** | Transport Play/Stop, Hard Mute/Panic, Reset Utilities (all gains to 0 dB), Per-layer force on/off |
-| **Finale — Quilt** | Per-cell lock/mute/override, column reorder, cell swaps (V3.3) |
+| **Finale — Quilt** | Phase actions (Start Assignment/Preview/Playback), full quilt grid with per-cell lock/unlock/mute/unmute/override song, column reorder arrows, cell swap selector (V3.3) |
 | **NPC** | Bank of pre-written NPC lines (organized by phase), Free-text input for improvised lines, Fire button |
 | **Live Performance** | Toggle live input tracks (vocal, synth, etc.) |
 | **Emergency** | Pause/Resume show, Export/Import state as JSON, Force reconnect all clients, Reset to lobby |
