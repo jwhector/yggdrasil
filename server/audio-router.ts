@@ -32,7 +32,6 @@ import type {
   ShowState,
   ConductorEvent,
   AudioCue,
-  TrackBundle,
   LayerType,
   GainConfig,
 } from '../conductor/types';
@@ -859,28 +858,37 @@ export function createAudioRouter(
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  // V3.2 live mix crossfade handler (stub — full implementation in live mix task)
-  function handleLiveMixCrossfade(cue: Extract<AudioCue, { type: 'live_mix_crossfade' }>): void {
+  // V3.3: Quilt playback start — unmute initial column tracks
+  function handleQuiltPlaybackStart(cue: Extract<AudioCue, { type: 'quilt_playback_start' }>): void {
     ensureTransportStarted();
-    // Fade out outgoing, fade in incoming (iterate all tracks in multi-track fragments)
-    for (const idx of cue.outgoingTrackIndices) {
-      fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
-    }
-    for (const idx of cue.incomingTrackIndices) {
-      unmuteTrack(idx);
-      setGain(idx, currentGainConfig.entryGain);
-      fadeGain(idx, 1.0, currentGainConfig.ceremonySwellBeats);
+    for (const trackIndex of cue.trackIndices) {
+      unmuteTrack(trackIndex);
+      setGain(trackIndex, 1.0);
     }
   }
 
-  // V3.2 live mix start handler (stub — full implementation in live mix task)
-  function handleLiveMixStart(cue: Extract<AudioCue, { type: 'live_mix_start' }>): void {
-    ensureTransportStarted();
-    for (const trackIndex of cue.activeTrackIndices) {
-      unmuteTrack(trackIndex);
-      setGain(trackIndex, currentGainConfig.entryGain);
-      fadeGain(trackIndex, 1.0, currentGainConfig.ceremonySwellBeats);
+  // V3.3: Quilt column change — mute/unmute tracks at column boundary
+  function handleQuiltColumnChange(cue: Extract<AudioCue, { type: 'quilt_column_change' }>): void {
+    for (const change of cue.trackChanges) {
+      if (change.muteTrack !== null) {
+        fadeGain(change.muteTrack, 0, currentGainConfig.lockInFadeBeats);
+      }
+      if (change.unmuteTrack !== null) {
+        unmuteTrack(change.unmuteTrack);
+        setGain(change.unmuteTrack, 1.0);
+      }
     }
+  }
+
+  // V3.3: Quilt mute cell
+  function handleQuiltMuteCell(cue: Extract<AudioCue, { type: 'quilt_mute_cell' }>): void {
+    fadeGain(cue.trackIndex, 0, currentGainConfig.lockInFadeBeats);
+  }
+
+  // V3.3: Quilt unmute cell
+  function handleQuiltUnmuteCell(cue: Extract<AudioCue, { type: 'quilt_unmute_cell' }>): void {
+    unmuteTrack(cue.trackIndex);
+    setGain(cue.trackIndex, 1.0);
   }
 
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
@@ -1075,11 +1083,20 @@ export function createAudioRouter(
           case 'rejection_gesture':
             handleRejectionGesture(cue, state);
             break;
-          case 'live_mix_crossfade':
-            handleLiveMixCrossfade(cue);
+          case 'quilt_playback_start':
+            handleQuiltPlaybackStart(cue);
             break;
-          case 'live_mix_start':
-            handleLiveMixStart(cue);
+          case 'quilt_column_change':
+            handleQuiltColumnChange(cue);
+            break;
+          case 'quilt_reorder':
+            // No immediate audio change — takes effect at next column boundary
+            break;
+          case 'quilt_mute_cell':
+            handleQuiltMuteCell(cue);
+            break;
+          case 'quilt_unmute_cell':
+            handleQuiltUnmuteCell(cue);
             break;
           case 'transport':
             handleTransport(cue);

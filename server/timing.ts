@@ -325,8 +325,37 @@ export function createTimingEngine(
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Preview Timer (V3.3)
+  // --------------------------------------------------------------------------
+
+  let previewTimer: NodeJS.Timeout | null = null;
+
+  function startPreviewTimer(durationMs: number): void {
+    clearPreviewTimer();
+    console.log(`[Timing] Preview timer: ${durationMs}ms`);
+    previewTimer = setTimeout(() => {
+      if (!running) return;
+      const state = getState();
+      if (state.phase === 'finale_preview') {
+        console.log('[Timing] Preview timer expired → PREVIEW_COMPLETE');
+        sendCommand({ type: 'PREVIEW_COMPLETE' });
+        sendCommand({ type: 'ADVANCE_PHASE' });
+      }
+      previewTimer = null;
+    }, durationMs);
+  }
+
+  function clearPreviewTimer(): void {
+    if (previewTimer) {
+      clearTimeout(previewTimer);
+      previewTimer = null;
+    }
+  }
+
   function clearAllFinaleTimers(): void {
     clearAssignmentTimer();
+    clearPreviewTimer();
   }
 
   // --------------------------------------------------------------------------
@@ -523,7 +552,7 @@ export function createTimingEngine(
       fallbackLoopInterval = setInterval(() => {
         if (!running) return;
         const state = getState();
-        if (state.phase !== 'finale_live_mix') {
+        if (state.phase !== 'finale_playback') {
           stopLoopTracking();
           return;
         }
@@ -673,7 +702,7 @@ export function createTimingEngine(
 
     // --- Loop boundary tracking (live mix) ---
     if (!loopState) return;
-    if (state.phase !== 'finale_live_mix') return;
+    if (state.phase !== 'finale_playback') return;
 
     // Initialize baseline on first beat
     if (loopState.lastBoundaryBeat < 0) {
@@ -784,7 +813,7 @@ export function createTimingEngine(
       stopLoopTracking();
       clearAllFinaleTimers();
 
-      if (showPhaseEvent.phase === 'finale_live_mix') {
+      if (showPhaseEvent.phase === 'finale_playback') {
         startLoopTracking();
       }
     }
@@ -803,6 +832,34 @@ export function createTimingEngine(
     // All cells assigned → clear assignment timer
     if (events.some(e => e.type === 'ALL_CELLS_ASSIGNED')) {
       clearAssignmentTimer();
+    }
+
+    // Preview started → start preview timer
+    if (events.some(e => e.type === 'PREVIEW_STARTED')) {
+      const timerMs = state.config.finale.quilt.previewTimerMs;
+      if (timerMs > 0) {
+        startPreviewTimer(timerMs);
+      }
+    }
+
+    // All users locked in → clear preview timer (ADVANCE_PHASE handled by conductor/server)
+    if (events.some(e => e.type === 'USER_LOCKED_IN')) {
+      // Check if all cell owners have locked in
+      const fs = state.finaleState;
+      if (fs && fs.phase === 'preview') {
+        let allLocked = true;
+        for (const cell of fs.quilt.cells.values()) {
+          if (cell.ownerId && !fs.preview.lockedInUsers.has(cell.ownerId)) {
+            allLocked = false;
+            break;
+          }
+        }
+        if (allLocked) {
+          clearPreviewTimer();
+          sendCommand({ type: 'PREVIEW_COMPLETE' });
+          sendCommand({ type: 'ADVANCE_PHASE' });
+        }
+      }
     }
   }
 
@@ -865,7 +922,7 @@ export function createTimingEngine(
           },
         ]);
       }
-    } else if (state.phase === 'finale_live_mix') {
+    } else if (state.phase === 'finale_playback') {
       startLoopTracking();
     }
   }
@@ -935,6 +992,21 @@ export function createTimingEngine(
         }
       }
     }
+
+    if (state.phase === 'finale_preview') {
+      const timerRemaining = state.finaleState.preview.timerRemaining;
+      if (timerRemaining !== null) {
+        const remaining = timerRemaining - elapsed;
+        if (remaining > 0) {
+          console.log(`[Timing] Recovering preview timer: ${remaining}ms remaining`);
+          startPreviewTimer(remaining);
+        } else {
+          console.log('[Timing] Preview timer already expired on recovery → firing PREVIEW_COMPLETE');
+          sendCommand({ type: 'PREVIEW_COMPLETE' });
+          sendCommand({ type: 'ADVANCE_PHASE' });
+        }
+      }
+    }
   }
 
   /**
@@ -969,7 +1041,7 @@ export function createTimingEngine(
       if (attempt?.status === 'in_progress' && attempt.currentLayerPhase === 'auditioning') {
         startAuditionTracking(state);
       }
-    } else if (state.phase === 'finale_live_mix') {
+    } else if (state.phase === 'finale_playback') {
       startLoopTracking();
     }
   }

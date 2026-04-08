@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS ceremony_events (
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 
--- V3.2: Finale assignments — granular type group assignments
+-- [DEPRECATED V3.2] Finale assignments — granular type group assignments
 CREATE TABLE IF NOT EXISTS finale_assignments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS finale_assignments (
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 
--- V3.2: Finale live mix preference events
+-- [DEPRECATED V3.2] Finale live mix preference events
 CREATE TABLE IF NOT EXISTS finale_mix_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
@@ -90,6 +90,30 @@ CREATE TABLE IF NOT EXISTS finale_mix_events (
   granular_type TEXT NOT NULL,
   fragment_id TEXT NOT NULL,
   event_type TEXT NOT NULL CHECK(event_type IN ('preference', 'lock', 'unlock', 'override')),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+
+-- V3.3: Quilt cell state
+CREATE TABLE IF NOT EXISTS finale_quilt_cells (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  cell_id TEXT NOT NULL,
+  owner_id TEXT,
+  song_index INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id),
+  UNIQUE(show_id, cell_id)
+);
+
+-- V3.3: Remix events (audience + performer actions during playback)
+CREATE TABLE IF NOT EXISTS finale_remix_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT,
+  event_type TEXT NOT NULL CHECK(event_type IN ('move', 'reorder', 'swap', 'lock', 'unlock', 'mute', 'unmute', 'override')),
+  payload JSON NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
@@ -103,3 +127,5 @@ CREATE INDEX IF NOT EXISTS idx_finale_group_votes_show ON finale_group_votes(sho
 CREATE INDEX IF NOT EXISTS idx_ceremony_events_show ON ceremony_events(show_id);
 CREATE INDEX IF NOT EXISTS idx_finale_assignments_show ON finale_assignments(show_id);
 CREATE INDEX IF NOT EXISTS idx_finale_mix_events_show ON finale_mix_events(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_quilt_cells_show ON finale_quilt_cells(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_remix_events_show ON finale_remix_events(show_id);

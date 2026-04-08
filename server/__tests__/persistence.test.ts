@@ -350,50 +350,54 @@ describe('User persistence', () => {
   });
 });
 
-describe('Finale persistence (V3.2)', () => {
-  test('saves a finale assignment', () => {
+describe('Quilt persistence (V3.3)', () => {
+  test('saves and retrieves a quilt cell', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
 
-    expect(() =>
-      db.saveFinaleAssignment('show-1', 'user-1', 'bass', false)
-    ).not.toThrow();
+    db.saveQuiltCell('show-1', '0:0', 'user-1', null);
+    db.saveQuiltCell('show-1', '1:0', 'user-2', 1);
+
+    const cells = db.getQuiltCells('show-1');
+    expect(cells).toHaveLength(2);
+    expect(cells[0].cellId).toBe('0:0');
+    expect(cells[0].userId).toBe('user-1');
+    expect(cells[0].songIndex).toBeNull();
+    expect(cells[1].songIndex).toBe(1);
 
     db.close();
   });
 
-  test('saves an auto-assigned finale assignment', () => {
+  test('upserts quilt cell on duplicate (show_id, cell_id)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
-    db.saveUser({ id: 'user-1', seatId: null, connected: true, joinedAt: Date.now() }, 'show-1');
 
-    expect(() =>
-      db.saveFinaleAssignment('show-1', 'user-1', 'drums', true)
-    ).not.toThrow();
+    db.saveQuiltCell('show-1', '0:0', 'user-1', null);
+    db.saveQuiltCell('show-1', '0:0', 'user-1', 2); // update song
 
-    const assignments = db.getFinaleAssignments('show-1');
-    expect(assignments).toHaveLength(1);
-    expect(assignments[0].granularType).toBe('drums');
-    expect(assignments[0].autoAssigned).toBe(true);
+    const cells = db.getQuiltCells('show-1');
+    expect(cells).toHaveLength(1);
+    expect(cells[0].songIndex).toBe(2);
 
     db.close();
   });
 
-  test('retrieves all assignments for a show', () => {
+  test('saves and retrieves remix events', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
     db.saveState(state);
 
-    db.saveFinaleAssignment('show-1', 'user-1', 'bass', true);
-    db.saveFinaleAssignment('show-1', 'user-2', 'drums', true);
-    db.saveFinaleAssignment('show-1', 'user-3', 'bass', false);
+    db.saveRemixEvent('show-1', 'user-1', 'move', '{"from":"0:0","to":"1:0"}');
+    db.saveRemixEvent('show-1', null, 'lock', '{"cellId":"0:0"}');
 
-    const assignments = db.getFinaleAssignments('show-1');
-    expect(assignments).toHaveLength(3);
-    expect(assignments.map(a => a.granularType).sort()).toEqual(['bass', 'bass', 'drums']);
+    const events = db.getRemixEvents('show-1');
+    expect(events).toHaveLength(2);
+    expect(events[0].eventType).toBe('move');
+    expect(events[0].userId).toBe('user-1');
+    expect(events[1].eventType).toBe('lock');
+    expect(events[1].userId).toBeNull();
 
     db.close();
   });

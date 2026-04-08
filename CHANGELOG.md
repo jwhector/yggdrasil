@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 2026-04-07 — V3.3 Phase 3: Server wiring + persistence
+
+Wired the V3.3 quilt conductor to the server layer: sockets, persistence, audio routing, and timing.
+
+### Updated: `server/socket.ts`
+- Removed V3.2 events: `select_type`, `set_preference`, `group_update`, `mix_state`, `assigned`, `type_locked`/`type_unlocked`
+- Added V3.3 client→server: `claim_cell`, `release_cell`, `set_song`, `lock_in`, `move_cell`, `change_song`
+- Added V3.3 server→client: `quilt_state` (~4 Hz), `cell_claimed`, `cell_moved`, `playhead_update`, `column_reordered`
+- Replaced `mix_state` broadcast with `quilt_state` broadcast (unified interval)
+- Updated state filtering for projector and audience to use quilt grid instead of live mix data
+- Removed `getLoopPosition` parameter (no longer needed)
+
+### Updated: `server/persistence.ts`
+- Replaced `saveFinaleAssignment`/`getFinaleAssignments`/`saveMixEvent`/`getMixEvents` with `saveQuiltCell`/`getQuiltCells`/`saveRemixEvent`/`getRemixEvents`
+- Added migration v6: `finale_quilt_cells` (with UNIQUE on show_id+cell_id for upsert) and `finale_remix_events`
+
+### Updated: `db/schema.sql`
+- Added `finale_quilt_cells` and `finale_remix_events` table definitions
+- Marked `finale_assignments` and `finale_mix_events` as deprecated
+
+### Updated: `server/audio-router.ts`
+- Removed `live_mix_crossfade` and `live_mix_start` handlers
+- Added `quilt_playback_start`, `quilt_column_change`, `quilt_reorder`, `quilt_mute_cell`, `quilt_unmute_cell` handlers
+
+### Updated: `server/timing.ts`
+- Replaced all `finale_live_mix` references with `finale_playback`
+- Added preview timer: starts on `PREVIEW_STARTED`, fires `PREVIEW_COMPLETE` + `ADVANCE_PHASE` on expiry
+- Added early preview completion when all users lock in
+- Added preview timer recovery on server restart
+
+### Tests
+- Updated persistence tests: replaced V3.2 assignment tests with V3.3 quilt cell + remix event tests
+- Updated audio-router tests: replaced `live_mix_crossfade`/`live_mix_start` with `quilt_playback_start`/`quilt_column_change`/`quilt_mute_cell`/`quilt_unmute_cell`
+- 333 tests passing across 12 suites, `tsc --noEmit` clean
+
+### Docs
+- Updated `docs/server-protocol.md`: new event tables, schema, recovery notes
+- Updated `docs/audio-engine.md`: quilt playback section replaces live mix section
+
 ## 2026-04-07 — V3.3 Phase 2: Quilt conductor logic
 
 Pure conductor implementation for the V3.3 Quilt finale. All functions are pure (no I/O) and fully tested.
