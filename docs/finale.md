@@ -144,6 +144,58 @@ The audience watches on the projector as their quilt gets rearranged in real tim
 - **Silent cells:** If a cell is empty or muted, that granular type is silent during that time slice. This is musically valid — silence is part of the composition.
 - **Ableton implementation:** At each column boundary, the system mutes/unmutes the appropriate tracks per type. Only one track per type is ever unmuted at a time within a column.
 
+### Automated Playback Arc
+
+When the arc system is enabled (`QuiltConfig.arc.enabled`), playback follows an automated 4-phase sequence instead of looping indefinitely. The performer plays live over the top — no manual interaction required.
+
+**Cell size threshold:** Below 4 columns → 8 bars/cell (full Ableton loop). 4+ columns → 4 bars/cell (half loop). This keeps grid loop duration in a musical sweet spot. Configurable via `arc.cellSizeThreshold`.
+
+**Song energy profiles:** Each song has an inherent energy level: Song 0 (Ambition) = 1.0, Song 1 (Love) = 0.5, Song 2 (Avoidance) = 0.2. Configurable via `arc.songEnergy`.
+
+**Row weight:** Different granular types have different impact on perceived energy. Drums (0.9) and bass (0.8) dominate the feel; pad (0.3) and fx (0.2) are textural. The sorting algorithm uses weighted energy: `songEnergy[songIndex] * rowWeight[granularType]`. Configurable via `arc.rowWeight`.
+
+#### Arc Phase 1: Entry (staggered unmute)
+Rows unmute in pairs over 2-3 Ableton loops. Foundation first, texture last:
+- Ableton loop 1: drums + bass
+- Ableton loop 2: melody + harmony
+- Ableton loop 3: pad + fx
+
+Entry groups fire on actual Ableton loop boundaries (beat-driven, not timer-based). Configurable via `arc.entrySchedule`.
+
+#### Arc Phase 2: Raw Playback (1 grid loop)
+The full unmodified audience composition plays through once. All 6 rows active. This is the moment the audience hears exactly what they collectively created.
+
+#### Arc Phase 3: Sort + Sorted Playback
+After the raw grid loop completes, the system sorts the grid. Two modes, auto-selected by grid loop duration:
+
+**Single-pass** (grid loop ≥ 16 bars): Divides columns into 3 zones — opening (medium energy), climax (high energy), cool-down (low energy). The algorithm treats all cells as a shared pool. Rows are filled in priority order: drums picks first from the best-fitting cells for each zone, then bass, etc. Lower-priority rows absorb fragmentation.
+
+**Multi-pass** (grid loop < 16 bars): Re-sorts between grid loops, targeting a different energy level each pass (medium → high → cool-down). Configurable via `arc.multiPassTargets`.
+
+Key sorting rules:
+- **Song choices are never changed.** Sorting reorders cells, not content.
+- **Cross-row movement allowed.** A cell can move to a different row (configurable via `arc.allowCrossRowSort`).
+- **Empty cells are zero energy.** They naturally migrate to cool-down zones.
+- **Tiered consolidation.** High-weight rows (drums, bass) get first pick → best consolidation. Low-weight rows (pad, fx) absorb fragmentation.
+
+The sort can also be triggered manually by the performer via the "Sort Grid" button (`TRIGGER_SORT` command).
+
+**Sort animation:** Cells animate to new positions over 500ms (CSS transitions on absolutely-positioned elements keyed by owner ID).
+
+#### Arc Phase 4: Exit (staggered mute)
+Reverse of entry — texture first, foundation last:
+- Ableton loop 1: fx + pad
+- Ableton loop 2: melody + harmony
+- Ableton loop 3: bass + drums → silence
+
+Exit groups fire on Ableton loop boundaries. Configurable via `arc.exitSchedule`.
+
+#### Timing
+All arc timing is beat-driven (Ableton is source of truth):
+- **Column advances:** fire on beat boundaries via OSC beat events
+- **Entry/exit groups:** fire on Ableton loop boundaries (every 32 beats)
+- **Raw→sort and sort→exit transitions:** triggered by the conductor when the playhead wraps a grid loop (no timer needed)
+
 ### Climax & Ending
 
 The performer settles the quilt into its final arrangement. Optionally:
@@ -274,6 +326,12 @@ type FinaleCommand =
   | { type: 'MUTE_CELL'; cellId: string }
   | { type: 'UNMUTE_CELL'; cellId: string }
   | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }  // Performer: force a song choice
+
+  // Arc (automated playback arc)
+  | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }   // Timing engine: unmute next row group during entry
+  | { type: 'ARC_EXIT_ROW_GROUP'; groupIndex: number }    // Timing engine: mute next row group during exit
+  | { type: 'ARC_COMPLETE' }                               // Timing engine: arc finished
+  | { type: 'TRIGGER_SORT' }                               // Performer: manually sort the grid
 ```
 
 ## Conductor Events (Finale — V3.3)
@@ -305,6 +363,12 @@ type FinaleEvent =
   | { type: 'CELL_MUTED'; cellId: string }
   | { type: 'CELL_UNMUTED'; cellId: string }
 
+  // Arc
+  | { type: 'ARC_PHASE_CHANGED'; arcPhase: ArcPhase }                    // entry | raw | sorting | sorted_playback | exit | complete
+  | { type: 'ARC_ROW_GROUP_ENTERED'; granularTypes: string[] }
+  | { type: 'ARC_SORT_APPLIED'; passIndex: number; previousCells: Map<string, QuiltCell> }
+  | { type: 'ARC_ROW_GROUP_EXITED'; granularTypes: string[] }
+
   // Audio
   | { type: 'AUDIO_CUE'; cue: QuiltAudioCue }
 ```
@@ -318,6 +382,9 @@ type QuiltAudioCue =
   | { type: 'quilt_reorder'; newColumnOrder: number[] }
   | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndex: number }
   | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndex: number }
+  // Arc: staggered entry/exit
+  | { type: 'quilt_row_unmute'; granularTypes: string[]; trackIndices: number[] }
+  | { type: 'quilt_row_mute'; granularTypes: string[]; trackIndices: number[] }
 ```
 
 ## WebSocket Events (V3.3 changes)
@@ -426,8 +493,16 @@ The quilt grid as a patchwork of chapter colors (amber/coral/teal). A **playhead
 - **Loop length is 8 bars.** All music is composed for 8-bar loops.
 - **Live seed / melody is a quilt row.** It is one of the 6 granular type rows, audience-controllable like everything else. The performer's live instruments (vocal, synth, etc.) are separate tracks layered on top of the quilt, not part of the grid.
 - **Visual design should be intentionally modular** — build for easy iteration, no locked visual commitments yet.
+- **Song energy profiles** (V3.3 arc): Song 0 (Ambition) = 1.0, Song 1 (Love) = 0.5, Song 2 (Avoidance) = 0.2. Configurable. Reflects the existing musical material.
+- **Row weight for sorting** (V3.3 arc): drums=0.9, bass=0.8, melody=0.5, harmony=0.4, pad=0.3, fx=0.2. Rhythm section dominates perceived energy; texture rows absorb sorting fragmentation.
+- **Cell size threshold** (V3.3 arc): ≥4 columns use 4-bar cells; <4 columns use 8-bar cells. Keeps grid loop duration in a musical sweet spot (~16-32 bars).
+- **Sort mode selection** (V3.3 arc): grid loop ≥16 bars = single-pass (3 zones); <16 bars = multi-pass (3 passes with different energy targets). Based on grid loop duration, not column count.
+- **Finale timing is Ableton-driven** (V3.3 arc): Column advances and arc phase transitions use Ableton beat events as source of truth, not wall-clock timers. Prevents drift.
+- **No vertical unity optimization** (V3.3 arc): The sorting algorithm does not try to align columns to the same song. The zone-based sorting with shared pool naturally produces inter-row variety, which sounds more interesting than all-same-song columns.
 
 ## Open Questions
 
 - [x] ~~Exact crossfade duration at column boundaries~~ — Implemented via `GainConfig.crossfadeBeats` (default: 1 beat). Both fade-out and fade-in use `fadeGain()` for smooth, cancellation-safe transitions.
 - [ ] Projector and phone visual design for the quilt (modular, easy to iterate)
+- [ ] Can the performer pause/cancel the arc mid-playback?
+- [ ] Interaction between manual performer remix controls and the automatic arc (do manual changes persist through sorts?)

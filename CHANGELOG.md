@@ -1,5 +1,56 @@
 # CHANGELOG
 
+## 2026-04-08 — V3.3 Quilt Arc: Sorting, Timing, Animation
+
+Automated playback arc system for the quilt finale — staggered entry/exit, energy-based sorting, and sort animation.
+
+### New: `conductor/quilt-arc.ts`
+- Pure functions for arc scheduling, cell energy scoring, and sorting algorithm
+- Shared pool sorting: all cells treated as one pool, rows filled in priority order (drums first → best consolidation)
+- Single-pass (3 zones: medium/high/cooldown) and multi-pass modes
+- Weighted energy: `songEnergy[songIndex] * rowWeight[granularType]` — rhythm section dominates perceived energy
+- Cell size threshold: ≥4 columns → 4 bars/cell, <4 → 8 bars/cell
+
+### New: Arc types and config
+- Added `ArcPhase`, `ArcConfig`, `ArcSchedule`, `ArcState` types to `conductor/types.ts`
+- Added arc config block to `config/default-show.json` (song energy, row weights, entry/exit schedules)
+- Added `arc` field to `V33FinaleState`, serialization, and client view types
+
+### New: Conductor arc integration (`conductor/conductor.ts`)
+- `handleStartPlayback` initializes arc, staggered entry (first row group only)
+- `handleAdvanceQuiltColumn` is arc-aware: filters by entered rows, triggers raw→sort and sort→exit transitions on grid loop wraps
+- Arc handlers: `handleArcEntryRowGroup`, `handleArcRawComplete`, `handleArcSortComplete`, `handleArcExitRowGroup`, `handleArcComplete`
+- `handleTriggerSort`: performer can manually sort the grid during playback
+
+### New: Beat-driven arc timing (`server/timing.ts`)
+- Replaced setTimeout-based arc scheduler with `startArcTracking` / `handleArcBeat`
+- Entry/exit row groups fire on actual Ableton loop boundaries (beat-counted, not wall-clock)
+- Raw→sort and sort→exit transitions driven by conductor grid loop wraps (no timer needed)
+- Fixed fractional `loopBeats` issue: `Math.round()` prevents float comparison drift
+
+### New: Audio routing (`server/audio-router.ts`)
+- `handleQuiltRowUnmute`: fade-in with `entrySwellBeats` for staggered entry
+- `handleQuiltRowMute`: fade-out with `exitFadeBeats` for staggered exit
+
+### New: Sort animation (`components/finale/QuiltGrid.tsx`)
+- Rewrote to absolute positioning with owner-keyed cells
+- CSS `transition: left 0.5s ease, top 0.5s ease` animates cell position changes during sort
+- Row headers absolutely positioned alongside cells
+
+### UI updates
+- `useQuilt` hook exposes `arcPhase`
+- `QuiltGrid` dims un-entered rows during arc entry phase
+- `QuiltRemixControls` shows arc phase/pass indicator + "Sort Grid" button
+- `filterStateForClient` sends `arcPhase`/`arcPassIndex` to projector and audience
+
+### Documentation
+- Updated `docs/finale.md`: added Automated Playback Arc section, arc commands/events/audio cues
+- Updated `DECISIONS.md`: R32-R37 (song energy, row weight, cell size, sort mode, timing, vertical unity)
+
+### Tests
+- 44 new tests in `conductor/__tests__/quilt-arc.test.ts`
+- 377 tests passing across 13 suites, `tsc --noEmit` clean
+
 ## 2026-04-08 — V3.3 Phase 6: Cleanup + finalize migration
 
 Final cleanup phase for the V3.3 "Quilt" migration. All phases complete.

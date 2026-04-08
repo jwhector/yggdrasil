@@ -172,6 +172,36 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Decision:** Build quilt visualization for easy iteration — no locked visual commitments yet.
 **Rationale:** The quilt is a new interaction model. Visual design needs playtesting to discover what works.
 
+### R32: Song energy profiles for sorting (V3.3)
+**Date:** 2026-04-08
+**Decision:** Song 0 (Ambition) = 1.0, Song 1 (Love) = 0.5, Song 2 (Avoidance) = 0.2. Configurable via `arc.songEnergy`.
+**Rationale:** Reflects the existing musical material — Ambition is driving/intense, Love is spacious, Avoidance is sparse/dark.
+
+### R33: Row weight for sorting (V3.3)
+**Date:** 2026-04-08
+**Decision:** drums=0.9, bass=0.8, melody=0.5, harmony=0.4, pad=0.3, fx=0.2. Configurable via `arc.rowWeight`.
+**Rationale:** Rhythm section (drums, bass) has the most impact on perceived energy. The sorting algorithm uses `songEnergy * rowWeight` so drums/bass shape the arc; pad/fx absorb fragmentation.
+
+### R34: Cell size threshold (V3.3)
+**Date:** 2026-04-08
+**Decision:** ≥4 columns → 4 bars/cell. <4 columns → 8 bars/cell. Configurable via `arc.cellSizeThreshold`.
+**Rationale:** Keeps grid loop duration in a musical sweet spot (16-32 bars). Too short and the composition doesn't register; too long and it drags.
+
+### R35: Sort mode selection (V3.3)
+**Date:** 2026-04-08
+**Decision:** Grid loop ≥16 bars → single-pass (3 zones: medium/high/cooldown). <16 bars → multi-pass (3 passes with different energy targets).
+**Rationale:** Single-pass needs enough horizontal space for a full energy arc. Below 16 bars, the arc plays out across multiple shorter loops instead.
+
+### R36: Finale timing is Ableton-driven (V3.3)
+**Date:** 2026-04-08
+**Decision:** Column advances and arc entry/exit groups fire on Ableton beat events (OSC). Raw→sort and sort→exit transitions are triggered by the conductor on grid loop wraps. No wall-clock timers for arc phase transitions.
+**Rationale:** setTimeout chains drift from Ableton's actual playback position over 2+ minutes. Beat-driven timing keeps the grid perfectly synchronized.
+
+### R37: No vertical unity optimization in sorting (V3.3)
+**Date:** 2026-04-08
+**Decision:** The sorting algorithm does NOT try to align columns to the same song across rows. Removed the post-sort `applyVerticalUnitySwaps` pass.
+**Rationale:** Full-column unity (all rows playing the same song) sounded monotonous. The zone-based sorting with shared pool naturally produces inter-row variety — drums might play Ambition in the climax while melody plays Love, which is more musically interesting.
+
 ---
 
 ## Open Decisions

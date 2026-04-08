@@ -310,9 +310,6 @@ function sortWithZones(
     }
   }
 
-  // Apply vertical unity optimization
-  applyVerticalUnitySwaps(layout, cells, columns, rows, arcConfig);
-
   // Build position map — only include cells that actually moved
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < columns; c++) {
@@ -327,78 +324,6 @@ function sortWithZones(
   }
 
   return positionMap;
-}
-
-/**
- * Post-processing: try local swaps within each row that improve vertical
- * (column-level) song agreement, weighted by row weight.
- */
-function applyVerticalUnitySwaps(
-  layout: (string | null)[][],
-  cells: Map<string, QuiltCell>,
-  columns: number,
-  rows: number,
-  arcConfig: ArcConfig,
-): void {
-  // Score a column's vertical unity: count cells with the same songIndex,
-  // weighted by rowWeight
-  function columnUnityScore(col: number): number {
-    const songCounts = new Map<number, number>();
-    for (let r = 0; r < rows; r++) {
-      const cellId = layout[r][col];
-      if (cellId) {
-        const cell = cells.get(cellId);
-        if (cell && cell.songIndex !== null) {
-          const weight = arcConfig.rowWeight[cell.granularType] ?? 0;
-          songCounts.set(cell.songIndex, (songCounts.get(cell.songIndex) ?? 0) + weight);
-        }
-      }
-    }
-    // Unity = max weighted agreement for any single song
-    return songCounts.size > 0 ? Math.max(...songCounts.values()) : 0;
-  }
-
-  // For each row, try swapping adjacent cells within the same zone
-  // if it improves the column unity score
-  for (let r = 0; r < rows; r++) {
-    let improved = true;
-    let iterations = 0;
-    const maxIterations = columns * 2; // Prevent infinite loops
-
-    while (improved && iterations < maxIterations) {
-      improved = false;
-      iterations++;
-
-      for (let c = 0; c < columns - 1; c++) {
-        const cellIdA = layout[r][c];
-        const cellIdB = layout[r][c + 1];
-        if (!cellIdA || !cellIdB) continue;
-
-        const cellA = cells.get(cellIdA);
-        const cellB = cells.get(cellIdB);
-        if (!cellA || !cellB) continue;
-        if (cellA.songIndex === cellB.songIndex) continue; // Same song, no benefit
-
-        // Score before swap
-        const scoreBefore = columnUnityScore(c) + columnUnityScore(c + 1);
-
-        // Try swap
-        layout[r][c] = cellIdB;
-        layout[r][c + 1] = cellIdA;
-
-        // Score after swap
-        const scoreAfter = columnUnityScore(c) + columnUnityScore(c + 1);
-
-        if (scoreAfter > scoreBefore) {
-          improved = true; // Keep the swap
-        } else {
-          // Revert
-          layout[r][c] = cellIdA;
-          layout[r][c + 1] = cellIdB;
-        }
-      }
-    }
-  }
 }
 
 // ============================================================================

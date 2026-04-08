@@ -246,14 +246,12 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Arc (V3.3: automated playback arc)
     case 'ARC_ENTRY_ROW_GROUP':
       return handleArcEntryRowGroup(state, command.groupIndex);
-    case 'ARC_RAW_COMPLETE':
-      return handleArcRawComplete(state);
-    case 'ARC_SORT_COMPLETE':
-      return handleArcSortComplete(state);
     case 'ARC_EXIT_ROW_GROUP':
       return handleArcExitRowGroup(state, command.groupIndex);
     case 'ARC_COMPLETE':
       return handleArcComplete(state);
+    case 'TRIGGER_SORT':
+      return handleTriggerSort(state);
 
     // Audio
     case 'AUDIO_TRANSPORT':
@@ -1639,9 +1637,19 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
   // Advance playhead
   const { columnIndex, loopWrapped } = quiltAdvancePlayhead(quilt);
 
-  // Track grid loop completion for arc
+  // Track grid loop completion for arc + trigger phase transitions
+  const arcPhaseEvents: ConductorEvent[] = [];
   if (loopWrapped && arc && arc.phase !== 'complete') {
     arc.gridLoopsInPhase++;
+
+    // Raw phase complete: after 1 grid loop, trigger sort
+    if (arc.phase === 'raw' && arc.gridLoopsInPhase >= 1) {
+      arcPhaseEvents.push(...handleArcRawComplete(state));
+    }
+    // Sorted playback: after each grid loop, check if pass/phase is done
+    else if (arc.phase === 'sorted_playback') {
+      arcPhaseEvents.push(...handleArcSortComplete(state));
+    }
   }
 
   // Build a map of granularType -> active trackIndex for the new column
@@ -1675,6 +1683,9 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
       cue: { type: 'quilt_column_change', columnIndex, trackChanges },
     });
   }
+
+  // Append arc phase transition events (sort applied, phase changed, etc.)
+  events.push(...arcPhaseEvents);
 
   return events;
 }
@@ -1890,6 +1901,38 @@ function handleArcComplete(state: ShowState): ConductorEvent[] {
 
   state.finaleState.arc.phase = 'complete';
   return [{ type: 'ARC_PHASE_CHANGED', arcPhase: 'complete' }];
+}
+
+function handleTriggerSort(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState || state.finaleState.phase !== 'playback') {
+    return [{ type: 'ERROR', message: 'Can only sort during playback' }];
+  }
+
+  const arcConfig = state.config.finale.quilt.arc;
+  if (!arcConfig) return [{ type: 'ERROR', message: 'Arc config not found' }];
+
+  // Snapshot cells before sort
+  const previousCells = new Map(
+    [...state.finaleState.quilt.cells].map(([id, cell]) => [id, { ...cell }]),
+  );
+
+  const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
+
+  const positionMap = sortGrid(
+    state.finaleState.quilt.cells,
+    state.finaleState.quilt.columns,
+    state.finaleState.quilt.rows,
+    arcConfig,
+    'single',
+  );
+
+  if (positionMap.size === 0) {
+    return []; // Nothing to sort
+  }
+
+  applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+
+  return [{ type: 'ARC_SORT_APPLIED', passIndex: 0, previousCells }];
 }
 
 // ============================================================================

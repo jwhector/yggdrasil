@@ -3,7 +3,7 @@
  *
  * Tests for pure arc functions: cell size computation, arc scheduling,
  * energy scoring, sorting algorithm (single-pass and multi-pass),
- * vertical unity optimization, and position map application.
+ * and position map application.
  */
 
 import { describe, test, expect } from '@jest/globals';

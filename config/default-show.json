@@ -462,7 +462,7 @@
         "rowWeight": {
           "drums": 0.9,
           "bass": 0.8,
-          "melody": 0.5,
+          "seed": 0.5,
           "harmony": 0.4,
           "pad": 0.3,
           "fx": 0.2
@@ -496,7 +496,7 @@
       "lockInFadeBeats": 8,
       "collapseFadeBeats": 8,
       "ceremonySwellBeats": 4,
-      "crossfadeBeats": 8,
+      "crossfadeBeats": 4,
       "unityGainValue": 0,
       "stepsPerBeat": 3
     }

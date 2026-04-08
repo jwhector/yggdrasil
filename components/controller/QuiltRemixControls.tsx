@@ -109,7 +109,24 @@ export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControl
         })}
       </div>
 
-      {/* Swap mode */}
+      {/* Sort + Swap tools */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+        <button
+          onClick={() => sendCommand({ type: 'TRIGGER_SORT' })}
+          style={{
+            padding: '6px 14px',
+            borderRadius: 6,
+            border: '1px solid rgba(124, 58, 237, 0.5)',
+            background: 'rgba(124, 58, 237, 0.15)',
+            color: '#c4b5fd',
+            fontSize: '0.8rem',
+            cursor: 'pointer',
+            fontWeight: 500,
+          }}
+        >
+          Sort Grid
+        </button>
+      </div>
       <SwapTool cells={cells} sendCommand={sendCommand} />
 
       {/* Stats */}

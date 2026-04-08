@@ -429,10 +429,9 @@ export type ConductorCommand =
 
   // Finale — Arc (V3.3: automated playback arc)
   | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }
-  | { type: 'ARC_RAW_COMPLETE' }
-  | { type: 'ARC_SORT_COMPLETE' }
   | { type: 'ARC_EXIT_ROW_GROUP'; groupIndex: number }
   | { type: 'ARC_COMPLETE' }
+  | { type: 'TRIGGER_SORT' }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }

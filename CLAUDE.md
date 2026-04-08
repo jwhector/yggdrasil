@@ -70,6 +70,7 @@ yggdrasil/
 │   ├── voting.ts                # Vote tallying + doubt threshold check
 │   ├── threshold.ts             # Doubt threshold check
 │   ├── quilt.ts                 # Quilt grid management (cell claiming, song choice, column advancement)
+│   ├── quilt-arc.ts             # Automated playback arc (sorting, energy scoring, arc scheduling)
 │   ├── assignment.ts            # Cell assignment (auto round-robin / self-select claiming)
 │   ├── fragments.ts             # Fragment generation (layer group → granular decomposition for elegy)
 │   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
