@@ -259,9 +259,16 @@ export function createRemoteOSCBridge(): OSCBridge & {
   }
 
   function sendBundle(messages: { address: string; args: (string | number | boolean)[] }[]): void {
-    for (const msg of messages) {
-      send(msg.address, ...msg.args);
+    if (!running || !bridgeSocket) {
+      console.warn('[OSC-Remote] Cannot sendBundle - bridge not running');
+      return;
     }
+    if (messages.length === 0) return;
+    if (messages.length === 1) {
+      send(messages[0].address, ...messages[0].args);
+      return;
+    }
+    bridgeSocket.emit('osc_send_bundle', { messages });
   }
 
   function on(address: string, handler: (...args: any[]) => void): void {
