@@ -203,6 +203,8 @@ describe('State persistence', () => {
         mutedCells: new Set(),
         lastMoveByUser: new Map([['user-1', 3]]),
         liveTracksActive: [],
+        frozenColumn: null,
+        frozenActiveTracks: new Map(),
       },
       npc: { currentMessage: 'Try again' },
       elegyOptedIn: new Set(['user-1']),

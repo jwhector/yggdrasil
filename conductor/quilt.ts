@@ -448,14 +448,14 @@ export function overrideCellSong(
 // ============================================================================
 
 /**
- * Resolve a cell to an Ableton track index.
- * trackMap[granularType][songIndex] → trackIndex
+ * Resolve a cell to Ableton track indices.
+ * trackMap[granularType][songIndex] → trackIndices[]
  */
 export function resolveTrack(
-  trackMap: Map<string, Map<number, number>>,
+  trackMap: Map<string, Map<number, number[]>>,
   granularType: string,
   songIndex: number,
-): number | null {
+): number[] | null {
   const typeMap = trackMap.get(granularType);
   if (!typeMap) return null;
   return typeMap.get(songIndex) ?? null;
@@ -463,24 +463,23 @@ export function resolveTrack(
 
 /**
  * Build a trackMap from the config's attempt definitions and granular types.
- * Maps granularType → songIndex → first track index from the winning option's TrackBundle.
+ * Maps granularType → songIndex → all track indices from the fragment.
  *
  * This uses the attempt results to determine which option (A/B) won for each layer group,
  * then extracts each granular type's track indices from the winning bundle.
  */
 export function buildTrackMap(
   finaleState: V33FinaleState,
-): Map<string, Map<number, number>> {
-  const trackMap = new Map<string, Map<number, number>>();
+): Map<string, Map<number, number[]>> {
+  const trackMap = new Map<string, Map<number, number[]>>();
 
   for (const fragment of finaleState.availableFragments) {
     if (!trackMap.has(fragment.granularType)) {
       trackMap.set(fragment.granularType, new Map());
     }
     const typeMap = trackMap.get(fragment.granularType)!;
-    // Use the first track index for this granular type + song combination
     if (!typeMap.has(fragment.songIndex) && fragment.trackIndices.length > 0) {
-      typeMap.set(fragment.songIndex, fragment.trackIndices[0]);
+      typeMap.set(fragment.songIndex, [...fragment.trackIndices]);
     }
   }
 

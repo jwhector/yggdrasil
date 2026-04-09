@@ -11,7 +11,7 @@
  * Maps/Sets in ShowState (V3.3):
  *   - ShowState.users: Map<UserId, User>
  *   - V33FinaleState.quilt.cells: Map<string, QuiltCell>
- *   - V33FinaleState.trackMap: Map<string, Map<number, number>>
+ *   - V33FinaleState.trackMap: Map<string, Map<number, number[]>>
  *   - V33FinaleState.preview.lockedInUsers: Set<UserId>
  *   - V33FinaleState.remix.lockedCells: Set<string>
  *   - V33FinaleState.remix.mutedCells: Set<string>
@@ -49,7 +49,7 @@ export interface SerializedFinaleState {
     loopCount: number;
   };
   availableSongs: number[];
-  trackMap: [string, [number, number][]][];
+  trackMap: [string, [number, number[]][]][];
   assignment: V33FinaleState['assignment'];
   preview: {
     lockedInUsers: UserId[];
@@ -60,6 +60,8 @@ export interface SerializedFinaleState {
     mutedCells: string[];
     lastMoveByUser: [UserId, number][];
     liveTracksActive: string[];
+    frozenColumn: number | null;
+    frozenActiveTracks: [string, number[]][];
   };
   npc: V33FinaleState['npc'];
   arc?: V33FinaleState['arc'];
@@ -100,7 +102,7 @@ export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState 
     },
     availableSongs: fs.availableSongs,
     trackMap: Array.from(fs.trackMap.entries()).map(
-      ([gt, songMap]) => [gt, Array.from(songMap.entries())] as [string, [number, number][]],
+      ([gt, songMap]): [string, [number, number[]][]] => [gt, Array.from(songMap.entries())],
     ),
     assignment: fs.assignment,
     preview: {
@@ -112,6 +114,8 @@ export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState 
       mutedCells: Array.from(fs.remix.mutedCells),
       lastMoveByUser: Array.from(fs.remix.lastMoveByUser.entries()),
       liveTracksActive: fs.remix.liveTracksActive,
+      frozenColumn: fs.remix.frozenColumn,
+      frozenActiveTracks: Array.from(fs.remix.frozenActiveTracks.entries()),
     },
     npc: fs.npc,
     arc: fs.arc,
@@ -147,6 +151,8 @@ export function deserializeFinaleState(data: SerializedFinaleState): V33FinaleSt
       mutedCells: new Set(data.remix.mutedCells),
       lastMoveByUser: new Map(data.remix.lastMoveByUser),
       liveTracksActive: data.remix.liveTracksActive,
+      frozenColumn: data.remix.frozenColumn ?? null,
+      frozenActiveTracks: new Map(data.remix.frozenActiveTracks ?? []),
     },
     npc: data.npc,
     arc: data.arc ?? null,

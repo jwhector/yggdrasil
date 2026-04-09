@@ -112,8 +112,8 @@
         {
           "index": 2,
           "group": "spark",
-          "labelA": "Bright. Sharp.",
-          "labelB": "Dark. Soft.",
+          "labelA": "YOU WIN!",
+          "labelB": "REV IT UP!",
           "optionA": {
             "tracks": [
               {
@@ -272,7 +272,7 @@
       ]
     },
     {
-      "chapter": "avoidance",
+      "chapter": "acceptance",
       "title": "Song 3",
       "thresholds": [
         0.5,
@@ -349,7 +349,7 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  25
+                  23
                 ]
               }
             ]
@@ -359,7 +359,7 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  26
+                  24
                 ]
               }
             ]
@@ -408,7 +408,7 @@
   ],
   "finale": {
     "assignmentMode": "auto",
-    "bothOptionsSurvive": true,
+    "bothOptionsSurvive": false,
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
       {
@@ -439,19 +439,19 @@
     "quilt": {
       "maxColumns": 12,
       "loopBars": 8,
-      "columnTiming": "half_loop",
+      "columnTiming": "full_loop",
       "overflowMode": "spectator",
       "previewTimerMs": 20000,
       "assignmentTimerMs": 30000,
       "audienceRemix": {
-        "enabled": false,
+        "enabled": true,
         "scope": "own_cell",
         "allowCrossRowSwaps": true,
         "cooldownLoops": 1,
         "allowSongChange": false
       },
       "arc": {
-        "enabled": true,
+        "enabled": false,
         "cellSizeThreshold": 4,
         "fullLoopBarsPerCell": 8,
         "halfLoopBarsPerCell": 4,
@@ -541,37 +541,37 @@
   "granularTypes": [
     {
       "id": "bass",
-      "label": "The Mind",
+      "label": "Bass",
       "color": "#8b1a1a",
       "symbol": "\u25a0"
     },
     {
       "id": "drums",
-      "label": "The Heartbeat",
+      "label": "Drums",
       "color": "#f5c542",
       "symbol": "\u25b2"
     },
     {
       "id": "pad",
-      "label": "The Hand",
+      "label": "Pad",
       "color": "#7b2d8b",
       "symbol": "\u25c6"
     },
     {
       "id": "seed",
-      "label": "The Soul",
+      "label": "Melody",
       "color": "#e5e5e5",
       "symbol": "◎"
     },
     {
       "id": "harmony",
-      "label": "The Hair",
+      "label": "Harmony",
       "color": "#2563eb",
       "symbol": "\u25cf"
     },
     {
       "id": "fx",
-      "label": "The Kidney",
+      "label": "FX",
       "color": "#22c55e",
       "symbol": "~"
     }
@@ -621,7 +621,7 @@
       ]
     },
     {
-      "chapter": "avoidance",
+      "chapter": "acceptance",
       "thoughtsPerPerson": [1, 3, 5],
       "pool": [
         ["Why bother?", "It won't matter", "Nothing changes", "Skip it", "Not worth the effort", "Save your energy", "Nobody notices", "Invisible is safe", "Path of least resistance", "Let it slide", "Numb is fine", "Detach", "Float away", "None of this is real", "Who cares"],

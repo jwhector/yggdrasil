@@ -448,7 +448,7 @@ export function applyPositionMap(
  */
 export function resolveTracksForRows(
   cells: Map<string, QuiltCell>,
-  trackMap: Map<string, Map<number, number>>,
+  trackMap: Map<string, Map<number, number[]>>,
   granularTypes: string[],
   playheadColumn: number,
   mutedCells: Set<string>,
@@ -475,9 +475,9 @@ export function resolveTracksForRows(
 
     const typeMap = trackMap.get(gt);
     if (!typeMap) continue;
-    const trackIndex = typeMap.get(cell.songIndex);
-    if (trackIndex !== undefined) {
-      tracks.push(trackIndex);
+    const trackIndices = typeMap.get(cell.songIndex);
+    if (trackIndices !== undefined) {
+      tracks.push(...trackIndices);
     }
   }
 
@@ -491,7 +491,7 @@ export function resolveTracksForRows(
  */
 export function resolveAllTracksForRows(
   cells: Map<string, QuiltCell>,
-  trackMap: Map<string, Map<number, number>>,
+  trackMap: Map<string, Map<number, number[]>>,
   granularTypes: string[],
   mutedCells: Set<string>,
 ): number[] {
@@ -504,9 +504,9 @@ export function resolveAllTracksForRows(
 
     const typeMap = trackMap.get(cell.granularType);
     if (!typeMap) continue;
-    const trackIndex = typeMap.get(cell.songIndex);
-    if (trackIndex !== undefined) {
-      trackSet.add(trackIndex);
+    const trackIndices = typeMap.get(cell.songIndex);
+    if (trackIndices !== undefined) {
+      for (const ti of trackIndices) trackSet.add(ti);
     }
   }
 

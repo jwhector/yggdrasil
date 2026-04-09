@@ -93,28 +93,6 @@ export function encodeOSCMessage(address: string, args: OSCArgument[]): Buffer {
   return Buffer.concat([addressBuffer, typeTagBuffer, ...argBuffers]);
 }
 
-/**
- * Encode an OSC bundle into a Buffer.
- * Bundle format: "#bundle\0" + 8-byte timetag + (4-byte size + message)...
- * Uses timetag = 1 (immediate execution).
- */
-export function encodeOSCBundle(messages: { address: string; args: OSCArgument[] }[]): Buffer {
-  const header = encodeOSCString('#bundle');
-  // Timetag: 8 bytes, value 1 = "immediately"
-  const timetag = Buffer.alloc(8);
-  timetag.writeUInt32BE(0, 0);
-  timetag.writeUInt32BE(1, 4);
-
-  const parts: Buffer[] = [header, timetag];
-  for (const msg of messages) {
-    const encoded = encodeOSCMessage(msg.address, msg.args);
-    const size = Buffer.alloc(4);
-    size.writeInt32BE(encoded.length, 0);
-    parts.push(size, encoded);
-  }
-  return Buffer.concat(parts);
-}
-
 // ============================================================================
 // Decoding
 // ============================================================================

@@ -126,6 +126,8 @@ function makeMinimalFinaleState(timerRemaining: number | null = null): V33Finale
       mutedCells: new Set(),
       lastMoveByUser: new Map(),
       liveTracksActive: [],
+      frozenColumn: null,
+      frozenActiveTracks: new Map(),
     },
     npc: { currentMessage: null },
   };

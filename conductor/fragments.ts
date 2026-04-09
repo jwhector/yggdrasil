@@ -218,36 +218,33 @@ export function generateGranularFragments(
         const winBundle = winOption === 'A' ? layerConfig.optionA : layerConfig.optionB;
         const loseBundle = loseOption === 'A' ? layerConfig.optionA : layerConfig.optionB;
 
-        // Winner tracks — always included
-        for (const track of winBundle.tracks) {
+        // Winner tracks — always included (merge same granularType into single fragment)
+        for (const merged of mergeTracksByGranularType(winBundle.tracks)) {
           fragments.push(buildGranularFragment(
-            attempt.index, layerConfig.group, track, winOption, attempt.chapter, audioPreviewPath, true,
+            attempt.index, layerConfig.group, merged, winOption, attempt.chapter, audioPreviewPath, true,
           ));
         }
 
         // Loser tracks — included if bothOptionsSurvive or track is alwaysAvailable
-        for (const track of loseBundle.tracks) {
-          if (bothOptionsSurvive || track.alwaysAvailable) {
-            fragments.push(buildGranularFragment(
-              attempt.index, layerConfig.group, track, loseOption, attempt.chapter, audioPreviewPath, false,
-            ));
-          }
+        const eligibleLoseTracks = loseBundle.tracks.filter(t => bothOptionsSurvive || t.alwaysAvailable);
+        for (const merged of mergeTracksByGranularType(eligibleLoseTracks)) {
+          fragments.push(buildGranularFragment(
+            attempt.index, layerConfig.group, merged, loseOption, attempt.chapter, audioPreviewPath, false,
+          ));
         }
       } else {
         // Unreached — only alwaysAvailable tracks
-        for (const track of layerConfig.optionA.tracks) {
-          if (track.alwaysAvailable) {
-            fragments.push(buildGranularFragment(
-              attempt.index, layerConfig.group, track, 'A', attempt.chapter, audioPreviewPath, false,
-            ));
-          }
+        const alwaysAvailableA = layerConfig.optionA.tracks.filter(t => t.alwaysAvailable);
+        for (const merged of mergeTracksByGranularType(alwaysAvailableA)) {
+          fragments.push(buildGranularFragment(
+            attempt.index, layerConfig.group, merged, 'A', attempt.chapter, audioPreviewPath, false,
+          ));
         }
-        for (const track of layerConfig.optionB.tracks) {
-          if (track.alwaysAvailable) {
-            fragments.push(buildGranularFragment(
-              attempt.index, layerConfig.group, track, 'B', attempt.chapter, audioPreviewPath, false,
-            ));
-          }
+        const alwaysAvailableB = layerConfig.optionB.tracks.filter(t => t.alwaysAvailable);
+        for (const merged of mergeTracksByGranularType(alwaysAvailableB)) {
+          fragments.push(buildGranularFragment(
+            attempt.index, layerConfig.group, merged, 'B', attempt.chapter, audioPreviewPath, false,
+          ));
         }
       }
     }
@@ -270,6 +267,29 @@ export function generateGranularFragments(
   }
 
   return fragments;
+}
+
+/**
+ * Merge tracks with the same granularType into single entries with combined trackIndices.
+ * E.g., two {granularType: "fx", trackIndices: [60]} and {granularType: "fx", trackIndices: [61]}
+ * become one {granularType: "fx", trackIndices: [60, 61]}.
+ */
+function mergeTracksByGranularType(tracks: GranularTrackRef[]): GranularTrackRef[] {
+  const byType = new Map<string, number[]>();
+  const order: string[] = [];
+  for (const track of tracks) {
+    const existing = byType.get(track.granularType);
+    if (existing) {
+      existing.push(...track.trackIndices);
+    } else {
+      byType.set(track.granularType, [...track.trackIndices]);
+      order.push(track.granularType);
+    }
+  }
+  return order.map(gt => ({
+    granularType: gt as GranularTrackRef['granularType'],
+    trackIndices: byType.get(gt)!,
+  }));
 }
 
 function buildGranularFragment(

@@ -352,15 +352,15 @@ export type AudioCue =
   /** V3.2: mute live seed tracks on collapse or rejection */
   | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
   /** V3.3: initial track setup when quilt playback starts */
-  | { type: 'quilt_playback_start'; initialColumn: number; trackIndices: number[] }
-  /** V3.3: mute/unmute tracks at column boundary during playback */
-  | { type: 'quilt_column_change'; columnIndex: number; trackChanges: { granularType: string; muteTrack: number | null; unmuteTrack: number | null }[] }
+  | { type: 'quilt_playback_start'; initialColumn: number; trackIndices: number[]; jumpToBeatZero?: boolean }
+  /** V3.3: mute/unmute tracks at column boundary during playback. expectedTracks = all tracks that should be active for the new column (safety mute for anything else). */
+  | { type: 'quilt_column_change'; columnIndex: number; trackChanges: { granularType: string; muteTracks: number[]; unmuteTracks: number[] }[]; expectedTracks: number[] }
   /** V3.3: column order changed (takes effect at next boundary) */
   | { type: 'quilt_reorder'; newColumnOrder: number[] }
-  /** V3.3: mute a single cell's track */
-  | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndex: number }
-  /** V3.3: unmute a single cell's track */
-  | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndex: number }
+  /** V3.3: mute a single cell's tracks */
+  | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndices: number[] }
+  /** V3.3: unmute a single cell's tracks */
+  | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndices: number[] }
   /** V3.3 Arc: staggered row group unmute during entry */
   | { type: 'quilt_row_unmute'; granularTypes: string[]; trackIndices: number[] }
   /** V3.3 Arc: staggered row group mute during exit */
@@ -430,6 +430,8 @@ export type ConductorCommand =
   | { type: 'MUTE_CELL'; cellId: string }
   | { type: 'UNMUTE_CELL'; cellId: string }
   | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }
+  | { type: 'FREEZE_COLUMN'; columnIndex: number }
+  | { type: 'UNFREEZE_COLUMN' }
 
   // Finale — Arc (V3.3: automated playback arc)
   | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }
@@ -506,6 +508,8 @@ export type ConductorEvent =
   | { type: 'CELL_UNLOCKED'; cellId: string }
   | { type: 'CELL_MUTED'; cellId: string }
   | { type: 'CELL_UNMUTED'; cellId: string }
+  | { type: 'COLUMN_FROZEN'; columnIndex: number }
+  | { type: 'COLUMN_UNFROZEN' }
 
   // Finale — Arc (V3.3)
   | { type: 'ARC_PHASE_CHANGED'; arcPhase: ArcPhase }
@@ -797,7 +801,7 @@ export interface V33FinaleState {
   availableSongs: number[];                         // Song indices available as choices (e.g., [0, 1, 2])
 
   // Track resolution map
-  trackMap: Map<string, Map<number, number>>;       // granularType -> songIndex -> Ableton trackIndex
+  trackMap: Map<string, Map<number, number[]>>;       // granularType -> songIndex -> Ableton trackIndices
 
   // Assignment state
   assignment: {
@@ -817,6 +821,8 @@ export interface V33FinaleState {
     mutedCells: Set<string>;                        // cellIds the performer has muted
     lastMoveByUser: Map<UserId, number>;            // userId -> loopCount of last move
     liveTracksActive: string[];                     // Live performance track IDs
+    frozenColumn: number | null;                    // When set, playhead loops this single column
+    frozenActiveTracks: Map<string, number[]>;       // Tracks last activated for frozen column (for crossfade diff)
   };
 
   npc: { currentMessage: string | null };

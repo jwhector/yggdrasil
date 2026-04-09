@@ -15,7 +15,7 @@
 import * as dgram from 'dgram';
 import { EventEmitter } from 'events';
 import type { Socket as SocketIOSocket } from 'socket.io';
-import { encodeOSCMessage, encodeOSCBundle, decodeOSCMessage } from '../lib/osc-codec';
+import { encodeOSCMessage, decodeOSCMessage } from '../lib/osc-codec';
 
 // Re-export codec functions for backward compatibility
 export { encodeOSCMessage, decodeOSCMessage } from '../lib/osc-codec';
@@ -27,9 +27,6 @@ export type { OSCArgument, OSCMessage } from '../lib/osc-codec';
 export interface OSCBridge {
   /** Send an OSC message to Ableton */
   send(address: string, ...args: (string | number | boolean)[]): void;
-
-  /** Send multiple OSC messages as an atomic bundle */
-  sendBundle(messages: { address: string; args: (string | number | boolean)[] }[]): void;
 
   /** Register handler for incoming OSC messages */
   on(address: string, handler: (...args: any[]) => void): void;
@@ -105,28 +102,6 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
       });
     } catch (err) {
       console.error(`[OSC] Encode error for ${address}:`, err);
-    }
-  }
-
-  function sendBundle(messages: { address: string; args: (string | number | boolean)[] }[]): void {
-    if (!sendSocket || !running) {
-      console.warn('[OSC] Cannot sendBundle - bridge not running');
-      return;
-    }
-    if (messages.length === 0) return;
-    if (messages.length === 1) {
-      send(messages[0].address, ...messages[0].args);
-      return;
-    }
-    try {
-      const bundle = encodeOSCBundle(messages);
-      sendSocket.send(bundle, finalConfig.sendPort, finalConfig.abletonHost, (err) => {
-        if (err) {
-          console.error('[OSC] Bundle send error:', err);
-        }
-      });
-    } catch (err) {
-      console.error('[OSC] Bundle encode error:', err);
     }
   }
 
@@ -209,7 +184,6 @@ export function createOSCBridge(config?: Partial<OSCBridgeConfig>): OSCBridge {
 
   return {
     send,
-    sendBundle,
     on,
     once,
     off,
@@ -256,19 +230,6 @@ export function createRemoteOSCBridge(): OSCBridge & {
 
     console.log(`[OSC-Remote] Relaying: ${address}`, args);
     bridgeSocket.emit('osc_send', { address, args });
-  }
-
-  function sendBundle(messages: { address: string; args: (string | number | boolean)[] }[]): void {
-    if (!running || !bridgeSocket) {
-      console.warn('[OSC-Remote] Cannot sendBundle - bridge not running');
-      return;
-    }
-    if (messages.length === 0) return;
-    if (messages.length === 1) {
-      send(messages[0].address, ...messages[0].args);
-      return;
-    }
-    bridgeSocket.emit('osc_send_bundle', { messages });
   }
 
   function on(address: string, handler: (...args: any[]) => void): void {
@@ -344,7 +305,6 @@ export function createRemoteOSCBridge(): OSCBridge & {
 
   return {
     send,
-    sendBundle,
     on,
     once,
     off,
@@ -373,12 +333,6 @@ export function createNullOSCBridge(): OSCBridge {
   return {
     send(address: string, ...args: (string | number | boolean)[]): void {
       console.log(`[OSC-Null] Would send: ${address}`, args);
-    },
-    sendBundle(messages: { address: string; args: (string | number | boolean)[] }[]): void {
-      // Delegate to send() so mocked send() is called in tests
-      for (const msg of messages) {
-        this.send(msg.address, ...msg.args);
-      }
     },
     on(address: string, handler: (...args: any[]) => void): void {
       emitter.on(address, handler);

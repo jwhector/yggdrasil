@@ -560,10 +560,10 @@ describe('applyPositionMap', () => {
 describe('resolveTracksForRows', () => {
   test('resolves tracks for specified granular types at playhead column', () => {
     const cells = makeGrid(6, 2, () => 0);
-    const trackMap = new Map<string, Map<number, number>>([
-      ['drums', new Map([[0, 10], [1, 11]])],
-      ['bass', new Map([[0, 20], [1, 21]])],
-      ['melody', new Map([[0, 30]])],
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['drums', new Map([[0, [10]], [1, [11]]])],
+      ['bass', new Map([[0, [20]], [1, [21]]])],
+      ['melody', new Map([[0, [30]]])],
     ]);
 
     const tracks = resolveTracksForRows(
@@ -576,9 +576,9 @@ describe('resolveTracksForRows', () => {
 
   test('skips muted cells', () => {
     const cells = makeGrid(6, 2, () => 0);
-    const trackMap = new Map([
-      ['drums', new Map([[0, 10]])],
-      ['bass', new Map([[0, 20]])],
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['drums', new Map([[0, [10]]])],
+      ['bass', new Map([[0, [20]]])],
     ]);
 
     const tracks = resolveTracksForRows(
@@ -590,9 +590,9 @@ describe('resolveTracksForRows', () => {
 
   test('skips empty cells (null songIndex)', () => {
     const cells = makeGrid(6, 2, (r) => r === 0 ? null : 0);
-    const trackMap = new Map([
-      ['drums', new Map([[0, 10]])],
-      ['bass', new Map([[0, 20]])],
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['drums', new Map([[0, [10]]])],
+      ['bass', new Map([[0, [20]]])],
     ]);
 
     const tracks = resolveTracksForRows(
@@ -611,9 +611,9 @@ describe('resolveAllTracksForRows', () => {
   test('resolves all unique tracks across all columns for given types', () => {
     // 2 columns: col 0 has song 0, col 1 has song 1
     const cells = makeGrid(6, 2, (_r, c) => c);
-    const trackMap = new Map([
-      ['drums', new Map([[0, 10], [1, 11]])],
-      ['bass', new Map([[0, 20], [1, 21]])],
+    const trackMap = new Map<string, Map<number, number[]>>([
+      ['drums', new Map([[0, [10]], [1, [11]]])],
+      ['bass', new Map([[0, [20]], [1, [21]]])],
     ]);
 
     const tracks = resolveAllTracksForRows(
