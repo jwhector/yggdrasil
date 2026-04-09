@@ -57,6 +57,16 @@ export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControl
         sendCommand={sendCommand}
       />
 
+      {/* Freeze column controls */}
+      {fs.phase === 'playback' && (
+        <FreezeColumnControls
+          columnOrder={quilt.columnOrder}
+          playheadColumn={quilt.playheadColumn}
+          frozenColumn={fs.remix.frozenColumn}
+          sendCommand={sendCommand}
+        />
+      )}
+
       {/* Quilt grid with per-cell actions */}
       <div style={styles.gridContainer}>
         {/* Column headers */}
@@ -74,6 +84,7 @@ export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControl
             >
               Col {colIdx + 1}
               {colIdx === quilt.playheadColumn && ' \u25B6'}
+              {colIdx === fs.remix.frozenColumn && ' *'}
             </div>
           ))}
         </div>
@@ -265,6 +276,74 @@ function ColumnReorder({
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Freeze column — loop a single column for simpler mixing
+// ---------------------------------------------------------------------------
+
+function FreezeColumnControls({
+  columnOrder,
+  playheadColumn,
+  frozenColumn,
+  sendCommand,
+}: {
+  columnOrder: number[];
+  playheadColumn: number;
+  frozenColumn: number | null;
+  sendCommand: (cmd: ConductorCommand) => void;
+}) {
+  return (
+    <div style={{ ...styles.subsection, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+      <span style={styles.subLabel}>Freeze column:</span>
+      {frozenColumn !== null && (
+        <button
+          onClick={() => sendCommand({ type: 'UNFREEZE_COLUMN' })}
+          style={{
+            ...styles.arrowBtn,
+            backgroundColor: '#dc2626',
+            color: '#fff',
+            padding: '2px 10px',
+            fontSize: '0.7rem',
+            fontWeight: 600,
+          }}
+        >
+          Unfreeze
+        </button>
+      )}
+      {columnOrder.map((colIdx) => {
+        const isFrozen = frozenColumn === colIdx;
+        const isPlayhead = playheadColumn === colIdx;
+        return (
+          <button
+            key={colIdx}
+            onClick={() => {
+              if (isFrozen) {
+                sendCommand({ type: 'UNFREEZE_COLUMN' });
+              } else {
+                sendCommand({ type: 'FREEZE_COLUMN', columnIndex: colIdx });
+              }
+            }}
+            style={{
+              padding: '2px 8px',
+              borderRadius: '3px',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              backgroundColor: isFrozen ? '#2563eb' : '#222',
+              color: isFrozen ? '#fff' : isPlayhead ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.4)',
+              border: isFrozen ? '2px solid #60a5fa' : '1px solid #444',
+              minWidth: '24px',
+              textAlign: 'center' as const,
+              cursor: 'pointer',
+            }}
+            title={isFrozen ? `Unfreeze column ${colIdx + 1}` : `Freeze column ${colIdx + 1}`}
+          >
+            {colIdx + 1}
+          </button>
+        );
+      })}
     </div>
   );
 }

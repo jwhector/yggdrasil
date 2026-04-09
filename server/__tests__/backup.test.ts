@@ -180,6 +180,8 @@ describe('loadBackup', () => {
         mutedCells: new Set(),
         lastMoveByUser: new Map([['u1', 2]]),
         liveTracksActive: [],
+        frozenColumn: null,
+        frozenActiveTracks: new Map(),
       },
       npc: { currentMessage: null },
       elegyOptedIn: new Set(['u1']),

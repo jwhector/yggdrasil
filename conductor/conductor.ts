@@ -68,6 +68,7 @@ import {
   buildTrackMap,
   deriveAvailableSongs,
   findUserCell,
+  type QuiltGrid,
 } from './quilt';
 import {
   computeBarsPerCell,
@@ -247,6 +248,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleUnmuteCell(state, command.cellId);
     case 'OVERRIDE_CELL_SONG':
       return handleOverrideCellSong(state, command.cellId, command.songIndex);
+    case 'FREEZE_COLUMN':
+      return handleFreezeColumn(state, command.columnIndex);
+    case 'UNFREEZE_COLUMN':
+      return handleUnfreezeColumn(state);
 
     // Arc (V3.3: automated playback arc)
     case 'ARC_ENTRY_ROW_GROUP':
@@ -1367,6 +1372,8 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
       mutedCells: new Set(),
       lastMoveByUser: new Map(),
       liveTracksActive: [],
+      frozenColumn: null,
+      frozenActiveTracks: new Map(),
     },
     npc: { currentMessage: null },
     arc: null,
@@ -1655,45 +1662,39 @@ function handlePrepareColumnCrossfade(state: ShowState): ConductorEvent[] {
   const quilt = state.finaleState.quilt;
   const trackMap = state.finaleState.trackMap;
   const mutedCells = state.finaleState.remix.mutedCells;
+  const frozenColumn = state.finaleState.remix.frozenColumn;
+  const enteredTypes = getEnteredGranularTypes(state);
+
+  if (frozenColumn !== null) {
+    // Frozen: diff the snapshot of what's playing vs what the column now resolves to
+    const currentTracks = state.finaleState.remix.frozenActiveTracks;
+    const nextTracks = resolveColumnTracks(quilt, trackMap, mutedCells, frozenColumn, enteredTypes);
+    const trackChanges = computeTrackChanges(currentTracks, nextTracks);
+
+    // Update snapshot to reflect what will be playing after this crossfade
+    state.finaleState.remix.frozenActiveTracks = new Map(nextTracks);
+
+    if (trackChanges.length === 0) return []; // Nothing changed
+    return [{
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'quilt_column_change',
+        columnIndex: frozenColumn,
+        trackChanges,
+        expectedTracks: [...nextTracks.values()].flat(),
+      },
+    }];
+  }
+
+  // Normal (not frozen): diff current column vs next column
   const currentColumn = quilt.playheadColumn;
   const nextColumn = quiltPeekNextColumn(quilt);
 
   if (currentColumn === nextColumn) return []; // Single column — no crossfade needed
 
-  const enteredTypes = getEnteredGranularTypes(state);
-
-  // Current column's active tracks
-  const currentTracks = new Map<string, number[]>();
-  for (const cell of quilt.cells.values()) {
-    if (cell.columnIndex === currentColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
-      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
-      const trackIndices = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndices !== null) currentTracks.set(cell.granularType, trackIndices);
-    }
-  }
-
-  // Next column's active tracks
-  const nextTracks = new Map<string, number[]>();
-  for (const cell of quilt.cells.values()) {
-    if (cell.columnIndex === nextColumn && cell.songIndex !== null && !mutedCells.has(cell.id)) {
-      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
-      const trackIndices = resolveTrack(trackMap, cell.granularType, cell.songIndex);
-      if (trackIndices !== null) nextTracks.set(cell.granularType, trackIndices);
-    }
-  }
-
-  // Compute track changes
-  const trackChanges: { granularType: string; muteTracks: number[]; unmuteTracks: number[] }[] = [];
-  const allTypes = new Set([...currentTracks.keys(), ...nextTracks.keys()]);
-  for (const gt of allTypes) {
-    const prev = currentTracks.get(gt) ?? [];
-    const next = nextTracks.get(gt) ?? [];
-    const prevStr = prev.join(',');
-    const nextStr = next.join(',');
-    if (prevStr !== nextStr) {
-      trackChanges.push({ granularType: gt, muteTracks: prev, unmuteTracks: next });
-    }
-  }
+  const currentTracks = resolveColumnTracks(quilt, trackMap, mutedCells, currentColumn, enteredTypes);
+  const nextTracks = resolveColumnTracks(quilt, trackMap, mutedCells, nextColumn, enteredTypes);
+  const trackChanges = computeTrackChanges(currentTracks, nextTracks);
 
   const expectedTracks = [...nextTracks.values()].flat();
 
@@ -1708,6 +1709,13 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
 
   const quilt = state.finaleState.quilt;
   const arc = state.finaleState.arc;
+  const frozenColumn = state.finaleState.remix.frozenColumn;
+
+  // When frozen, don't advance — just increment loop count and stay on the frozen column
+  if (frozenColumn !== null) {
+    quilt.loopCount++;
+    return [{ type: 'PLAYHEAD_ADVANCED', columnIndex: frozenColumn }];
+  }
 
   // Advance playhead
   const { columnIndex, loopWrapped } = quiltAdvancePlayhead(quilt);
@@ -1761,6 +1769,46 @@ function getEnteredGranularTypes(state: ShowState): Set<string> | null {
     }
   }
   return entered;
+}
+
+/**
+ * Resolve all active tracks for a given column, keyed by granular type.
+ */
+function resolveColumnTracks(
+  quilt: QuiltGrid,
+  trackMap: Map<string, Map<number, number[]>>,
+  mutedCells: Set<string>,
+  columnIndex: number,
+  enteredTypes: Set<string> | null,
+): Map<string, number[]> {
+  const tracks = new Map<string, number[]>();
+  for (const cell of quilt.cells.values()) {
+    if (cell.columnIndex === columnIndex && cell.songIndex !== null && !mutedCells.has(cell.id)) {
+      if (enteredTypes && !enteredTypes.has(cell.granularType)) continue;
+      const trackIndices = resolveTrack(trackMap, cell.granularType, cell.songIndex);
+      if (trackIndices !== null) tracks.set(cell.granularType, trackIndices);
+    }
+  }
+  return tracks;
+}
+
+/**
+ * Compute track changes (crossfade diff) between two track maps.
+ */
+function computeTrackChanges(
+  currentTracks: Map<string, number[]>,
+  nextTracks: Map<string, number[]>,
+): { granularType: string; muteTracks: number[]; unmuteTracks: number[] }[] {
+  const changes: { granularType: string; muteTracks: number[]; unmuteTracks: number[] }[] = [];
+  const allTypes = new Set([...currentTracks.keys(), ...nextTracks.keys()]);
+  for (const gt of allTypes) {
+    const prev = currentTracks.get(gt) ?? [];
+    const next = nextTracks.get(gt) ?? [];
+    if (prev.join(',') !== next.join(',')) {
+      changes.push({ granularType: gt, muteTracks: prev, unmuteTracks: next });
+    }
+  }
+  return changes;
 }
 
 // ============================================================================
@@ -2052,6 +2100,8 @@ function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): Cond
       mutedCells: new Set(),
       lastMoveByUser: new Map(),
       liveTracksActive: [],
+      frozenColumn: null,
+      frozenActiveTracks: new Map(),
     },
     npc: { currentMessage: null },
     arc: null,
@@ -2245,6 +2295,65 @@ function handleOverrideCellSong(state: ShowState, cellId: string, songIndex: num
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
   return [{ type: 'CELL_SONG_SET', cellId, songIndex }];
+}
+
+function handleFreezeColumn(state: ShowState, columnIndex: number): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.phase !== 'playback') return [{ type: 'ERROR', message: 'Not in playback phase' }];
+  if (!state.finaleState.quilt.columnOrder.includes(columnIndex)) {
+    return [{ type: 'ERROR', message: `Column ${columnIndex} not in column order` }];
+  }
+
+  state.finaleState.remix.frozenColumn = columnIndex;
+
+  const events: ConductorEvent[] = [{ type: 'COLUMN_FROZEN', columnIndex }];
+
+  const quilt = state.finaleState.quilt;
+  const trackMap = state.finaleState.trackMap;
+  const mutedCells = state.finaleState.remix.mutedCells;
+  const enteredTypes = getEnteredGranularTypes(state);
+
+  // Resolve current playhead column's tracks (what's playing now)
+  const currentTracks = resolveColumnTracks(quilt, trackMap, mutedCells, quilt.playheadColumn, enteredTypes);
+
+  // Resolve the frozen column's tracks
+  const frozenTracks = resolveColumnTracks(quilt, trackMap, mutedCells, columnIndex, enteredTypes);
+
+  // Snapshot what will be active after this crossfade
+  state.finaleState.remix.frozenActiveTracks = new Map(frozenTracks);
+
+  if (quilt.playheadColumn !== columnIndex) {
+    // Crossfade from current column to frozen column
+    const trackChanges = computeTrackChanges(currentTracks, frozenTracks);
+
+    if (trackChanges.length > 0) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: {
+          type: 'quilt_column_change',
+          columnIndex,
+          trackChanges,
+          expectedTracks: [...frozenTracks.values()].flat(),
+        },
+      });
+    }
+
+    // Move playhead to the frozen column
+    quilt.playheadColumn = columnIndex;
+    events.push({ type: 'PLAYHEAD_ADVANCED', columnIndex });
+  }
+
+  return events;
+}
+
+function handleUnfreezeColumn(state: ShowState): ConductorEvent[] {
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  if (state.finaleState.remix.frozenColumn === null) {
+    return [{ type: 'ERROR', message: 'No column is frozen' }];
+  }
+
+  state.finaleState.remix.frozenColumn = null;
+  return [{ type: 'COLUMN_UNFROZEN' }];
 }
 
 function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent[] {

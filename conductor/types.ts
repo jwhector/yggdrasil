@@ -430,6 +430,8 @@ export type ConductorCommand =
   | { type: 'MUTE_CELL'; cellId: string }
   | { type: 'UNMUTE_CELL'; cellId: string }
   | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }
+  | { type: 'FREEZE_COLUMN'; columnIndex: number }
+  | { type: 'UNFREEZE_COLUMN' }
 
   // Finale — Arc (V3.3: automated playback arc)
   | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }
@@ -506,6 +508,8 @@ export type ConductorEvent =
   | { type: 'CELL_UNLOCKED'; cellId: string }
   | { type: 'CELL_MUTED'; cellId: string }
   | { type: 'CELL_UNMUTED'; cellId: string }
+  | { type: 'COLUMN_FROZEN'; columnIndex: number }
+  | { type: 'COLUMN_UNFROZEN' }
 
   // Finale — Arc (V3.3)
   | { type: 'ARC_PHASE_CHANGED'; arcPhase: ArcPhase }
@@ -817,6 +821,8 @@ export interface V33FinaleState {
     mutedCells: Set<string>;                        // cellIds the performer has muted
     lastMoveByUser: Map<UserId, number>;            // userId -> loopCount of last move
     liveTracksActive: string[];                     // Live performance track IDs
+    frozenColumn: number | null;                    // When set, playhead loops this single column
+    frozenActiveTracks: Map<string, number[]>;       // Tracks last activated for frozen column (for crossfade diff)
   };
 
   npc: { currentMessage: string | null };

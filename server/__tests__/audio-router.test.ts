@@ -166,6 +166,8 @@ function makeFinaleState(allFragments: Fragment[] = []): V33FinaleState {
       mutedCells: new Set(),
       lastMoveByUser: new Map(),
       liveTracksActive: [],
+      frozenColumn: null,
+      frozenActiveTracks: new Map(),
     },
     npc: { currentMessage: null },
   };

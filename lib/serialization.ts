@@ -60,6 +60,8 @@ export interface SerializedFinaleState {
     mutedCells: string[];
     lastMoveByUser: [UserId, number][];
     liveTracksActive: string[];
+    frozenColumn: number | null;
+    frozenActiveTracks: [string, number[]][];
   };
   npc: V33FinaleState['npc'];
   arc?: V33FinaleState['arc'];
@@ -100,7 +102,7 @@ export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState 
     },
     availableSongs: fs.availableSongs,
     trackMap: Array.from(fs.trackMap.entries()).map(
-      ([gt, songMap]) => [gt, Array.from(songMap.entries())] as [string, [number, number[]][]][number],
+      ([gt, songMap]): [string, [number, number[]][]] => [gt, Array.from(songMap.entries())],
     ),
     assignment: fs.assignment,
     preview: {
@@ -112,6 +114,8 @@ export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState 
       mutedCells: Array.from(fs.remix.mutedCells),
       lastMoveByUser: Array.from(fs.remix.lastMoveByUser.entries()),
       liveTracksActive: fs.remix.liveTracksActive,
+      frozenColumn: fs.remix.frozenColumn,
+      frozenActiveTracks: Array.from(fs.remix.frozenActiveTracks.entries()),
     },
     npc: fs.npc,
     arc: fs.arc,
@@ -147,6 +151,8 @@ export function deserializeFinaleState(data: SerializedFinaleState): V33FinaleSt
       mutedCells: new Set(data.remix.mutedCells),
       lastMoveByUser: new Map(data.remix.lastMoveByUser),
       liveTracksActive: data.remix.liveTracksActive,
+      frozenColumn: data.remix.frozenColumn ?? null,
+      frozenActiveTracks: new Map(data.remix.frozenActiveTracks ?? []),
     },
     npc: data.npc,
     arc: data.arc ?? null,
