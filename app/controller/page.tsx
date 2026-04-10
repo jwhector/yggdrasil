@@ -19,11 +19,13 @@ import { VotingControls } from '@/components/controller/VotingControls';
 import { QuiltRemixControls } from '@/components/controller/QuiltRemixControls';
 import { NpcControls } from '@/components/controller/NpcControls';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
+import { RemixController } from '@/components/finale/RemixController';
 
 const SHOW_ID = 'default-show';
 const PASSCODE = process.env.NEXT_PUBLIC_CONTROLLER_PASSCODE ?? '';
 
 const FINALE_PHASES = new Set(['finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback']);
+const V34_FINALE_PHASES = new Set(['finale_vote', 'finale_remix']);
 
 // ---------------------------------------------------------------------------
 // Entry point — passcode gate
@@ -69,6 +71,7 @@ function ControllerContent() {
   const { phase } = fullState;
   const isAttemptBuild = phase === 'attempt_build';
   const isFinale = FINALE_PHASES.has(phase);
+  const isV34Finale = V34_FINALE_PHASES.has(phase);
 
   return (
     <main style={styles.container}>
@@ -87,12 +90,17 @@ function ControllerContent() {
         <VotingControls fullState={fullState} sendCommand={sendCommand} />
       )}
 
-      {/* Finale controls */}
+      {/* V3.3 Finale controls */}
       {isFinale && (
         <>
           <QuiltRemixControls fullState={fullState} sendCommand={sendCommand} />
           <NpcControls fullState={fullState} sendCommand={sendCommand} />
         </>
+      )}
+
+      {/* V3.4 Finale controls */}
+      {isV34Finale && (
+        <RemixController fullState={fullState} sendCommand={sendCommand} socket={socket} />
       )}
 
       {/* Test tools — simulate finale grid (always visible) */}

@@ -407,6 +407,103 @@ describe('Quilt persistence (V3.3)', () => {
   });
 });
 
+describe('Finale vote persistence (V3.4)', () => {
+  test('saves a finale vote', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    expect(() => db.saveFinaleVote('show-1', 'user-1', 'chapter_0', 0)).not.toThrow();
+
+    db.close();
+  });
+
+  test('allows multiple votes from the same user (different questions)', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    db.saveFinaleVote('show-1', 'user-1', 'chapter_0', 0);
+    db.saveFinaleVote('show-1', 'user-1', 'chapter_1', 1);
+    db.saveFinaleVote('show-1', 'user-1', 'chapter_2', 2);
+
+    db.close(); // No error = pass
+  });
+
+  test('allows votes from multiple users', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    db.saveFinaleVote('show-1', 'user-1', 'chapter_0', 0);
+    db.saveFinaleVote('show-1', 'user-2', 'chapter_1', 0);
+    db.saveFinaleVote('show-1', 'user-3', 'chapter_0', 0);
+
+    db.close(); // No error = pass
+  });
+});
+
+describe('Token event persistence (V3.4)', () => {
+  test('saves an activated token event', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    expect(() =>
+      db.saveTokenEvent('show-1', 'token-abc', 'bass', 'chapter_0', 'activated', null)
+    ).not.toThrow();
+
+    db.close();
+  });
+
+  test('saves a spent token event with loop number', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    expect(() =>
+      db.saveTokenEvent('show-1', 'token-abc', 'drums', 'chapter_1', 'spent', 3)
+    ).not.toThrow();
+
+    db.close();
+  });
+
+  test('saves queued and cancelled events', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    expect(() => db.saveTokenEvent('show-1', 'token-1', 'pad', 'chapter_0', 'queued', null)).not.toThrow();
+    expect(() => db.saveTokenEvent('show-1', 'token-1', 'pad', 'chapter_0', 'cancelled', null)).not.toThrow();
+
+    db.close();
+  });
+
+  test('rejects invalid event_type (CHECK constraint)', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    expect(() =>
+      db.saveTokenEvent('show-1', 'token-1', 'bass', 'chapter_0', 'invalid' as any, null)
+    ).toThrow();
+
+    db.close();
+  });
+
+  test('allows null loop number', () => {
+    const db = createPersistence(TEST_DB_PATH);
+    const state = createInitialState(createTestConfig(), 'show-1');
+    db.saveState(state);
+
+    expect(() =>
+      db.saveTokenEvent('show-1', 'token-xyz', 'harmony', 'chapter_2', 'activated', null)
+    ).not.toThrow();
+
+    db.close();
+  });
+});
+
 describe('Transaction atomicity', () => {
   test('rapid saves preserve latest version', () => {
     const db = createPersistence(TEST_DB_PATH);

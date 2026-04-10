@@ -27,6 +27,7 @@ import type {
   UserId,
   User,
   V33FinaleState,
+  V34FinaleState,
   QuiltCell,
 } from '@/conductor/types';
 
@@ -73,7 +74,7 @@ export interface SerializedShowState {
   currentAttemptIndex: number;
   attempts: ShowState['attempts'];
   users: [UserId, User][];
-  finaleState: SerializedFinaleState | null;
+  finaleState: SerializedFinaleState | object | null;
   config: ShowState['config'];
   version: number;
   lastUpdated: number;
@@ -160,6 +161,88 @@ export function deserializeFinaleState(data: SerializedFinaleState): V33FinaleSt
 }
 
 // ============================================================================
+// V3.4 Finale State Serialize / Deserialize
+// ============================================================================
+
+/** Serialized shape of V3.4 finale state (Maps converted to arrays). */
+export interface SerializedV34FinaleState {
+  phase: 'vote' | 'remix';
+  vote: {
+    questionsAnsweredByUser: [string, number][];
+    maxQuestionsPerPerson: number;
+    poolCapReached: boolean;
+  };
+  pool: {
+    tokens: V34FinaleState['pool']['tokens'];
+    availableByChapter: [string, number][];
+    totalByChapter: [string, number][];
+    totalRemaining: number;
+    targetPoolSize: number;
+  };
+  queue: [string, V34FinaleState['queue'] extends Map<string, infer V> ? V : never][];
+  active: [string, V34FinaleState['active'] extends Map<string, infer V> ? V : never][];
+  audienceInteraction: boolean;
+  trackMap: [string, [number, number[]][]][];
+  loopCount: number;
+  loopProgress: number;
+  npc: { currentMessage: string | null };
+}
+
+export function deserializeV34FinaleState(data: SerializedV34FinaleState): V34FinaleState {
+  return {
+    phase: data.phase,
+    vote: {
+      questionsAnsweredByUser: new Map(data.vote.questionsAnsweredByUser),
+      maxQuestionsPerPerson: data.vote.maxQuestionsPerPerson,
+      poolCapReached: data.vote.poolCapReached,
+    },
+    pool: {
+      tokens: data.pool.tokens,
+      availableByChapter: new Map(data.pool.availableByChapter),
+      totalByChapter: new Map(data.pool.totalByChapter),
+      totalRemaining: data.pool.totalRemaining,
+      targetPoolSize: data.pool.targetPoolSize,
+    },
+    queue: new Map(data.queue),
+    active: new Map(data.active),
+    audienceInteraction: data.audienceInteraction,
+    trackMap: new Map(
+      data.trackMap.map(([gt, entries]) => [gt, new Map(entries)]),
+    ),
+    loopCount: data.loopCount,
+    loopProgress: data.loopProgress,
+    npc: data.npc,
+  };
+}
+
+export function serializeV34FinaleState(fs: V34FinaleState): object {
+  return {
+    phase: fs.phase,
+    vote: {
+      questionsAnsweredByUser: Array.from(fs.vote.questionsAnsweredByUser.entries()),
+      maxQuestionsPerPerson: fs.vote.maxQuestionsPerPerson,
+      poolCapReached: fs.vote.poolCapReached,
+    },
+    pool: {
+      tokens: fs.pool.tokens,
+      availableByChapter: Array.from(fs.pool.availableByChapter.entries()),
+      totalByChapter: Array.from(fs.pool.totalByChapter.entries()),
+      totalRemaining: fs.pool.totalRemaining,
+      targetPoolSize: fs.pool.targetPoolSize,
+    },
+    queue: Array.from(fs.queue.entries()).map(([gt, tokens]) => [gt, tokens]),
+    active: Array.from(fs.active.entries()).map(([gt, node]) => [gt, node]),
+    audienceInteraction: fs.audienceInteraction,
+    trackMap: Array.from(fs.trackMap.entries()).map(
+      ([gt, songMap]): [string, [number, number[]][]] => [gt, Array.from(songMap.entries())],
+    ),
+    loopCount: fs.loopCount,
+    loopProgress: fs.loopProgress,
+    npc: fs.npc,
+  };
+}
+
+// ============================================================================
 // Show State Serialize / Deserialize
 // ============================================================================
 
@@ -174,7 +257,11 @@ export function serializeState(state: ShowState): SerializedShowState {
     currentAttemptIndex: state.currentAttemptIndex,
     attempts: state.attempts,
     users: Array.from(state.users.entries()),
-    finaleState: state.finaleState && 'quilt' in state.finaleState ? serializeFinaleState(state.finaleState as V33FinaleState) : null,
+    finaleState: state.finaleState && 'quilt' in state.finaleState
+      ? serializeFinaleState(state.finaleState as V33FinaleState)
+      : state.finaleState && 'queue' in state.finaleState
+        ? serializeV34FinaleState(state.finaleState as V34FinaleState)
+        : null,
     config: state.config,
     version: state.version,
     lastUpdated: state.lastUpdated,
@@ -194,7 +281,13 @@ export function deserializeState(data: SerializedShowState): ShowState {
     currentAttemptIndex: data.currentAttemptIndex,
     attempts: data.attempts,
     users: new Map(data.users),
-    finaleState: data.finaleState ? deserializeFinaleState(data.finaleState) : null,
+    finaleState: data.finaleState && typeof data.finaleState === 'object'
+      ? 'quilt' in data.finaleState
+        ? deserializeFinaleState(data.finaleState as SerializedFinaleState)
+        : 'queue' in data.finaleState
+          ? deserializeV34FinaleState(data.finaleState as SerializedV34FinaleState)
+          : null
+      : null,
     config: data.config,
     version: data.version,
     lastUpdated: data.lastUpdated,

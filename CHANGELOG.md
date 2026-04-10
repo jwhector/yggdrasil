@@ -1,5 +1,96 @@
 # CHANGELOG
 
+## 2026-04-09 — V3.4 Migration Phase 6: Client Components & Hooks
+
+Build the V3.4 UI: audience emotion vote, projector token pool canvas, pentagon remix display, controller fallback grid.
+
+### New hooks
+- **`hooks/useTokenPool.ts`** — subscribes to `pool_state` socket event (~2 Hz), provides `availableByChapter` and `totalRemaining`.
+- **`hooks/useRemixQueue.ts`** — controller queue management: sends `QUEUE_TOKEN` / `CANCEL_QUEUE` commands with optimistic local queue depth state.
+- **`hooks/useDragToken.ts`** — iPad touch drag state: `touchstart`/`touchmove`/`touchend` position tracking, drop zone hit testing with magnetic snap.
+
+### New components
+- **`components/finale/EmotionVote.tsx`** — audience: question text + 3 tappable chapter cards. Listens for `question` and `emotion_confirmed` socket events. Shows "phones down" when pool cap reached.
+- **`components/finale/TokenPool.tsx`** — projector: canvas 2D floating colored dots with `requestAnimationFrame`. Drift physics, bloom-in animation, generous touch targets (~44pt). Reconciles dot count with pool state.
+- **`components/finale/PentagonRemix.tsx`** — projector: 6 pentagon nodes (5 outer + center seed) mirroring song-building layout. Active chapter glow, loop progress ring, queue depth badges, hover highlight for drag targets.
+- **`components/finale/ProjectorFinale.tsx`** — projector: composes `TokenPool` + `PentagonRemix`. Touch interaction layer (enabled only during `finale_remix` on touch devices). Screen wake lock (`navigator.wakeLock` + hidden video fallback). Drag-to-node sends `QUEUE_TOKEN` with optimistic UI.
+- **`components/finale/RemixController.tsx`** — controller: 6x3 button grid (granular types x chapters). Pool counters per chapter, queue depth badges, active node indicators with loop progress bars, audience interaction mode toggle.
+
+### Modified files
+- **`app/audience/page.tsx`** — `finale_vote` renders `EmotionVote`; `finale_remix` renders "LISTEN" phones-down display.
+- **`app/projector/page.tsx`** — `finale_vote` and `finale_remix` render `ProjectorFinale`.
+- **`app/controller/page.tsx`** — `finale_vote` and `finale_remix` render `RemixController`. Added `V34_FINALE_PHASES` set.
+- **`components/controller/ShowControls.tsx`** — added "Start Remix" button (during `finale_vote`) and "End Show" button (during `finale_remix`).
+- **`lib/serialization.ts`** — added `SerializedV34FinaleState` interface and `deserializeV34FinaleState()` function. Fixed `deserializeState()` to reconstruct V3.4 finale Maps (was returning null for V3.4 state).
+
+### Test count: **437** (unchanged — no new tests; this phase is UI-only)
+
+---
+
+## 2026-04-09 — V3.4 Migration Phase 5: Persistence & Schema
+
+Add V3.4 database tables and persistence functions. Deprecate V3.3 quilt tables.
+
+### `db/schema.sql`
+- **`finale_votes`** table — records one row per audience emotional vote (show_id, user_id, chapter_id, question_index). Foreign key to shows.
+- **`finale_token_events`** table — token lifecycle log for recovery + analytics (token_id, granular_type, chapter_id, event_type CHECK IN ('queued','activated','spent','cancelled'), loop_number nullable). Foreign key to shows.
+- **Indexes** — `idx_finale_votes_show`, `idx_finale_token_events_show` for common show-scoped queries.
+- **`[DEPRECATED V3.3]`** comments on `finale_quilt_cells` and `finale_remix_events` — tables kept for backward compat with existing show data, not dropped.
+
+### `server/persistence.ts`
+- **`PersistenceLayer` interface** — added `saveFinaleVote()` and `saveTokenEvent()` method signatures.
+- **Migration 7 (`v34_token_pool_tables`)** — idempotent `CREATE TABLE IF NOT EXISTS` + indexes for both new tables. Runs on existing DBs that were created from older schema versions.
+- **`saveFinaleVote(showId, userId, chapterId, questionIndex)`** — inserts one row per question answered.
+- **`saveTokenEvent(showId, tokenId, granularType, chapterId, eventType, loopNumber)`** — inserts a token lifecycle event. `loopNumber` accepts null (available for `TOKEN_SPENT` via `V34FinaleState.loopCount`).
+
+### `server/socket.ts`
+- **`submit_emotion` handler** — calls `persistence.saveFinaleVote()` immediately after processing the command (data is on the socket payload).
+- **Generic `command` handler** — inspects events after `setState`; calls `saveTokenEvent('activated')` for `TOKEN_ACTIVATED` events and `saveTokenEvent('spent')` for `TOKEN_SPENT` events. For `TOKEN_SPENT`, looks up `chapterId` from `pool.tokens` (tokens remain in array with `status: 'spent'`).
+
+### `server/index.ts`
+- **`processCommandAndBroadcast`** — same token event inspection as socket.ts command handler, for commands fired by the timing engine (e.g. `LOOP_BOUNDARY` which produces `TOKEN_ACTIVATED` and `TOKEN_SPENT`).
+
+### `server/__tests__/persistence.test.ts`
+- **`Finale vote persistence (V3.4)`** — 3 tests: saves a vote, multiple votes per user, multiple users.
+- **`Token event persistence (V3.4)`** — 5 tests: activated event, spent with loop number, queued/cancelled, CHECK constraint rejects invalid type, null loop number accepted.
+
+### Test count: **437** (up from 431 after Phase 4)
+
+## 2026-04-09 — V3.4 Migration Phase 4: Server & Socket Layer
+
+Wire V3.4 conductor commands to WebSocket events. State filtering updated for new client views. Loop boundary timing added for `finale_remix`.
+
+### `server/socket.ts`
+- **`submit_emotion` handler** — maps audience `submit_emotion` event to `SUBMIT_EMOTION` command (userId from socket session for security). Guards against wrong phase.
+- **`pool_state` broadcast interval** (~2 Hz) — fires during `finale_vote` and `finale_remix`. Broadcasts serialized pool counts (`availableByChapter`, `totalByChapter`, `totalRemaining`) to projector and controller. Bypasses `state_sync` per high-frequency data pattern.
+- **V3.4 conductor event handling in `broadcastEvents`**:
+  - `NEXT_QUESTION` → `question` event to specific audience member (with question text + chapters)
+  - `EMOTION_RECEIVED` → `emotion_confirmed` to specific audience member
+  - `POOL_CAP_REACHED` → `phones_down` to all audience
+  - `REMIX_STARTED` → `phones_down` to all audience
+  - `TOKEN_ACTIVATED` → `node_update` to projector + controller
+  - `NODE_SILENT` → `node_update` to projector + controller
+  - `VOTE_STARTED` → sends initial `question` to all connected audience members
+- **`filterStateForClient` — projector**: detects V3.4 phases via `state.phase`; returns `ProjectorFinaleV34View` (pool counts, active nodes, queue depths, loop state) instead of V3.3 quilt view.
+- **`filterStateForClient` — audience**: detects V3.4 phases; returns `AudienceVoteView` (current question, answered count, pool cap, chapters) for `finale_vote` and `AudienceRemixView` (phones down) for `finale_remix`. V3.3 quilt path unchanged.
+
+### `server/timing.ts`
+- **`RemixLoopTrackingState` interface** — simple loop state (no crossfade pre-cue, no column logic).
+- **`startRemixLoopTracking()` / `stopRemixLoopTracking()`** — starts beat-driven `LOOP_BOUNDARY` firing during `finale_remix`. OSC mode: tracks beats, fires on each `loopBoundaryBeats` boundary. Fallback mode: JS interval.
+- **`handleBeatEvent`** — checks for `remixLoopState` before V3.3 loop tracking; fires `LOOP_BOUNDARY` at each boundary and returns early.
+- **`onStateChanged`** — starts remix loop tracking on `SHOW_PHASE_CHANGED` → `finale_remix`.
+- **`start()` / `onBridgeReconnect()`** — recover/restart remix loop tracking if phase is `finale_remix` on engine init or bridge reconnect.
+- **`clearAllFinaleTimers()`** — calls `stopRemixLoopTracking()`.
+
+### `lib/serialization.ts`
+- **`serializeV34FinaleState()`** — converts all V34 Maps (vote tracking, pool counts, queue, active nodes, trackMap) to arrays for JSON transport.
+- **`serializeState()`** — detects V34 finale state (`'queue' in state.finaleState`) and uses new serializer for controller full-state sync.
+- **`SerializedShowState.finaleState`** — widened to `SerializedFinaleState | object | null` to accommodate V34 serialized shape.
+- **`deserializeState()`** — guards V33 deserialization with `'quilt' in data.finaleState` check (V34 full deserialization deferred to Phase 5).
+
+### Tests
+- 429 tests passing (16 suites). No test changes needed — server wiring tested via conductor tests (Phase 3) and manual smoke test.
+
 ## 2026-04-09 — V3.4 Migration Phase 3: Conductor Modules (Pure Logic)
 
 Three new conductor modules implementing the V3.4 token pool finale system. All pure functions — no I/O.

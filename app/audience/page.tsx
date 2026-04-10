@@ -18,7 +18,8 @@ import { QuiltGrid } from '@/components/finale/QuiltGrid';
 import { QuiltPreview } from '@/components/finale/QuiltPreview';
 import { QuiltRemix } from '@/components/finale/QuiltRemix';
 import { NpcDisplay } from '@/components/finale/NpcDisplay';
-import type { AudienceFinaleView, AudienceAttemptView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
+import { EmotionVote } from '@/components/finale/EmotionVote';
+import type { AudienceFinaleView, AudienceAttemptView, AudienceVoteView, AudienceRemixView, GranularType, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -116,6 +117,25 @@ function AudienceContent() {
               granularTypes={state.config.granularTypes ?? []}
             />
           : <DarkListenScreen />
+      )}
+
+      {phase === 'finale_vote' && state.myFinale && (state.myFinale as unknown as AudienceVoteView).finalePhase === 'vote' && (
+        <EmotionVote
+          socket={socket}
+          initialQuestion={(state.myFinale as unknown as AudienceVoteView).currentQuestion}
+          answeredCount={(state.myFinale as unknown as AudienceVoteView).answeredCount}
+          poolCapReached={(state.myFinale as unknown as AudienceVoteView).poolCapReached}
+          chapters={(state.myFinale as unknown as AudienceVoteView).chapters}
+          emit={emit}
+        />
+      )}
+
+      {phase === 'finale_remix' && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+          <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+            LISTEN
+          </p>
+        </div>
       )}
 
       {phase === 'ended' && (

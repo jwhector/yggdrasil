@@ -126,6 +126,25 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
             Force Collapse
           </button>
         )}
+
+        {/* V3.4 finale phase buttons */}
+        {phase === 'finale_vote' && (
+          <button
+            onClick={() => sendCommand({ type: 'START_REMIX' })}
+            style={{ ...styles.btn, ...styles.btnPrimary }}
+          >
+            Start Remix
+          </button>
+        )}
+
+        {phase === 'finale_remix' && (
+          <button
+            onClick={() => sendCommand({ type: 'END_SHOW' })}
+            style={{ ...styles.btn, ...styles.btnDanger }}
+          >
+            End Show
+          </button>
+        )}
       </div>
 
       {/* Jump to Phase */}

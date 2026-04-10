@@ -8,8 +8,10 @@ import { useProjectorThoughts } from '@/hooks/useProjectorThoughts';
 import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ElegyGrid } from '@/components/finale/ElegyGrid';
 import { QuiltGrid } from '@/components/finale/QuiltGrid';
+import { ProjectorFinale } from '@/components/finale/ProjectorFinale';
 import { ProjectorCanvas } from '@/components/projector/ProjectorCanvas';
 import { OpenerSlides } from '@/components/projector/OpenerSlides';
+import type { ProjectorFinaleV34View } from '@/conductor/types';
 
 const SHOW_ID = 'default-show';
 
@@ -108,6 +110,21 @@ export default function ProjectorPage() {
             />
           </div>
         </main>
+      );
+    }
+
+    case 'finale_vote':
+    case 'finale_remix': {
+      const finaleV34 = state.finaleState as ProjectorFinaleV34View | null;
+      if (!finaleV34) return <ProjectorDark />;
+      return (
+        <ProjectorFinale
+          socket={socket}
+          phase={phase}
+          finaleView={finaleV34}
+          chapters={state.config.chapters ?? []}
+          granularTypes={state.config.granularTypes ?? []}
+        />
       );
     }
 

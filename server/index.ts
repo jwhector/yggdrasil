@@ -22,7 +22,7 @@ import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
-import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand } from '../conductor/types';
+import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, V34FinaleState } from '../conductor/types';
 import { LAYERS_PER_ATTEMPT } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
@@ -299,6 +299,22 @@ async function main() {
     const events = processCommand(state, command);
     setState(state, events);
     persistence.saveState(state);
+
+    // Persist V3.4 token events from timing-engine commands (e.g. LOOP_BOUNDARY)
+    for (const event of events) {
+      if (event.type === 'TOKEN_ACTIVATED') {
+        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number };
+        persistence.saveTokenEvent(state.id, ta.tokenId, ta.granularType, ta.chapterId, 'activated', null);
+      } else if (event.type === 'TOKEN_SPENT') {
+        const ts = event as { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number };
+        const finaleV34 = state.finaleState as V34FinaleState | null;
+        const spentToken = finaleV34?.pool.tokens.find(t => t.id === ts.tokenId);
+        const chapterId = spentToken?.chapterId ?? '';
+        const loopCount = finaleV34?.loopCount ?? null;
+        persistence.saveTokenEvent(state.id, ts.tokenId, ts.granularType, chapterId, 'spent', loopCount);
+      }
+    }
+
     await broadcastEvents(io, events, state);
 
     if (command.type === 'ADVANCE_FROM_VERDICT') {

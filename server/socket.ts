@@ -22,6 +22,7 @@ import type {
   AttemptState,
   AssignedThought,
   V32LayerConfig,
+  V34FinaleState,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
 import { assignThoughts, findThoughtsConfig } from '../conductor/intrusive-thoughts';
@@ -50,6 +51,7 @@ const HEARTBEAT_INTERVAL_MS = 15000;            // Ping every 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 seconds
 const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
 const QUILT_STATE_BROADCAST_INTERVAL_MS = 250;  // ~4 Hz during playback, ~2 Hz during assignment (throttled)
+const POOL_STATE_BROADCAST_INTERVAL_MS = 500;   // ~2 Hz during finale_vote and finale_remix
 
 // ============================================================================
 // Intrusive thoughts — server-side state
@@ -175,12 +177,39 @@ export function setupSocketHandlers(
   }, QUILT_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
+  // Pool state broadcast (~2 Hz during finale_vote and finale_remix)
+  // ============================================================================
+
+  const poolStateBroadcastInterval = setInterval(() => {
+    const state = getState();
+    if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') return;
+
+    const fs = state.finaleState;
+    if (!fs || !('pool' in fs)) return;
+
+    const v34fs = fs as V34FinaleState;
+    const poolState = {
+      availableByChapter: Array.from(v34fs.pool.availableByChapter.entries()).map(
+        ([chapterId, count]) => ({ chapterId, count })
+      ),
+      totalByChapter: Array.from(v34fs.pool.totalByChapter.entries()).map(
+        ([chapterId, count]) => ({ chapterId, count })
+      ),
+      totalRemaining: v34fs.pool.totalRemaining,
+    };
+
+    io.to('projector').emit('pool_state', poolState);
+    io.to('controller').emit('pool_state', poolState);
+  }, POOL_STATE_BROADCAST_INTERVAL_MS);
+
+  // ============================================================================
   // Cleanup
   // ============================================================================
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
     clearInterval(quiltStateBroadcastInterval);
+    clearInterval(poolStateBroadcastInterval);
   });
 
   // ============================================================================
@@ -531,6 +560,41 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
+    // submit_emotion — audience submits chapter vote during finale_vote
+    //
+    // Payload: { chapterId: string; questionIndex: number }
+    // userId taken from socket session (not payload) for security.
+    // ------------------------------------------------------------------
+    socket.on('submit_emotion', async (data: { chapterId: string; questionIndex: number }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] submit_emotion rejected: no userId on socket');
+        return;
+      }
+
+      const state = getState();
+      if (state.phase !== 'finale_vote') {
+        console.warn(`[Socket] submit_emotion rejected: wrong phase (${state.phase})`);
+        return;
+      }
+
+      console.log(`[Socket] Emotion from ${userId}: chapter=${data.chapterId} q=${data.questionIndex}`);
+
+      const events = processCommand(state, {
+        type: 'SUBMIT_EMOTION',
+        userId,
+        chapterId: data.chapterId,
+        questionIndex: data.questionIndex,
+      });
+
+      setState(state, events);
+      persistence.saveState(state);
+      persistence.saveFinaleVote(state.id, userId, data.chapterId, data.questionIndex);
+
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
     // dismiss_thought — audience member swipes away an intrusive thought
     // ------------------------------------------------------------------
     socket.on('dismiss_thought', (data: { thoughtId: string; direction: 'left' | 'right' }) => {
@@ -606,6 +670,21 @@ export function setupSocketHandlers(
       // Clear intrusive thoughts when advancing past verdict (layer actually moves on)
       if (processedCommand.type === 'ADVANCE_FROM_VERDICT') {
         clearThoughtsOnAdvance(io);
+      }
+
+      // Persist V3.4 token events (TOKEN_ACTIVATED and TOKEN_SPENT carry tokenId)
+      for (const event of events) {
+        if (event.type === 'TOKEN_ACTIVATED') {
+          const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number };
+          persistence.saveTokenEvent(state.id, ta.tokenId, ta.granularType, ta.chapterId, 'activated', null);
+        } else if (event.type === 'TOKEN_SPENT') {
+          const ts = event as { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number };
+          const finaleV34 = state.finaleState as import('../conductor/types').V34FinaleState | null;
+          const spentToken = finaleV34?.pool.tokens.find(t => t.id === ts.tokenId);
+          const chapterId = spentToken?.chapterId ?? '';
+          const loopCount = finaleV34?.loopCount ?? null;
+          persistence.saveTokenEvent(state.id, ts.tokenId, ts.granularType, chapterId, 'spent', loopCount);
+        }
       }
 
       // Persist performer remix events
@@ -760,6 +839,95 @@ export async function broadcastEvents(
         break;
       }
 
+      case 'NEXT_QUESTION': {
+        // Send next question directly to the specific audience member
+        const nextQ = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string };
+        const audienceSocksForQ = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForQ) {
+          if ((s as any).userId === nextQ.userId) {
+            s.emit('question', {
+              questionIndex: nextQ.questionIndex,
+              text: nextQ.questionText,
+              chapters: state.config.chapters ?? [],
+            });
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'EMOTION_RECEIVED': {
+        // Confirm the vote to the specific audience member
+        const er = event as { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number };
+        const audienceSocksForEr = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForEr) {
+          if ((s as any).userId === er.userId) {
+            s.emit('emotion_confirmed', { chapterId: er.chapterId, questionIndex: er.questionIndex });
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'POOL_CAP_REACHED':
+        // Phones go dark when pool cap is reached
+        io.to('audience').emit('phones_down');
+        break;
+
+      case 'REMIX_STARTED':
+        // Phones go dark when remix begins
+        io.to('audience').emit('phones_down');
+        break;
+
+      case 'TOKEN_ACTIVATED': {
+        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number };
+        io.to('projector').emit('node_update', {
+          granularType: ta.granularType,
+          chapterId: ta.chapterId,
+          status: 'active',
+        });
+        io.to('controller').emit('node_update', {
+          granularType: ta.granularType,
+          chapterId: ta.chapterId,
+          status: 'active',
+        });
+        break;
+      }
+
+      case 'NODE_SILENT': {
+        const ns = event as { type: 'NODE_SILENT'; granularType: string };
+        io.to('projector').emit('node_update', {
+          granularType: ns.granularType,
+          chapterId: null,
+          status: 'silent',
+        });
+        io.to('controller').emit('node_update', {
+          granularType: ns.granularType,
+          chapterId: null,
+          status: 'silent',
+        });
+        break;
+      }
+
+      case 'VOTE_STARTED': {
+        // Send initial questions to all connected audience members
+        const audienceSocksForVote = await io.in('audience').fetchSockets();
+        const voteConfig = state.config.finaleV34?.vote;
+        if (voteConfig && voteConfig.questions.length > 0) {
+          const firstQ = voteConfig.questions[0];
+          if (firstQ) {
+            for (const s of audienceSocksForVote) {
+              s.emit('question', {
+                questionIndex: 0,
+                text: firstQ.text,
+                chapters: state.config.chapters ?? [],
+              });
+            }
+          }
+        }
+        break;
+      }
+
       case 'ERROR':
         io.to('controller').emit('error', event);
         console.error('[Conductor Error]:', event.message, (event as any).command?.type);
@@ -795,6 +963,72 @@ export function filterStateForClient(
     // -------------------------------------------------------------------------
     case 'projector': {
       const fs = state.finaleState;
+      let finaleStateForClient: object | null = null;
+
+      if (fs) {
+        if (state.phase === 'finale_vote' || state.phase === 'finale_remix') {
+          // V3.4 — token pool finale
+          const v34fs = fs as V34FinaleState;
+          finaleStateForClient = {
+            finalePhase: v34fs.phase,
+            pool: {
+              availableByChapter: Array.from(v34fs.pool.availableByChapter.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+              totalByChapter: Array.from(v34fs.pool.totalByChapter.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+              totalRemaining: v34fs.pool.totalRemaining,
+              targetPoolSize: v34fs.pool.targetPoolSize,
+              poolCapReached: v34fs.vote.poolCapReached,
+            },
+            active: Array.from(v34fs.active.entries()).map(([granularType, node]) => ({
+              granularType,
+              chapterId: node.chapterId,
+              trackIndex: node.trackIndex,
+              persistent: node.persistent,
+            })),
+            queueDepth: Array.from(v34fs.queue.entries()).map(([granularType, tokens]) => ({
+              granularType,
+              depth: tokens.length,
+            })),
+            loopCount: v34fs.loopCount,
+            loopProgress: v34fs.loopProgress,
+            audienceInteraction: v34fs.audienceInteraction,
+            npcMessage: v34fs.npc.currentMessage,
+          };
+        } else {
+          // V3.3 — quilt finale
+          const v33fs = fs as import('../conductor/types').V33FinaleState;
+          finaleStateForClient = {
+            finalePhase: v33fs.phase,
+            availableFragments: v33fs.availableFragments,
+            allFragments: v33fs.allFragments,
+            // Quilt grid
+            quilt: {
+              rows: v33fs.quilt.rows,
+              columns: v33fs.quilt.columns,
+              cells: Array.from(v33fs.quilt.cells.values()).map(c => ({
+                id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
+                granularType: c.granularType, songIndex: c.songIndex,
+                chapter: c.chapter, ownerId: c.ownerId,
+              })),
+              columnOrder: v33fs.quilt.columnOrder,
+              playheadColumn: v33fs.quilt.playheadColumn,
+              loopCount: v33fs.quilt.loopCount,
+            },
+            availableSongs: v33fs.availableSongs,
+            // Arc state
+            arcPhase: v33fs.arc?.phase ?? null,
+            arcPassIndex: v33fs.arc?.currentPassIndex ?? null,
+            // Assignment
+            assignmentMode: v33fs.assignment.mode,
+            assignmentTimerRemaining: v33fs.assignment.timerRemaining,
+            // Remix
+            lockedCells: Array.from(v33fs.remix.lockedCells),
+            mutedCells: Array.from(v33fs.remix.mutedCells),
+            // NPC
+            npcMessage: v33fs.npc.currentMessage,
+          };
+        }
+      }
+
       return {
         phase: state.phase,
         paused: state.paused,
@@ -803,36 +1037,7 @@ export function filterStateForClient(
         userCount: state.users.size,
         openerSlideState: state.openerSlideState,
         attempts: state.attempts,
-        finaleState: fs ? {
-          finalePhase: fs.phase,
-          availableFragments: fs.availableFragments,
-          allFragments: fs.allFragments,
-          // Quilt grid
-          quilt: {
-            rows: fs.quilt.rows,
-            columns: fs.quilt.columns,
-            cells: Array.from(fs.quilt.cells.values()).map(c => ({
-              id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
-              granularType: c.granularType, songIndex: c.songIndex,
-              chapter: c.chapter, ownerId: c.ownerId,
-            })),
-            columnOrder: fs.quilt.columnOrder,
-            playheadColumn: fs.quilt.playheadColumn,
-            loopCount: fs.quilt.loopCount,
-          },
-          availableSongs: fs.availableSongs,
-          // Arc state
-          arcPhase: fs.arc?.phase ?? null,
-          arcPassIndex: fs.arc?.currentPassIndex ?? null,
-          // Assignment
-          assignmentMode: fs.assignment.mode,
-          assignmentTimerRemaining: fs.assignment.timerRemaining,
-          // Remix
-          lockedCells: Array.from(fs.remix.lockedCells),
-          mutedCells: Array.from(fs.remix.mutedCells),
-          // NPC
-          npcMessage: fs.npc.currentMessage,
-        } : null,
+        finaleState: finaleStateForClient,
         config: state.config,
       };
     }
@@ -865,47 +1070,81 @@ export function filterStateForClient(
       let myFinale: object | null = null;
       const fs = state.finaleState;
       if (fs) {
-        // Find user's cell
-        let myCellId: string | null = null;
-        for (const cell of fs.quilt.cells.values()) {
-          if (cell.ownerId === userId) { myCellId = cell.id; break; }
-        }
+        if (state.phase === 'finale_vote') {
+          // V3.4 — audience vote phase
+          const v34fs = fs as V34FinaleState;
+          const answeredCount = v34fs.vote.questionsAnsweredByUser.get(userId) ?? 0;
+          const voteConfig = state.config.finaleV34?.vote;
+          let currentQuestion: { questionIndex: number; text: string } | null = null;
+          if (
+            voteConfig &&
+            !v34fs.vote.poolCapReached &&
+            answeredCount < v34fs.vote.maxQuestionsPerPerson &&
+            answeredCount < voteConfig.questions.length
+          ) {
+            const q = voteConfig.questions[answeredCount];
+            if (q) currentQuestion = { questionIndex: answeredCount, text: q.text };
+          }
+          myFinale = {
+            finalePhase: 'vote',
+            currentQuestion,
+            answeredCount,
+            poolCapReached: v34fs.vote.poolCapReached,
+            chapters: state.config.chapters ?? [],
+            npcMessage: v34fs.npc.currentMessage,
+          };
+        } else if (state.phase === 'finale_remix') {
+          // V3.4 — phones down during remix
+          const v34fs = fs as V34FinaleState;
+          myFinale = {
+            finalePhase: 'remix',
+            npcMessage: v34fs.npc.currentMessage,
+          };
+        } else {
+          // V3.3 — quilt finale
+          const v33fs = fs as import('../conductor/types').V33FinaleState;
+          // Find user's cell
+          let myCellId: string | null = null;
+          for (const cell of v33fs.quilt.cells.values()) {
+            if (cell.ownerId === userId) { myCellId = cell.id; break; }
+          }
 
-        myFinale = {
-          finalePhase: fs.phase,
-          // Quilt grid (shared)
-          quilt: {
-            rows: fs.quilt.rows,
-            columns: fs.quilt.columns,
-            cells: Array.from(fs.quilt.cells.values()).map(c => ({
-              id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
-              granularType: c.granularType, songIndex: c.songIndex,
-              chapter: c.chapter, ownerId: c.ownerId,
-            })),
-            columnOrder: fs.quilt.columnOrder,
-            playheadColumn: fs.quilt.playheadColumn,
-          },
-          availableSongs: fs.availableSongs,
-          // Elegy opt-in
-          optedIn: fs.elegyOptedIn.has(userId),
-          optInCount: fs.elegyOptedIn.size,
-          // Arc state
-          arcPhase: fs.arc?.phase ?? null,
-          // Assignment
-          myCellId,
-          assignmentMode: fs.assignment.mode,
-          assignmentTimerRemaining: fs.assignment.timerRemaining,
-          // Preview
-          previewTimerRemaining: fs.preview.timerRemaining,
-          lockedIn: fs.preview.lockedInUsers.has(userId),
-          audioPreviewPath: state.config.finale.audioPreviewPath,
-          // Remix
-          lockedCells: Array.from(fs.remix.lockedCells),
-          mutedCells: Array.from(fs.remix.mutedCells),
-          audienceRemix: state.config.finale.quilt.audienceRemix,
-          // NPC
-          npcMessage: fs.npc.currentMessage,
-        };
+          myFinale = {
+            finalePhase: v33fs.phase,
+            // Quilt grid (shared)
+            quilt: {
+              rows: v33fs.quilt.rows,
+              columns: v33fs.quilt.columns,
+              cells: Array.from(v33fs.quilt.cells.values()).map(c => ({
+                id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
+                granularType: c.granularType, songIndex: c.songIndex,
+                chapter: c.chapter, ownerId: c.ownerId,
+              })),
+              columnOrder: v33fs.quilt.columnOrder,
+              playheadColumn: v33fs.quilt.playheadColumn,
+            },
+            availableSongs: v33fs.availableSongs,
+            // Elegy opt-in
+            optedIn: v33fs.elegyOptedIn.has(userId),
+            optInCount: v33fs.elegyOptedIn.size,
+            // Arc state
+            arcPhase: v33fs.arc?.phase ?? null,
+            // Assignment
+            myCellId,
+            assignmentMode: v33fs.assignment.mode,
+            assignmentTimerRemaining: v33fs.assignment.timerRemaining,
+            // Preview
+            previewTimerRemaining: v33fs.preview.timerRemaining,
+            lockedIn: v33fs.preview.lockedInUsers.has(userId),
+            audioPreviewPath: state.config.finale.audioPreviewPath,
+            // Remix
+            lockedCells: Array.from(v33fs.remix.lockedCells),
+            mutedCells: Array.from(v33fs.remix.mutedCells),
+            audienceRemix: state.config.finale.quilt.audienceRemix,
+            // NPC
+            npcMessage: v33fs.npc.currentMessage,
+          };
+        }
       }
 
       return {

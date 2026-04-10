@@ -234,6 +234,45 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    name: 'v34_token_pool_tables',
+    up: (db) => {
+      // V3.4: Audience emotional votes
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS finale_votes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          chapter_id TEXT NOT NULL,
+          question_index INTEGER NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id)
+        )
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_finale_votes_show ON finale_votes(show_id)
+      `);
+
+      // V3.4: Token spend log (for recovery + analytics)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS finale_token_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          show_id TEXT NOT NULL,
+          token_id TEXT NOT NULL,
+          granular_type TEXT NOT NULL,
+          chapter_id TEXT NOT NULL,
+          event_type TEXT NOT NULL CHECK(event_type IN ('queued', 'activated', 'spent', 'cancelled')),
+          loop_number INTEGER,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (show_id) REFERENCES shows(id)
+        )
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_finale_token_events_show ON finale_token_events(show_id)
+      `);
+    },
+  },
 ];
 
 /**
@@ -274,6 +313,10 @@ export interface PersistenceLayer {
   // V3.3: Remix event persistence (audience + performer actions)
   saveRemixEvent(showId: ShowId, userId: UserId | null, eventType: string, payload: string): void;
   getRemixEvents(showId: ShowId): Array<{ userId: UserId | null; eventType: string; payload: string; createdAt: string }>;
+  // V3.4: Finale vote persistence (one row per question answered by an audience member)
+  saveFinaleVote(showId: ShowId, userId: UserId, chapterId: string, questionIndex: number): void;
+  // V3.4: Token event persistence (for recovery + analytics)
+  saveTokenEvent(showId: ShowId, tokenId: string, granularType: string, chapterId: string, eventType: 'queued' | 'activated' | 'spent' | 'cancelled', loopNumber: number | null): void;
   getUsersByShow(showId: ShowId): Pick<User, 'id' | 'seatId'>[];
   close(): void;
 }
@@ -353,6 +396,18 @@ export function createPersistence(dbPath: string): PersistenceLayer {
 
     getRemixEvents: db.prepare(`
       SELECT user_id, event_type, payload, created_at FROM finale_remix_events WHERE show_id = ? ORDER BY created_at ASC
+    `),
+
+    // V3.4: Finale votes
+    insertFinaleVote: db.prepare(`
+      INSERT INTO finale_votes (show_id, user_id, chapter_id, question_index, created_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `),
+
+    // V3.4: Token events
+    insertTokenEvent: db.prepare(`
+      INSERT INTO finale_token_events (show_id, token_id, granular_type, chapter_id, event_type, loop_number, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `),
   };
 
@@ -459,6 +514,20 @@ export function createPersistence(dbPath: string): PersistenceLayer {
         payload: r.payload,
         createdAt: r.created_at,
       }));
+    },
+
+    /**
+     * Save an audience emotional vote (V3.4).
+     */
+    saveFinaleVote(showId: ShowId, userId: UserId, chapterId: string, questionIndex: number): void {
+      stmts.insertFinaleVote.run(showId, userId, chapterId, questionIndex);
+    },
+
+    /**
+     * Save a token lifecycle event (V3.4 — for recovery + analytics).
+     */
+    saveTokenEvent(showId: ShowId, tokenId: string, granularType: string, chapterId: string, eventType: 'queued' | 'activated' | 'spent' | 'cancelled', loopNumber: number | null): void {
+      stmts.insertTokenEvent.run(showId, tokenId, granularType, chapterId, eventType, loopNumber ?? null);
     },
 
     /**

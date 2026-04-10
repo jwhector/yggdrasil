@@ -132,13 +132,22 @@ interface AuditionTrackingState {
 }
 
 /**
- * Loop boundary tracking state (for performer mix pending changes)
+ * Loop boundary tracking state (for performer mix pending changes — V3.3 quilt)
  */
 interface LoopTrackingState {
   lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
   loopBeats: number;           // from config.timing.loopBoundaryBeats
   crossfadeBeats: number;      // How many beats before boundary to fire PREPARE_COLUMN_CROSSFADE
   crossfadeSent: boolean;      // Whether the pre-cue has been sent for the current interval
+}
+
+/**
+ * Remix loop boundary tracking state (V3.4 token pool).
+ * Simpler than V3.3: just fires LOOP_BOUNDARY at each 8-bar boundary, no crossfade pre-cue.
+ */
+interface RemixLoopTrackingState {
+  lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
+  loopBeats: number;           // from config.timing.loopBoundaryBeats
 }
 
 const BEATS_PER_BAR = 4;
@@ -184,6 +193,8 @@ export function createTimingEngine(
   let loopState: LoopTrackingState | null = null;
   let fallbackLoopInterval: NodeJS.Timeout | null = null;
   let fallbackCrossfadeTimeout: NodeJS.Timeout | null = null;
+  let remixLoopState: RemixLoopTrackingState | null = null;
+  let fallbackRemixLoopInterval: NodeJS.Timeout | null = null;
   let configuredLoopBoundaryBeats: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
@@ -494,6 +505,7 @@ export function createTimingEngine(
     clearAssignmentTimer();
     clearPreviewTimer();
     stopArcTracking();
+    stopRemixLoopTracking();
   }
 
   // --------------------------------------------------------------------------
@@ -751,6 +763,58 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
+  // Remix Loop Boundary Tracking (V3.4 token pool)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Start loop boundary tracking for the finale_remix phase.
+   * Fires LOOP_BOUNDARY at each 8-bar (loopBoundaryBeats) boundary.
+   * Simpler than V3.3 loop tracking — no crossfade pre-cue, no column logic.
+   */
+  function startRemixLoopTracking(): void {
+    stopRemixLoopTracking();
+
+    // Reset beat baseline so rawToMonotonic handles the jump to beat 0 cleanly
+    previousRawBeat = -1;
+    beatWrapOffset = 0;
+    currentAbsoluteBeat = 0;
+
+    const loopBeats = configuredLoopBoundaryBeats;
+
+    if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
+      remixLoopState = { lastBoundaryBeat: -1, loopBeats };
+      console.log(`[Timing] Remix loop tracking started (OSC, every ${loopBeats} beats)`);
+    } else {
+      // Fallback: JS interval
+      const msPerBeat = 60000 / engineConfig.fallbackBpm;
+      const intervalMs = loopBeats * msPerBeat;
+
+      fallbackRemixLoopInterval = setInterval(() => {
+        if (!running) return;
+        const state = getState();
+        if (state.phase !== 'finale_remix') {
+          stopRemixLoopTracking();
+          return;
+        }
+        sendCommand({ type: 'LOOP_BOUNDARY' });
+      }, intervalMs);
+
+      console.log(`[Timing] Remix loop tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
+    }
+  }
+
+  /**
+   * Stop remix loop boundary tracking.
+   */
+  function stopRemixLoopTracking(): void {
+    remixLoopState = null;
+    if (fallbackRemixLoopInterval) {
+      clearInterval(fallbackRemixLoopInterval);
+      fallbackRemixLoopInterval = null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // Fallback Beat Ticker
   // --------------------------------------------------------------------------
 
@@ -875,7 +939,20 @@ export function createTimingEngine(
       }
     }
 
-    // --- Loop boundary tracking (live mix) ---
+    // --- Remix loop boundary (V3.4 token pool) ---
+    if (remixLoopState && state.phase === 'finale_remix') {
+      if (remixLoopState.lastBoundaryBeat < 0) {
+        remixLoopState.lastBoundaryBeat = monotonicBeat;
+      }
+      const remixBeatsSinceBoundary = monotonicBeat - remixLoopState.lastBoundaryBeat;
+      if (remixBeatsSinceBoundary >= remixLoopState.loopBeats) {
+        remixLoopState.lastBoundaryBeat = monotonicBeat;
+        sendCommand({ type: 'LOOP_BOUNDARY' });
+      }
+      return; // Remix loop handled — do not fall through to V3.3 loop tracking
+    }
+
+    // --- Loop boundary tracking (live mix — V3.3 quilt) ---
     if (!loopState) return;
     if (state.phase !== 'finale_playback') return;
 
@@ -1004,6 +1081,10 @@ export function createTimingEngine(
         // Start beat-driven arc tracking if arc is enabled
         startArcTracking(state);
       }
+
+      if (showPhaseEvent.phase === 'finale_remix') {
+        startRemixLoopTracking();
+      }
     }
 
     // Assignment started (self-select mode) → start assignment timer
@@ -1112,6 +1193,8 @@ export function createTimingEngine(
       }
     } else if (state.phase === 'finale_playback') {
       startLoopTracking();
+    } else if (state.phase === 'finale_remix') {
+      startRemixLoopTracking();
     }
   }
 
@@ -1216,6 +1299,7 @@ export function createTimingEngine(
     // Reset audition/loop baselines so they re-anchor to new beats
     if (auditionState) auditionState.lastToggleBeat = -1;
     if (loopState) loopState.lastBoundaryBeat = -1;
+    if (remixLoopState) remixLoopState.lastBoundaryBeat = -1;
 
     // Re-subscribe to Ableton events
     engineConfig.oscBridge.send('/live/song/start_listen/beat');
@@ -1231,6 +1315,8 @@ export function createTimingEngine(
       }
     } else if (state.phase === 'finale_playback') {
       startLoopTracking();
+    } else if (state.phase === 'finale_remix') {
+      startRemixLoopTracking();
     }
   }
 
