@@ -133,11 +133,19 @@ interface AuditionTrackingState {
 
 /**
  * Remix loop boundary tracking state (V3.4 token pool).
- * Fires LOOP_BOUNDARY at each 8-bar boundary, no crossfade pre-cue.
+ *
+ * Ableton transport loop is the source of truth for loop period. The raw beat
+ * position (0–31 for a 32-beat loop) tells us exactly where we are. We fire
+ * LOOP_BOUNDARY `preCueBeats` before the transport wraps so the crossfade is
+ * already in progress when the new loop starts. The wrap resets the fired flag.
+ *
+ * In fallback mode, a JS interval fires at configuredLoopBoundaryBeats intervals.
  */
 interface RemixLoopTrackingState {
-  lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
-  loopBeats: number;           // from config.timing.loopBoundaryBeats
+  active: boolean;
+  preCueBeats: number;          // How many beats before the wrap to fire LOOP_BOUNDARY
+  loopBeats: number;            // configuredLoopBoundaryBeats (for pre-cue threshold)
+  firedThisLoop: boolean;       // Prevents double-firing within the same loop
 }
 
 const BEATS_PER_BAR = 4;
@@ -481,25 +489,25 @@ export function createTimingEngine(
   function startRemixLoopTracking(): void {
     stopRemixLoopTracking();
 
-    // Reset beat baseline so rawToMonotonic handles the jump to beat 0 cleanly
-    previousRawBeat = -1;
-    beatWrapOffset = 0;
-    currentAbsoluteBeat = 0;
-
+    const state = getState();
+    const crossfadeBeats = state.config.timing.gain?.crossfadeBeats ?? 1;
+    const preCueBeats = Math.ceil(crossfadeBeats / 2);
     const loopBeats = configuredLoopBoundaryBeats;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
-      remixLoopState = { lastBoundaryBeat: -1, loopBeats };
-      console.log(`[Timing] Remix loop tracking started (OSC, every ${loopBeats} beats)`);
+      // OSC mode: fire LOOP_BOUNDARY `preCueBeats` before Ableton transport wraps
+      remixLoopState = { active: true, preCueBeats, loopBeats, firedThisLoop: false };
+      console.log(`[Timing] Remix loop tracking started (OSC, Ableton transport loop, pre-cue ${preCueBeats} beats)`);
     } else {
-      // Fallback: JS interval
+      // Fallback: JS interval (no Ableton transport to detect)
+      remixLoopState = { active: true, preCueBeats, loopBeats, firedThisLoop: false };
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
       const intervalMs = loopBeats * msPerBeat;
 
       fallbackRemixLoopInterval = setInterval(() => {
         if (!running) return;
-        const state = getState();
-        if (state.phase !== 'finale_remix') {
+        const s = getState();
+        if (s.phase !== 'finale_remix') {
           stopRemixLoopTracking();
           return;
         }
@@ -613,6 +621,9 @@ export function createTimingEngine(
   function handleBeatEvent(rawBeatNumber: number): void {
     if (!running) return;
 
+    // Capture pre-wrap state for remix loop detection (before rawToMonotonic mutates previousRawBeat)
+    const prevRaw = previousRawBeat;
+
     // Convert wrapping Ableton beats (e.g. 0–31, 0–31, ...) to monotonic
     const monotonicBeat = rawToMonotonic(rawBeatNumber);
     const state = getState();
@@ -646,14 +657,19 @@ export function createTimingEngine(
       }
     }
 
-    // --- Remix loop boundary (V3.4 token pool) ---
-    if (remixLoopState && state.phase === 'finale_remix') {
-      if (remixLoopState.lastBoundaryBeat < 0) {
-        remixLoopState.lastBoundaryBeat = monotonicBeat;
+    // --- Remix loop boundary (V3.4 — Ableton transport loop is source of truth) ---
+    // Fire LOOP_BOUNDARY `preCueBeats` before the transport wraps so the
+    // crossfade is already in progress when the new loop starts. Reset on wrap.
+    if (remixLoopState?.active && state.phase === 'finale_remix') {
+      // Transport wrapped — reset flag for the new loop
+      if (prevRaw >= 0 && rawBeatNumber < prevRaw) {
+        remixLoopState.firedThisLoop = false;
       }
-      const remixBeatsSinceBoundary = monotonicBeat - remixLoopState.lastBoundaryBeat;
-      if (remixBeatsSinceBoundary >= remixLoopState.loopBeats) {
-        remixLoopState.lastBoundaryBeat = monotonicBeat;
+
+      // Pre-cue: fire when raw beat reaches the threshold
+      const threshold = remixLoopState.loopBeats - remixLoopState.preCueBeats;
+      if (!remixLoopState.firedThisLoop && rawBeatNumber >= threshold) {
+        remixLoopState.firedThisLoop = true;
         sendCommand({ type: 'LOOP_BOUNDARY' });
       }
     }
@@ -896,9 +912,8 @@ export function createTimingEngine(
     currentBeatPosition = null;
     currentBpm = engineConfig.fallbackBpm;
 
-    // Reset audition/loop baselines so they re-anchor to new beats
+    // Reset audition baselines so they re-anchor to new beats
     if (auditionState) auditionState.lastToggleBeat = -1;
-    if (remixLoopState) remixLoopState.lastBoundaryBeat = -1;
 
     // Re-subscribe to Ableton events
     engineConfig.oscBridge.send('/live/song/start_listen/beat');

@@ -1309,7 +1309,7 @@ describe('V3.4 Finale Phases', () => {
     expect((phaseChanged as any).phase).toBe('ended');
   });
 
-  test('QUEUE_TOKEN during finale_remix queues token and emits events', () => {
+  test('QUEUE_TOKEN to silent node activates immediately', () => {
     const state = createV34TestState();
     advanceToFinaleVote(state);
     processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
@@ -1322,27 +1322,45 @@ describe('V3.4 Finale Phases', () => {
       chapterId: 'chapter_0',
     });
 
-    const queued = events.find(e => e.type === 'TOKEN_QUEUED');
-    expect(queued).toBeDefined();
-    expect((queued as any).granularType).toBe('bass');
-    expect((queued as any).chapterId).toBe('chapter_0');
+    // Silent node — should activate immediately, not queue
+    const activated = events.find(e => e.type === 'TOKEN_ACTIVATED');
+    expect(activated).toBeDefined();
+    expect((activated as any).granularType).toBe('bass');
+    expect((activated as any).chapterId).toBe('chapter_0');
   });
 
-  test('LOOP_BOUNDARY processes queue and spend cycle', () => {
+  test('QUEUE_TOKEN to occupied node queues for next boundary', () => {
     const state = createV34TestState();
     advanceToFinaleVote(state);
     processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
     processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u2', chapterId: 'chapter_0', questionIndex: 0 });
     processCommand(state, { type: 'START_REMIX' });
 
-    // Queue a token
+    // First token activates immediately (silent node)
     processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
 
-    // Loop boundary should activate it
+    // Second token goes to queue (node is occupied)
+    const events = processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
+    const queued = events.find(e => e.type === 'TOKEN_QUEUED');
+    expect(queued).toBeDefined();
+    expect((queued as any).granularType).toBe('bass');
+  });
+
+  test('LOOP_BOUNDARY spends active token with no replacement', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u2', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+
+    // Activates immediately on silent node
+    processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
+
+    // Boundary spends the active token (no replacement queued)
     const events = processCommand(state, { type: 'LOOP_BOUNDARY' });
-    const activated = events.find(e => e.type === 'TOKEN_ACTIVATED');
-    expect(activated).toBeDefined();
-    expect((activated as any).granularType).toBe('bass');
+    const spent = events.find(e => e.type === 'TOKEN_SPENT');
+    expect(spent).toBeDefined();
+    expect((spent as any).granularType).toBe('bass');
   });
 
   test('finale_remix transitions to ended when pool is empty', () => {
@@ -1353,10 +1371,8 @@ describe('V3.4 Finale Phases', () => {
     processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
     processCommand(state, { type: 'START_REMIX' });
 
-    // Queue it
+    // Activates immediately (silent node)
     processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
-    // Activate it
-    processCommand(state, { type: 'LOOP_BOUNDARY' });
     // Spend it (no replacement)
     const events = processCommand(state, { type: 'LOOP_BOUNDARY' });
 

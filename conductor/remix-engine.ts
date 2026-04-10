@@ -65,6 +65,16 @@ export function queueToken(
     );
   }
 
+  // If the node is silent (no active token), activate immediately — no reason to wait
+  if (!state.active.has(granularType)) {
+    return activateOnSilentNode(
+      { ...state, pool: updatedPool },
+      granularType,
+      chapterId,
+      consumed.token.id,
+    );
+  }
+
   // Add to queue
   const updatedQueue = new Map(state.queue);
   const typeQueue = [...(updatedQueue.get(granularType) ?? [])];
@@ -381,6 +391,61 @@ export function resolveTrack(
 // ============================================================================
 // Internal Helpers
 // ============================================================================
+
+/**
+ * Activate a token immediately on a silent node (no active token playing).
+ * Used when queuing to an empty node — no reason to wait for loop boundary.
+ */
+function activateOnSilentNode(
+  state: FinaleState,
+  granularType: string,
+  chapterId: string,
+  tokenId: string,
+): { state: FinaleState; events: ConductorEvent[] } {
+  const events: ConductorEvent[] = [];
+  const updatedActive = new Map(state.active);
+  const updatedTokens = [...state.pool.tokens];
+
+  const songIndex = chapterToSongIndex(chapterId, state);
+  const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
+  const trackIndex = trackIndices[0] ?? -1;
+
+  // Mark token as playing
+  const tokenIdx = updatedTokens.findIndex(t => t.id === tokenId);
+  if (tokenIdx !== -1) {
+    updatedTokens[tokenIdx] = { ...updatedTokens[tokenIdx], status: 'playing' };
+  }
+
+  updatedActive.set(granularType, {
+    tokenId,
+    chapterId,
+    startedAtLoop: state.loopCount,
+    trackIndex,
+    persistent: false,
+  });
+
+  events.push({
+    type: 'TOKEN_ACTIVATED',
+    granularType,
+    chapterId,
+    tokenId,
+    trackIndex,
+  });
+
+  events.push({
+    type: 'AUDIO_CUE',
+    cue: { type: 'node_unmute', granularType, trackIndex },
+  });
+
+  return {
+    state: {
+      ...state,
+      pool: { ...state.pool, tokens: updatedTokens },
+      active: updatedActive,
+    },
+    events,
+  };
+}
 
 /**
  * Instantly activate a token (audience interaction mode).
