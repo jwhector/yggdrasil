@@ -193,7 +193,7 @@ export interface NpcMessageConfig {
 
 /** Reference to an audio clip/track in Ableton. */
 export interface AudioReference {
-  trackIndex: number;                   // Computed from track layout formula
+  trackIndices: number[];                   // Computed from track layout formula
   clipSlot?: number;
   effectIndices?: number[];             // Device indices to enable/disable for this option
   label?: string;                       // Human-readable reference
@@ -425,6 +425,9 @@ export type ConductorCommand =
 
   // Manual end (V3.4)
   | { type: 'END_SHOW' }
+
+  // Testing — inject tokens directly into the pool
+  | { type: 'INJECT_TOKENS'; chapterId: string; count: number }
 
   // Recovery
   | { type: 'EXPORT_STATE' }
@@ -880,6 +883,8 @@ export interface ProjectorFinaleView {
   }>;
   // Queue depth per granular type (for stack indicators on nodes)
   queueDepth: Array<{ granularType: string; depth: number }>;
+  // Valid granularType+chapter combos (have tracks from song-building)
+  validNodes: Array<{ granularType: string; chapterId: string }>;
   // Loop state
   loopCount: number;
   loopProgress: number;

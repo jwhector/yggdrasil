@@ -34,6 +34,7 @@ import type {
   SeatId,
   User,
   FinaleState,
+  Token,
   VotePhaseConfig,
   V32LayerConfig,
   TrackBundle,
@@ -216,6 +217,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Manual end (V3.4)
     case 'END_SHOW':
       return handleEndShow(state);
+
+    // Testing — inject tokens into the pool
+    case 'INJECT_TOKENS':
+      return handleInjectTokens(state, command.chapterId, command.count);
 
     // Recovery
     case 'EXPORT_STATE':
@@ -1476,6 +1481,36 @@ function handleEndShow(state: ShowState): ConductorEvent[] {
 
   state.phase = 'ended';
   return [{ type: 'SHOW_PHASE_CHANGED', phase: 'ended', attemptIndex: state.currentAttemptIndex }];
+}
+
+function handleInjectTokens(state: ShowState, chapterId: string, count: number): ConductorEvent[] {
+  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'INJECT_TOKENS only valid during finale phases' }];
+  }
+
+  const fs = state.finaleState as FinaleState | null;
+  if (!fs) return [{ type: 'ERROR', message: 'No finale state' }];
+
+  const startId = fs.pool.tokens.length;
+  const newTokens: Token[] = [];
+  for (let i = 0; i < count; i++) {
+    newTokens.push({
+      id: `injected-${startId + i}`,
+      ownerId: '__controller__',
+      chapterId,
+      questionIndex: -1,
+      status: 'available',
+    });
+  }
+
+  fs.pool.tokens = [...fs.pool.tokens, ...newTokens];
+  const prev = fs.pool.availableByChapter.get(chapterId) ?? 0;
+  fs.pool.availableByChapter.set(chapterId, prev + count);
+  const prevTotal = fs.pool.totalByChapter.get(chapterId) ?? 0;
+  fs.pool.totalByChapter.set(chapterId, prevTotal + count);
+  fs.pool.totalRemaining += count;
+
+  return [{ type: 'STATE_UPDATED', version: state.version }];
 }
 
 /**

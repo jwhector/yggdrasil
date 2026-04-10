@@ -34,6 +34,11 @@ interface QueueDepthView {
   depth: number;
 }
 
+interface ValidNode {
+  granularType: string;
+  chapterId: string;
+}
+
 interface PentagonRemixProps {
   /** Canvas width in CSS pixels. */
   width: number;
@@ -51,6 +56,10 @@ interface PentagonRemixProps {
   granularTypes: GranularType[];
   /** Drag hover target (granular type ID or null). */
   hoverTarget: string | null;
+  /** Chapter ID of the token being dragged (null if not dragging). */
+  dragChapterId: string | null;
+  /** Valid granularType+chapter combos (have tracks from song-building). */
+  validNodes: ValidNode[];
   /** Whether audience interaction mode is active. */
   audienceInteraction: boolean;
   /** Callback to register drop zones for drag hit testing. */
@@ -68,6 +77,8 @@ export function PentagonRemix({
   chapters,
   granularTypes,
   hoverTarget,
+  dragChapterId,
+  validNodes,
   audienceInteraction,
   onDropZonesComputed,
 }: PentagonRemixProps) {
@@ -100,6 +111,16 @@ export function PentagonRemix({
     }
     return map;
   }, [queueDepths]);
+
+  // Build set of granular types that are valid for the currently-dragged chapter
+  const validForDrag = useMemo(() => {
+    if (!dragChapterId) return null;  // Not dragging — no highlighting
+    const set = new Set<string>();
+    for (const vn of validNodes) {
+      if (vn.chapterId === dragChapterId) set.add(vn.granularType);
+    }
+    return set;
+  }, [dragChapterId, validNodes]);
 
   // Animation loop
   useEffect(() => {
@@ -154,8 +175,10 @@ export function PentagonRemix({
         const active = activeMap.get(nodeDef.id);
         const queueDepth = queueMap.get(nodeDef.id) ?? 0;
         const isHovered = hoverTarget === nodeDef.id;
+        const dragValidity = validForDrag === null ? 'none' as const
+          : validForDrag.has(nodeDef.id) ? 'valid' as const : 'invalid' as const;
 
-        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, loopProgress, isHovered, chapterColorMap, t);
+        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, loopProgress, isHovered, dragValidity, chapterColorMap, t);
       }
 
       // Draw seed node (center)
@@ -163,7 +186,9 @@ export function PentagonRemix({
         const active = activeMap.get(SEED_ID);
         const queueDepth = queueMap.get(SEED_ID) ?? 0;
         const isHovered = hoverTarget === SEED_ID;
-        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, loopProgress, isHovered, chapterColorMap, t);
+        const dragValidity = validForDrag === null ? 'none' as const
+          : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
+        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, loopProgress, isHovered, dragValidity, chapterColorMap, t);
       }
 
       // Audience interaction indicator
@@ -179,7 +204,7 @@ export function PentagonRemix({
 
     animRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animRef.current);
-  }, [width, height, activeMap, queueMap, loopProgress, hoverTarget, chapterColorMap, audienceInteraction, onDropZonesComputed]);
+  }, [width, height, activeMap, queueMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed]);
 
   return (
     <canvas
@@ -210,24 +235,46 @@ function drawRemixNode(
   queueDepth: number,
   loopProgress: number,
   isHovered: boolean,
+  dragValidity: 'none' | 'valid' | 'invalid',
   chapterColors: Map<string, RGB>,
   t: number,
 ): void {
   const emptyColor: RGB = { r: 50, g: 50, b: 45 };
+  const isDimmed = dragValidity === 'invalid';
 
-  // Hover glow
-  if (isHovered) {
+  // Valid target highlight (pulsing ring when dragging a compatible token)
+  if (dragValidity === 'valid' && !isHovered) {
+    const pulseAlpha = 0.12 + 0.08 * Math.sin(t * 3);
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 1.8, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${pulseAlpha})`;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 1.5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Hover glow (brighter when valid, suppressed when invalid)
+  if (isHovered && dragValidity !== 'invalid') {
     ctx.beginPath();
     ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.fill();
 
     ctx.beginPath();
     ctx.arc(x, y, radius * 1.6, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 2.5;
     ctx.stroke();
   }
+
+  // Apply dimming for invalid targets during drag
+  if (isDimmed) ctx.globalAlpha = 0.25;
 
   if (active) {
     const color = chapterColors.get(active.chapterId) ?? emptyColor;
@@ -290,6 +337,9 @@ function drawRemixNode(
   ctx.textBaseline = 'top';
   ctx.fillText(nodeDef.label, x, y + radius + 6);
   ctx.textBaseline = 'middle';
+
+  // Restore alpha before badge (badge should always be visible)
+  if (isDimmed) ctx.globalAlpha = 1;
 
   // Queue depth badge
   if (queueDepth > 0) {

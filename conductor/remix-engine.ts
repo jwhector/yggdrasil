@@ -188,14 +188,14 @@ export function processLoopBoundary(
       // Resolve track for incoming token
       const songIndex = chapterToSongIndex(replacement.chapterId, state);
       const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
-      const trackIndex = trackIndices[0] ?? -1;
+      // const trackIndex = trackIndices[0] ?? -1;
 
       // Activate replacement
       updatedActive.set(granularType, {
         tokenId: replacement.tokenId,
         chapterId: replacement.chapterId,
         startedAtLoop: state.loopCount + 1,
-        trackIndex,
+        trackIndices,
         persistent: false,
       });
 
@@ -217,7 +217,7 @@ export function processLoopBoundary(
         granularType,
         chapterId: replacement.chapterId,
         tokenId: replacement.tokenId,
-        trackIndex,
+        trackIndices,
       });
 
       // Audio: crossfade
@@ -227,7 +227,7 @@ export function processLoopBoundary(
           type: 'node_crossfade',
           granularType,
           muteTrack: activeNode.trackIndex,
-          unmuteTrack: trackIndex,
+          unmuteTrack: trackIndices[0],
         },
       });
     } else {

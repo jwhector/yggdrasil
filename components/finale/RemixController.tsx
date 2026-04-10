@@ -160,6 +160,9 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
       <div style={styles.loopInfo}>
         Loop {finaleState.loopCount} | Progress: {Math.round(finaleState.loopProgress * 100)}%
       </div>
+
+      {/* Inject tokens (testing) */}
+      <InjectTokens chapters={chapters} sendCommand={sendCommand} />
     </section>
   );
 }
@@ -210,6 +213,78 @@ function ActiveIndicator({
           HOLD
         </span>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inject tokens — testing tool
+// ---------------------------------------------------------------------------
+
+function InjectTokens({
+  chapters,
+  sendCommand,
+}: {
+  chapters: ChapterConfig[];
+  sendCommand: (cmd: ConductorCommand) => void;
+}) {
+  const [count, setCount] = useState(10);
+  const [chapterIdx, setChapterIdx] = useState(0);
+
+  const selectedChapter = chapters[chapterIdx] ?? chapters[0];
+  if (!selectedChapter) return null;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
+      <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>Inject:</span>
+      <input
+        type="number"
+        min={1}
+        max={200}
+        value={count}
+        onChange={e => setCount(Math.max(1, Math.min(200, parseInt(e.target.value) || 1)))}
+        style={{
+          width: 48,
+          padding: '4px 6px',
+          borderRadius: 4,
+          border: '1px solid rgba(255,255,255,0.15)',
+          background: 'rgba(255,255,255,0.06)',
+          color: '#e5e7eb',
+          fontSize: '0.75rem',
+          textAlign: 'center' as const,
+        }}
+      />
+      <select
+        value={chapterIdx}
+        onChange={e => setChapterIdx(Number(e.target.value))}
+        style={{
+          padding: '4px 8px',
+          borderRadius: 4,
+          border: '1px solid rgba(255,255,255,0.15)',
+          background: 'rgba(255,255,255,0.06)',
+          color: '#e5e7eb',
+          fontSize: '0.75rem',
+        }}
+      >
+        {chapters.map((ch, i) => (
+          <option key={ch.id} value={i}>{ch.label}</option>
+        ))}
+      </select>
+      <div style={{ width: 14, height: 14, borderRadius: '50%', backgroundColor: selectedChapter.color, flexShrink: 0 }} />
+      <button
+        onClick={() => sendCommand({ type: 'INJECT_TOKENS', chapterId: selectedChapter.id, count })}
+        style={{
+          padding: '4px 10px',
+          borderRadius: 4,
+          border: '1px solid rgba(34, 197, 94, 0.4)',
+          background: 'rgba(34, 197, 94, 0.1)',
+          color: '#86efac',
+          fontSize: '0.75rem',
+          cursor: 'pointer',
+        }}
+      >
+        Add
+      </button>
     </div>
   );
 }

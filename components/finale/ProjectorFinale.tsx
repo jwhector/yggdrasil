@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { ChapterConfig, GranularType, ShowPhase, ProjectorFinaleView } from '@/conductor/types';
 import { useTokenPool } from '@/hooks/useTokenPool';
@@ -101,19 +101,31 @@ export function ProjectorFinale({
     drag.startDrag(chapterId, x, y);
   }, [drag]);
 
+  // Build a set of valid granular types for the currently-dragged chapter
+  const validForDragChapter = useMemo(() => {
+    const set = new Set<string>();
+    for (const vn of finaleView.validNodes) {
+      set.add(`${vn.granularType}:${vn.chapterId}`);
+    }
+    return set;
+  }, [finaleView.validNodes]);
+
   // Drop handler — shared between touch and mouse
   const handleDrop = useCallback(() => {
     if (!drag.isDragging) return;
+    const chapterId = drag.dragChapterId;
     const target = drag.endDrag();
-    if (target && drag.dragChapterId && socket) {
+    if (target && chapterId && socket) {
+      // Only allow drop if this granularType+chapter combo has valid tracks
+      if (!validForDragChapter.has(`${target}:${chapterId}`)) return;
       socket.emit('command', {
         type: 'QUEUE_TOKEN',
         granularType: target,
-        chapterId: drag.dragChapterId,
+        chapterId,
         instant: finaleView.audienceInteraction,
       });
     }
-  }, [drag, socket, finaleView.audienceInteraction]);
+  }, [drag, socket, finaleView.audienceInteraction, validForDragChapter]);
 
   // Touch handlers
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
@@ -176,6 +188,8 @@ export function ProjectorFinale({
             chapters={chapters}
             granularTypes={granularTypes}
             hoverTarget={drag.hoverTarget}
+            dragChapterId={drag.dragChapterId}
+            validNodes={finaleView.validNodes}
             audienceInteraction={finaleView.audienceInteraction}
             onDropZonesComputed={drag.setDropZones}
           />

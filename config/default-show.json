@@ -499,7 +499,7 @@
   "chapters": [
     { "id": "ambition",  "label": "Ambition",  "color": "#e63946", "colorA": "#ff6b6b", "colorB": "#c2185b", "icon": "\u25b2" },
     { "id": "love",      "label": "Love",       "color": "#f4a261", "colorA": "#ffcc80", "colorB": "#e65100", "icon": "\u25cf" },
-    { "id": "avoidance", "label": "Avoidance",  "color": "#457b9d", "colorA": "#64b5f6", "colorB": "#1a237e", "icon": "\u25c6" }
+    { "id": "acceptance", "label": "Acceptance",  "color": "#457b9d", "colorA": "#64b5f6", "colorB": "#1a237e", "icon": "\u25c6" }
   ],
   "granularTypes": [
     {

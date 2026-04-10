@@ -753,6 +753,7 @@ export function filterStateForClient(
             granularType,
             depth: tokens.length,
           })),
+          validNodes: deriveValidNodes(finaleFs),
           loopCount: finaleFs.loopCount,
           loopProgress: finaleFs.loopProgress,
           audienceInteraction: finaleFs.audienceInteraction,
@@ -874,4 +875,25 @@ export function filterStateForClient(
     default:
       return serializeState(state);
   }
+}
+
+/**
+ * Derive valid granularType+chapter combos from the finale trackMap.
+ * A combo is valid if trackMap[granularType][songIndex] has entries and
+ * the chapter maps to that songIndex via chapterSongIndex.
+ */
+function deriveValidNodes(fs: FinaleState): Array<{ granularType: string; chapterId: string }> {
+  const result: Array<{ granularType: string; chapterId: string }> = [];
+  for (const [granularType, songMap] of fs.trackMap.entries()) {
+    for (const [songIndex, trackIndices] of songMap.entries()) {
+      if (trackIndices.length === 0) continue;
+      // Reverse-lookup: find chapterId for this songIndex
+      for (const [chapterId, sIdx] of fs.chapterSongIndex.entries()) {
+        if (sIdx === songIndex) {
+          result.push({ granularType, chapterId });
+        }
+      }
+    }
+  }
+  return result;
 }
