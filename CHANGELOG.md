@@ -1,5 +1,52 @@
 # CHANGELOG
 
+## 2026-04-09 — V3.4 Migration Phase 2: Token Pool Types & Interfaces
+
+Type-only additions to `conductor/types.ts` for the V3.4 "Token Pool" finale system. No behavioral changes.
+
+### ShowPhase
+- Added `'finale_vote'` and `'finale_remix'` to `ShowPhase` union
+- Marked V3.3 phases (`finale_elegy`, `finale_assignment`, `finale_preview`, `finale_playback`) with `// V3.3 — remove in Phase 8`
+
+### New Types: Token Pool Core
+- `TokenPool` — wire-safe pool counts (`available` + `total` maps by chapterId)
+- `Token` — single emotional vote token with `status: 'available' | 'queued' | 'playing' | 'spent'`
+- `QueuedToken` — token queued for next loop boundary on a granular type node
+- `ActiveNode` — currently-playing token on a node, with `persistent` flag for audience interaction mode
+
+### New Types: V34FinaleState
+- `V34FinaleState` — full V3.4 finale runtime state: vote tracking, token pool, performer queue, active nodes, trackMap, loop progress
+- Sits alongside `V33FinaleState` (not yet wired into `ShowState` — happens in Phase 3)
+
+### New Types: V34FinaleConfig
+- `V34FinaleConfig`, `VotePhaseConfig`, `QuestionConfig`, `RemixConfig`
+
+### New AudioCue Variants
+- `remix_start`, `node_unmute`, `node_crossfade`, `node_instant_crossfade`, `node_fade_out` added to `AudioCue` union
+- `RemixAudioCue` type alias for remix-phase audio cue handlers
+
+### New ConductorCommand Variants
+- Vote: `START_VOTE`, `SUBMIT_EMOTION`, `REQUEST_NEXT_QUESTION`, `POOL_CAP_REACHED`
+- Remix: `START_REMIX`, `QUEUE_TOKEN`, `CANCEL_QUEUE`, `TOGGLE_AUDIENCE_INTERACTION`, `LOOP_BOUNDARY`
+- Manual end: `END_SHOW`
+
+### New ConductorEvent Variants
+- Vote: `VOTE_STARTED`, `EMOTION_RECEIVED`, `NEXT_QUESTION`, `POOL_CAP_REACHED`, `POOL_READY`
+- Remix: `REMIX_STARTED`, `TOKEN_QUEUED`, `TOKEN_CANCELLED`, `TOKEN_ACTIVATED`, `TOKEN_SPENT`, `NODE_SILENT`, `POOL_EMPTY`
+
+### New Client View Types
+- `AudienceVoteView` — personalized vote phase view (current question, answer count, pool cap state)
+- `AudienceRemixView` — phones-down remix phase view
+- `ProjectorFinaleV34View` — projector view for both V3.4 finale phases (pool state, active nodes, queue depth)
+
+### Misc
+- Added `songIndex?: number` to `ChapterConfig` (V3.4 track resolution)
+- Updated `MetricsPanel` and `ShowControls` to include `finale_vote` / `finale_remix` in phase label/color maps
+
+**Tests:** 378 passing (up from 377 — one new test added by prior work).
+
+---
+
 ## 2026-04-08 — V3.3 Quilt Arc: Sorting, Timing, Animation
 
 Automated playback arc system for the quilt finale — staggered entry/exit, energy-based sorting, and sort animation.

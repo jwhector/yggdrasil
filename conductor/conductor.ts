@@ -2044,12 +2044,11 @@ function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): Cond
 
   // Build fragments from actual config option A tracks (real Ableton track indices)
   const attemptConfigs = state.config.attempts;
-  const chapters: import('./types').Chapter[] = ['ambition', 'love', 'avoidance'];
   const availableFragments: import('./types').GranularFragment[] = [];
 
   for (let songIndex = 0; songIndex < attemptConfigs.length; songIndex++) {
     const attemptConfig = attemptConfigs[songIndex];
-    const chapter = chapters[songIndex] ?? 'ambition';
+    const chapter = attemptConfig.chapter;
 
     // Extract option A tracks from each layer
     for (const layerConfig of attemptConfig.layers) {
@@ -2118,7 +2117,7 @@ function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): Cond
       cell.ownerId = `sim-user-${userIndex}`;
       const randomSong = availableSongs[Math.floor(Math.random() * availableSongs.length)];
       cell.songIndex = randomSong;
-      cell.chapter = chapters[randomSong];
+      cell.chapter = attemptConfigs[randomSong]?.chapter ?? null;
       userIndex++;
     }
     // Remaining cells stay empty (null owner, null song) — valid silent cells

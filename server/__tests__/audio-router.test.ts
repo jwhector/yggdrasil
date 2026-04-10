@@ -71,7 +71,7 @@ function makeLayerConfig(index: number): V32LayerConfig {
   };
 }
 
-function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig {
+function makeAttemptConfig(chapter: string): V32AttemptConfig {
   return {
     chapter,
     title: chapter,

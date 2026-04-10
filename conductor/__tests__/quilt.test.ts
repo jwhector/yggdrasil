@@ -237,7 +237,7 @@ describe('setCellSong', () => {
     const result = setCellSong(grid, 'user-1', 1, [0, 1, 2]);
     expect(result.ok).toBe(true);
     expect(grid.cells.get('0:0')!.songIndex).toBe(1);
-    expect(grid.cells.get('0:0')!.chapter).toBe('love');
+    expect(grid.cells.get('0:0')!.chapter).toBe('chapter_1');
   });
 
   test('rejects invalid song index', () => {
@@ -263,9 +263,9 @@ describe('setCellSong', () => {
     setCellSong(grid, 'u2', 1, [0, 1, 2]);
     setCellSong(grid, 'u3', 2, [0, 1, 2]);
 
-    expect(grid.cells.get('0:0')!.chapter).toBe('ambition');
-    expect(grid.cells.get('1:0')!.chapter).toBe('love');
-    expect(grid.cells.get('2:0')!.chapter).toBe('avoidance');
+    expect(grid.cells.get('0:0')!.chapter).toBe('chapter_0');
+    expect(grid.cells.get('1:0')!.chapter).toBe('chapter_1');
+    expect(grid.cells.get('2:0')!.chapter).toBe('chapter_2');
   });
 });
 
@@ -428,7 +428,7 @@ describe('changeCellSong', () => {
     );
     expect(result.ok).toBe(true);
     expect(grid.cells.get('0:0')!.songIndex).toBe(2);
-    expect(grid.cells.get('0:0')!.chapter).toBe('avoidance');
+    expect(grid.cells.get('0:0')!.chapter).toBe('chapter_2');
   });
 
   test('rejects song change when not allowed', () => {
@@ -557,7 +557,7 @@ describe('overrideCellSong', () => {
     const result = overrideCellSong(grid, '0:0', 2, [0, 1, 2]);
     expect(result.ok).toBe(true);
     expect(grid.cells.get('0:0')!.songIndex).toBe(2);
-    expect(grid.cells.get('0:0')!.chapter).toBe('avoidance');
+    expect(grid.cells.get('0:0')!.chapter).toBe('chapter_2');
   });
 
   test('rejects invalid song index', () => {

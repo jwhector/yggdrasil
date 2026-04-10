@@ -32,7 +32,7 @@ function makeV32Layer(index: number): V32LayerConfig {
 }
 
 function createTestConfig(): ShowConfig {
-  const makeAttempt = (chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig => ({
+  const makeAttempt = (chapter: string): V32AttemptConfig => ({
     chapter,
     title: chapter,
     liveSeed: { trackIndices: [99] },

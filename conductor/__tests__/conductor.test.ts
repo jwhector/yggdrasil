@@ -32,7 +32,7 @@ function makeV32LayerConfig(index: number): V32LayerConfig {
 }
 
 function makeAttemptConfig(
-  chapter: 'ambition' | 'love' | 'avoidance',
+  chapter: string,
   layerCount = 3,
   thresholds?: number[],
 ): V32AttemptConfig {

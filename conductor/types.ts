@@ -25,8 +25,12 @@ export type Timestamp = number;
 // Chapter & Layer Identity
 // ============================================================================
 
-/** The three story chapters, each corresponding to one song-building attempt. */
-export type Chapter = 'ambition' | 'love' | 'avoidance';
+/**
+ * A chapter ID string. References a ChapterConfig entry by its `id` field.
+ * Config-driven — no hardcoded chapter names in code. Resolve display labels
+ * via config lookup (e.g., getChapterIdentity(chapterId)).
+ */
+export type Chapter = string;
 
 /** Sentinel fragment ID: when a type's active fragment is this, audio is muted. Voteable like any fragment. */
 export const MUTE_FRAGMENT_ID = '__mute__';
@@ -226,7 +230,7 @@ export interface User {
 /**
  * Show phase progression:
  * lobby → opener → attempt_story → attempt_build → attempt_resolve → ... (×3) →
- * finale_elegy → finale_assignment → finale_preview → finale_playback → ended
+ * finale_vote → finale_remix → ended
  */
 export type ShowPhase =
   | 'lobby'                   // Audience joining, waiting
@@ -234,10 +238,12 @@ export type ShowPhase =
   | 'attempt_story'           // Story segment before song-building (phones dark)
   | 'attempt_build'           // Active song-building with audience voting
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
-  | 'finale_elegy'            // Elegy display of all fragments (available and locked)
-  | 'finale_assignment'       // Audience claims quilt cells (V3.3)
-  | 'finale_preview'          // Private song exploration — room silent (V3.3)
-  | 'finale_playback'         // Quilt plays + performer/audience remix (V3.3)
+  | 'finale_elegy'            // V3.3 — remove in Phase 8
+  | 'finale_assignment'       // V3.3 — remove in Phase 8
+  | 'finale_preview'          // V3.3 — remove in Phase 8
+  | 'finale_playback'         // V3.3 — remove in Phase 8
+  | 'finale_vote'             // V3.4: Audience emotional vote — phones active, tokens generated
+  | 'finale_remix'            // V3.4: Performer builds song from token pool — phones down
   | 'ended';                  // Show complete
 
 // ============================================================================
@@ -250,7 +256,7 @@ export interface ShowState {
   currentAttemptIndex: number;          // 0, 1, 2
   attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: V33FinaleState | null;    // Populated at finale_elegy
+  finaleState: V33FinaleState | null;    // Populated at finale_elegy (V3.3) — updated to V34FinaleState in Phase 3
   config: ShowConfig;
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
@@ -368,7 +374,17 @@ export type AudioCue =
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
   | { type: 'master_panic' }            // Authoritative: query Ableton for all tracks, mute every non-foldable, reset gains
-  | { type: 'reset_utilities' };        // Emergency: set all Utility gains to 0 dB, unmute all tracks
+  | { type: 'reset_utilities' }         // Emergency: set all Utility gains to 0 dB, unmute all tracks
+  /** V3.4: start the remix transport (reset beat counter) */
+  | { type: 'remix_start' }
+  /** V3.4: unmute a single remix node track with gain swell */
+  | { type: 'node_unmute'; granularType: string; trackIndex: number }
+  /** V3.4: crossfade between two chapter tracks at loop boundary */
+  | { type: 'node_crossfade'; granularType: string; muteTrack: number; unmuteTrack: number }
+  /** V3.4: immediate crossfade (no loop boundary wait) — used in audience interaction mode */
+  | { type: 'node_instant_crossfade'; granularType: string; muteTrack: number | null; unmuteTrack: number }
+  /** V3.4: fade a node's track to silence (nothing queued) */
+  | { type: 'node_fade_out'; granularType: string; trackIndex: number };
 
 // ============================================================================
 // Conductor Commands (Input)
@@ -450,6 +466,22 @@ export type ConductorCommand =
   | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
   | { type: 'USER_DISCONNECT'; userId: UserId }
 
+  // Finale — Vote phase (V3.4)
+  | { type: 'START_VOTE' }
+  | { type: 'SUBMIT_EMOTION'; userId: UserId; chapterId: string; questionIndex: number }
+  | { type: 'REQUEST_NEXT_QUESTION'; userId: UserId }
+  | { type: 'POOL_CAP_REACHED' }
+
+  // Finale — Remix phase (V3.4)
+  | { type: 'START_REMIX' }
+  | { type: 'QUEUE_TOKEN'; granularType: string; chapterId: string; instant?: boolean }
+  | { type: 'CANCEL_QUEUE'; granularType: string }
+  | { type: 'TOGGLE_AUDIENCE_INTERACTION' }
+  | { type: 'LOOP_BOUNDARY' }
+
+  // Manual end (V3.4)
+  | { type: 'END_SHOW' }
+
   // Recovery
   | { type: 'EXPORT_STATE' }
   | { type: 'IMPORT_STATE'; state: ShowState }
@@ -517,6 +549,22 @@ export type ConductorEvent =
   | { type: 'ARC_SORT_APPLIED'; passIndex: number; previousCells: Map<string, QuiltCell> }
   | { type: 'ARC_ROW_GROUP_EXITED'; granularTypes: string[] }
 
+  // Finale — Vote phase (V3.4)
+  | { type: 'VOTE_STARTED' }
+  | { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number; poolSize: number }
+  | { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string }
+  | { type: 'POOL_CAP_REACHED'; finalPoolSize: number }
+  | { type: 'POOL_READY'; pool: TokenPool }
+
+  // Finale — Remix phase (V3.4)
+  | { type: 'REMIX_STARTED'; pool: TokenPool }
+  | { type: 'TOKEN_QUEUED'; granularType: string; chapterId: string; queueDepth: number }
+  | { type: 'TOKEN_CANCELLED'; granularType: string; chapterId: string; returnedToPool: boolean }
+  | { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number }
+  | { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number }
+  | { type: 'NODE_SILENT'; granularType: string }
+  | { type: 'POOL_EMPTY' }
+
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
 
@@ -548,6 +596,7 @@ export interface ChapterConfig {
   colorA: string;  // Option A CSS color
   colorB: string;  // Option B CSS color
   icon: string;    // Unicode symbol
+  songIndex?: number;  // V3.4: maps chapter to song index (0, 1, 2) for track resolution
 }
 
 /**
@@ -969,4 +1018,196 @@ export interface ProjectorClientState {
   finaleState: ProjectorFinaleView | null;
   config: ShowConfig;
   openerSlideState: OpenerSlidePosition | null;
+}
+
+// ============================================================================
+// V3.4 Token Pool — Types
+// ============================================================================
+
+/**
+ * Serialized token pool counts for transport over the wire and event payloads.
+ * Maps are used internally in V34FinaleState; TokenPool is the wire-safe form.
+ */
+export interface TokenPool {
+  available: Map<string, number>;  // chapterId → remaining available count
+  total: Map<string, number>;      // chapterId → original count (for display)
+}
+
+/** A single emotional vote token created by an audience member. */
+export interface Token {
+  id: string;
+  ownerId: UserId;
+  chapterId: string;
+  questionIndex: number;
+  status: 'available' | 'queued' | 'playing' | 'spent';
+}
+
+/** A token queued for the next loop boundary on a granular type node. */
+export interface QueuedToken {
+  tokenId: string;
+  chapterId: string;
+  queuedAt: number;  // Timestamp
+}
+
+/** The currently-playing token on a granular type node. */
+export interface ActiveNode {
+  tokenId: string;
+  chapterId: string;
+  startedAtLoop: number;
+  trackIndex: number;   // Resolved Ableton track index
+  persistent: boolean;  // True when activated in audience interaction mode — loops until overridden
+}
+
+// ============================================================================
+// V3.4 Finale State
+// ============================================================================
+
+/**
+ * Finale state (V3.4 — "Token Pool").
+ * Phases: finale_vote → finale_remix.
+ */
+export interface V34FinaleState {
+  phase: 'vote' | 'remix';
+
+  // Vote phase tracking
+  vote: {
+    questionsAnsweredByUser: Map<UserId, number>;  // How many questions each person has answered
+    maxQuestionsPerPerson: number;                  // Derived from targetPoolSize / audienceCount
+    poolCapReached: boolean;
+  };
+
+  // Token pool
+  pool: {
+    tokens: Token[];                            // All tokens (available + queued + playing + spent)
+    availableByChapter: Map<string, number>;    // chapterId → remaining available count
+    totalByChapter: Map<string, number>;        // chapterId → original count
+    totalRemaining: number;                     // Sum of all available
+    targetPoolSize: number;                     // Config-driven cap
+  };
+
+  // Performer queue (what's coming on the next loop boundary)
+  queue: Map<string, QueuedToken[]>;  // granularType → ordered list of queued tokens
+
+  // Currently playing (what's active right now)
+  active: Map<string, ActiveNode>;    // granularType → currently playing info
+
+  // Mode
+  audienceInteraction: boolean;  // When true: instant crossfade + persistent looping
+
+  // Track resolution (granularType → songIndex → Ableton trackIndices)
+  trackMap: Map<string, Map<number, number[]>>;
+
+  // Loop tracking
+  loopCount: number;
+  loopProgress: number;  // 0.0–1.0, for display
+
+  npc: { currentMessage: string | null };
+}
+
+// ============================================================================
+// V3.4 Finale Config
+// ============================================================================
+
+/** Question in the vote phase question bank. */
+export interface QuestionConfig {
+  text: string;  // e.g., "What does he need to hear?"
+}
+
+/** Vote phase configuration. */
+export interface VotePhaseConfig {
+  questions: QuestionConfig[];       // Ordered question bank
+  shuffleQuestions: boolean;         // Randomize order per person (default: false)
+  targetPoolSize: number;            // Pool cap — total tokens before phones go dark (default: 120)
+  questionDelayMs: number;           // Delay between answer and next question (default: 3000)
+  revealPoolOnProjector: boolean;    // Show dots blooming on projector in real time (default: true)
+}
+
+/** Remix phase configuration. */
+export interface RemixConfig {
+  audienceInteraction: boolean;  // Default mode: false (standard loop-quantized behavior)
+}
+
+/** Finale configuration (V3.4). */
+export interface V34FinaleConfig {
+  bothOptionsSurvive: boolean;
+  audioPreviewPath: string;
+  npcMessages: NpcMessageConfig[];
+  vote: VotePhaseConfig;
+  remix: RemixConfig;
+}
+
+// ============================================================================
+// V3.4 Audio Cues
+// ============================================================================
+
+/**
+ * Remix-specific audio cues (V3.4).
+ * These are also added as variants to the main AudioCue union above.
+ * RemixAudioCue is a convenience alias for remix-phase cue handlers.
+ */
+export type RemixAudioCue =
+  | { type: 'remix_start' }
+  | { type: 'node_unmute'; granularType: string; trackIndex: number }
+  | { type: 'node_crossfade'; granularType: string; muteTrack: number; unmuteTrack: number }
+  | { type: 'node_instant_crossfade'; granularType: string; muteTrack: number | null; unmuteTrack: number }
+  | { type: 'node_fade_out'; granularType: string; trackIndex: number }
+  | { type: 'transport'; action: 'play' | 'stop' }
+  | { type: 'panic' };
+
+// ============================================================================
+// V3.4 Client State Types
+// ============================================================================
+
+/**
+ * Finale view sent to audience clients during finale_vote (V3.4).
+ * Personalized: includes current question and answer count for this user.
+ */
+export interface AudienceVoteView {
+  finalePhase: 'vote';
+  currentQuestion: { questionIndex: number; text: string } | null;  // null = pool cap reached or no more questions
+  answeredCount: number;    // How many questions this user has answered
+  poolCapReached: boolean;  // True when phones should go dark
+  chapters: ChapterConfig[];  // For rendering the 3 option cards (chapter identity)
+  npcMessage: string | null;
+}
+
+/**
+ * Finale view sent to audience clients during finale_remix (V3.4).
+ * Phones are down — no interactive UI needed.
+ */
+export interface AudienceRemixView {
+  finalePhase: 'remix';
+  npcMessage: string | null;
+}
+
+/**
+ * Finale state sent to projector clients during V3.4 finale phases (public — no per-user data).
+ * Used for both finale_vote (pool fill visualization) and finale_remix (pentagon nodes + pool).
+ */
+export interface ProjectorFinaleV34View {
+  finalePhase: 'vote' | 'remix';
+  // Pool state (serialized for JSON transport)
+  pool: {
+    availableByChapter: Array<{ chapterId: string; count: number }>;
+    totalByChapter: Array<{ chapterId: string; count: number }>;
+    totalRemaining: number;
+    targetPoolSize: number;
+    poolCapReached: boolean;
+  };
+  // Active nodes (what's currently playing on each granular type)
+  active: Array<{
+    granularType: string;
+    chapterId: string;
+    trackIndex: number;
+    persistent: boolean;
+  }>;
+  // Queue depth per granular type (for stack indicators on nodes)
+  queueDepth: Array<{ granularType: string; depth: number }>;
+  // Loop state
+  loopCount: number;
+  loopProgress: number;
+  // Mode
+  audienceInteraction: boolean;
+  // NPC
+  npcMessage: string | null;
 }

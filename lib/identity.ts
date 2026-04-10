@@ -78,13 +78,13 @@ export function getLayerIdentity(type: LayerType | string): LayerIdentity {
   return layerLookup[type] ?? { ...FALLBACK_LAYER, label: type };
 }
 
-/** Get chapter identity. */
-export function getChapterIdentity(chapter: Chapter | string): ChapterIdentity {
+/** Get chapter identity by config-driven chapter ID. */
+export function getChapterIdentity(chapter: Chapter): ChapterIdentity {
   return chapterLookup[chapter] ?? { color: '#6b7280', colorA: '#6b7280', colorB: '#6b7280', label: chapter, icon: '' };
 }
 
 /** Get the option-specific color for a chapter. */
-export function getChapterOptionColor(chapter: Chapter | string, option: 'A' | 'B'): string {
+export function getChapterOptionColor(chapter: Chapter, option: 'A' | 'B'): string {
   const identity = getChapterIdentity(chapter);
   return option === 'A' ? identity.colorA : identity.colorB;
 }

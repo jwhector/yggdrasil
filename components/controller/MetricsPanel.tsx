@@ -25,6 +25,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   finale_assignment: 'Finale — Assignment',
   finale_preview: 'Finale — Preview',
   finale_playback: 'Finale — Playback',
+  finale_vote: 'Finale — Vote',      // V3.4
+  finale_remix: 'Finale — Remix',    // V3.4
   ended: 'Ended',
 };
 
@@ -38,6 +40,8 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   finale_assignment: '#0f766e',
   finale_preview: '#5b21b6',
   finale_playback: '#7c3aed',
+  finale_vote: '#0d9488',            // V3.4
+  finale_remix: '#7c3aed',           // V3.4
   ended: '#374151',
 };
 

@@ -42,10 +42,16 @@ export type QuiltResult<T = QuiltGrid> =
 // Grid Creation
 // ============================================================================
 
-/** Map song index to chapter. */
-function chapterFromSongIndex(songIndex: number): Chapter {
-  const chapters: Chapter[] = ['ambition', 'love', 'avoidance'];
-  return chapters[songIndex] ?? 'ambition';
+/**
+ * Map song index to chapter.
+ * When config attempts are available, use attemptConfig.chapter instead.
+ * This fallback uses the songIndex as the chapter ID string.
+ */
+function chapterFromSongIndex(songIndex: number, attempts?: { chapter: Chapter }[]): Chapter {
+  if (attempts && attempts[songIndex]) {
+    return attempts[songIndex].chapter;
+  }
+  return `chapter_${songIndex}`;
 }
 
 /**

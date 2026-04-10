@@ -29,7 +29,7 @@ function createTestConfig(): ShowConfig {
     optionA: { tracks: [{ granularType: 'bass', trackIndices: [i * 2] }] },
     optionB: { tracks: [{ granularType: 'bass', trackIndices: [i * 2 + 1] }] },
   });
-  const makeAttempt = (chapter: 'ambition' | 'love' | 'avoidance') => ({
+  const makeAttempt = (chapter: string) => ({
     chapter,
     title: chapter,
     liveSeed: { trackIndices: [99] },

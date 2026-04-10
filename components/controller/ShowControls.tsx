@@ -17,7 +17,8 @@ interface ShowControlsProps {
 
 const ALL_PHASES: ShowPhase[] = [
   'lobby', 'opener', 'attempt_story', 'attempt_build', 'attempt_resolve',
-  'finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback', 'ended',
+  'finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback',
+  'finale_vote', 'finale_remix', 'ended',
 ];
 
 const PHASE_LABELS: Record<ShowPhase, string> = {
@@ -30,6 +31,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   finale_assignment: 'Finale — Assignment',
   finale_preview: 'Finale — Preview',
   finale_playback: 'Finale — Playback',
+  finale_vote: 'Finale — Vote',      // V3.4
+  finale_remix: 'Finale — Remix',    // V3.4
   ended: 'Ended',
 };
 
@@ -144,9 +147,9 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
             onChange={e => setJumpAttemptIndex(Number(e.target.value))}
             style={styles.select}
           >
-            <option value={0}>Attempt 1 ({fullState.config.attempts[0]?.chapter ?? 'ambition'})</option>
-            <option value={1}>Attempt 2 ({fullState.config.attempts[1]?.chapter ?? 'love'})</option>
-            <option value={2}>Attempt 3 ({fullState.config.attempts[2]?.chapter ?? 'avoidance'})</option>
+            {fullState.config.attempts.map((a, i) => (
+              <option key={i} value={i}>Attempt {i + 1} ({a.chapter})</option>
+            ))}
           </select>
         )}
 
