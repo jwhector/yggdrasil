@@ -1,9 +1,9 @@
 {
   "pages": {
-    "/controller/page": [
+    "/projector/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/controller/page.js"
+      "static/chunks/app/projector/page.js"
     ],
     "/layout": [
       "static/chunks/webpack.js",

@@ -882,31 +882,42 @@ export function createAudioRouter(
 
   // V3.4: Unmute a single remix node track with gain swell
   function handleNodeUnmute(cue: Extract<AudioCue, { type: 'node_unmute' }>): void {
-    unmuteTrack(cue.trackIndex);
-    fadeGain(cue.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+    for (const idx of cue.trackIndices) {
+      unmuteTrack(idx);
+      fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
+    }
   }
 
-  // V3.4: Crossfade between two chapter tracks at loop boundary
+  // V3.4: Crossfade between two sets of chapter tracks at loop boundary
   function handleNodeCrossfade(cue: Extract<AudioCue, { type: 'node_crossfade' }>): void {
     const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
-    fadeGain(cue.muteTrack, 0, xfadeBeats);
-    unmuteTrack(cue.unmuteTrack);
-    fadeGain(cue.unmuteTrack, 1.0, xfadeBeats);
+    for (const idx of cue.muteTracks) {
+      fadeGain(idx, 0, xfadeBeats);
+    }
+    for (const idx of cue.unmuteTracks) {
+      unmuteTrack(idx);
+      fadeGain(idx, 1.0, xfadeBeats);
+    }
   }
 
   // V3.4: Immediate crossfade (audience interaction mode — no loop boundary quantization)
   function handleNodeInstantCrossfade(cue: Extract<AudioCue, { type: 'node_instant_crossfade' }>): void {
     const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
-    if (cue.muteTrack !== null) {
-      fadeGain(cue.muteTrack, 0, xfadeBeats);
+    for (const idx of cue.muteTracks) {
+      fadeGain(idx, 0, xfadeBeats);
     }
-    unmuteTrack(cue.unmuteTrack);
-    fadeGain(cue.unmuteTrack, 1.0, xfadeBeats);
+    for (const idx of cue.unmuteTracks) {
+      unmuteTrack(idx);
+      fadeGain(idx, 1.0, xfadeBeats);
+    }
   }
 
-  // V3.4: Fade a node's track to silence
+  // V3.4: Fade a node's tracks to silence
   function handleNodeFadeOut(cue: Extract<AudioCue, { type: 'node_fade_out' }>): void {
-    fadeGain(cue.trackIndex, 0, currentGainConfig.crossfadeBeats ?? 1);
+    const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
+    for (const idx of cue.trackIndices) {
+      fadeGain(idx, 0, xfadeBeats);
+    }
   }
 
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {

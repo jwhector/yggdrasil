@@ -25,7 +25,7 @@ import type { DropZone } from '@/hooks/useDragToken';
 interface ActiveNodeView {
   granularType: string;
   chapterId: string;
-  trackIndex: number;
+  trackIndices: number[];
   persistent: boolean;
 }
 

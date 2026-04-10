@@ -648,10 +648,11 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('node_unmute', () => {
-    test('unmutes the track and swells gain', () => {
-      sendCue(router, state, { type: 'node_unmute', granularType: 'bass', trackIndex: 5 });
+    test('unmutes all tracks in the bundle and swells gain', () => {
+      sendCue(router, state, { type: 'node_unmute', granularType: 'bass', trackIndices: [5, 6] });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0);
     });
   });
 
@@ -660,16 +661,30 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('node_crossfade', () => {
-    test('fades out muteTrack and fades in unmuteTrack', () => {
+    test('fades out muteTracks and fades in unmuteTracks', () => {
       sendCue(router, state, {
         type: 'node_crossfade',
         granularType: 'drums',
-        muteTrack: 3,
-        unmuteTrack: 7,
+        muteTracks: [3],
+        unmuteTracks: [7],
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1); // muted (gain→0)
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 7, 0); // unmuted
+    });
+
+    test('handles multiple tracks per bundle', () => {
+      sendCue(router, state, {
+        type: 'node_crossfade',
+        granularType: 'drums',
+        muteTracks: [3, 4],
+        unmuteTracks: [7, 8],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 7, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 8, 0);
     });
   });
 
@@ -678,29 +693,27 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('node_instant_crossfade', () => {
-    test('fades out muteTrack and fades in unmuteTrack immediately', () => {
+    test('fades out muteTracks and fades in unmuteTracks immediately', () => {
       sendCue(router, state, {
         type: 'node_instant_crossfade',
         granularType: 'pad',
-        muteTrack: 2,
-        unmuteTrack: 6,
+        muteTracks: [2],
+        unmuteTracks: [6],
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // muted
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // unmuted
     });
 
-    test('handles null muteTrack (nothing to fade out)', () => {
+    test('handles empty muteTracks (nothing to fade out)', () => {
       sendCue(router, state, {
         type: 'node_instant_crossfade',
         granularType: 'pad',
-        muteTrack: null,
-        unmuteTrack: 6,
+        muteTracks: [],
+        unmuteTracks: [6],
       });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // unmuted
-      // No mute sent for null
-      expect(mockSend).not.toHaveBeenCalledWith('/live/track/set/mute', null, 1);
     });
   });
 
@@ -709,14 +722,15 @@ describe('AudioRouter', () => {
   // --------------------------------------------------------------------------
 
   describe('node_fade_out', () => {
-    test('fades the track to silence', () => {
-      // First unmute the track so it's in unmutedTracks
-      sendCue(router, state, { type: 'node_unmute', granularType: 'bass', trackIndex: 4 });
+    test('fades all tracks to silence', () => {
+      // First unmute the tracks so they're in unmutedTracks
+      sendCue(router, state, { type: 'node_unmute', granularType: 'bass', trackIndices: [4, 5] });
       mockSend.mockClear();
 
-      sendCue(router, state, { type: 'node_fade_out', granularType: 'bass', trackIndex: 4 });
+      sendCue(router, state, { type: 'node_fade_out', granularType: 'bass', trackIndices: [4, 5] });
 
       expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1); // muted after gain→0
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 1);
     });
   });
 

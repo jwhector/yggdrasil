@@ -359,14 +359,14 @@ export type AudioCue =
   | { type: 'reset_utilities' }         // Emergency: set all Utility gains to 0 dB, unmute all tracks
   /** V3.4: start the remix transport (reset beat counter) */
   | { type: 'remix_start' }
-  /** V3.4: unmute a single remix node track with gain swell */
-  | { type: 'node_unmute'; granularType: string; trackIndex: number }
-  /** V3.4: crossfade between two chapter tracks at loop boundary */
-  | { type: 'node_crossfade'; granularType: string; muteTrack: number; unmuteTrack: number }
+  /** V3.4: unmute remix node tracks with gain swell */
+  | { type: 'node_unmute'; granularType: string; trackIndices: number[] }
+  /** V3.4: crossfade between two sets of chapter tracks at loop boundary */
+  | { type: 'node_crossfade'; granularType: string; muteTracks: number[]; unmuteTracks: number[] }
   /** V3.4: immediate crossfade (no loop boundary wait) — used in audience interaction mode */
-  | { type: 'node_instant_crossfade'; granularType: string; muteTrack: number | null; unmuteTrack: number }
-  /** V3.4: fade a node's track to silence (nothing queued) */
-  | { type: 'node_fade_out'; granularType: string; trackIndex: number };
+  | { type: 'node_instant_crossfade'; granularType: string; muteTracks: number[]; unmuteTracks: number[] }
+  /** V3.4: fade a node's tracks to silence (nothing queued) */
+  | { type: 'node_fade_out'; granularType: string; trackIndices: number[] };
 
 // ============================================================================
 // Conductor Commands (Input)
@@ -474,7 +474,7 @@ export type ConductorEvent =
   | { type: 'REMIX_STARTED'; pool: TokenPool }
   | { type: 'TOKEN_QUEUED'; granularType: string; chapterId: string; queueDepth: number }
   | { type: 'TOKEN_CANCELLED'; granularType: string; chapterId: string; returnedToPool: boolean }
-  | { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number }
+  | { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] }
   | { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number }
   | { type: 'NODE_SILENT'; granularType: string }
   | { type: 'POOL_EMPTY' }
@@ -731,8 +731,8 @@ export interface ActiveNode {
   tokenId: string;
   chapterId: string;
   startedAtLoop: number;
-  trackIndex: number;   // Resolved Ableton track index
-  persistent: boolean;  // True when activated in audience interaction mode — loops until overridden
+  trackIndices: number[];  // Resolved Ableton track indices (multiple tracks per granular type)
+  persistent: boolean;     // True when activated in audience interaction mode — loops until overridden
 }
 
 // ============================================================================
@@ -827,10 +827,10 @@ export interface FinaleConfig {
  */
 export type RemixAudioCue =
   | { type: 'remix_start' }
-  | { type: 'node_unmute'; granularType: string; trackIndex: number }
-  | { type: 'node_crossfade'; granularType: string; muteTrack: number; unmuteTrack: number }
-  | { type: 'node_instant_crossfade'; granularType: string; muteTrack: number | null; unmuteTrack: number }
-  | { type: 'node_fade_out'; granularType: string; trackIndex: number }
+  | { type: 'node_unmute'; granularType: string; trackIndices: number[] }
+  | { type: 'node_crossfade'; granularType: string; muteTracks: number[]; unmuteTracks: number[] }
+  | { type: 'node_instant_crossfade'; granularType: string; muteTracks: number[]; unmuteTracks: number[] }
+  | { type: 'node_fade_out'; granularType: string; trackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' };
 
@@ -878,7 +878,7 @@ export interface ProjectorFinaleView {
   active: Array<{
     granularType: string;
     chapterId: string;
-    trackIndex: number;
+    trackIndices: number[];
     persistent: boolean;
   }>;
   // Queue depth per granular type (for stack indicators on nodes)

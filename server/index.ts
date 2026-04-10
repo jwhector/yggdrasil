@@ -306,7 +306,7 @@ async function main() {
     // Persist V3.4 token events from timing-engine commands (e.g. LOOP_BOUNDARY)
     for (const event of events) {
       if (event.type === 'TOKEN_ACTIVATED') {
-        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number };
+        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
         persistence.saveTokenEvent(state.id, ta.tokenId, ta.granularType, ta.chapterId, 'activated', null);
       } else if (event.type === 'TOKEN_SPENT') {
         const ts = event as { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number };

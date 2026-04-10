@@ -491,7 +491,7 @@ export function setupSocketHandlers(
       // Persist token events
       for (const event of events) {
         if (event.type === 'TOKEN_ACTIVATED') {
-          const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number };
+          const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
           persistence.saveTokenEvent(state.id, ta.tokenId, ta.granularType, ta.chapterId, 'activated', null);
         } else if (event.type === 'TOKEN_SPENT') {
           const ts = event as { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number };
@@ -647,7 +647,7 @@ export async function broadcastEvents(
         break;
 
       case 'TOKEN_ACTIVATED': {
-        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndex: number };
+        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
         io.to('projector').emit('node_update', {
           granularType: ta.granularType,
           chapterId: ta.chapterId,
@@ -746,7 +746,7 @@ export function filterStateForClient(
           active: Array.from(finaleFs.active.entries()).map(([granularType, node]) => ({
             granularType,
             chapterId: node.chapterId,
-            trackIndex: node.trackIndex,
+            trackIndices: node.trackIndices,
             persistent: node.persistent,
           })),
           queueDepth: Array.from(finaleFs.queue.entries()).map(([granularType, tokens]) => ({

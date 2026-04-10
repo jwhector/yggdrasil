@@ -220,14 +220,14 @@ export function processLoopBoundary(
         trackIndices,
       });
 
-      // Audio: crossfade
+      // Audio: crossfade all tracks in the bundle
       events.push({
         type: 'AUDIO_CUE',
         cue: {
           type: 'node_crossfade',
           granularType,
-          muteTrack: activeNode.trackIndex,
-          unmuteTrack: trackIndices[0],
+          muteTracks: activeNode.trackIndices,
+          unmuteTracks: trackIndices,
         },
       });
     } else {
@@ -250,7 +250,7 @@ export function processLoopBoundary(
         cue: {
           type: 'node_fade_out',
           granularType,
-          trackIndex: activeNode.trackIndex,
+          trackIndices: activeNode.trackIndices,
         },
       });
 
@@ -271,13 +271,12 @@ export function processLoopBoundary(
 
     const songIndex = chapterToSongIndex(next.chapterId, state);
     const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
-    const trackIndex = trackIndices[0] ?? -1;
 
     updatedActive.set(granularType, {
       tokenId: next.tokenId,
       chapterId: next.chapterId,
       startedAtLoop: state.loopCount + 1,
-      trackIndex,
+      trackIndices,
       persistent: false,
     });
 
@@ -292,7 +291,7 @@ export function processLoopBoundary(
       granularType,
       chapterId: next.chapterId,
       tokenId: next.tokenId,
-      trackIndex,
+      trackIndices,
     });
 
     events.push({
@@ -300,7 +299,7 @@ export function processLoopBoundary(
       cue: {
         type: 'node_unmute',
         granularType,
-        trackIndex,
+        trackIndices,
       },
     });
   }
@@ -408,7 +407,6 @@ function activateOnSilentNode(
 
   const songIndex = chapterToSongIndex(chapterId, state);
   const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
-  const trackIndex = trackIndices[0] ?? -1;
 
   // Mark token as playing
   const tokenIdx = updatedTokens.findIndex(t => t.id === tokenId);
@@ -420,7 +418,7 @@ function activateOnSilentNode(
     tokenId,
     chapterId,
     startedAtLoop: state.loopCount,
-    trackIndex,
+    trackIndices,
     persistent: false,
   });
 
@@ -429,12 +427,12 @@ function activateOnSilentNode(
     granularType,
     chapterId,
     tokenId,
-    trackIndex,
+    trackIndices,
   });
 
   events.push({
     type: 'AUDIO_CUE',
-    cue: { type: 'node_unmute', granularType, trackIndex },
+    cue: { type: 'node_unmute', granularType, trackIndices },
   });
 
   return {
@@ -463,10 +461,9 @@ function activateInstant(
 
   const existingNode = updatedActive.get(granularType);
 
-  // Resolve track for new token
+  // Resolve tracks for new token
   const songIndex = chapterToSongIndex(chapterId, state);
   const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
-  const trackIndex = trackIndices[0] ?? -1;
 
   if (existingNode) {
     // Spend the existing token
@@ -488,8 +485,8 @@ function activateInstant(
       cue: {
         type: 'node_instant_crossfade',
         granularType,
-        muteTrack: existingNode.trackIndex,
-        unmuteTrack: trackIndex,
+        muteTracks: existingNode.trackIndices,
+        unmuteTracks: trackIndices,
       },
     });
   } else {
@@ -499,8 +496,8 @@ function activateInstant(
       cue: {
         type: 'node_instant_crossfade',
         granularType,
-        muteTrack: null,
-        unmuteTrack: trackIndex,
+        muteTracks: [],
+        unmuteTracks: trackIndices,
       },
     });
   }
@@ -516,7 +513,7 @@ function activateInstant(
     tokenId,
     chapterId,
     startedAtLoop: state.loopCount,
-    trackIndex,
+    trackIndices,
     persistent: true,
   });
 
@@ -534,7 +531,7 @@ function activateInstant(
     granularType,
     chapterId,
     tokenId,
-    trackIndex,
+    trackIndices,
   });
 
   return {
