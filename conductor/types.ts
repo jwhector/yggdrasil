@@ -256,7 +256,7 @@ export interface ShowState {
   currentAttemptIndex: number;          // 0, 1, 2
   attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: V33FinaleState | null;    // Populated at finale_elegy (V3.3) — updated to V34FinaleState in Phase 3
+  finaleState: V33FinaleState | V34FinaleState | null;  // V3.3 or V3.4 finale state
   config: ShowConfig;
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
@@ -281,6 +281,7 @@ export interface ShowConfig {
   layerGroups?: LayerGroupConfig[];     // V3.2: layer group definitions (bones/flesh/spark)
   attempts: V32AttemptConfig[];         // Length 3; V3.2 structure with TrackBundles + liveSeed
   finale: V33FinaleConfig;
+  finaleV34?: V34FinaleConfig;          // V3.4 finale config (when present, V3.4 phases are used)
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;             // Text displayed while waiting

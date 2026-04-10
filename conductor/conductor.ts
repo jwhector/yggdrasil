@@ -34,12 +34,16 @@ import type {
   SeatId,
   User,
   V33FinaleState,
+  V34FinaleState,
+  V34FinaleConfig,
+  VotePhaseConfig,
   V32LayerConfig,
   TrackBundle,
   GranularType,
   ArcConfig,
   ArcPhase,
   QuiltCell,
+  TokenPool,
 } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
@@ -79,6 +83,18 @@ import {
   resolveAllTracksForRows,
   resolveTracksForRows,
 } from './quilt-arc';
+import {
+  getNextQuestion,
+  calculateMaxQuestionsPerPerson,
+  processEmotion,
+} from './question-engine';
+import {
+  queueToken as remixQueueToken,
+  cancelQueue as remixCancelQueue,
+  processLoopBoundary as remixProcessLoopBoundary,
+  toggleAudienceInteraction as remixToggleAudienceInteraction,
+} from './remix-engine';
+import { createTokenPool } from './token-pool';
 
 // ============================================================================
 // State Initialization
@@ -281,6 +297,32 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     case 'USER_DISCONNECT':
       return handleUserDisconnect(state, command.userId);
 
+    // Finale — Vote phase (V3.4)
+    case 'START_VOTE':
+      return handleStartVote(state);
+    case 'SUBMIT_EMOTION':
+      return handleSubmitEmotion(state, command.userId, command.chapterId, command.questionIndex);
+    case 'REQUEST_NEXT_QUESTION':
+      return handleRequestNextQuestion(state, command.userId);
+    case 'POOL_CAP_REACHED':
+      return handlePoolCapReached(state);
+
+    // Finale — Remix phase (V3.4)
+    case 'START_REMIX':
+      return handleStartRemix(state);
+    case 'QUEUE_TOKEN':
+      return handleQueueToken(state, command.granularType, command.chapterId, command.instant);
+    case 'CANCEL_QUEUE':
+      return handleCancelQueue(state, command.granularType);
+    case 'TOGGLE_AUDIENCE_INTERACTION':
+      return handleToggleAudienceInteraction(state);
+    case 'LOOP_BOUNDARY':
+      return handleLoopBoundary(state);
+
+    // Manual end (V3.4)
+    case 'END_SHOW':
+      return handleEndShow(state);
+
     // Recovery
     case 'EXPORT_STATE':
       // Handled at server layer; conductor just acknowledges
@@ -321,10 +363,12 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'attempt_story',       // attempt 2
   'attempt_build',       // attempt 2
   'attempt_resolve',     // attempt 2
-  'finale_elegy',
-  'finale_assignment',
-  'finale_preview',
-  'finale_playback',
+  'finale_elegy',        // V3.3 — kept for backward compat
+  'finale_assignment',   // V3.3
+  'finale_preview',      // V3.3
+  'finale_playback',     // V3.3
+  'finale_vote',         // V3.4
+  'finale_remix',        // V3.4
   'ended',
 ];
 
@@ -407,7 +451,9 @@ function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number 
     case 'finale_assignment': return 12;
     case 'finale_preview': return 13;
     case 'finale_playback': return 14;
-    case 'ended': return 15;
+    case 'finale_vote': return 15;
+    case 'finale_remix': return 16;
+    case 'ended': return 17;
     default: return -1;
   }
 }
@@ -456,6 +502,12 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     // Auto-setup finale state (generate fragments from attempt results)
     console.log('handleAdvancePhase: auto-setup finale state');
     events.push(...handleSetupFinale(state));
+  }
+
+  if (nextPhase === 'finale_vote') {
+    // Auto-setup V3.4 finale state
+    console.log('handleAdvancePhase: auto-setup V3.4 finale state');
+    events.push(...handleSetupFinaleV34(state));
   }
 
   if (nextPhase === 'finale_assignment' && state.finaleState) {
@@ -1388,15 +1440,16 @@ function handleSetupFinale(state: ShowState): ConductorEvent[] {
 
 function handleElegyOptIn(state: ShowState, userId: UserId): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'elegy') return [{ type: 'ERROR', message: 'Opt-in only during elegy phase' }];
-  if (state.finaleState.elegyOptedIn.has(userId)) return []; // Already opted in
+  const fs = v33Finale(state);
+  if (fs.phase !== 'elegy') return [{ type: 'ERROR', message: 'Opt-in only during elegy phase' }];
+  if (fs.elegyOptedIn.has(userId)) return []; // Already opted in
 
-  state.finaleState.elegyOptedIn.add(userId);
+  fs.elegyOptedIn.add(userId);
 
   return [{
     type: 'ELEGY_OPT_IN_RECEIVED',
     userId,
-    totalOptedIn: state.finaleState.elegyOptedIn.size,
+    totalOptedIn: fs.elegyOptedIn.size,
   }];
 }
 
@@ -1406,29 +1459,30 @@ function handleElegyOptIn(state: ShowState, userId: UserId): ConductorEvent[] {
 
 function handleStartAssignment(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
   const config = state.config.finale;
   const granularTypes = state.config.granularTypes ?? [];
 
   // Create the real quilt grid now, sized by opt-in count (or all connected users as fallback)
-  const optInCount = state.finaleState.elegyOptedIn.size;
+  const optInCount = fs.elegyOptedIn.size;
   const audienceSize = optInCount > 0 ? optInCount : countConnectedUsers(state);
-  state.finaleState.quilt = createQuiltGrid(audienceSize, config.quilt, granularTypes);
+  fs.quilt = createQuiltGrid(audienceSize, config.quilt, granularTypes);
 
-  state.finaleState.phase = 'assignment';
-  state.finaleState.assignment.mode = config.assignmentMode;
+  fs.phase = 'assignment';
+  fs.assignment.mode = config.assignmentMode;
 
   if (config.assignmentMode === 'self_select') {
-    state.finaleState.assignment.timerRemaining = config.quilt.assignmentTimerMs;
+    fs.assignment.timerRemaining = config.quilt.assignmentTimerMs;
   }
 
-  const quilt = state.finaleState.quilt;
+  const quilt = fs.quilt;
   const events: ConductorEvent[] = [
     { type: 'ASSIGNMENT_STARTED', mode: config.assignmentMode, quiltDimensions: { rows: quilt.rows, columns: quilt.columns } },
   ];
   const npcMsg = getNpcMessage(config.npcMessages, 'assignment_start');
   if (npcMsg) {
-    state.finaleState.npc.currentMessage = npcMsg;
+    fs.npc.currentMessage = npcMsg;
     events.push({ type: 'NPC_MESSAGE', message: npcMsg });
   }
   return events;
@@ -1436,12 +1490,13 @@ function handleStartAssignment(state: ShowState): ConductorEvent[] {
 
 function handleAssignmentComplete(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
   const events: ConductorEvent[] = [];
 
   // Assign remaining unclaimed users to empty cells
   const claimedUserIds = new Set<UserId>();
-  for (const cell of state.finaleState.quilt.cells.values()) {
+  for (const cell of fs.quilt.cells.values()) {
     if (cell.ownerId) claimedUserIds.add(cell.ownerId);
   }
   const unclaimedUserIds: UserId[] = [];
@@ -1452,13 +1507,13 @@ function handleAssignmentComplete(state: ShowState): ConductorEvent[] {
   }
 
   if (unclaimedUserIds.length > 0) {
-    const result = assignRemainingUsers(state.finaleState.quilt, unclaimedUserIds);
+    const result = assignRemainingUsers(fs.quilt, unclaimedUserIds);
     for (const assignment of result.assignments) {
       events.push({ type: 'CELL_CLAIMED', cellId: assignment.cellId, userId: assignment.userId });
     }
   }
 
-  state.finaleState.assignment.timerRemaining = null;
+  fs.assignment.timerRemaining = null;
   events.push({ type: 'ALL_CELLS_ASSIGNED' });
   return events;
 }
@@ -1469,11 +1524,12 @@ function handleAssignmentComplete(state: ShowState): ConductorEvent[] {
 
 function handleClaimCell(state: ShowState, userId: UserId, cellId: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'assignment') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'assignment') {
     return [{ type: 'ERROR', message: 'Can only claim cells during assignment phase' }];
   }
 
-  const result = quiltClaimCell(state.finaleState.quilt, userId, cellId);
+  const result = quiltClaimCell(fs.quilt, userId, cellId);
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
   return [{ type: 'CELL_CLAIMED', cellId, userId }];
@@ -1481,14 +1537,15 @@ function handleClaimCell(state: ShowState, userId: UserId, cellId: string): Cond
 
 function handleReleaseCell(state: ShowState, userId: UserId): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'assignment') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'assignment') {
     return [{ type: 'ERROR', message: 'Can only release cells during assignment phase' }];
   }
 
-  const cell = findUserCell(state.finaleState.quilt, userId);
+  const cell = findUserCell(fs.quilt, userId);
   if (!cell) return [{ type: 'ERROR', message: `User ${userId} does not own any cell` }];
 
-  const result = quiltReleaseCell(state.finaleState.quilt, userId);
+  const result = quiltReleaseCell(fs.quilt, userId);
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
   return [{ type: 'CELL_RELEASED', cellId: cell.id }];
@@ -1500,14 +1557,15 @@ function handleReleaseCell(state: ShowState, userId: UserId): ConductorEvent[] {
 
 function handleStartPreview(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
-  state.finaleState.phase = 'preview';
-  state.finaleState.preview.timerRemaining = state.config.finale.quilt.previewTimerMs;
+  fs.phase = 'preview';
+  fs.preview.timerRemaining = state.config.finale.quilt.previewTimerMs;
 
   const events: ConductorEvent[] = [{ type: 'PREVIEW_STARTED' }];
   const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'preview_start');
   if (npcMsg) {
-    state.finaleState.npc.currentMessage = npcMsg;
+    fs.npc.currentMessage = npcMsg;
     events.push({ type: 'NPC_MESSAGE', message: npcMsg });
   }
   return events;
@@ -1515,30 +1573,32 @@ function handleStartPreview(state: ShowState): ConductorEvent[] {
 
 function handleSetCellSong(state: ShowState, userId: UserId, songIndex: number): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'preview') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'preview') {
     return [{ type: 'ERROR', message: 'Can only set song during preview phase' }];
   }
-  if (state.finaleState.preview.lockedInUsers.has(userId)) {
+  if (fs.preview.lockedInUsers.has(userId)) {
     return [{ type: 'ERROR', message: 'User already locked in' }];
   }
 
   const result = quiltSetCellSong(
-    state.finaleState.quilt, userId, songIndex, state.finaleState.availableSongs,
+    fs.quilt, userId, songIndex, fs.availableSongs,
   );
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
-  const cell = findUserCell(state.finaleState.quilt, userId)!;
+  const cell = findUserCell(fs.quilt, userId)!;
   return [{ type: 'CELL_SONG_SET', cellId: cell.id, songIndex }];
 }
 
 function handleLockInChoice(state: ShowState, userId: UserId): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'preview') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'preview') {
     return [{ type: 'ERROR', message: 'Can only lock in during preview phase' }];
   }
 
   const result = quiltLockInChoice(
-    state.finaleState.quilt, userId, state.finaleState.preview.lockedInUsers,
+    fs.quilt, userId, fs.preview.lockedInUsers,
   );
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
   if (result.alreadyLocked) return [];
@@ -1548,10 +1608,11 @@ function handleLockInChoice(state: ShowState, userId: UserId): ConductorEvent[] 
 
 function handlePreviewComplete(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
   // Assign default songs to users who didn't choose
-  assignDefaultSongs(state.finaleState.quilt, state.finaleState.availableSongs);
-  state.finaleState.preview.timerRemaining = null;
+  assignDefaultSongs(fs.quilt, fs.availableSongs);
+  fs.preview.timerRemaining = null;
 
   return [];
 }
@@ -1562,20 +1623,21 @@ function handlePreviewComplete(state: ShowState): ConductorEvent[] {
 
 function handleStartPlayback(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
-  state.finaleState.phase = 'playback';
-  state.finaleState.quilt.playheadColumn = state.finaleState.quilt.columnOrder[0] ?? 0;
+  fs.phase = 'playback';
+  fs.quilt.playheadColumn = fs.quilt.columnOrder[0] ?? 0;
 
   const events: ConductorEvent[] = [];
-  const quilt = state.finaleState.quilt;
-  const trackMap = state.finaleState.trackMap;
-  const mutedCells = state.finaleState.remix.mutedCells;
+  const quilt = fs.quilt;
+  const trackMap = fs.trackMap;
+  const mutedCells = fs.remix.mutedCells;
   const arcConfig = state.config.finale.quilt.arc;
 
   // Initialize arc if enabled
   if (arcConfig?.enabled) {
     const schedule = computeArcSchedule(quilt.columns, arcConfig);
-    state.finaleState.arc = initArcState(schedule);
+    fs.arc = initArcState(schedule);
 
     // Only unmute first entry group's tracks (staggered entry)
     const firstGroup = arcConfig.entrySchedule[0];
@@ -1584,7 +1646,7 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
         quilt.cells, trackMap, firstGroup.granularTypes, mutedCells,
       );
 
-      state.finaleState.arc.enteredRowGroups.push(0);
+      fs.arc!.enteredRowGroups.push(0);
 
       events.push({
         type: 'PLAYBACK_STARTED',
@@ -1610,7 +1672,7 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
 
       // If only one entry group, transition straight to raw
       if (arcConfig.entrySchedule.length === 1) {
-        state.finaleState.arc.phase = 'raw';
+        fs.arc!.phase = 'raw';
         events.push({ type: 'ARC_PHASE_CHANGED', arcPhase: 'raw' });
       }
     }
@@ -1643,7 +1705,7 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
 
   const npcMsg = getNpcMessage(state.config.finale.npcMessages, 'first_playback');
   if (npcMsg) {
-    state.finaleState.npc.currentMessage = npcMsg;
+    fs.npc.currentMessage = npcMsg;
     events.push({ type: 'NPC_MESSAGE', message: npcMsg });
   }
 
@@ -1658,21 +1720,22 @@ function handleStartPlayback(state: ShowState): ConductorEvent[] {
  */
 function handlePrepareColumnCrossfade(state: ShowState): ConductorEvent[] {
   if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
+  const fs = v33Finale(state);
 
-  const quilt = state.finaleState.quilt;
-  const trackMap = state.finaleState.trackMap;
-  const mutedCells = state.finaleState.remix.mutedCells;
-  const frozenColumn = state.finaleState.remix.frozenColumn;
+  const quilt = fs.quilt;
+  const trackMap = fs.trackMap;
+  const mutedCells = fs.remix.mutedCells;
+  const frozenColumn = fs.remix.frozenColumn;
   const enteredTypes = getEnteredGranularTypes(state);
 
   if (frozenColumn !== null) {
     // Frozen: diff the snapshot of what's playing vs what the column now resolves to
-    const currentTracks = state.finaleState.remix.frozenActiveTracks;
+    const currentTracks = fs.remix.frozenActiveTracks;
     const nextTracks = resolveColumnTracks(quilt, trackMap, mutedCells, frozenColumn, enteredTypes);
     const trackChanges = computeTrackChanges(currentTracks, nextTracks);
 
     // Update snapshot to reflect what will be playing after this crossfade
-    state.finaleState.remix.frozenActiveTracks = new Map(nextTracks);
+    fs.remix.frozenActiveTracks = new Map(nextTracks);
 
     if (trackChanges.length === 0) return []; // Nothing changed
     return [{
@@ -1706,10 +1769,11 @@ function handlePrepareColumnCrossfade(state: ShowState): ConductorEvent[] {
 
 function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
   if (!state.finaleState || state.finaleState.phase !== 'playback') return [];
+  const fs = v33Finale(state);
 
-  const quilt = state.finaleState.quilt;
-  const arc = state.finaleState.arc;
-  const frozenColumn = state.finaleState.remix.frozenColumn;
+  const quilt = fs.quilt;
+  const arc = fs.arc;
+  const frozenColumn = fs.remix.frozenColumn;
 
   // When frozen, don't advance — just increment loop count and stay on the frozen column
   if (frozenColumn !== null) {
@@ -1750,7 +1814,8 @@ function handleAdvanceQuiltColumn(state: ShowState): ConductorEvent[] {
  * Returns null if arc is not active (meaning all types are active).
  */
 function getEnteredGranularTypes(state: ShowState): Set<string> | null {
-  const arc = state.finaleState?.arc;
+  if (!state.finaleState) return null;
+  const arc = v33Finale(state).arc;
   if (!arc) return null;
 
   const arcConfig = state.config.finale.quilt.arc;
@@ -1816,9 +1881,11 @@ function computeTrackChanges(
 // ============================================================================
 
 function handleArcEntryRowGroup(state: ShowState, groupIndex: number): ConductorEvent[] {
-  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  const fs = v33Finale(state);
+  if (!fs.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
 
-  const arc = state.finaleState.arc;
+  const arc = fs.arc;
   const arcConfig = state.config.finale.quilt.arc;
   if (!arcConfig?.enabled) return [];
   if (arc.phase !== 'entry') return [];
@@ -1832,10 +1899,10 @@ function handleArcEntryRowGroup(state: ShowState, groupIndex: number): Conductor
   arc.enteredRowGroups.push(groupIndex);
 
   const trackIndices = resolveAllTracksForRows(
-    state.finaleState.quilt.cells,
-    state.finaleState.trackMap,
+    fs.quilt.cells,
+    fs.trackMap,
     group.granularTypes,
-    state.finaleState.remix.mutedCells,
+    fs.remix.mutedCells,
   );
 
   const events: ConductorEvent[] = [];
@@ -1858,9 +1925,11 @@ function handleArcEntryRowGroup(state: ShowState, groupIndex: number): Conductor
 }
 
 function handleArcRawComplete(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  const fs = v33Finale(state);
+  if (!fs.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
 
-  const arc = state.finaleState.arc;
+  const arc = fs.arc;
   const arcConfig = state.config.finale.quilt.arc;
   if (!arcConfig?.enabled) return [];
   if (arc.phase !== 'raw') return [];
@@ -1869,7 +1938,7 @@ function handleArcRawComplete(state: ShowState): ConductorEvent[] {
 
   // Snapshot cells before sort
   const previousCells = new Map<string, QuiltCell>();
-  for (const [id, cell] of state.finaleState.quilt.cells) {
+  for (const [id, cell] of fs.quilt.cells) {
     previousCells.set(id, { ...cell });
   }
 
@@ -1879,15 +1948,15 @@ function handleArcRawComplete(state: ShowState): ConductorEvent[] {
   const targetEnergy = mode === 'multi' ? arcConfig.multiPassTargets[0] : undefined;
 
   const positionMap = sortGrid(
-    state.finaleState.quilt.cells,
-    state.finaleState.quilt.columns,
-    state.finaleState.quilt.rows,
+    fs.quilt.cells,
+    fs.quilt.columns,
+    fs.quilt.rows,
     arcConfig,
     mode,
     targetEnergy,
   );
 
-  applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+  applyPositionMap(fs.quilt.cells, positionMap, granularTypes);
 
   arc.phase = 'sorted_playback';
   arc.currentPassIndex = 0;
@@ -1900,9 +1969,11 @@ function handleArcRawComplete(state: ShowState): ConductorEvent[] {
 }
 
 function handleArcSortComplete(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  const fs = v33Finale(state);
+  if (!fs.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
 
-  const arc = state.finaleState.arc;
+  const arc = fs.arc;
   const arcConfig = state.config.finale.quilt.arc;
   if (!arcConfig?.enabled) return [];
   if (arc.phase !== 'sorted_playback') return [];
@@ -1916,7 +1987,7 @@ function handleArcSortComplete(state: ShowState): ConductorEvent[] {
     if (nextPassIndex < arc.schedule.sortedPassCount) {
       // Re-sort for next pass
       const previousCells = new Map<string, QuiltCell>();
-      for (const [id, cell] of state.finaleState.quilt.cells) {
+      for (const [id, cell] of fs.quilt.cells) {
         previousCells.set(id, { ...cell });
       }
 
@@ -1924,15 +1995,15 @@ function handleArcSortComplete(state: ShowState): ConductorEvent[] {
       const targetEnergy = arcConfig.multiPassTargets[nextPassIndex] ?? 0.5;
 
       const positionMap = sortGrid(
-        state.finaleState.quilt.cells,
-        state.finaleState.quilt.columns,
-        state.finaleState.quilt.rows,
+        fs.quilt.cells,
+        fs.quilt.columns,
+        fs.quilt.rows,
         arcConfig,
         'multi',
         targetEnergy,
       );
 
-      applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+      applyPositionMap(fs.quilt.cells, positionMap, granularTypes);
 
       arc.currentPassIndex = nextPassIndex;
       arc.gridLoopsInPhase = 0;
@@ -1951,9 +2022,11 @@ function handleArcSortComplete(state: ShowState): ConductorEvent[] {
 }
 
 function handleArcExitRowGroup(state: ShowState, groupIndex: number): ConductorEvent[] {
-  if (!state.finaleState?.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  if (!state.finaleState) return [{ type: 'ERROR', message: 'Arc not initialized' }];
+  const fs = v33Finale(state);
+  if (!fs.arc) return [{ type: 'ERROR', message: 'Arc not initialized' }];
 
-  const arc = state.finaleState.arc;
+  const arc = fs.arc;
   const arcConfig = state.config.finale.quilt.arc;
   if (!arcConfig?.enabled) return [];
   if (arc.phase !== 'exit') return [];
@@ -1967,10 +2040,10 @@ function handleArcExitRowGroup(state: ShowState, groupIndex: number): ConductorE
   arc.exitedRowGroups.push(groupIndex);
 
   const trackIndices = resolveAllTracksForRows(
-    state.finaleState.quilt.cells,
-    state.finaleState.trackMap,
+    fs.quilt.cells,
+    fs.trackMap,
     group.granularTypes,
-    state.finaleState.remix.mutedCells,
+    fs.remix.mutedCells,
   );
 
   const events: ConductorEvent[] = [];
@@ -1992,9 +2065,11 @@ function handleArcExitRowGroup(state: ShowState, groupIndex: number): ConductorE
 }
 
 function handleArcComplete(state: ShowState): ConductorEvent[] {
-  if (!state.finaleState?.arc) return [];
+  if (!state.finaleState) return [];
+  const fs = v33Finale(state);
+  if (!fs.arc) return [];
 
-  state.finaleState.arc.phase = 'complete';
+  fs.arc.phase = 'complete';
   return [{ type: 'ARC_PHASE_CHANGED', arcPhase: 'complete' }];
 }
 
@@ -2002,21 +2077,22 @@ function handleTriggerSort(state: ShowState): ConductorEvent[] {
   if (!state.finaleState || state.finaleState.phase !== 'playback') {
     return [{ type: 'ERROR', message: 'Can only sort during playback' }];
   }
+  const fs = v33Finale(state);
 
   const arcConfig = state.config.finale.quilt.arc;
   if (!arcConfig) return [{ type: 'ERROR', message: 'Arc config not found' }];
 
   // Snapshot cells before sort
   const previousCells = new Map(
-    [...state.finaleState.quilt.cells].map(([id, cell]) => [id, { ...cell }]),
+    [...fs.quilt.cells].map(([id, cell]) => [id, { ...cell }]),
   );
 
   const granularTypes = (state.config.granularTypes ?? []).map(gt => gt.id);
 
   const positionMap = sortGrid(
-    state.finaleState.quilt.cells,
-    state.finaleState.quilt.columns,
-    state.finaleState.quilt.rows,
+    fs.quilt.cells,
+    fs.quilt.columns,
+    fs.quilt.rows,
     arcConfig,
     'single',
   );
@@ -2025,7 +2101,7 @@ function handleTriggerSort(state: ShowState): ConductorEvent[] {
     return []; // Nothing to sort
   }
 
-  applyPositionMap(state.finaleState.quilt.cells, positionMap, granularTypes);
+  applyPositionMap(fs.quilt.cells, positionMap, granularTypes);
 
   return [{ type: 'ARC_SORT_APPLIED', passIndex: 0, previousCells }];
 }
@@ -2143,30 +2219,31 @@ function handleSimulateFinaleGrid(state: ShowState, audienceCount: number): Cond
 
 function handleMoveCell(state: ShowState, userId: UserId, targetCellId: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'playback') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'playback') {
     return [{ type: 'ERROR', message: 'Can only move cells during playback phase' }];
   }
 
-  const sourceCell = findUserCell(state.finaleState.quilt, userId);
+  const sourceCell = findUserCell(fs.quilt, userId);
   if (!sourceCell) return [{ type: 'ERROR', message: `User ${userId} does not own any cell` }];
   const fromPosition = { row: sourceCell.rowIndex, col: sourceCell.columnIndex };
 
-  const targetCell = state.finaleState.quilt.cells.get(targetCellId);
+  const targetCell = fs.quilt.cells.get(targetCellId);
   const swappedWithCellId = targetCell?.ownerId ? targetCellId : null;
 
   const result = quiltMoveCell(
-    state.finaleState.quilt,
+    fs.quilt,
     userId,
     targetCellId,
     state.config.finale.quilt.audienceRemix,
-    state.finaleState.remix.lockedCells,
-    state.finaleState.remix.lastMoveByUser,
-    state.finaleState.quilt.loopCount,
+    fs.remix.lockedCells,
+    fs.remix.lastMoveByUser,
+    fs.quilt.loopCount,
   );
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
   // After swap, the source cell has moved to the target position
-  const movedCell = findUserCell(state.finaleState.quilt, userId)!;
+  const movedCell = findUserCell(fs.quilt, userId)!;
   return [{
     type: 'CELL_MOVED',
     cellId: movedCell.id,
@@ -2178,21 +2255,22 @@ function handleMoveCell(state: ShowState, userId: UserId, targetCellId: string):
 
 function handleChangeCellSong(state: ShowState, userId: UserId, songIndex: number): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'playback') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'playback') {
     return [{ type: 'ERROR', message: 'Can only change song during playback phase' }];
   }
 
   const result = quiltChangeCellSong(
-    state.finaleState.quilt,
+    fs.quilt,
     userId,
     songIndex,
     state.config.finale.quilt.audienceRemix,
-    state.finaleState.availableSongs,
-    state.finaleState.remix.lockedCells,
+    fs.availableSongs,
+    fs.remix.lockedCells,
   );
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
-  const cell = findUserCell(state.finaleState.quilt, userId)!;
+  const cell = findUserCell(fs.quilt, userId)!;
   return [{ type: 'CELL_SONG_SET', cellId: cell.id, songIndex }];
 }
 
@@ -2202,26 +2280,28 @@ function handleChangeCellSong(state: ShowState, userId: UserId, songIndex: numbe
 
 function handleReorderColumn(state: ShowState, fromIndex: number, toIndex: number): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'playback') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'playback') {
     return [{ type: 'ERROR', message: 'Can only reorder columns during playback phase' }];
   }
 
-  const result = quiltReorderColumn(state.finaleState.quilt, fromIndex, toIndex);
+  const result = quiltReorderColumn(fs.quilt, fromIndex, toIndex);
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
   return [
-    { type: 'COLUMN_REORDERED', columnOrder: [...state.finaleState.quilt.columnOrder] },
-    { type: 'AUDIO_CUE', cue: { type: 'quilt_reorder', newColumnOrder: [...state.finaleState.quilt.columnOrder] } },
+    { type: 'COLUMN_REORDERED', columnOrder: [...fs.quilt.columnOrder] },
+    { type: 'AUDIO_CUE', cue: { type: 'quilt_reorder', newColumnOrder: [...fs.quilt.columnOrder] } },
   ];
 }
 
 function handleSwapCells(state: ShowState, cellIdA: string, cellIdB: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'playback') {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'playback') {
     return [{ type: 'ERROR', message: 'Can only swap cells during playback phase' }];
   }
 
-  const result = quiltSwapCells(state.finaleState.quilt, cellIdA, cellIdB);
+  const result = quiltSwapCells(fs.quilt, cellIdA, cellIdB);
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
   return [{ type: 'CELLS_SWAPPED', cellIdA, cellIdB }];
@@ -2229,8 +2309,9 @@ function handleSwapCells(state: ShowState, cellIdA: string, cellIdB: string): Co
 
 function handleLockCell(state: ShowState, cellId: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
-  const result = quiltLockCell(state.finaleState.remix.lockedCells, cellId, state.finaleState.quilt);
+  const result = quiltLockCell(fs.remix.lockedCells, cellId, fs.quilt);
   if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
 
   return [{ type: 'CELL_LOCKED', cellId }];
@@ -2238,8 +2319,9 @@ function handleLockCell(state: ShowState, cellId: string): ConductorEvent[] {
 
 function handleUnlockCell(state: ShowState, cellId: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
-  const result = quiltUnlockCell(state.finaleState.remix.lockedCells, cellId);
+  const result = quiltUnlockCell(fs.remix.lockedCells, cellId);
   if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
 
   return [{ type: 'CELL_UNLOCKED', cellId }];
@@ -2247,14 +2329,15 @@ function handleUnlockCell(state: ShowState, cellId: string): ConductorEvent[] {
 
 function handleMuteCell(state: ShowState, cellId: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
-  const result = quiltMuteCell(state.finaleState.remix.mutedCells, cellId, state.finaleState.quilt);
+  const result = quiltMuteCell(fs.remix.mutedCells, cellId, fs.quilt);
   if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
 
-  const cell = state.finaleState.quilt.cells.get(cellId);
+  const cell = fs.quilt.cells.get(cellId);
   const events: ConductorEvent[] = [{ type: 'CELL_MUTED', cellId }];
   if (cell && cell.songIndex !== null) {
-    const trackIndices = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
+    const trackIndices = resolveTrack(fs.trackMap, cell.granularType, cell.songIndex);
     if (trackIndices !== null) {
       events.push({
         type: 'AUDIO_CUE',
@@ -2267,14 +2350,15 @@ function handleMuteCell(state: ShowState, cellId: string): ConductorEvent[] {
 
 function handleUnmuteCell(state: ShowState, cellId: string): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
-  const result = quiltUnmuteCell(state.finaleState.remix.mutedCells, cellId);
+  const result = quiltUnmuteCell(fs.remix.mutedCells, cellId);
   if (!result.ok) return [{ type: 'ERROR', message: result.error! }];
 
-  const cell = state.finaleState.quilt.cells.get(cellId);
+  const cell = fs.quilt.cells.get(cellId);
   const events: ConductorEvent[] = [{ type: 'CELL_UNMUTED', cellId }];
   if (cell && cell.songIndex !== null) {
-    const trackIndices = resolveTrack(state.finaleState.trackMap, cell.granularType, cell.songIndex);
+    const trackIndices = resolveTrack(fs.trackMap, cell.granularType, cell.songIndex);
     if (trackIndices !== null) {
       events.push({
         type: 'AUDIO_CUE',
@@ -2287,9 +2371,10 @@ function handleUnmuteCell(state: ShowState, cellId: string): ConductorEvent[] {
 
 function handleOverrideCellSong(state: ShowState, cellId: string, songIndex: number): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+  const fs = v33Finale(state);
 
   const result = quiltOverrideCellSong(
-    state.finaleState.quilt, cellId, songIndex, state.finaleState.availableSongs,
+    fs.quilt, cellId, songIndex, fs.availableSongs,
   );
   if (!result.ok) return [{ type: 'ERROR', message: result.error }];
 
@@ -2298,18 +2383,19 @@ function handleOverrideCellSong(state: ShowState, cellId: string, songIndex: num
 
 function handleFreezeColumn(state: ShowState, columnIndex: number): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.phase !== 'playback') return [{ type: 'ERROR', message: 'Not in playback phase' }];
-  if (!state.finaleState.quilt.columnOrder.includes(columnIndex)) {
+  const fs = v33Finale(state);
+  if (fs.phase !== 'playback') return [{ type: 'ERROR', message: 'Not in playback phase' }];
+  if (!fs.quilt.columnOrder.includes(columnIndex)) {
     return [{ type: 'ERROR', message: `Column ${columnIndex} not in column order` }];
   }
 
-  state.finaleState.remix.frozenColumn = columnIndex;
+  fs.remix.frozenColumn = columnIndex;
 
   const events: ConductorEvent[] = [{ type: 'COLUMN_FROZEN', columnIndex }];
 
-  const quilt = state.finaleState.quilt;
-  const trackMap = state.finaleState.trackMap;
-  const mutedCells = state.finaleState.remix.mutedCells;
+  const quilt = fs.quilt;
+  const trackMap = fs.trackMap;
+  const mutedCells = fs.remix.mutedCells;
   const enteredTypes = getEnteredGranularTypes(state);
 
   // Resolve current playhead column's tracks (what's playing now)
@@ -2319,7 +2405,7 @@ function handleFreezeColumn(state: ShowState, columnIndex: number): ConductorEve
   const frozenTracks = resolveColumnTracks(quilt, trackMap, mutedCells, columnIndex, enteredTypes);
 
   // Snapshot what will be active after this crossfade
-  state.finaleState.remix.frozenActiveTracks = new Map(frozenTracks);
+  fs.remix.frozenActiveTracks = new Map(frozenTracks);
 
   if (quilt.playheadColumn !== columnIndex) {
     // Crossfade from current column to frozen column
@@ -2347,11 +2433,12 @@ function handleFreezeColumn(state: ShowState, columnIndex: number): ConductorEve
 
 function handleUnfreezeColumn(state: ShowState): ConductorEvent[] {
   if (!state.finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-  if (state.finaleState.remix.frozenColumn === null) {
+  const fs = v33Finale(state);
+  if (fs.remix.frozenColumn === null) {
     return [{ type: 'ERROR', message: 'No column is frozen' }];
   }
 
-  state.finaleState.remix.frozenColumn = null;
+  fs.remix.frozenColumn = null;
   return [{ type: 'COLUMN_UNFROZEN' }];
 }
 
@@ -2362,8 +2449,255 @@ function handleSendNpcMessage(state: ShowState, message: string): ConductorEvent
 }
 
 // ============================================================================
+// V3.4 Finale Handlers
+// ============================================================================
+
+function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
+  const v34Config = state.config.finaleV34;
+  if (!v34Config) {
+    return [{ type: 'ERROR', message: 'No V3.4 finale config (finaleV34) found in show config' }];
+  }
+
+  const audienceCount = countConnectedUsers(state);
+  const maxQ = calculateMaxQuestionsPerPerson(v34Config.vote.targetPoolSize, audienceCount);
+
+  // Build trackMap from attempt configs (granularType → songIndex → trackIndices)
+  const trackMap = buildTrackMapFromConfig(state);
+
+  const finaleState: V34FinaleState = {
+    phase: 'vote',
+    vote: {
+      questionsAnsweredByUser: new Map(),
+      maxQuestionsPerPerson: maxQ,
+      poolCapReached: false,
+    },
+    pool: {
+      tokens: [],
+      availableByChapter: new Map(),
+      totalByChapter: new Map(),
+      totalRemaining: 0,
+      targetPoolSize: v34Config.vote.targetPoolSize,
+    },
+    queue: new Map(),
+    active: new Map(),
+    audienceInteraction: v34Config.remix.audienceInteraction,
+    trackMap,
+    loopCount: 0,
+    loopProgress: 0,
+    npc: { currentMessage: null },
+  };
+
+  state.finaleState = finaleState;
+
+  return [
+    { type: 'VOTE_STARTED' },
+  ];
+}
+
+function handleStartVote(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_vote') {
+    return [{ type: 'ERROR', message: 'START_VOTE only valid during finale_vote phase' }];
+  }
+  // Vote is already started by phase transition; this is a no-op re-trigger
+  return [];
+}
+
+function handleSubmitEmotion(
+  state: ShowState,
+  userId: UserId,
+  chapterId: string,
+  questionIndex: number,
+): ConductorEvent[] {
+  if (state.phase !== 'finale_vote') {
+    return [{ type: 'ERROR', message: 'SUBMIT_EMOTION only valid during finale_vote' }];
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState || finaleState.phase !== 'vote') {
+    return [{ type: 'ERROR', message: 'Finale not in vote phase' }];
+  }
+
+  const result = processEmotion(finaleState, userId, chapterId, questionIndex);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorEvent[] {
+  if (state.phase !== 'finale_vote') {
+    return [{ type: 'ERROR', message: 'REQUEST_NEXT_QUESTION only valid during finale_vote' }];
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState || finaleState.phase !== 'vote') {
+    return [{ type: 'ERROR', message: 'Finale not in vote phase' }];
+  }
+
+  const v34Config = state.config.finaleV34;
+  if (!v34Config) {
+    return [{ type: 'ERROR', message: 'No V3.4 finale config' }];
+  }
+
+  const answeredCount = finaleState.vote.questionsAnsweredByUser.get(userId) ?? 0;
+  const question = getNextQuestion(v34Config.vote, answeredCount, finaleState.vote.maxQuestionsPerPerson, userId);
+
+  if (!question) {
+    return []; // No more questions for this user
+  }
+
+  return [{
+    type: 'NEXT_QUESTION',
+    userId,
+    questionIndex: answeredCount,
+    questionText: question.text,
+  }];
+}
+
+function handlePoolCapReached(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_vote') {
+    return [{ type: 'ERROR', message: 'POOL_CAP_REACHED only valid during finale_vote' }];
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  finaleState.vote.poolCapReached = true;
+  state.finaleState = finaleState;
+
+  return [{
+    type: 'POOL_CAP_REACHED',
+    finalPoolSize: finaleState.pool.tokens.length,
+  }];
+}
+
+function handleStartRemix(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'START_REMIX only valid from finale_vote or finale_remix' }];
+  }
+
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  // Transition to remix phase
+  finaleState.phase = 'remix';
+  state.phase = 'finale_remix';
+  state.finaleState = finaleState;
+
+  const pool: TokenPool = {
+    available: finaleState.pool.availableByChapter,
+    total: finaleState.pool.totalByChapter,
+  };
+
+  return [
+    { type: 'SHOW_PHASE_CHANGED', phase: 'finale_remix', attemptIndex: state.currentAttemptIndex },
+    { type: 'REMIX_STARTED', pool },
+    { type: 'AUDIO_CUE', cue: { type: 'remix_start' } },
+  ];
+}
+
+function handleQueueToken(
+  state: ShowState,
+  granularType: string,
+  chapterId: string,
+  instant?: boolean,
+): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'QUEUE_TOKEN only valid during finale_remix' }];
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = remixQueueToken(finaleState, granularType, chapterId, instant);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleCancelQueue(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'CANCEL_QUEUE only valid during finale_remix' }];
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = remixCancelQueue(finaleState, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleToggleAudienceInteraction(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'TOGGLE_AUDIENCE_INTERACTION only valid during finale_remix' }];
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = remixToggleAudienceInteraction(finaleState);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleLoopBoundary(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return []; // Silently ignore loop boundaries outside remix
+  }
+  const finaleState = state.finaleState as V34FinaleState;
+  if (!finaleState) return [];
+
+  const result = remixProcessLoopBoundary(finaleState);
+  state.finaleState = result.state;
+
+  // If POOL_EMPTY was emitted, auto-transition to ended
+  const poolEmpty = result.events.some(e => e.type === 'POOL_EMPTY');
+  if (poolEmpty) {
+    state.phase = 'ended';
+    result.events.push({ type: 'SHOW_PHASE_CHANGED', phase: 'ended', attemptIndex: state.currentAttemptIndex });
+  }
+
+  return result.events;
+}
+
+function handleEndShow(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'END_SHOW only valid during finale phases' }];
+  }
+
+  state.phase = 'ended';
+  return [{ type: 'SHOW_PHASE_CHANGED', phase: 'ended', attemptIndex: state.currentAttemptIndex }];
+}
+
+/**
+ * Build trackMap from attempt configs for V3.4 remix.
+ * Maps granularType → songIndex → trackIndices.
+ * Same logic as V3.3 buildTrackMap but reads from attempt configs directly.
+ */
+function buildTrackMapFromConfig(state: ShowState): Map<string, Map<number, number[]>> {
+  const trackMap = new Map<string, Map<number, number[]>>();
+
+  for (let songIndex = 0; songIndex < state.config.attempts.length; songIndex++) {
+    const attemptConfig = state.config.attempts[songIndex];
+    for (const layer of attemptConfig.layers) {
+      // Both options have tracks with granular types
+      for (const option of [layer.optionA, layer.optionB]) {
+        for (const trackRef of option.tracks) {
+          if (!trackMap.has(trackRef.granularType)) {
+            trackMap.set(trackRef.granularType, new Map());
+          }
+          const typeMap = trackMap.get(trackRef.granularType)!;
+          if (!typeMap.has(songIndex)) {
+            typeMap.set(songIndex, trackRef.trackIndices);
+          }
+        }
+      }
+    }
+  }
+
+  return trackMap;
+}
+
+// ============================================================================
 // Utilities
 // ============================================================================
+
+/** Narrow finaleState to V3.3 type. V3.3 handlers call this after phase guards. */
+function v33Finale(state: ShowState): V33FinaleState {
+  return state.finaleState as V33FinaleState;
+}
 
 /** Get the current attempt, or null if none. */
 function currentAttempt(state: ShowState): AttemptState | null {

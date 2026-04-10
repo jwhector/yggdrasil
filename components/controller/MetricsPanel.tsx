@@ -7,7 +7,7 @@
 
 'use client';
 
-import type { ShowState, ShowPhase } from '@/conductor/types';
+import type { ShowState, ShowPhase, V33FinaleState } from '@/conductor/types';
 
 interface MetricsPanelProps {
   fullState: ShowState;
@@ -46,7 +46,8 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
 };
 
 export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsPanelProps) {
-  const { phase, currentAttemptIndex, paused, version, users, attempts, finaleState } = fullState;
+  const { phase, currentAttemptIndex, paused, version, users, attempts } = fullState;
+  const finaleState = fullState.finaleState as V33FinaleState | null;
   const currentAttempt = attempts[currentAttemptIndex];
 
   const connectedUsers = Array.from(users.values()).filter(u => u.connected).length;

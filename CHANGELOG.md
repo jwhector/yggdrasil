@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## 2026-04-09 — V3.4 Migration Phase 3: Conductor Modules (Pure Logic)
+
+Three new conductor modules implementing the V3.4 token pool finale system. All pure functions — no I/O.
+
+### New Files
+- `conductor/token-pool.ts` — Pool management: `createTokenPool`, `consumeToken`, `returnToken`, `isPoolEmpty`, `getTotalRemaining`
+- `conductor/question-engine.ts` — Vote phase logic: `getNextQuestion`, `calculateMaxQuestionsPerPerson`, `shouldCapPool`, `processEmotion`
+- `conductor/remix-engine.ts` — Queue & spend logic: `queueToken`, `cancelQueue`, `processLoopBoundary`, `toggleAudienceInteraction`, `resolveTrack`
+
+### Conductor Wiring (`conductor/conductor.ts`)
+- Added command handlers for all V3.4 finale commands: `START_VOTE`, `SUBMIT_EMOTION`, `REQUEST_NEXT_QUESTION`, `POOL_CAP_REACHED`, `START_REMIX`, `QUEUE_TOKEN`, `CANCEL_QUEUE`, `TOGGLE_AUDIENCE_INTERACTION`, `LOOP_BOUNDARY`, `END_SHOW`
+- Added `finale_vote` and `finale_remix` to phase sequence and `findPhaseSequenceIndex`
+- `SETUP_FINALE` initializes `V34FinaleState` when `finaleV34` config is present
+- `LOOP_BOUNDARY` wired to `processLoopBoundary()` — auto-transitions to `ended` on `POOL_EMPTY`
+- `START_REMIX` transitions from `finale_vote` to `finale_remix`
+- Added `v33Finale()` type guard helper for V3.3 handler narrowing
+
+### Type Changes
+- `ShowState.finaleState`: widened from `V33FinaleState | null` to `V33FinaleState | V34FinaleState | null`
+- `ShowConfig.finaleV34`: optional `V34FinaleConfig` field added
+
+### Exports (`conductor/index.ts`)
+- All three new modules exported
+
+### Tests
+- `conductor/__tests__/token-pool.test.ts` — 8 tests
+- `conductor/__tests__/question-engine.test.ts` — 12 tests
+- `conductor/__tests__/remix-engine.test.ts` — 18 tests
+- `conductor/__tests__/conductor.test.ts` — 6 new V3.4 integration tests
+- Updated existing phase sequence tests for expanded `PHASE_SEQUENCE`
+- Total: 429 tests passing across 16 suites
+
+---
+
 ## 2026-04-09 — V3.4 Migration Phase 2: Token Pool Types & Interfaces
 
 Type-only additions to `conductor/types.ts` for the V3.4 "Token Pool" finale system. No behavioral changes.

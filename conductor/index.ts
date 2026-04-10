@@ -60,3 +60,12 @@ export type { QuiltGrid, QuiltResult } from './quilt';
 
 // Export NPC functions
 export { getNpcMessage } from './npc';
+
+// Export token pool functions (V3.4)
+export { createTokenPool, consumeToken, returnToken, isPoolEmpty, getTotalRemaining } from './token-pool';
+
+// Export question engine functions (V3.4)
+export { getNextQuestion, calculateMaxQuestionsPerPerson, shouldCapPool, processEmotion } from './question-engine';
+
+// Export remix engine functions (V3.4)
+export { queueToken, cancelQueue, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';

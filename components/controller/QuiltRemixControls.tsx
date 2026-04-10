@@ -20,7 +20,7 @@ interface QuiltRemixControlsProps {
 }
 
 export function QuiltRemixControls({ fullState, sendCommand }: QuiltRemixControlsProps) {
-  const fs = fullState.finaleState;
+  const fs = fullState.finaleState as V33FinaleState | null;
   if (!fs) return null;
 
   const granularTypes = fullState.config.granularTypes ?? [];

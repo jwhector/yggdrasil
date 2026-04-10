@@ -174,7 +174,7 @@ export function serializeState(state: ShowState): SerializedShowState {
     currentAttemptIndex: state.currentAttemptIndex,
     attempts: state.attempts,
     users: Array.from(state.users.entries()),
-    finaleState: state.finaleState ? serializeFinaleState(state.finaleState) : null,
+    finaleState: state.finaleState && 'quilt' in state.finaleState ? serializeFinaleState(state.finaleState as V33FinaleState) : null,
     config: state.config,
     version: state.version,
     lastUpdated: state.lastUpdated,
