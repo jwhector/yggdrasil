@@ -1271,7 +1271,13 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
   const audienceCount = countConnectedUsers(state);
   const maxQ = calculateMaxQuestionsPerPerson(v34Config.vote.targetPoolSize, audienceCount);
 
-  // Build trackMap from attempt configs (granularType → songIndex → trackIndices)
+  // Build chapter → songIndex mapping from attempt configs
+  const chapterSongIndex = new Map<string, number>();
+  for (let i = 0; i < state.config.attempts.length; i++) {
+    chapterSongIndex.set(state.config.attempts[i].chapter, i);
+  }
+
+  // Build trackMap from attempt results (vote-aware, includes liveSeed)
   const trackMap = buildTrackMapFromConfig(state);
 
   const finaleState: FinaleState = {
@@ -1291,6 +1297,7 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     queue: new Map(),
     active: new Map(),
     audienceInteraction: v34Config.remix.audienceInteraction,
+    chapterSongIndex,
     trackMap,
     loopCount: 0,
     loopProgress: 0,
@@ -1476,24 +1483,77 @@ function handleEndShow(state: ShowState): ConductorEvent[] {
  * Maps granularType → songIndex → trackIndices.
  * Same logic as V3.3 buildTrackMap but reads from attempt configs directly.
  */
+/**
+ * Build trackMap from attempt results (vote-aware).
+ * Only includes tracks from winning options (or both if bothOptionsSurvive).
+ * Also includes liveSeed tracks for the "seed" granular type.
+ *
+ * Mirrors the logic in fragments.ts generateGranularFragments() for consistency.
+ */
 function buildTrackMapFromConfig(state: ShowState): Map<string, Map<number, number[]>> {
   const trackMap = new Map<string, Map<number, number[]>>();
+  const bothOptionsSurvive = state.config.finale.bothOptionsSurvive;
+
+  function addTracks(granularType: string, songIndex: number, trackIndices: number[]): void {
+    if (trackIndices.length === 0) return;
+    if (!trackMap.has(granularType)) {
+      trackMap.set(granularType, new Map());
+    }
+    const typeMap = trackMap.get(granularType)!;
+    const existing = typeMap.get(songIndex);
+    if (existing) {
+      // Merge track indices for same granularType + songIndex (same as mergeTracksByGranularType)
+      typeMap.set(songIndex, [...existing, ...trackIndices]);
+    } else {
+      typeMap.set(songIndex, [...trackIndices]);
+    }
+  }
 
   for (let songIndex = 0; songIndex < state.config.attempts.length; songIndex++) {
     const attemptConfig = state.config.attempts[songIndex];
+    const attemptState = state.attempts[songIndex];
+
     for (const layer of attemptConfig.layers) {
-      // Both options have tracks with granular types
-      for (const option of [layer.optionA, layer.optionB]) {
-        for (const trackRef of option.tracks) {
-          if (!trackMap.has(trackRef.granularType)) {
-            trackMap.set(trackRef.granularType, new Map());
+      const result = attemptState?.layerResults.find(r => r.layerIndex === layer.index);
+      const isVoted = result
+        && (result.status === 'locked_in' || result.status === 'collapsed')
+        && result.chosenOption !== null;
+
+      if (isVoted) {
+        const winOption = result!.chosenOption!;
+        const winBundle = winOption === 'A' ? layer.optionA : layer.optionB;
+        const loseBundle = winOption === 'A' ? layer.optionB : layer.optionA;
+
+        // Winner tracks — always included
+        for (const trackRef of winBundle.tracks) {
+          addTracks(trackRef.granularType, songIndex, trackRef.trackIndices);
+        }
+
+        // Loser tracks — only if bothOptionsSurvive or alwaysAvailable
+        for (const trackRef of loseBundle.tracks) {
+          if (bothOptionsSurvive || trackRef.alwaysAvailable) {
+            addTracks(trackRef.granularType, songIndex, trackRef.trackIndices);
           }
-          const typeMap = trackMap.get(trackRef.granularType)!;
-          if (!typeMap.has(songIndex)) {
-            typeMap.set(songIndex, trackRef.trackIndices);
+        }
+      } else {
+        // Unreached layer — only alwaysAvailable tracks
+        for (const trackRef of layer.optionA.tracks) {
+          if (trackRef.alwaysAvailable) {
+            addTracks(trackRef.granularType, songIndex, trackRef.trackIndices);
+          }
+        }
+        for (const trackRef of layer.optionB.tracks) {
+          if (trackRef.alwaysAvailable) {
+            addTracks(trackRef.granularType, songIndex, trackRef.trackIndices);
           }
         }
       }
+    }
+
+    // Add seed tracks from liveSeed
+    const liveSeed = attemptConfig.liveSeed;
+    if (liveSeed?.trackIndices?.length) {
+      addTracks('seed', songIndex, liveSeed.trackIndices);
     }
   }
 

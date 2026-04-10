@@ -66,6 +66,7 @@ function makeRemixState(overrides?: Partial<FinaleState>): FinaleState {
     queue: new Map(),
     active: new Map(),
     audienceInteraction: false,
+    chapterSongIndex: new Map([['chapter_0', 0], ['chapter_1', 1], ['chapter_2', 2]]),
     trackMap: makeTrackMap(),
     loopCount: 0,
     loopProgress: 0,
@@ -414,5 +415,79 @@ describe('remix-engine: resolveTrack', () => {
   test('returns empty array for unknown song index', () => {
     const trackMap = makeTrackMap();
     expect(resolveTrack(trackMap, 'bass', 99)).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Chapter-to-SongIndex Resolution
+// ============================================================================
+
+describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
+  test('non-numeric chapter IDs resolve to correct song index via chapterSongIndex', () => {
+    const tokens = makeTokens({ ambition: 5, love: 5, avoidance: 5 });
+    const state = makeRemixState({
+      chapterSongIndex: new Map([['ambition', 0], ['love', 1], ['avoidance', 2]]),
+      pool: {
+        tokens,
+        availableByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
+        totalByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
+        totalRemaining: 15,
+        targetPoolSize: 15,
+      },
+    });
+
+    // Queue token for "ambition" (songIndex=0) on bass
+    const r0 = queueToken(state, 'bass', 'ambition');
+    const b0 = processLoopBoundary(r0.state);
+    const activated0 = findEvent(b0.events, 'TOKEN_ACTIVATED');
+    // bass songIndex=0 → trackIndex 1 (from makeTrackMap: bass index 0, song 0 = [1])
+    expect(activated0).toBeDefined();
+    expect((activated0 as any).trackIndex).toBe(1);
+  });
+
+  test('different chapters resolve to different track indices', () => {
+    const tokens = makeTokens({ ambition: 5, love: 5, avoidance: 5 });
+    const state = makeRemixState({
+      chapterSongIndex: new Map([['ambition', 0], ['love', 1], ['avoidance', 2]]),
+      pool: {
+        tokens,
+        availableByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
+        totalByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
+        totalRemaining: 15,
+        targetPoolSize: 15,
+      },
+    });
+
+    // Queue chapter "love" (songIndex=1) on bass → should get track [2]
+    const r1 = queueToken(state, 'bass', 'love');
+    const b1 = processLoopBoundary(r1.state);
+    const activated1 = findEvent(b1.events, 'TOKEN_ACTIVATED');
+    expect(activated1).toBeDefined();
+    expect((activated1 as any).trackIndex).toBe(2);
+  });
+
+  test('seed granular type resolves when present in trackMap', () => {
+    const trackMap = makeTrackMap();
+    // Add seed entries (simulating liveSeed being included in trackMap)
+    trackMap.set('seed', new Map([[0, [100]], [1, [101]], [2, [102]]]));
+
+    const tokens = makeTokens({ ambition: 5, love: 5 });
+    const state = makeRemixState({
+      chapterSongIndex: new Map([['ambition', 0], ['love', 1]]),
+      trackMap,
+      pool: {
+        tokens,
+        availableByChapter: new Map([['ambition', 5], ['love', 5]]),
+        totalByChapter: new Map([['ambition', 5], ['love', 5]]),
+        totalRemaining: 10,
+        targetPoolSize: 10,
+      },
+    });
+
+    const r = queueToken(state, 'seed', 'love');
+    const b = processLoopBoundary(r.state);
+    const activated = findEvent(b.events, 'TOKEN_ACTIVATED');
+    expect(activated).toBeDefined();
+    expect((activated as any).trackIndex).toBe(101);
   });
 });

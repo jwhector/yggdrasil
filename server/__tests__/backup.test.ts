@@ -168,6 +168,7 @@ describe('loadBackup', () => {
       queue: new Map([['bass', []]]),
       active: new Map(),
       audienceInteraction: false,
+      chapterSongIndex: new Map([['ambition', 0], ['love', 1]]),
       trackMap: new Map([['bass', new Map([[0, [10, 11]], [1, [12, 13]]])]]),
       loopCount: 0,
       loopProgress: 0,

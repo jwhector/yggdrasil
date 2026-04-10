@@ -768,6 +768,9 @@ export interface FinaleState {
   // Mode
   audienceInteraction: boolean;  // When true: instant crossfade + persistent looping
 
+  // Chapter → songIndex mapping (e.g., "ambition" → 0, "love" → 1)
+  chapterSongIndex: Map<string, number>;
+
   // Track resolution (granularType → songIndex → Ableton trackIndices)
   trackMap: Map<string, Map<number, number[]>>;
 

@@ -3,7 +3,7 @@
  *
  * Projector component for finale_vote and finale_remix phases.
  * Composes TokenPool (floating dots) + PentagonRemix (pentagon nodes).
- * Manages touch interaction layer (enabled only during finale_remix on touch devices).
+ * Manages drag interaction layer (enabled during finale_remix — touch and mouse).
  * Handles screen wake lock to prevent iPad sleep during performance.
  */
 
@@ -41,13 +41,8 @@ export function ProjectorFinale({
   // Drag state for touch interaction
   const drag = useDragToken();
 
-  // Detect touch capability
-  const [isTouchDevice] = useState(() =>
-    typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
-  );
-
   const isRemix = phase === 'finale_remix';
-  const touchEnabled = isRemix && isTouchDevice;
+  const interactionEnabled = isRemix;
 
   // Measure container
   useEffect(() => {
@@ -101,24 +96,16 @@ export function ProjectorFinale({
     ? poolState.availableByChapter
     : finaleView.pool.availableByChapter;
 
-  // Handle dot touch start — begin drag
-  const handleDotTouchStart = useCallback((chapterId: string, x: number, y: number) => {
+  // Handle dot drag start (touch or mouse)
+  const handleDotDragStart = useCallback((chapterId: string, x: number, y: number) => {
     drag.startDrag(chapterId, x, y);
   }, [drag]);
 
-  // Touch move/end on the container
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!drag.isDragging) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    drag.moveDrag(touch.clientX, touch.clientY);
-  }, [drag]);
-
-  const handleTouchEnd = useCallback(() => {
+  // Drop handler — shared between touch and mouse
+  const handleDrop = useCallback(() => {
     if (!drag.isDragging) return;
     const target = drag.endDrag();
     if (target && drag.dragChapterId && socket) {
-      // Send QUEUE_TOKEN command
       socket.emit('command', {
         type: 'QUEUE_TOKEN',
         granularType: target,
@@ -127,6 +114,24 @@ export function ProjectorFinale({
       });
     }
   }, [drag, socket, finaleView.audienceInteraction]);
+
+  // Touch handlers
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!drag.isDragging) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    drag.moveDrag(touch.clientX, touch.clientY);
+  }, [drag]);
+
+  const handleTouchEnd = useCallback(() => handleDrop(), [handleDrop]);
+
+  // Mouse handlers (desktop testing)
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!drag.isDragging) return;
+    drag.moveDrag(e.clientX, e.clientY);
+  }, [drag]);
+
+  const handleMouseUp = useCallback(() => handleDrop(), [handleDrop]);
 
   // Pool counter text
   const totalRemaining = poolState.totalRemaining > 0
@@ -146,6 +151,8 @@ export function ProjectorFinale({
       }}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
     >
       {size.width > 0 && size.height > 0 && (
         <>
@@ -155,8 +162,8 @@ export function ProjectorFinale({
             chapters={chapters}
             width={size.width}
             height={size.height}
-            touchEnabled={touchEnabled}
-            onDotTouchStart={handleDotTouchStart}
+            interactionEnabled={interactionEnabled}
+            onDotDragStart={handleDotDragStart}
           />
 
           {/* Pentagon nodes */}
@@ -175,7 +182,7 @@ export function ProjectorFinale({
         </>
       )}
 
-      {/* Drag indicator — follows finger */}
+      {/* Drag indicator — follows pointer */}
       {drag.isDragging && drag.dragPosition && drag.dragChapterId && (
         <DragDot
           x={drag.dragPosition.x}

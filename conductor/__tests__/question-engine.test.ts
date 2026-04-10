@@ -52,6 +52,7 @@ function makeFinaleState(overrides?: Partial<FinaleState>): FinaleState {
     queue: new Map(),
     active: new Map(),
     audienceInteraction: false,
+    chapterSongIndex: new Map([['chapter_0', 0], ['chapter_1', 1], ['chapter_2', 2]]),
     trackMap: new Map(),
     loopCount: 0,
     loopProgress: 0,

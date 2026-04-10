@@ -51,6 +51,7 @@ export interface SerializedFinaleState {
   queue: [string, FinaleState['queue'] extends Map<string, infer V> ? V : never][];
   active: [string, FinaleState['active'] extends Map<string, infer V> ? V : never][];
   audienceInteraction: boolean;
+  chapterSongIndex: [string, number][];
   trackMap: [string, [number, number[]][]][];
   loopCount: number;
   loopProgress: number;
@@ -93,6 +94,7 @@ export function serializeFinaleState(fs: FinaleState): SerializedFinaleState {
     queue: Array.from(fs.queue.entries()).map(([gt, tokens]) => [gt, tokens]),
     active: Array.from(fs.active.entries()).map(([gt, node]) => [gt, node]),
     audienceInteraction: fs.audienceInteraction,
+    chapterSongIndex: Array.from(fs.chapterSongIndex.entries()),
     trackMap: Array.from(fs.trackMap.entries()).map(
       ([gt, songMap]): [string, [number, number[]][]] => [gt, Array.from(songMap.entries())],
     ),
@@ -120,6 +122,7 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
     queue: new Map(data.queue),
     active: new Map(data.active),
     audienceInteraction: data.audienceInteraction,
+    chapterSongIndex: new Map(data.chapterSongIndex),
     trackMap: new Map(
       data.trackMap.map(([gt, entries]) => [gt, new Map(entries)]),
     ),

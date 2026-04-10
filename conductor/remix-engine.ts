@@ -485,13 +485,9 @@ function activateInstant(
 /**
  * Map a chapterId to a songIndex using the trackMap keys.
  * Convention: chapter_0 → 0, chapter_1 → 1, chapter_2 → 2.
- * Falls back to parsing the numeric suffix from the chapterId.
+ * Uses the pre-built chapterSongIndex map on FinaleState.
+ * Populated at finale setup from attempt configs (e.g., "ambition" → 0, "love" → 1).
  */
 function chapterToSongIndex(chapterId: string, state: FinaleState): number {
-  // Check if any granular type in the trackMap has this as a direct songIndex key
-  // The trackMap is granularType → songIndex → tracks, so we need to find which songIndex
-  // corresponds to this chapter. For now, parse the chapter suffix.
-  const match = chapterId.match(/(\d+)$/);
-  if (match) return parseInt(match[1], 10);
-  return 0;
+  return state.chapterSongIndex.get(chapterId) ?? 0;
 }

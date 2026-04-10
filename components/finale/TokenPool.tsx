@@ -23,10 +23,10 @@ interface TokenPoolProps {
   width: number;
   /** Canvas height in CSS pixels. */
   height: number;
-  /** Called when a dot is touched (drag start). Returns dot index. */
-  onDotTouchStart?: (chapterId: string, x: number, y: number) => void;
-  /** Whether touch interaction is enabled (finale_remix on touch device). */
-  touchEnabled?: boolean;
+  /** Called when a dot drag starts (touch or mouse). */
+  onDotDragStart?: (chapterId: string, x: number, y: number) => void;
+  /** Whether drag interaction is enabled (finale_remix). */
+  interactionEnabled?: boolean;
 }
 
 interface Dot {
@@ -53,8 +53,8 @@ export function TokenPool({
   chapters,
   width,
   height,
-  onDotTouchStart,
-  touchEnabled = false,
+  onDotDragStart,
+  interactionEnabled = false,
 }: TokenPoolProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Dot[]>([]);
@@ -178,38 +178,53 @@ export function TokenPool({
     return () => cancelAnimationFrame(animRef.current);
   }, [width, height]);
 
-  // Touch handling for drag
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (!touchEnabled || !onDotTouchStart) return;
-    const touch = e.touches[0];
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-
-    // Find closest dot within touch target
+  // Hit-test: find closest dot within target radius
+  const findClosestDot = useCallback((canvasX: number, canvasY: number): Dot | null => {
+    if (!interactionEnabled || !onDotDragStart) return null;
     const dots = dotsRef.current;
     let closestDot: Dot | null = null;
     let closestDist = TOUCH_TARGET_RADIUS;
 
     for (const dot of dots) {
-      const dx = x - dot.x;
-      const dy = y - dot.y;
+      const dx = canvasX - dot.x;
+      const dy = canvasY - dot.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < closestDist) {
         closestDist = dist;
         closestDot = dot;
       }
     }
+    return closestDot;
+  }, [interactionEnabled, onDotDragStart]);
 
-    if (closestDot) {
+  // Start drag from a dot (shared between touch and mouse)
+  const startDragFromDot = useCallback((dot: Dot, clientX: number, clientY: number) => {
+    dotsRef.current = dotsRef.current.filter(d => d !== dot);
+    onDotDragStart!(dot.chapterId, clientX, clientY);
+  }, [onDotDragStart]);
+
+  // Touch handling
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const touch = e.touches[0];
+    const dot = findClosestDot(touch.clientX - rect.left, touch.clientY - rect.top);
+    if (dot) {
       e.preventDefault();
-      // Remove the dot from the pool visually (optimistic)
-      dotsRef.current = dots.filter(d => d !== closestDot);
-      onDotTouchStart(closestDot.chapterId, touch.clientX, touch.clientY);
+      startDragFromDot(dot, touch.clientX, touch.clientY);
     }
-  }, [touchEnabled, onDotTouchStart]);
+  }, [findClosestDot, startDragFromDot]);
+
+  // Mouse handling (desktop)
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dot = findClosestDot(e.clientX - rect.left, e.clientY - rect.top);
+    if (dot) {
+      e.preventDefault();
+      startDragFromDot(dot, e.clientX, e.clientY);
+    }
+  }, [findClosestDot, startDragFromDot]);
 
   return (
     <canvas
@@ -221,9 +236,11 @@ export function TokenPool({
         top: 0,
         left: 0,
         touchAction: 'none',
-        pointerEvents: touchEnabled ? 'auto' : 'none',
+        pointerEvents: interactionEnabled ? 'auto' : 'none',
+        cursor: interactionEnabled ? 'grab' : 'default',
       }}
       onTouchStart={handleTouchStart}
+      onMouseDown={handleMouseDown}
     />
   );
 }
