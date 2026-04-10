@@ -944,6 +944,42 @@ export function createAudioRouter(
     }
   }
 
+  // V3.4: Remix start — stop transport and restart from beat 0
+  function handleRemixStart(): void {
+    stopPlayback();
+    oscBridge.send('/live/song/start_playing');
+    routerState.transportStarted = true;
+  }
+
+  // V3.4: Unmute a single remix node track with gain swell
+  function handleNodeUnmute(cue: Extract<AudioCue, { type: 'node_unmute' }>): void {
+    unmuteTrack(cue.trackIndex);
+    fadeGain(cue.trackIndex, 1.0, currentGainConfig.entrySwellBeats);
+  }
+
+  // V3.4: Crossfade between two chapter tracks at loop boundary
+  function handleNodeCrossfade(cue: Extract<AudioCue, { type: 'node_crossfade' }>): void {
+    const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
+    fadeGain(cue.muteTrack, 0, xfadeBeats);
+    unmuteTrack(cue.unmuteTrack);
+    fadeGain(cue.unmuteTrack, 1.0, xfadeBeats);
+  }
+
+  // V3.4: Immediate crossfade (audience interaction mode — no loop boundary quantization)
+  function handleNodeInstantCrossfade(cue: Extract<AudioCue, { type: 'node_instant_crossfade' }>): void {
+    const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
+    if (cue.muteTrack !== null) {
+      fadeGain(cue.muteTrack, 0, xfadeBeats);
+    }
+    unmuteTrack(cue.unmuteTrack);
+    fadeGain(cue.unmuteTrack, 1.0, xfadeBeats);
+  }
+
+  // V3.4: Fade a node's track to silence
+  function handleNodeFadeOut(cue: Extract<AudioCue, { type: 'node_fade_out' }>): void {
+    fadeGain(cue.trackIndex, 0, currentGainConfig.crossfadeBeats ?? 1);
+  }
+
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
     if (cue.action === 'play') {
       oscBridge.send('/live/song/start_playing');
@@ -1168,6 +1204,21 @@ export function createAudioRouter(
             break;
           case 'reset_utilities':
             handleResetUtilities();
+            break;
+          case 'remix_start':
+            handleRemixStart();
+            break;
+          case 'node_unmute':
+            handleNodeUnmute(cue);
+            break;
+          case 'node_crossfade':
+            handleNodeCrossfade(cue);
+            break;
+          case 'node_instant_crossfade':
+            handleNodeInstantCrossfade(cue);
+            break;
+          case 'node_fade_out':
+            handleNodeFadeOut(cue);
             break;
         }
       }

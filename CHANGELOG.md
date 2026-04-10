@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 2026-04-09 — V3.4 Migration Phase 7: Audio Router & OSC
+
+Map V3.4 remix audio cues to OSC commands in `server/audio-router.ts`.
+
+### New cue handlers
+- **`remix_start`** — stops transport then restarts from beat 0 (reset for finale remix loop).
+- **`node_unmute`** — unmutes a single remix node track and swells gain over `entrySwellBeats`.
+- **`node_crossfade`** — simultaneous fade-out (`muteTrack`) + fade-in (`unmuteTrack`) over `crossfadeBeats` at loop boundary.
+- **`node_instant_crossfade`** — same crossfade but fires immediately (audience interaction mode); `muteTrack` may be `null` (first token on a node).
+- **`node_fade_out`** — fades a node track to silence over `crossfadeBeats`.
+
+### Modified files
+- **`server/audio-router.ts`** — 5 new handler functions + switch cases wired into `handleStateChange`.
+- **`server/__tests__/audio-router.test.ts`** — 9 new tests covering all 5 V3.4 cue types.
+
+### Test count: **50** audio-router tests (9 added); full suite run separately.
+
+---
+
 ## 2026-04-09 — V3.4 Migration Phase 6: Client Components & Hooks
 
 Build the V3.4 UI: audience emotion vote, projector token pool canvas, pentagon remix display, controller fallback grid.
