@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Socket } from 'socket.io-client';
-import type { ChapterConfig, GranularType, ShowPhase, ProjectorFinaleV34View } from '@/conductor/types';
+import type { ChapterConfig, GranularType, ShowPhase, ProjectorFinaleView } from '@/conductor/types';
 import { useTokenPool } from '@/hooks/useTokenPool';
 import { useDragToken } from '@/hooks/useDragToken';
 import { TokenPool } from './TokenPool';
@@ -20,7 +20,7 @@ import { PentagonRemix } from './PentagonRemix';
 interface ProjectorFinaleProps {
   socket: Socket | null;
   phase: ShowPhase;
-  finaleView: ProjectorFinaleV34View;
+  finaleView: ProjectorFinaleView;
   chapters: ChapterConfig[];
   granularTypes: GranularType[];
 }

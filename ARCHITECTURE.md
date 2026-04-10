@@ -1,18 +1,18 @@
-# Solo Show — Technical Architecture Specification (V3.3)
+# Solo Show — Technical Architecture Specification (V3.4)
 
 ## Document Purpose
-This document and the `docs/` directory are the **authoritative source of truth** for the Solo Show system architecture. It supersedes the V3.2 spec and reflects the V3.3 "Quilt" redesign of the finale (quilt-based collaborative composition replacing Incredibox-style live mix).
+This document and the `docs/` directory are the **authoritative source of truth** for the Solo Show system architecture. It supersedes the V3.3 spec and reflects the V3.4 "Token Pool" redesign of the finale (token-based collaborative composition replacing quilt grid).
 
 **When this document or any file in `docs/` conflicts with code, the spec is correct and the code should be updated.**
 
-**V3.3 migration complete.** See `V33-MIGRATION-PLAN.md` for the implementation plan and `docs/finale.md` for the authoritative quilt spec.
+**V3.4 migration complete.** See `docs/finale.md` for the authoritative token pool spec.
 
 ---
 
 ## Project Overview
 
 ### What This Is
-An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. Each song starts with a **live seed** — a prerecorded loop the performer theatrically "plays" — then the audience makes 3 binary A/B choices per song. Each choice selects between **bundled layer groups** (e.g., "The Foundation" = bass + drums), making each vote a big audible vibe shift. Each layer has a **doubt threshold** — if the winning vote proportion falls below it, the song collapses. Thresholds: `[0.50, 0.66, 0.99]`. Songs that survive all 3 layers are narratively rejected by the performer (self-sabotage). In the finale, the audience — abandoned by the performer — each claims a cell in a **quilt** (a grid of granular types × time slices), chooses which song's material to play, and collaboratively rearranges the composition in real time alongside the returning performer.
+An interactive live performance system where ~40 audience members help build songs in real time across a theatrical monologue. The show consists of three story/song-building cycles and a collaborative finale. Each song starts with a **live seed** — a prerecorded loop the performer theatrically "plays" — then the audience makes 3 binary A/B choices per song. Each choice selects between **bundled layer groups** (e.g., "The Foundation" = bass + drums), making each vote a big audible vibe shift. Each layer has a **doubt threshold** — if the winning vote proportion falls below it, the song collapses. Thresholds: `[0.50, 0.66, 0.99]`. Songs that survive all 3 layers are narratively rejected by the performer (self-sabotage). In the finale, the audience — abandoned by the performer — answers emotional questions whose votes generate **tokens** (one per vote, colored by song). The performer arranges these tokens on a **pentagon of granular types**, and the remix plays with loop-quantized crossfades as tokens are moved between nodes.
 
 ### Core Metaphor
 > **"If I can build a song, I can build a life."**
@@ -25,7 +25,7 @@ The audience is framed as the performer's inner council — parts of the subcons
 3. **Central timing, distributed choice.** The system runs on a master musical clock: audience controls *what* and *how*, not *when*.
 4. **Legibility over complexity.** Binary choices, consistent visual cues, minimal UI.
 5. **Safety constraints.** All musical actions are quantized and bounded so outputs remain coherent.
-6. **Finale = collective agency.** After the performer abandons the stage, each audience member claims one cell of the quilt and chooses which song's material fills it. The audience and returning performer collaboratively rearrange the composition in real time.
+6. **Finale = collective agency.** After the performer abandons the stage, the audience answers emotional questions whose votes generate tokens. The performer arranges tokens on a pentagon of granular types, shaping a collaborative remix.
 7. **Projector tells the story, phone is the instrument.** Visual narrative lives on the projector; audience phones are input devices and personal audio preview tools.
 
 ---
@@ -47,11 +47,11 @@ The audience is framed as the performer's inner council — parts of the subcons
 | **Blind Vote** | The song-building voting mechanic. Audience votes without seeing live split feedback. Results are revealed after the window closes. |
 | **Reveal** | The post-vote moment when the A/B split is shown, the threshold check is visualized, and the winning option locks in. |
 | **Song Rejection** | The performer's narrative act of rejecting a **completed** song (one that survived all layers without collapsing). Triggered manually via controller; accompanied by an OSC-triggered audio effect. Only applies when the song completes — collapsed songs are already dead. |
-| **Fragment** | An option from a reached layer during song-building, available in the finale. Which options survive is configurable via `bothOptionsSurvive` — when true, both A and B from voted layers are available; when false, only winners survive. In V3.3, the quilt uses song indices rather than fragment IDs — see **Song Choice**. |
+| **Fragment** | An option from a reached layer during song-building, available in the finale. Which options survive is configurable via `bothOptionsSurvive` — when true, both A and B from voted layers are available; when false, only winners survive. |
 | **Locked Fragment** | A fragment visible in the pre-game "elegy" display but not available during gameplay. Includes: both options from unreached layers (due to collapse), and losing options from voted layers when `bothOptionsSurvive` is false. Represents "what could have been." |
-| **Quilt** | (V3.3) The finale song structure — a grid where rows = granular types, columns = time slices. Each cell holds a song choice (0, 1, 2). The loop plays left to right across columns, switching active tracks per type at each column boundary. |
-| **Cell** | (V3.3) One position in the quilt grid (granular type × time slice). Claimed by one audience member during assignment. Holds a song choice that determines which song's audio plays for that type during that time slice. |
-| **Song Choice** | (V3.3) The song index (0, 1, or 2) stored in a quilt cell. Combined with the cell's row (granular type), it resolves to an Ableton track: `trackMap[granularType][songIndex] → trackIndex`. |
+| **Token** | A unit generated from an audience vote during `finale_vote`. Each vote produces one token colored by the song it references (song 0, 1, or 2). Tokens are placed on pentagon nodes (granular types) during the remix. |
+| **Token Pool** | The collection of all tokens generated during the vote phase. The performer draws from the pool and arranges tokens on the pentagon during the remix. |
+| **Pentagon Node** | One of the granular type positions on the remix pentagon. Each node holds tokens that determine which song's audio plays for that type. Track resolution: `trackMap[granularType][songIndex] → trackIndex`. |
 | **NPC** | A system-controlled narrative voice displayed on audience phones during the finale. Reacts to key events (performer abandonment, assignment, live mix start). Terminal-style typeface. Event-driven. |
 | **Loop Boundary** | The downbeat of each 8-bar loop cycle. All audio changes are quantized to these boundaries. |
 | **Layer Group Identity** | Consistent color + symbol for each layer group, derived from its first granular type (bones→■, flesh→✦, spark→~). |
@@ -116,7 +116,7 @@ lobby → opener → attempt_story → attempt_build → attempt_resolve (if com
                                        ↓ (if collapsed)
                  attempt_story → attempt_build → attempt_resolve (if completed) →
                                        ↓ (if collapsed)
-                 finale_elegy → finale_assignment → finale_preview → finale_playback → ended
+                 finale_vote → finale_remix → ended
 ```
 
 ### Phase Details
@@ -128,10 +128,8 @@ type ShowPhase =
   | 'attempt_story'            // Story phase for current attempt (phones dark)
   | 'attempt_build'            // Song-building phase: 3 bundled layer groups (phones active)
   | 'attempt_resolve'          // Song completed; performer rejects it (phones dim/watch)
-  | 'finale_elegy'             // Audience sees full fragment wreckage (phones passive)
-  | 'finale_assignment'        // Audience claims quilt cells (V3.3)
-  | 'finale_preview'           // Private song exploration — room silent (V3.3)
-  | 'finale_playback'          // Quilt plays + performer/audience remix (V3.3)
+  | 'finale_vote'              // Audience answers emotional questions; votes generate tokens
+  | 'finale_remix'             // Performer arranges tokens on pentagon; remix plays with crossfades
   | 'ended';
 ```
 
@@ -146,13 +144,11 @@ type ShowPhase =
 | `attempt_story` | `attempt_build` | Manual | Activates voting UI |
 | `attempt_build` | `attempt_resolve` | **Auto** | When all 3 layer groups voted on AND all pass their thresholds |
 | `attempt_build` | `attempt_story` | **Auto** | When doubt threshold not met (collapse); increments attempt index |
-| `attempt_build` (attempt 2) | `finale_elegy` | **Auto** on collapse, or Manual after rejection | Song 3 → finale regardless of outcome |
+| `attempt_build` (attempt 2) | `finale_vote` | **Auto** on collapse, or Manual after rejection | Song 3 → finale regardless of outcome |
 | `attempt_resolve` | `attempt_story` | Manual | Performer triggers rejection + advance; increments attempt index |
-| `attempt_resolve` (attempt 2) | `finale_elegy` | Manual | After Song 3 rejection |
-| `finale_elegy` | `finale_assignment` | Manual | NPC announces cell claim |
-| `finale_assignment` | `finale_preview` | **Auto** or Manual | When assignment timer expires |
-| `finale_preview` | `finale_playback` | **Auto** or Manual | When all users lock in or timer expires |
-| `finale_playback` | `ended` | Manual | |
+| `attempt_resolve` (attempt 2) | `finale_vote` | Manual | After Song 3 rejection |
+| `finale_vote` | `finale_remix` | **Auto** or Manual | When all questions answered or timer expires |
+| `finale_remix` | `ended` | Manual | |
 
 ---
 
@@ -174,7 +170,7 @@ Read the sections above first, then load only the docs relevant to your task:
 | File | Contents |
 |------|----------|
 | [docs/song-building.md](docs/song-building.md) | Layer structure, staggered ordering, blind vote, doubt thresholds, collapse, rejection, fragment generation |
-| [docs/finale.md](docs/finale.md) | Finale sub-phases (elegy, assignment, preview, playback), quilt model, NPC system, V33FinaleState type |
+| [docs/finale.md](docs/finale.md) | Finale sub-phases (vote, remix), token pool model, NPC system, FinaleState type |
 | [docs/data-models.md](docs/data-models.md) | TypeScript interfaces (User, ShowState, ShowConfig, Fragment), Conductor commands & events, VoteResult |
 | [docs/client-routes.md](docs/client-routes.md) | /audience, /projector, /controller UI specs, visual identity system (colors, symbols) |
 | [docs/audio-engine.md](docs/audio-engine.md) | Musical design spec, track layout, playback modes, OSC protocol, environment variables |
@@ -186,7 +182,7 @@ Read the sections above first, then load only the docs relevant to your task:
 
 ```
 solo-show/
-├── ARCHITECTURE.md              # This document (V3 — index + core concepts)
+├── ARCHITECTURE.md              # This document (V3.4 — index + core concepts)
 ├── docs/                        # Detailed specifications (see index above)
 │   ├── song-building.md
 │   ├── finale.md
@@ -206,8 +202,9 @@ solo-show/
 │   ├── conductor.ts             # State machine (show phases + layer phases)
 │   ├── voting.ts                # Blind vote tallying
 │   ├── threshold.ts             # Doubt threshold check
-│   ├── quilt.ts                 # Quilt grid management (V3.3 — cell claiming, song choice, column advancement)
-│   ├── assignment.ts            # Cell assignment (auto round-robin / self-select claiming)
+│   ├── question-engine.ts       # Question delivery logic for vote phase
+│   ├── remix-engine.ts          # Token pool management and remix state
+│   ├── token-pool.ts            # Token generation from votes
 │   ├── fragments.ts             # Fragment generation from attempt results (for elegy display)
 │   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
 │   ├── npc.ts                   # NPC event-driven message logic
@@ -258,16 +255,13 @@ solo-show/
 │   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (audience)
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
-│   │   ├── ElegyGrid.tsx        # Full fragment wreckage display
-│   │   ├── QuiltGrid.tsx        # Quilt grid — assignment cell claiming + visual grid (V3.3)
-│   │   ├── QuiltPreview.tsx     # Preview phase — song choice cards + audio preview (V3.3)
-│   │   ├── QuiltRemix.tsx       # Playback phase — draggable quilt cells + playhead (V3.3)
+│   │   ├── ProjectorFinale.tsx  # Projector pentagon + token pool visualization
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
 │   └── controller/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
-│       ├── QuiltRemixControls.tsx # Quilt performer controls — reorder, swap, lock, mute, override (V3.3)
+│       ├── RemixController.tsx   # Controller UI for remix phase
 │       ├── NpcControls.tsx      # NPC line bank + manual fire
 │       ├── EmergencyControls.tsx # Audio panic, state export/import, reset
 │       └── MetricsPanel.tsx     # Telemetry dashboard
@@ -275,7 +269,7 @@ solo-show/
 ├── hooks/
 │   ├── useSocket.ts             # Socket.IO connection + reconnection
 │   ├── useShowState.ts          # Client-side state management
-│   ├── useQuilt.ts              # Quilt state management (V3.3 — quilt_state, cell events, playhead)
+│   ├── useRemixState.ts         # Remix state management hook
 │   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
 │   ├── useAudioPreview.ts       # In-browser audio preview playback
 │   ├── useIntrusiveThoughts.ts  # Audience: server-assigned thought subscription + dismiss
@@ -293,11 +287,11 @@ solo-show/
 │                                # Naming: preview-{songIndex}-{granularType}-{option}.mp3
 │
 ├── config/
-│   ├── default-show.json        # Layer groups, granular types, track bundles, thresholds, live seed, NPC messages
+│   ├── default-show.json        # Layer groups, granular types, track bundles, thresholds, live seed, finale config, NPC messages
 │   └── ableton-layout.json      # Track index mappings + Utility device config
 │
 ├── db/
-│   └── schema.sql               # SQLite schema (V3.3)
+│   └── schema.sql               # SQLite schema (V3.4)
 │
 ├── next.config.js
 ├── tsconfig.json
@@ -318,12 +312,11 @@ test('blind vote does not expose split during voting window', ...)
 test('doubt thresholds escalate per layer index', ...)
 test('completed attempt transitions to attempt_resolve for rejection', ...)
 test('unreached layers are marked as locked fragments in finale', ...)
-test('auto-assignment distributes users evenly across quilt cells', ...)
-test('self-select mode allows switching cells before timer expires', ...)
-test('undecided users are randomly assigned when assignment timer expires', ...)
-test('column advance triggers track changes at column boundary', ...)
-test('cell swap updates both cell positions in quilt grid', ...)
-test('performer lock prevents audience from moving cell', ...)
+test('vote generates token with correct song index', ...)
+test('question engine delivers questions in configured order', ...)
+test('token placement on pentagon node triggers track crossfade', ...)
+test('remix state tracks token positions across pentagon nodes', ...)
+test('loop-quantized crossfade resolves at next loop boundary', ...)
 ```
 
 ---
@@ -440,27 +433,44 @@ test('performer lock prevents audience from moving cell', ...)
 
 ## Appendix E: What Changed from V3.2 → V3.3
 
-**V3.3 "Quilt" migration complete.** See `V33-MIGRATION-PLAN.md` for implementation phases and `docs/finale.md` for the authoritative spec.
+**V3.3 "Quilt" — superseded by V3.4.** The quilt model (grid of cells, audience claims cells, playhead sweeps columns) has been fully replaced by the V3.4 "Token Pool" model. See Appendix F.
+
+---
+
+## Appendix F: What Changed from V3.3 → V3.4
+
+**V3.4 "Token Pool" migration complete.** See `docs/finale.md` for the authoritative spec.
 
 ### Removed Systems
-- **Live mix majority voting**: Per-type majority voting with recency tiebreak. Replaced by quilt cell model — each cell has one owner making a direct song choice.
-- **Per-type group assignment**: Audience assigned to granular type groups (~6-7 people per type). Replaced by cell claiming — each person claims a single cell (type × time slice).
-- **`finale_live_mix` phase**: Single playback phase. Replaced by `finale_preview` (private exploration) + `finale_playback` (quilt plays + remix).
-- **Fragment-based selection**: Audience chose between specific fragments (options from song-building layers). Replaced by song choice (0, 1, 2) — simpler, and grid position determines everything else.
-- **`finale_mix_events` DB table**: Replaced by `finale_quilt_cells` + `finale_remix_events`.
-- **`finale_assignments` DB table**: Cell claim is the assignment (captured in `finale_quilt_cells.owner_id`).
+- **Quilt grid**: 6 rows × N columns grid where each cell held a song choice. Replaced by token pool + pentagon nodes.
+- **Cell claiming / assignment**: Audience claimed individual grid cells. Replaced by question-driven vote phase that generates tokens automatically.
+- **Preview phase** (`finale_preview`): Private song exploration with lock-in. Removed — audience interaction is now through answering questions.
+- **Playback phase** (`finale_playback`): Quilt playback with column-sweeping playhead. Replaced by `finale_remix` — continuous remix with loop-quantized crossfades.
+- **Elegy phase** (`finale_elegy`): Fragment wreckage display. Removed.
+- **Assignment phase** (`finale_assignment`): Cell claiming phase. Removed.
+- **Column timing / column crossfade**: Column-boundary-driven track switching. Replaced by loop-quantized crossfades triggered by token placement.
+- **Audience remix config** (`QuiltConfig.audienceRemix`): Cell movement permissions. No longer applicable.
+- **Quilt arc system**: Automated sorting + energy scoring + staggered entry/exit. Removed.
+- **`conductor/quilt.ts`**, **`conductor/quilt-arc.ts`**, **`conductor/assignment.ts`**: Removed.
+- **`components/finale/QuiltGrid.tsx`**, **`QuiltPreview.tsx`**, **`QuiltRemix.tsx`**, **`ElegyGrid.tsx`**: Removed.
+- **`components/controller/QuiltRemixControls.tsx`**: Removed.
+- **`hooks/useQuilt.ts`**: Removed.
+- **`finale_quilt_cells`** and **`finale_remix_events`** DB tables: Removed.
 
 ### New Systems
-- **Quilt grid**: 6 rows (granular types) × N columns (derived from audience size). Each cell = one person's assignment. The loop plays left to right across columns.
-- **Cell claiming**: Audience self-selects a cell in the grid (row + column). One cell per person. Timer-based with random assignment for unclaimed users.
-- **Preview phase** (`finale_preview`): Room is silent. Audience privately explores song options (1/2/3) for their cell via phone audio previews. Lock-in button commits choice.
-- **Playback & remix** (`finale_playback`): Quilt plays through. Configurable audience remix (move cells, swap positions, optionally change song choice). Performer can reorder columns, swap cells, lock/mute/override.
-- **Audience remix config** (`QuiltConfig.audienceRemix`): Master toggle, scope (own cell vs any cell), cross-row swaps, cooldown, song change permission. Allows rapid playtesting without code changes.
-- **Column timing** (`QuiltConfig.columnTiming`): `'divided'` (all columns in one loop), `'half_loop'` (each column = half a loop), or `'full_loop'` (each column = one full loop).
-- **Column crossfade** (`GainConfig.crossfadeBeats`): Both outgoing and incoming tracks fade simultaneously via `fadeGain()`. In-flight fades are cancelled safely if a track reappears mid-fade.
+- **Question engine** (`conductor/question-engine.ts`): Delivers emotional questions to the audience during `finale_vote`. Each vote generates a token.
+- **Token pool** (`conductor/token-pool.ts`): Generates tokens from votes. Each token is colored by the song it references (song 0, 1, or 2).
+- **Remix engine** (`conductor/remix-engine.ts`): Manages token placement on pentagon nodes (granular types) and remix state.
+- **Pentagon visualization** (`components/finale/ProjectorFinale.tsx`): Projector displays pentagon of granular types with token pool.
+- **Remix controller** (`components/finale/RemixController.tsx`): Controller UI for the performer to arrange tokens during remix.
+- **Remix state hook** (`hooks/useRemixState.ts`): Client-side remix state management.
+- **Loop-quantized crossfades**: Track changes triggered by token placement, quantized to loop boundaries.
 
 ### Changed Systems
-- **Assignment**: From granular type group selection to quilt cell claiming. Same self-select/auto modes, but now claiming a specific grid position rather than a type group.
-- **NPC event keys**: Updated for new phases — `preview_start`, `first_playback` replace live-mix-specific events.
-- **Audio cues**: `quilt_playback_start`, `quilt_column_change`, `quilt_reorder`, `quilt_mute_cell`, `quilt_unmute_cell` replace live mix audio cues.
-- **Show phase state machine**: `finale_live_mix` → `finale_preview` + `finale_playback`.
+- **Show phase state machine**: `finale_elegy` → `finale_assignment` → `finale_preview` → `finale_playback` replaced by `finale_vote` → `finale_remix`.
+- **FinaleState type**: `V34FinaleState` renamed to `FinaleState`. Quilt state replaced by token pool + remix state.
+- **FinaleConfig type**: `V34FinaleConfig` renamed to `FinaleConfig`. Contains `vote: VotePhaseConfig` and `remix: RemixConfig` instead of `quilt: QuiltConfig`.
+- **ShowConfig**: `finale` key uses `FinaleConfig` directly (no more `finaleV34` intermediate key).
+- **ProjectorFinaleView**: `ProjectorFinaleV34View` renamed to `ProjectorFinaleView`.
+- **NPC event keys**: Updated for new phases — vote and remix events replace quilt-specific events.
+- **Audio cues**: Token placement and remix cues replace quilt playback/column/cell cues.

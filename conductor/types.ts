@@ -238,12 +238,8 @@ export type ShowPhase =
   | 'attempt_story'           // Story segment before song-building (phones dark)
   | 'attempt_build'           // Active song-building with audience voting
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
-  | 'finale_elegy'            // V3.3 — remove in Phase 8
-  | 'finale_assignment'       // V3.3 — remove in Phase 8
-  | 'finale_preview'          // V3.3 — remove in Phase 8
-  | 'finale_playback'         // V3.3 — remove in Phase 8
-  | 'finale_vote'             // V3.4: Audience emotional vote — phones active, tokens generated
-  | 'finale_remix'            // V3.4: Performer builds song from token pool — phones down
+  | 'finale_vote'             // Audience emotional vote — phones active, tokens generated
+  | 'finale_remix'            // Performer builds song from token pool — phones down
   | 'ended';                  // Show complete
 
 // ============================================================================
@@ -256,7 +252,7 @@ export interface ShowState {
   currentAttemptIndex: number;          // 0, 1, 2
   attempts: AttemptState[];             // Length 3, pre-initialized
   users: Map<UserId, User>;
-  finaleState: V33FinaleState | V34FinaleState | null;  // V3.3 or V3.4 finale state
+  finaleState: FinaleState | null;
   config: ShowConfig;
   version: number;                      // Increments on every state change
   lastUpdated: Timestamp;               // Wall clock time
@@ -280,8 +276,7 @@ export interface ShowConfig {
   granularTypes?: GranularType[];       // V3.2: master registry of granular types
   layerGroups?: LayerGroupConfig[];     // V3.2: layer group definitions (bones/flesh/spark)
   attempts: V32AttemptConfig[];         // Length 3; V3.2 structure with TrackBundles + liveSeed
-  finale: V33FinaleConfig;
-  finaleV34?: V34FinaleConfig;          // V3.4 finale config (when present, V3.4 phases are used)
+  finale: FinaleConfig;
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;             // Text displayed while waiting
@@ -330,7 +325,7 @@ export interface GainConfig {
   lockInFadeBeats: number;      // Beats to fade out the loser on lock-in (default 4)
   collapseFadeBeats: number;    // Beats to fade all attempt tracks on collapse (default 8)
   ceremonySwellBeats: number;   // Beats for ceremony fragment swell-in (default 4)
-  crossfadeBeats: number;       // Beats for quilt column crossfade — both fade-out and fade-in (default 1)
+  crossfadeBeats: number;       // Beats for node crossfade — both fade-out and fade-in (default 1)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
   stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
 }
@@ -358,20 +353,6 @@ export type AudioCue =
   | { type: 'live_seed_start'; attemptIndex: number; trackIndices: number[] }
   /** V3.2: mute live seed tracks on collapse or rejection */
   | { type: 'live_seed_stop'; attemptIndex: number; trackIndices: number[] }
-  /** V3.3: initial track setup when quilt playback starts */
-  | { type: 'quilt_playback_start'; initialColumn: number; trackIndices: number[]; jumpToBeatZero?: boolean }
-  /** V3.3: mute/unmute tracks at column boundary during playback. expectedTracks = all tracks that should be active for the new column (safety mute for anything else). */
-  | { type: 'quilt_column_change'; columnIndex: number; trackChanges: { granularType: string; muteTracks: number[]; unmuteTracks: number[] }[]; expectedTracks: number[] }
-  /** V3.3: column order changed (takes effect at next boundary) */
-  | { type: 'quilt_reorder'; newColumnOrder: number[] }
-  /** V3.3: mute a single cell's tracks */
-  | { type: 'quilt_mute_cell'; granularType: string; columnIndex: number; trackIndices: number[] }
-  /** V3.3: unmute a single cell's tracks */
-  | { type: 'quilt_unmute_cell'; granularType: string; columnIndex: number; trackIndices: number[] }
-  /** V3.3 Arc: staggered row group unmute during entry */
-  | { type: 'quilt_row_unmute'; granularTypes: string[]; trackIndices: number[] }
-  /** V3.3 Arc: staggered row group mute during exit */
-  | { type: 'quilt_row_mute'; granularTypes: string[]; trackIndices: number[] }
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }                   // Hard mute all — gain to 0, mute tracks
   | { type: 'master_panic' }            // Authoritative: query Ableton for all tracks, mute every non-foldable, reset gains
@@ -418,44 +399,6 @@ export type ConductorCommand =
   // Finale — Setup & NPC
   | { type: 'SETUP_FINALE' }
   | { type: 'SEND_NPC_MESSAGE'; message: string }
-
-  // Finale — Elegy opt-in (V3.3)
-  | { type: 'ELEGY_OPT_IN'; userId: UserId }
-
-  // Finale — Assignment (V3.3: cell claiming)
-  | { type: 'START_ASSIGNMENT' }
-  | { type: 'CLAIM_CELL'; userId: UserId; cellId: string }
-  | { type: 'RELEASE_CELL'; userId: UserId }
-  | { type: 'ASSIGNMENT_COMPLETE' }
-
-  // Finale — Preview (V3.3)
-  | { type: 'START_PREVIEW' }
-  | { type: 'SET_CELL_SONG'; userId: UserId; songIndex: number }
-  | { type: 'LOCK_IN_CHOICE'; userId: UserId }
-  | { type: 'PREVIEW_COMPLETE' }
-
-  // Finale — Playback & Remix (V3.3)
-  | { type: 'START_PLAYBACK' }
-  | { type: 'PREPARE_COLUMN_CROSSFADE' }
-  | { type: 'ADVANCE_QUILT_COLUMN' }
-  | { type: 'MOVE_CELL'; userId: UserId; targetCellId: string }
-  | { type: 'CHANGE_CELL_SONG'; userId: UserId; songIndex: number }
-  | { type: 'REORDER_COLUMN'; fromIndex: number; toIndex: number }
-  | { type: 'SWAP_CELLS'; cellIdA: string; cellIdB: string }
-  | { type: 'LOCK_CELL'; cellId: string }
-  | { type: 'UNLOCK_CELL'; cellId: string }
-  | { type: 'MUTE_CELL'; cellId: string }
-  | { type: 'UNMUTE_CELL'; cellId: string }
-  | { type: 'OVERRIDE_CELL_SONG'; cellId: string; songIndex: number }
-  | { type: 'FREEZE_COLUMN'; columnIndex: number }
-  | { type: 'UNFREEZE_COLUMN' }
-
-  // Finale — Arc (V3.3: automated playback arc)
-  | { type: 'ARC_ENTRY_ROW_GROUP'; groupIndex: number }
-  | { type: 'ARC_EXIT_ROW_GROUP'; groupIndex: number }
-  | { type: 'ARC_COMPLETE' }
-  | { type: 'TRIGGER_SORT' }
-  | { type: 'SIMULATE_FINALE_GRID'; audienceCount: number }
 
   // Audio
   | { type: 'AUDIO_TRANSPORT'; action: 'play' | 'stop' }
@@ -517,40 +460,7 @@ export type ConductorEvent =
   | { type: 'FINALE_SETUP_COMPLETE'; availableFragments: GranularFragment[]; allFragments: GranularFragment[] }
   | { type: 'NPC_MESSAGE'; message: string }
 
-  // Finale — Elegy opt-in (V3.3)
-  | { type: 'ELEGY_OPT_IN_RECEIVED'; userId: UserId; totalOptedIn: number }
-
-  // Finale — Assignment (V3.3: cell claiming)
-  | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select'; quiltDimensions: { rows: number; columns: number } }
-  | { type: 'CELL_CLAIMED'; cellId: string; userId: UserId }
-  | { type: 'CELL_RELEASED'; cellId: string }
-  | { type: 'ALL_CELLS_ASSIGNED' }
-
-  // Finale — Preview (V3.3)
-  | { type: 'PREVIEW_STARTED' }
-  | { type: 'CELL_SONG_SET'; cellId: string; songIndex: number }
-  | { type: 'USER_LOCKED_IN'; userId: UserId }
-
-  // Finale — Playback & Remix (V3.3)
-  | { type: 'PLAYBACK_STARTED'; quilt: Map<string, QuiltCell>; columnOrder: number[] }
-  | { type: 'PLAYHEAD_ADVANCED'; columnIndex: number }
-  | { type: 'CELL_MOVED'; cellId: string; fromPosition: { row: number; col: number }; toPosition: { row: number; col: number }; swappedWithCellId: string | null }
-  | { type: 'COLUMN_REORDERED'; columnOrder: number[] }
-  | { type: 'CELLS_SWAPPED'; cellIdA: string; cellIdB: string }
-  | { type: 'CELL_LOCKED'; cellId: string }
-  | { type: 'CELL_UNLOCKED'; cellId: string }
-  | { type: 'CELL_MUTED'; cellId: string }
-  | { type: 'CELL_UNMUTED'; cellId: string }
-  | { type: 'COLUMN_FROZEN'; columnIndex: number }
-  | { type: 'COLUMN_UNFROZEN' }
-
-  // Finale — Arc (V3.3)
-  | { type: 'ARC_PHASE_CHANGED'; arcPhase: ArcPhase }
-  | { type: 'ARC_ROW_GROUP_ENTERED'; granularTypes: string[] }
-  | { type: 'ARC_SORT_APPLIED'; passIndex: number; previousCells: Map<string, QuiltCell> }
-  | { type: 'ARC_ROW_GROUP_EXITED'; granularTypes: string[] }
-
-  // Finale — Vote phase (V3.4)
+  // Finale — Vote phase
   | { type: 'VOTE_STARTED' }
   | { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number; poolSize: number }
   | { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string }
@@ -684,8 +594,7 @@ export interface V32AttemptConfig {
  * Song-building produces LayerGroup results; those are decomposed into GranularFragments
  * (one per granular track per option).
  *
- * Note: V3.3 quilt phases use QuiltCell with songIndex instead of GranularFragment.
- * GranularFragment is still used for the elegy wreckage display.
+ * GranularFragment may be used for a future elegy display (see conductor/fragments.ts).
  */
 export interface GranularFragment {
   id: string;
@@ -710,176 +619,6 @@ export interface AuditionProgress {
   elapsedMs: number;            // Time since audition started
 }
 
-/** Finale config (V3.3). */
-export interface V33FinaleConfig {
-  assignmentMode: 'auto' | 'self_select';
-  bothOptionsSurvive: boolean;  // When true, both winner and loser tracks are available in elegy
-  audioPreviewPath: string;
-  npcMessages: NpcMessageConfig[];
-  quilt: QuiltConfig;
-}
-
-/** Quilt grid configuration (V3.3). */
-export interface QuiltConfig {
-  maxColumns: number;                              // Max time slices (default: 4, max: 8)
-  loopBars: number;                                // Total loop length (default: 8)
-  columnTiming: 'divided' | 'half_loop' | 'full_loop'; // 'divided' = all columns in one loop, 'half_loop' = each column is half a loop, 'full_loop' = one column per loop
-  overflowMode: 'spectator' | 'extend_loop';      // What happens when cells are full
-  previewTimerMs: number;                          // Preview phase duration (default: 20000)
-  assignmentTimerMs: number;                       // Assignment phase duration (default: 30000)
-  audienceRemix: AudienceRemixConfig;
-  arc?: ArcConfig;                                 // Automated playback arc (sorting + staggered entry/exit)
-}
-
-// ============================================================================
-// Quilt Arc — Automated Sorting & Playback (V3.3)
-// ============================================================================
-
-/** Sub-phases within finale_playback when arc is active. */
-export type ArcPhase = 'entry' | 'raw' | 'sorting' | 'sorted_playback' | 'exit' | 'complete';
-
-/** Sort algorithm mode, auto-selected by grid loop duration. */
-export type SortMode = 'single_pass' | 'multi_pass';
-
-/** Energy profile for a single song (chapter). */
-export interface SongEnergyProfile {
-  songIndex: number;
-  energy: number;                                  // 0.0–1.0 (Ambition=1.0, Love=0.5, Avoidance=0.2)
-}
-
-/** Which row groups unmute/mute together and when. */
-export interface RowGroupSchedule {
-  granularTypes: string[];                         // e.g., ['drums', 'bass']
-  abletonLoopIndex: number;                        // 0-based: which 8-bar boundary triggers this group
-}
-
-/** Full arc configuration — nested under QuiltConfig.arc. */
-export interface ArcConfig {
-  enabled: boolean;                                // Master toggle for automated arc
-  cellSizeThreshold: number;                       // Columns >= this use halfLoopBarsPerCell (default: 4)
-  fullLoopBarsPerCell: number;                     // Bars per cell below threshold (default: 8)
-  halfLoopBarsPerCell: number;                     // Bars per cell at/above threshold (default: 4)
-  sortModeThresholdBars: number;                   // Grid loop >= this uses single-pass sort (default: 16)
-  songEnergy: SongEnergyProfile[];                 // Energy per song
-  rowWeight: Record<string, number>;               // granularType → energy multiplier (0.0–1.0)
-  rowPriority: string[];                           // Consolidation order (highest priority first)
-  entrySchedule: RowGroupSchedule[];               // Row groups + timing for staggered entry
-  exitSchedule: RowGroupSchedule[];                // Row groups + timing for staggered exit
-  multiPassTargets: number[];                      // Energy targets per pass in multi-pass mode [0.5, 1.0, 0.2]
-  allowCrossRowSort: boolean;                      // Whether sort can move cells across rows
-  allowSortMuting: boolean;                        // Whether sort can mute cells in cool-down zone
-}
-
-/** Computed arc timeline — derived from grid dimensions + ArcConfig. */
-export interface ArcSchedule {
-  sortMode: SortMode;
-  barsPerCell: number;
-  gridLoopBars: number;                            // columns * barsPerCell
-  entryAbletonLoops: number;                       // 8-bar loops needed for staggered entry
-  sortedPassCount: number;                         // 1 (single-pass) or N (multi-pass)
-  exitAbletonLoops: number;                        // 8-bar loops needed for staggered exit
-}
-
-/** Runtime arc state — tracked during finale_playback. */
-export interface ArcState {
-  phase: ArcPhase;
-  schedule: ArcSchedule;
-  currentPassIndex: number;                        // 0-based, relevant in multi-pass
-  enteredRowGroups: number[];                      // Indices into entrySchedule that have entered
-  exitedRowGroups: number[];                       // Indices into exitSchedule that have exited
-  gridLoopsInPhase: number;                        // Grid loops completed in current arc phase
-}
-
-/** Audience interaction config during playback (V3.3). */
-export interface AudienceRemixConfig {
-  enabled: boolean;                                // Master toggle — false = audience watches only
-  scope: 'own_cell' | 'any_cell';                  // Can audience move only their own cell, or any cell?
-  allowCrossRowSwaps: boolean;                     // Whether audience can swap across rows (default: true)
-  cooldownLoops: number;                           // Loops between allowed audience cell moves (default: 1)
-  allowSongChange: boolean;                        // Can audience change cell's song during playback? (default: false)
-}
-
-/** A single cell in the quilt grid (V3.3). */
-export interface QuiltCell {
-  id: string;                                      // `${rowIndex}:${columnIndex}`
-  rowIndex: number;                                // Current row position (may change via swaps)
-  columnIndex: number;                             // Current column position (may change via swaps)
-  granularType: string;                            // Derived from current rowIndex
-  songIndex: number | null;                        // 0, 1, or 2 — the song choice. null if no choice yet.
-  chapter: Chapter | null;                         // Derived from songIndex
-  ownerId: UserId | null;                          // null if unclaimed
-}
-
-/** V3.3 show config — full V3.3 shape (for reference; ShowConfig is the active type). */
-export interface V33ShowConfig {
-  granularTypes: GranularType[];
-  layerGroups: LayerGroupConfig[];
-  layersPerAttempt: number;
-  attempts: V32AttemptConfig[];
-  finale: V33FinaleConfig;
-  timing: TimingConfig;
-  lobby: { waitingMessage: string };
-  seatIds: SeatId[];
-}
-
-/**
- * Finale state (V3.3 — "Quilt").
- * Phases: elegy → assignment → preview → playback.
- */
-export interface V33FinaleState {
-  phase: 'elegy' | 'assignment' | 'preview' | 'playback';
-
-  // Fragment availability (for elegy display — GranularFragments decomposed from layer group results)
-  availableFragments: GranularFragment[];
-  allFragments: GranularFragment[];
-
-  // Elegy opt-in
-  elegyOptedIn: Set<UserId>;                          // Users who opted in during elegy
-
-  // Quilt structure
-  quilt: {
-    rows: number;                                   // Always 6 (granular types)
-    columns: number;                                // Derived from audience size
-    barsPerCell: number;                            // Derived: loopBars / columns
-    cells: Map<string, QuiltCell>;                  // cellId -> cell state
-    columnOrder: number[];                          // Current column playback order
-    playheadColumn: number;                         // Current column index being played
-    loopCount: number;
-  };
-
-  // Song availability
-  availableSongs: number[];                         // Song indices available as choices (e.g., [0, 1, 2])
-
-  // Track resolution map
-  trackMap: Map<string, Map<number, number[]>>;       // granularType -> songIndex -> Ableton trackIndices
-
-  // Assignment state
-  assignment: {
-    mode: 'auto' | 'self_select';
-    timerRemaining: number | null;
-  };
-
-  // Preview state
-  preview: {
-    lockedInUsers: Set<UserId>;
-    timerRemaining: number | null;
-  };
-
-  // Remix state (both audience and performer)
-  remix: {
-    lockedCells: Set<string>;                       // cellIds the performer has locked
-    mutedCells: Set<string>;                        // cellIds the performer has muted
-    lastMoveByUser: Map<UserId, number>;            // userId -> loopCount of last move
-    liveTracksActive: string[];                     // Live performance track IDs
-    frozenColumn: number | null;                    // When set, playhead loops this single column
-    frozenActiveTracks: Map<string, number[]>;       // Tracks last activated for frozen column (for crossfade diff)
-  };
-
-  npc: { currentMessage: string | null };
-
-  // Arc state (automated playback arc — sorting + staggered entry/exit)
-  arc: ArcState | null;                             // null when arc disabled or before playback starts
-}
 
 // ============================================================================
 // Client Identity (stored in localStorage for reconnection)
@@ -919,42 +658,6 @@ export interface AudienceAttemptView {
 }
 
 /**
- * Finale view sent to audience clients during quilt phases (V3.3).
- * Personalized: includes own cell, own song choice, lock-in status.
- */
-export interface AudienceFinaleView {
-  finalePhase: V33FinaleState['phase'];
-  // Quilt grid (shared)
-  quilt: {
-    rows: number;
-    columns: number;
-    cells: Array<{ id: string; rowIndex: number; columnIndex: number; granularType: string; songIndex: number | null; chapter: Chapter | null; ownerId: UserId | null }>;
-    columnOrder: number[];
-    playheadColumn: number;
-  };
-  availableSongs: number[];
-  // Elegy opt-in
-  optedIn: boolean;                                    // Whether this user opted in during elegy
-  optInCount: number;                                  // Total opted-in users
-  // Arc state
-  arcPhase: ArcPhase | null;                           // Current arc sub-phase (null if arc disabled)
-  // Assignment
-  myCellId: string | null;                             // which cell the user owns
-  assignmentMode: 'auto' | 'self_select';
-  assignmentTimerRemaining: number | null;
-  // Preview
-  previewTimerRemaining: number | null;
-  lockedIn: boolean;                                   // whether user has locked in their song choice
-  audioPreviewPath: string;                            // base path for preview audio files
-  // Remix
-  lockedCells: string[];                               // performer-locked cell IDs
-  mutedCells: string[];                                // performer-muted cell IDs
-  audienceRemix: AudienceRemixConfig;                  // remix interaction config
-  // NPC
-  npcMessage: string | null;
-}
-
-/**
  * State received by audience clients via state_sync (personalized per user).
  * Must match the 'audience' case of filterStateForClient() in server/socket.ts.
  */
@@ -966,43 +669,13 @@ export interface AudienceClientState {
   version: number;
   currentAttemptIndex: number;
   currentAttempt: AudienceAttemptView | null;
-  myFinale: AudienceFinaleView | null;
+  myFinale: AudienceVoteView | AudienceRemixView | null;
   config: {
     lobby: { waitingMessage: string };
     chapters: ChapterConfig[];
     granularTypes: GranularType[];
     intrusiveThoughts: IntrusiveThoughtsConfig[];
   };
-}
-
-/**
- * Finale state sent to projector (public — no per-user data) (V3.3).
- */
-export interface ProjectorFinaleView {
-  finalePhase: V33FinaleState['phase'];
-  availableFragments: GranularFragment[];
-  allFragments: GranularFragment[];
-  // Quilt grid
-  quilt: {
-    rows: number;
-    columns: number;
-    cells: Array<{ id: string; rowIndex: number; columnIndex: number; granularType: string; songIndex: number | null; chapter: Chapter | null; ownerId: UserId | null }>;
-    columnOrder: number[];
-    playheadColumn: number;
-    loopCount: number;
-  };
-  availableSongs: number[];
-  // Arc state
-  arcPhase: ArcPhase | null;                           // Current arc sub-phase (null if arc disabled)
-  arcPassIndex: number | null;                         // Current sort pass (multi-pass mode)
-  // Assignment
-  assignmentMode: 'auto' | 'self_select';
-  assignmentTimerRemaining: number | null;
-  // Remix
-  lockedCells: string[];
-  mutedCells: string[];
-  // NPC
-  npcMessage: string | null;
 }
 
 /**
@@ -1027,7 +700,7 @@ export interface ProjectorClientState {
 
 /**
  * Serialized token pool counts for transport over the wire and event payloads.
- * Maps are used internally in V34FinaleState; TokenPool is the wire-safe form.
+ * Maps are used internally in FinaleState; TokenPool is the wire-safe form.
  */
 export interface TokenPool {
   available: Map<string, number>;  // chapterId → remaining available count
@@ -1067,7 +740,7 @@ export interface ActiveNode {
  * Finale state (V3.4 — "Token Pool").
  * Phases: finale_vote → finale_remix.
  */
-export interface V34FinaleState {
+export interface FinaleState {
   phase: 'vote' | 'remix';
 
   // Vote phase tracking
@@ -1129,7 +802,7 @@ export interface RemixConfig {
 }
 
 /** Finale configuration (V3.4). */
-export interface V34FinaleConfig {
+export interface FinaleConfig {
   bothOptionsSurvive: boolean;
   audioPreviewPath: string;
   npcMessages: NpcMessageConfig[];
@@ -1185,7 +858,7 @@ export interface AudienceRemixView {
  * Finale state sent to projector clients during V3.4 finale phases (public — no per-user data).
  * Used for both finale_vote (pool fill visualization) and finale_remix (pentagon nodes + pool).
  */
-export interface ProjectorFinaleV34View {
+export interface ProjectorFinaleView {
   finalePhase: 'vote' | 'remix';
   // Pool state (serialized for JSON transport)
   pool: {

@@ -60,24 +60,18 @@ function createTestConfig(
       makeAttemptConfig('avoidance', layerCount, thresholds),
     ],
     finale: {
-      assignmentMode: 'auto',
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
-      quilt: {
-        maxColumns: 4,
-        loopBars: 8,
-        columnTiming: 'divided' as const,
-        overflowMode: 'spectator' as const,
-        previewTimerMs: 20000,
-        assignmentTimerMs: 30000,
-        audienceRemix: {
-          enabled: true,
-          scope: 'own_cell' as const,
-          allowCrossRowSwaps: true,
-          cooldownLoops: 1,
-          allowSongChange: false,
-        },
+      vote: {
+        questions: [{ text: 'What do you feel?' }],
+        shuffleQuestions: false,
+        targetPoolSize: 10,
+        questionDelayMs: 3000,
+        revealPoolOnProjector: true,
+      },
+      remix: {
+        audienceInteraction: false,
       },
     },
     granularTypes: [
@@ -172,7 +166,7 @@ describe('Show Phase Transitions', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    for (let i = 0; i < 17; i++) {
+    for (let i = 0; i < 13; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -189,10 +183,6 @@ describe('Show Phase Transitions', () => {
       'attempt_story',       // attempt 2
       'attempt_build',       // attempt 2
       'attempt_resolve',     // attempt 2
-      'finale_elegy',
-      'finale_assignment',
-      'finale_preview',
-      'finale_playback',
       'finale_vote',
       'finale_remix',
       'ended',
@@ -1226,10 +1216,9 @@ describe('V3.2: 3 Bundled Layer Groups', () => {
 
 describe('V3.4 Finale Phases', () => {
   function createV34TestConfig(): ShowConfig {
-    const base = createTestConfig();
     return {
-      ...base,
-      finaleV34: {
+      ...createTestConfig(),
+      finale: {
         bothOptionsSurvive: true,
         audioPreviewPath: '/audio/previews',
         npcMessages: [],

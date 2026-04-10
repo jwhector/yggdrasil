@@ -9,7 +9,7 @@
 
 import type {
   UserId,
-  V34FinaleState,
+  FinaleState,
   VotePhaseConfig,
   QuestionConfig,
   ConductorEvent,
@@ -79,11 +79,11 @@ export function shouldCapPool(
  * (a few extra tokens don't break anything).
  */
 export function processEmotion(
-  state: V34FinaleState,
+  state: FinaleState,
   userId: UserId,
   chapterId: string,
   questionIndex: number,
-): { state: V34FinaleState; events: ConductorEvent[] } {
+): { state: FinaleState; events: ConductorEvent[] } {
   const events: ConductorEvent[] = [];
 
   // Create new token
@@ -109,7 +109,7 @@ export function processEmotion(
   const currentCount = updatedAnswered.get(userId) ?? 0;
   updatedAnswered.set(userId, currentCount + 1);
 
-  const updatedState: V34FinaleState = {
+  const updatedState: FinaleState = {
     ...state,
     pool: {
       ...state.pool,

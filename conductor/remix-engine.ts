@@ -12,7 +12,7 @@
  */
 
 import type {
-  V34FinaleState,
+  FinaleState,
   ConductorEvent,
   QueuedToken,
   ActiveNode,
@@ -30,11 +30,11 @@ import { consumeToken, returnToken, isPoolEmpty, getTotalRemaining } from './tok
  * In audience interaction mode with instant=true, activates immediately.
  */
 export function queueToken(
-  state: V34FinaleState,
+  state: FinaleState,
   granularType: string,
   chapterId: string,
   instant?: boolean,
-): { state: V34FinaleState; events: ConductorEvent[] } {
+): { state: FinaleState; events: ConductorEvent[] } {
   const events: ConductorEvent[] = [];
 
   // Consume a token from the pool
@@ -92,9 +92,9 @@ export function queueToken(
  * Cancel the last queued token for a granular type, returning it to the pool.
  */
 export function cancelQueue(
-  state: V34FinaleState,
+  state: FinaleState,
   granularType: string,
-): { state: V34FinaleState; events: ConductorEvent[] } {
+): { state: FinaleState; events: ConductorEvent[] } {
   const typeQueue = state.queue.get(granularType);
   if (!typeQueue || typeQueue.length === 0) {
     return { state, events: [] }; // No-op
@@ -146,8 +146,8 @@ export function cancelQueue(
  * 3. Check if pool is empty and no tokens are active or queued
  */
 export function processLoopBoundary(
-  state: V34FinaleState,
-): { state: V34FinaleState; events: ConductorEvent[] } {
+  state: FinaleState,
+): { state: FinaleState; events: ConductorEvent[] } {
   const events: ConductorEvent[] = [];
   const updatedActive = new Map(state.active);
   const updatedQueue = new Map(state.queue);
@@ -306,7 +306,7 @@ export function processLoopBoundary(
     }
   }
 
-  const updatedState: V34FinaleState = {
+  const updatedState: FinaleState = {
     ...state,
     pool: {
       ...state.pool,
@@ -339,8 +339,8 @@ export function processLoopBoundary(
  * When disabling: persistent tokens are marked non-persistent (they'll finish their current loop).
  */
 export function toggleAudienceInteraction(
-  state: V34FinaleState,
-): { state: V34FinaleState; events: ConductorEvent[] } {
+  state: FinaleState,
+): { state: FinaleState; events: ConductorEvent[] } {
   const newMode = !state.audienceInteraction;
   const updatedActive = new Map(state.active);
 
@@ -387,11 +387,11 @@ export function resolveTrack(
  * If there's an active node, spend it immediately and crossfade.
  */
 function activateInstant(
-  state: V34FinaleState,
+  state: FinaleState,
   granularType: string,
   chapterId: string,
   tokenId: string,
-): { state: V34FinaleState; events: ConductorEvent[] } {
+): { state: FinaleState; events: ConductorEvent[] } {
   const events: ConductorEvent[] = [];
   const updatedActive = new Map(state.active);
   let updatedTokens = [...state.pool.tokens];
@@ -487,7 +487,7 @@ function activateInstant(
  * Convention: chapter_0 → 0, chapter_1 → 1, chapter_2 → 2.
  * Falls back to parsing the numeric suffix from the chapterId.
  */
-function chapterToSongIndex(chapterId: string, state: V34FinaleState): number {
+function chapterToSongIndex(chapterId: string, state: FinaleState): number {
   // Check if any granular type in the trackMap has this as a direct songIndex key
   // The trackMap is granularType → songIndex → tracks, so we need to find which songIndex
   // corresponds to this chapter. For now, parse the chapter suffix.

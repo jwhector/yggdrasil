@@ -43,23 +43,18 @@ function createTestConfig(): ShowConfig {
     layersPerAttempt: 3,
     attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
-      assignmentMode: 'auto',
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
-      quilt: {
-        maxColumns: 4,
-        loopBars: 8,
-        overflowMode: 'spectator' as const,
-        previewTimerMs: 20000,
-        assignmentTimerMs: 30000,
-        audienceRemix: {
-          enabled: true,
-          scope: 'own_cell' as const,
-          allowCrossRowSwaps: true,
-          cooldownLoops: 1,
-          allowSongChange: false,
-        },
+      vote: {
+        questions: [],
+        shuffleQuestions: false,
+        targetPoolSize: 120,
+        questionDelayMs: 3000,
+        revealPoolOnProjector: true,
+      },
+      remix: {
+        audienceInteraction: false,
       },
     },
     timing: {
@@ -154,53 +149,41 @@ describe('loadBackup', () => {
     expect(loaded.finaleState).toBeNull();
   });
 
-  test('preserves finaleState Maps/Sets (V3.3 quilt cells, trackMap, preview, remix)', () => {
+  test('preserves finaleState Maps (V3.4 token pool)', () => {
     const state = createInitialState(createTestConfig(), 'show-1');
     state.finaleState = {
-      phase: 'assignment',
-      availableFragments: [],
-      allFragments: [],
-      quilt: {
-        rows: 6,
-        columns: 2,
-        barsPerCell: 4,
-        cells: new Map([
-          ['0:0', { id: '0:0', rowIndex: 0, columnIndex: 0, granularType: 'bass', songIndex: 1, chapter: 'love' as const, ownerId: 'u1' }],
-        ]),
-        columnOrder: [0, 1],
-        playheadColumn: 0,
-        loopCount: 0,
+      phase: 'vote',
+      vote: {
+        questionsAnsweredByUser: new Map([['u1', 3]]),
+        maxQuestionsPerPerson: 5,
+        poolCapReached: false,
       },
-      availableSongs: [0, 1, 2],
-      trackMap: new Map([['bass', new Map([[0, 10], [1, 11]])]]),
-      assignment: { mode: 'auto', timerRemaining: null },
-      preview: { lockedInUsers: new Set(['u1']), timerRemaining: null },
-      remix: {
-        lockedCells: new Set(['0:0']),
-        mutedCells: new Set(),
-        lastMoveByUser: new Map([['u1', 2]]),
-        liveTracksActive: [],
-        frozenColumn: null,
-        frozenActiveTracks: new Map(),
+      pool: {
+        tokens: [],
+        availableByChapter: new Map([['ambition', 10], ['love', 8]]),
+        totalByChapter: new Map([['ambition', 10], ['love', 10]]),
+        totalRemaining: 18,
+        targetPoolSize: 120,
       },
+      queue: new Map([['bass', []]]),
+      active: new Map(),
+      audienceInteraction: false,
+      trackMap: new Map([['bass', new Map([[0, [10, 11]], [1, [12, 13]]])]]),
+      loopCount: 0,
+      loopProgress: 0,
       npc: { currentMessage: null },
-      elegyOptedIn: new Set(['u1']),
-      arc: null,
-    };
+    } as any;
 
     const loaded = loadBackup(createBackup(state, TEST_BACKUP_DIR));
 
-    const fs = loaded.finaleState!;
-    expect(fs.quilt.cells).toBeInstanceOf(Map);
-    expect(fs.quilt.cells.get('0:0')?.songIndex).toBe(1);
+    const fs = loaded.finaleState! as any;
+    expect(fs.vote.questionsAnsweredByUser).toBeInstanceOf(Map);
+    expect(fs.vote.questionsAnsweredByUser.get('u1')).toBe(3);
+    expect(fs.pool.availableByChapter).toBeInstanceOf(Map);
+    expect(fs.pool.availableByChapter.get('ambition')).toBe(10);
     expect(fs.trackMap).toBeInstanceOf(Map);
-    expect(fs.trackMap.get('bass')!.get(1)).toBe(11);
-    expect(fs.preview.lockedInUsers).toBeInstanceOf(Set);
-    expect(fs.preview.lockedInUsers.has('u1')).toBe(true);
-    expect(fs.remix.lockedCells).toBeInstanceOf(Set);
-    expect(fs.remix.lockedCells.has('0:0')).toBe(true);
-    expect(fs.remix.lastMoveByUser).toBeInstanceOf(Map);
-    expect(fs.remix.lastMoveByUser.get('u1')).toBe(2);
+    expect(fs.trackMap.get('bass')!.get(1)).toEqual([12, 13]);
+    expect(fs.queue).toBeInstanceOf(Map);
   });
 
   test('throws for non-existent file', () => {

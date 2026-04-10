@@ -11,7 +11,7 @@ import {
   shouldCapPool,
   processEmotion,
 } from '../question-engine';
-import type { V34FinaleState, VotePhaseConfig } from '../types';
+import type { FinaleState, VotePhaseConfig } from '../types';
 
 // ============================================================================
 // Test Helpers
@@ -34,7 +34,7 @@ function makeVoteConfig(overrides?: Partial<VotePhaseConfig>): VotePhaseConfig {
   };
 }
 
-function makeV34FinaleState(overrides?: Partial<V34FinaleState>): V34FinaleState {
+function makeFinaleState(overrides?: Partial<FinaleState>): FinaleState {
   return {
     phase: 'vote',
     vote: {
@@ -164,7 +164,7 @@ describe('question-engine: shouldCapPool', () => {
 
 describe('question-engine: processEmotion', () => {
   test('creates a token and emits EMOTION_RECEIVED', () => {
-    const state = makeV34FinaleState();
+    const state = makeFinaleState();
     const result = processEmotion(state, 'user-1', 'chapter_0', 0);
 
     expect(result.state.pool.tokens).toHaveLength(1);
@@ -180,7 +180,7 @@ describe('question-engine: processEmotion', () => {
   });
 
   test('tracks questions answered per user independently', () => {
-    let state = makeV34FinaleState();
+    let state = makeFinaleState();
 
     // User A answers twice
     state = processEmotion(state, 'user-a', 'chapter_0', 0).state;
@@ -194,7 +194,7 @@ describe('question-engine: processEmotion', () => {
   });
 
   test('accepts answers that arrive after cap (grace period)', () => {
-    const state = makeV34FinaleState({
+    const state = makeFinaleState({
       pool: {
         tokens: Array.from({ length: 120 }, (_, i) => ({
           id: `token-${i}`,
@@ -223,7 +223,7 @@ describe('question-engine: processEmotion', () => {
   });
 
   test('does not emit POOL_CAP_REACHED if already capped', () => {
-    const state = makeV34FinaleState({
+    const state = makeFinaleState({
       vote: {
         questionsAnsweredByUser: new Map(),
         maxQuestionsPerPerson: 3,

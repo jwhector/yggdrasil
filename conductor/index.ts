@@ -24,40 +24,6 @@ export { checkThreshold } from './threshold';
 export { generateFragments, generateGranularFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
 
-// Export assignment functions (V3.3: cell claiming)
-export {
-  autoAssignCells,
-  getConnectedUserIds,
-  getUnclaimedUsers,
-} from './assignment';
-
-// Export quilt functions (V3.3)
-export {
-  createQuiltGrid,
-  deriveColumnCount,
-  claimCell,
-  releaseCell,
-  setCellSong,
-  lockInChoice,
-  assignDefaultSongs,
-  assignRemainingUsers,
-  moveCell,
-  changeCellSong,
-  reorderColumn,
-  swapCells,
-  lockCell,
-  unlockCell,
-  muteCell,
-  unmuteCell,
-  overrideCellSong,
-  resolveTrack,
-  buildTrackMap,
-  advancePlayhead,
-  deriveAvailableSongs,
-  findUserCell,
-} from './quilt';
-export type { QuiltGrid, QuiltResult } from './quilt';
-
 // Export NPC functions
 export { getNpcMessage } from './npc';
 

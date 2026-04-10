@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## 2026-04-09 — V3.4 Migration Phase 8: Cleanup & Documentation
+
+Remove all V3.3 "Quilt" finale code and update documentation to V3.4 "Token Pool" model.
+
+### Deleted files
+- `conductor/quilt.ts`, `conductor/quilt-arc.ts`, `conductor/assignment.ts` — V3.3 quilt logic
+- `conductor/__tests__/quilt.test.ts`, `conductor/__tests__/quilt-arc.test.ts`, `conductor/__tests__/assignment.test.ts` — V3.3 tests
+- `components/finale/QuiltGrid.tsx`, `QuiltPreview.tsx`, `QuiltRemix.tsx`, `ElegyGrid.tsx` — V3.3 UI
+- `components/controller/QuiltRemixControls.tsx` — V3.3 controller panel
+- `hooks/useQuilt.ts` — V3.3 quilt state hook
+
+### Type changes (`conductor/types.ts`)
+- Removed `ShowPhase` values: `finale_elegy`, `finale_assignment`, `finale_preview`, `finale_playback`
+- Removed types: `V33FinaleState`, `V33FinaleConfig`, `QuiltConfig`, `QuiltCell`, `ArcConfig`, `ArcState`, `ArcSchedule`, `ArcPhase`, `SortMode`, `SongEnergyProfile`, `RowGroupSchedule`, `AudienceRemixConfig`
+- Removed V3.3 `AudioCue` variants, `ConductorCommand` variants, `ConductorEvent` variants
+- Renamed: `V34FinaleState` → `FinaleState`, `V34FinaleConfig` → `FinaleConfig`, `ProjectorFinaleV34View` → `ProjectorFinaleView`
+- `ShowConfig.finale` is now `FinaleConfig` (single key, no more `finaleV34`)
+
+### Modified files
+- **`conductor/conductor.ts`** — removed all V3.3 command handlers and phase transitions (2723 → 1529 lines)
+- **`conductor/index.ts`** — removed quilt/assignment/arc exports
+- **`server/socket.ts`** — removed V3.3 socket handlers (`claim_cell`, `release_cell`, `set_song`, `lock_in`, `move_cell`, `change_song`), quilt broadcast interval, V3.3 `filterStateForClient` branches
+- **`server/audio-router.ts`** — removed V3.3 quilt audio cue handlers
+- **`lib/serialization.ts`** — rewritten: single `SerializedFinaleState` for V3.4, removed V3.3 serialization paths
+- **`app/projector/page.tsx`** — removed V3.3 phase cases and unused imports
+- **`app/controller/page.tsx`** — removed `QuiltRemixControls`, `SimulateFinaleSection`, consolidated finale phase sets
+- **`components/controller/MetricsPanel.tsx`** — replaced V3.3 quilt metrics with V3.4 pool/queue/active metrics
+- **`components/controller/ShowControls.tsx`** — removed V3.3 phases from jump-to-phase UI
+- **`components/projector/useProjectorState.ts`** — updated `finale_playback` → `finale_remix`
+
+### Documentation updates
+- `ARCHITECTURE.md`, `docs/finale.md`, `docs/data-models.md`, `docs/server-protocol.md`, `docs/client-routes.md`, `docs/audio-engine.md` — rewritten for V3.4
+- `DECISIONS.md` — R24–R37 marked superseded; R38–R42 added for V3.4
+- `CLAUDE.md` — updated phase state machine, project structure, patterns
+
+### Test count: **322** (13 suites). Removed V3.3 quilt/arc/timing tests; all remaining tests pass.
+
+---
+
 ## 2026-04-09 — V3.4 Migration Phase 7: Audio Router & OSC
 
 Map V3.4 remix audio cues to OSC commands in `server/audio-router.ts`.

@@ -51,23 +51,18 @@ function createTestConfig(): ShowConfig {
     ],
     attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
     finale: {
-      assignmentMode: 'auto',
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
-      quilt: {
-        maxColumns: 4,
-        loopBars: 8,
-        overflowMode: 'spectator' as const,
-        previewTimerMs: 20000,
-        assignmentTimerMs: 30000,
-        audienceRemix: {
-          enabled: true,
-          scope: 'own_cell' as const,
-          allowCrossRowSwaps: true,
-          cooldownLoops: 1,
-          allowSongChange: false,
-        },
+      vote: {
+        questions: [],
+        shuffleQuestions: false,
+        targetPoolSize: 120,
+        questionDelayMs: 3000,
+        revealPoolOnProjector: true,
+      },
+      remix: {
+        audienceInteraction: false,
       },
     },
     timing: {
@@ -171,67 +166,53 @@ describe('State persistence', () => {
     db.close();
   });
 
-  test('preserves finaleState Maps/Sets (V3.3 quilt cells, trackMap, preview, remix)', () => {
+  test('preserves finaleState Maps (V3.4 token pool)', () => {
     const db = createPersistence(TEST_DB_PATH);
     const state = createInitialState(createTestConfig(), 'show-1');
 
     state.finaleState = {
-      phase: 'assignment',
-      availableFragments: [],
-      allFragments: [],
-      quilt: {
-        rows: 6,
-        columns: 2,
-        barsPerCell: 4,
-        cells: new Map([
-          ['0:0', { id: '0:0', rowIndex: 0, columnIndex: 0, granularType: 'bass', songIndex: 1, chapter: 'love', ownerId: 'user-1' }],
-          ['1:0', { id: '1:0', rowIndex: 1, columnIndex: 0, granularType: 'drums', songIndex: null, chapter: null, ownerId: null }],
-        ]),
-        columnOrder: [0, 1],
-        playheadColumn: 0,
-        loopCount: 0,
+      phase: 'vote',
+      vote: {
+        questionsAnsweredByUser: new Map([['user-1', 3], ['user-2', 1]]),
+        maxQuestionsPerPerson: 5,
+        poolCapReached: false,
       },
-      availableSongs: [0, 1, 2],
+      pool: {
+        tokens: [],
+        availableByChapter: new Map([['ambition', 10], ['love', 8]]),
+        totalByChapter: new Map([['ambition', 10], ['love', 10]]),
+        totalRemaining: 18,
+        targetPoolSize: 120,
+      },
+      queue: new Map([['bass', []]]),
+      active: new Map(),
+      audienceInteraction: false,
       trackMap: new Map([
-        ['bass', new Map([[0, 10], [1, 11], [2, 12]])],
-        ['drums', new Map([[0, 20], [1, 21], [2, 22]])],
+        ['bass', new Map([[0, [10, 11]], [1, [12, 13]]])],
+        ['drums', new Map([[0, [20]], [1, [21]]])],
       ]),
-      assignment: { mode: 'auto', timerRemaining: null },
-      preview: { lockedInUsers: new Set(['user-1']), timerRemaining: 15000 },
-      remix: {
-        lockedCells: new Set(['0:0']),
-        mutedCells: new Set(),
-        lastMoveByUser: new Map([['user-1', 3]]),
-        liveTracksActive: [],
-        frozenColumn: null,
-        frozenActiveTracks: new Map(),
-      },
+      loopCount: 0,
+      loopProgress: 0,
       npc: { currentMessage: 'Try again' },
-      elegyOptedIn: new Set(['user-1']),
-      arc: null,
-    };
+    } as any;
 
     db.saveState(state);
     const loaded = db.loadState('show-1');
 
     expect(loaded!.finaleState).not.toBeNull();
-    const fs = loaded!.finaleState!;
-    // Quilt cells Map
-    expect(fs.quilt.cells).toBeInstanceOf(Map);
-    expect(fs.quilt.cells.get('0:0')?.songIndex).toBe(1);
-    expect(fs.quilt.cells.get('0:0')?.ownerId).toBe('user-1');
+    const fs = loaded!.finaleState! as any;
+    // Vote questionsAnsweredByUser Map
+    expect(fs.vote.questionsAnsweredByUser).toBeInstanceOf(Map);
+    expect(fs.vote.questionsAnsweredByUser.get('user-1')).toBe(3);
+    // Pool availableByChapter Map
+    expect(fs.pool.availableByChapter).toBeInstanceOf(Map);
+    expect(fs.pool.availableByChapter.get('ambition')).toBe(10);
     // Track map (nested Map)
     expect(fs.trackMap).toBeInstanceOf(Map);
     expect(fs.trackMap.get('bass')).toBeInstanceOf(Map);
-    expect(fs.trackMap.get('bass')!.get(1)).toBe(11);
-    // Preview Set
-    expect(fs.preview.lockedInUsers).toBeInstanceOf(Set);
-    expect(fs.preview.lockedInUsers.has('user-1')).toBe(true);
-    // Remix Sets and Map
-    expect(fs.remix.lockedCells).toBeInstanceOf(Set);
-    expect(fs.remix.lockedCells.has('0:0')).toBe(true);
-    expect(fs.remix.lastMoveByUser).toBeInstanceOf(Map);
-    expect(fs.remix.lastMoveByUser.get('user-1')).toBe(3);
+    expect(fs.trackMap.get('bass')!.get(1)).toEqual([12, 13]);
+    // Queue Map
+    expect(fs.queue).toBeInstanceOf(Map);
 
     db.close();
   });

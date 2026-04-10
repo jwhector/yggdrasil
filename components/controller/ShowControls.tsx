@@ -17,7 +17,6 @@ interface ShowControlsProps {
 
 const ALL_PHASES: ShowPhase[] = [
   'lobby', 'opener', 'attempt_story', 'attempt_build', 'attempt_resolve',
-  'finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback',
   'finale_vote', 'finale_remix', 'ended',
 ];
 
@@ -27,12 +26,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_story: 'Story (attempt_story)',
   attempt_build: 'Song Building (attempt_build)',
   attempt_resolve: 'Resolve (attempt_resolve)',
-  finale_elegy: 'Finale — Elegy',
-  finale_assignment: 'Finale — Assignment',
-  finale_preview: 'Finale — Preview',
-  finale_playback: 'Finale — Playback',
-  finale_vote: 'Finale — Vote',      // V3.4
-  finale_remix: 'Finale — Remix',    // V3.4
+  finale_vote: 'Finale — Vote',
+  finale_remix: 'Finale — Remix',
   ended: 'Ended',
 };
 

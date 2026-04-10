@@ -1,7 +1,7 @@
 # Audio Engine, Musical Design & Ableton Integration
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
-> **Related:** [song-building.md](song-building.md) (collapse/rejection audio), [finale.md](finale.md) (quilt playback audio behavior)
+> **Related:** [song-building.md](song-building.md) (collapse/rejection audio), [finale.md](finale.md) (remix playback audio behavior)
 
 ---
 
@@ -111,13 +111,13 @@ Each fragment clip must be exported as a standalone audio file for in-browser pr
 - Rejection effect on return track activates (TBD: distinct from collapse effect — configurable)
 - After effect completes, all tracks for this attempt are muted
 
-**Finale — Quilt playback (V3.3):**
-- When playback starts: unmute initial column tracks per granular type (via `quilt_playback_start` cue)
-- At each column boundary: mute/unmute tracks per type based on cell song choices (via `quilt_column_change` cue)
-- Column reorder: no immediate audio change — takes effect at next column boundary (via `quilt_reorder` cue)
-- Performer mute/unmute: per-cell track control (via `quilt_mute_cell` / `quilt_unmute_cell` cues)
-- Track resolution: `trackMap[granularType][songIndex] → trackIndex` (config-driven lookup)
-- Crossfade at column boundaries: both outgoing and incoming tracks fade via `fadeGain()` over `GainConfig.crossfadeBeats` (default: 1 beat). In-flight fades are cancelled safely if a track reappears mid-fade.
+**Finale — Token Pool Remix (V3.4):**
+- `remix_start`: starts transport, unmutes initial tracks for active nodes
+- `node_unmute`: unmutes tracks for a newly activated node. Track resolution: `trackMap[granularType][songIndex] → trackIndices` (array of Ableton track indices, config-driven lookup)
+- `node_crossfade`: beat-locked crossfade between old and new tracks on a node when the song assignment changes. Uses Utility device Gain parameter via OSC, beat-locked via timing engine with sub-beat interpolation (`stepsPerBeat`). In-flight fades are cancelled safely if a track reappears mid-fade.
+- `node_instant_crossfade`: immediate crossfade (bypasses beat-locking) for audience interaction mode where latency matters more than musical precision
+- `node_fade_out`: fades out and mutes a cleared node's tracks when a node is deactivated
+- Track resolution: `trackMap[granularType][songIndex] → trackIndices` (config-driven lookup, same as song-building but resolved per-node rather than per-layer-group)
 
 ### OSC Protocol
 
@@ -186,9 +186,8 @@ MOCK_BPM=120
 
 COLLAPSE_ANIMATION_MS=5000
 
-# Finale — Assignment (V3.3)
-FINALE_ASSIGNMENT_MODE=auto
-FINALE_ASSIGNMENT_TIMER_MS=30000
+# Finale
+FINALE_VOTE_TIMER_MS=30000
 
 # Audio Previews
 AUDIO_PREVIEW_PATH=/audio/previews

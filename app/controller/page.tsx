@@ -16,16 +16,13 @@ import { useShowState } from '@/hooks/useShowState';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
-import { QuiltRemixControls } from '@/components/controller/QuiltRemixControls';
-import { NpcControls } from '@/components/controller/NpcControls';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
 import { RemixController } from '@/components/finale/RemixController';
 
 const SHOW_ID = 'default-show';
 const PASSCODE = process.env.NEXT_PUBLIC_CONTROLLER_PASSCODE ?? '';
 
-const FINALE_PHASES = new Set(['finale_elegy', 'finale_assignment', 'finale_preview', 'finale_playback']);
-const V34_FINALE_PHASES = new Set(['finale_vote', 'finale_remix']);
+const FINALE_PHASES = new Set(['finale_vote', 'finale_remix']);
 
 // ---------------------------------------------------------------------------
 // Entry point — passcode gate
@@ -71,7 +68,6 @@ function ControllerContent() {
   const { phase } = fullState;
   const isAttemptBuild = phase === 'attempt_build';
   const isFinale = FINALE_PHASES.has(phase);
-  const isV34Finale = V34_FINALE_PHASES.has(phase);
 
   return (
     <main style={styles.container}>
@@ -90,21 +86,10 @@ function ControllerContent() {
         <VotingControls fullState={fullState} sendCommand={sendCommand} />
       )}
 
-      {/* V3.3 Finale controls */}
+      {/* Finale controls */}
       {isFinale && (
-        <>
-          <QuiltRemixControls fullState={fullState} sendCommand={sendCommand} />
-          <NpcControls fullState={fullState} sendCommand={sendCommand} />
-        </>
-      )}
-
-      {/* V3.4 Finale controls */}
-      {isV34Finale && (
         <RemixController fullState={fullState} sendCommand={sendCommand} socket={socket} />
       )}
-
-      {/* Test tools — simulate finale grid (always visible) */}
-      <SimulateFinaleSection sendCommand={sendCommand} />
 
       {/* Emergency + audio — always visible */}
       <EmergencyControls
@@ -113,53 +98,6 @@ function ControllerContent() {
         sendCommand={sendCommand}
       />
     </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Simulate finale grid (test tool)
-// ---------------------------------------------------------------------------
-
-function SimulateFinaleSection({ sendCommand }: { sendCommand: (cmd: import('@/conductor/types').ConductorCommand) => void }) {
-  const [count, setCount] = useState(24);
-
-  return (
-    <section style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem', fontWeight: 500 }}>Test:</span>
-        <input
-          type="number"
-          min={6}
-          max={72}
-          value={count}
-          onChange={e => setCount(Math.max(6, Math.min(72, parseInt(e.target.value) || 6)))}
-          style={{
-            width: 48,
-            padding: '4px 6px',
-            borderRadius: 4,
-            border: '1px solid rgba(255,255,255,0.15)',
-            background: 'rgba(255,255,255,0.06)',
-            color: '#e5e7eb',
-            fontSize: '0.75rem',
-            textAlign: 'center',
-          }}
-        />
-        <button
-          onClick={() => sendCommand({ type: 'SIMULATE_FINALE_GRID', audienceCount: count })}
-          style={{
-            padding: '4px 10px',
-            borderRadius: 4,
-            border: '1px solid rgba(34, 197, 94, 0.4)',
-            background: 'rgba(34, 197, 94, 0.1)',
-            color: '#86efac',
-            fontSize: '0.75rem',
-            cursor: 'pointer',
-          }}
-        >
-          Simulate Finale Grid
-        </button>
-      </div>
-    </section>
   );
 }
 

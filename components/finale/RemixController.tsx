@@ -9,7 +9,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { ShowState, ConductorCommand, V34FinaleState, GranularType, ChapterConfig } from '@/conductor/types';
+import type { ShowState, ConductorCommand, FinaleState, GranularType, ChapterConfig } from '@/conductor/types';
 import { useRemixQueue } from '@/hooks/useRemixQueue';
 import { useTokenPool, type PoolState } from '@/hooks/useTokenPool';
 import type { Socket } from 'socket.io-client';
@@ -21,7 +21,7 @@ interface RemixControllerProps {
 }
 
 export function RemixController({ fullState, sendCommand, socket }: RemixControllerProps) {
-  const finaleState = fullState.finaleState as V34FinaleState | null;
+  const finaleState = fullState.finaleState as FinaleState | null;
   const { queueToken, cancelQueue } = useRemixQueue(sendCommand);
   const poolState = useTokenPool(socket);
 

@@ -12,7 +12,7 @@ import {
   toggleAudienceInteraction,
   resolveTrack,
 } from '../remix-engine';
-import type { V34FinaleState, Token, ConductorEvent } from '../types';
+import type { FinaleState, Token, ConductorEvent } from '../types';
 
 // ============================================================================
 // Test Helpers
@@ -47,7 +47,7 @@ function makeTrackMap(): Map<string, Map<number, number[]>> {
   return map;
 }
 
-function makeRemixState(overrides?: Partial<V34FinaleState>): V34FinaleState {
+function makeRemixState(overrides?: Partial<FinaleState>): FinaleState {
   const tokens = makeTokens({ chapter_0: 5, chapter_1: 5, chapter_2: 5 });
   return {
     phase: 'remix',

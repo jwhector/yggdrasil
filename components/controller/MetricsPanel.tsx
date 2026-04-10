@@ -7,7 +7,7 @@
 
 'use client';
 
-import type { ShowState, ShowPhase, V33FinaleState } from '@/conductor/types';
+import type { ShowState, ShowPhase, FinaleState } from '@/conductor/types';
 
 interface MetricsPanelProps {
   fullState: ShowState;
@@ -21,12 +21,8 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_story: 'Story',
   attempt_build: 'Song Building',
   attempt_resolve: 'Resolve',
-  finale_elegy: 'Finale — Elegy',
-  finale_assignment: 'Finale — Assignment',
-  finale_preview: 'Finale — Preview',
-  finale_playback: 'Finale — Playback',
-  finale_vote: 'Finale — Vote',      // V3.4
-  finale_remix: 'Finale — Remix',    // V3.4
+  finale_vote: 'Finale — Vote',
+  finale_remix: 'Finale — Remix',
   ended: 'Ended',
 };
 
@@ -36,18 +32,14 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   attempt_story: '#6d28d9',
   attempt_build: '#d97706',
   attempt_resolve: '#92400e',
-  finale_elegy: '#0e7490',
-  finale_assignment: '#0f766e',
-  finale_preview: '#5b21b6',
-  finale_playback: '#7c3aed',
-  finale_vote: '#0d9488',            // V3.4
-  finale_remix: '#7c3aed',           // V3.4
+  finale_vote: '#0d9488',
+  finale_remix: '#7c3aed',
   ended: '#374151',
 };
 
 export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsPanelProps) {
   const { phase, currentAttemptIndex, paused, version, users, attempts } = fullState;
-  const finaleState = fullState.finaleState as V33FinaleState | null;
+  const finaleState = fullState.finaleState as FinaleState | null;
   const currentAttempt = attempts[currentAttemptIndex];
 
   const connectedUsers = Array.from(users.values()).filter(u => u.connected).length;
@@ -67,7 +59,7 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
     : connectionState === 'connecting' || connectionState === 'reconnecting' ? '#fbbf24'
     : '#f87171';
 
-  const isFinalePhase = phase === 'finale_elegy' || phase === 'finale_assignment' || phase === 'finale_preview' || phase === 'finale_playback';
+  const isFinalePhase = phase === 'finale_vote' || phase === 'finale_remix';
 
   return (
     <div style={styles.panel}>
@@ -121,40 +113,21 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
       {isFinalePhase && finaleState && (
         <div style={styles.row}>
           <StatCard label="Finale Phase" value={finaleState.phase} />
-          <StatCard label="Grid" value={`${finaleState.quilt.rows}\u00D7${finaleState.quilt.columns}`} />
-          <StatCard
-            label="Claimed"
-            value={`${Array.from(finaleState.quilt.cells.values()).filter(c => c.ownerId !== null).length} / ${finaleState.quilt.cells.size}`}
-          />
-          <StatCard
-            label="Songs Set"
-            value={String(Array.from(finaleState.quilt.cells.values()).filter(c => c.songIndex !== null).length)}
-          />
-          {finaleState.phase === 'assignment' && (
-            <>
-              <StatCard label="Mode" value={finaleState.assignment.mode} />
-              {finaleState.assignment.timerRemaining !== null && (
-                <StatCard label="Timer" value={`${Math.ceil(finaleState.assignment.timerRemaining / 1000)}s`} color="#fbbf24" />
-              )}
-            </>
+          <StatCard label="Pool" value={`${finaleState.pool.totalRemaining} / ${finaleState.pool.targetPoolSize}`} />
+          <StatCard label="Tokens" value={String(finaleState.pool.tokens.length)} />
+          <StatCard label="Active" value={String(finaleState.active.size)} color="#4ade80" />
+          <StatCard label="Queued" value={String(Array.from(finaleState.queue.values()).reduce((s, q) => s + q.length, 0))} />
+          {finaleState.phase === 'vote' && (
+            <StatCard
+              label="Answered"
+              value={String(finaleState.vote.questionsAnsweredByUser.size)}
+              color={finaleState.vote.poolCapReached ? '#4ade80' : undefined}
+            />
           )}
-          {finaleState.phase === 'preview' && (
+          {finaleState.phase === 'remix' && (
             <>
-              <StatCard
-                label="Locked In"
-                value={`${finaleState.preview.lockedInUsers.size} / ${Array.from(finaleState.quilt.cells.values()).filter(c => c.ownerId !== null).length}`}
-              />
-              {finaleState.preview.timerRemaining !== null && (
-                <StatCard label="Timer" value={`${Math.ceil(finaleState.preview.timerRemaining / 1000)}s`} color="#fbbf24" />
-              )}
-            </>
-          )}
-          {finaleState.phase === 'playback' && (
-            <>
-              <StatCard label="Locked" value={String(finaleState.remix.lockedCells.size)} color="#fbbf24" />
-              <StatCard label="Muted" value={String(finaleState.remix.mutedCells.size)} color={finaleState.remix.mutedCells.size > 0 ? '#f87171' : undefined} />
-              <StatCard label="Loop" value={String(finaleState.quilt.loopCount)} />
-              <StatCard label="Playhead" value={`Col ${finaleState.quilt.playheadColumn + 1}`} color="#7c3aed" />
+              <StatCard label="Loop" value={String(finaleState.loopCount)} />
+              <StatCard label="Audience" value={finaleState.audienceInteraction ? 'On' : 'Off'} color={finaleState.audienceInteraction ? '#4ade80' : '#666'} />
             </>
           )}
         </div>

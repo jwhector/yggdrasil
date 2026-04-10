@@ -480,8 +480,10 @@ export function createAudioRouter(
       }
     }
     if (state.finaleState) {
-      for (const fragment of state.finaleState.allFragments) {
-        for (const idx of fragment.trackIndices) routerState.fragmentTrackIndices.add(idx);
+      for (const [, songMap] of state.finaleState.trackMap) {
+        for (const [, trackIndices] of songMap) {
+          for (const idx of trackIndices) routerState.fragmentTrackIndices.add(idx);
+        }
       }
     }
   }
@@ -871,79 +873,6 @@ export function createAudioRouter(
     routerState.rejectionTimers.set(cue.attemptIndex, timer);
   }
 
-  // V3.3: Quilt playback start — unmute initial column tracks
-  function handleQuiltPlaybackStart(cue: Extract<AudioCue, { type: 'quilt_playback_start' }>): void {
-    if (cue.jumpToBeatZero) {
-      oscBridge.send('/live/song/stop_playing');
-      oscBridge.send('/live/song/set/current_song_time', 0);
-      oscBridge.send('/live/song/start_playing');
-      routerState.transportStarted = true;
-    } else {
-      ensureTransportStarted();
-    }
-    for (const trackIndex of cue.trackIndices) {
-      unmuteTrack(trackIndex);
-      setGain(trackIndex, 1.0);
-    }
-  }
-
-  // V3.3: Quilt column change — crossfade tracks at column boundary
-  function handleQuiltColumnChange(cue: Extract<AudioCue, { type: 'quilt_column_change' }>): void {
-    const xfadeBeats = currentGainConfig.crossfadeBeats ?? 1;
-    for (const change of cue.trackChanges) {
-      for (const ti of change.muteTracks) {
-        fadeGain(ti, 0, xfadeBeats);
-      }
-      for (const ti of change.unmuteTracks) {
-        fadeGain(ti, 1.0, xfadeBeats);
-      }
-    }
-
-    // Safety mute: silence any tracks that are unmuted but shouldn't be active
-    // for the incoming column. Catches bleedthrough from edge cases (swaps,
-    // reorders, or missed mutes from prior columns).
-    const expected = new Set(cue.expectedTracks);
-    // Also keep tracks that are actively being crossfaded out (they'll reach 0 on their own)
-    for (const change of cue.trackChanges) {
-      for (const ti of change.muteTracks) expected.add(ti);
-    }
-    for (const trackIndex of routerState.unmutedTracks) {
-      if (!expected.has(trackIndex)) {
-        setGain(trackIndex, 0);
-      }
-    }
-  }
-
-  // V3.3: Quilt mute cell
-  function handleQuiltMuteCell(cue: Extract<AudioCue, { type: 'quilt_mute_cell' }>): void {
-    for (const ti of cue.trackIndices) {
-      fadeGain(ti, 0, currentGainConfig.lockInFadeBeats);
-    }
-  }
-
-  // V3.3: Quilt unmute cell
-  function handleQuiltUnmuteCell(cue: Extract<AudioCue, { type: 'quilt_unmute_cell' }>): void {
-    for (const ti of cue.trackIndices) {
-      unmuteTrack(ti);
-      setGain(ti, 1.0);
-    }
-  }
-
-  // V3.3 Arc: Staggered row group unmute during entry
-  function handleQuiltRowUnmute(cue: Extract<AudioCue, { type: 'quilt_row_unmute' }>): void {
-    for (const trackIndex of cue.trackIndices) {
-      unmuteTrack(trackIndex);
-      fadeGain(trackIndex, 1.0, currentGainConfig.entrySwellBeats);
-    }
-  }
-
-  // V3.3 Arc: Staggered row group mute during exit
-  function handleQuiltRowMute(cue: Extract<AudioCue, { type: 'quilt_row_mute' }>): void {
-    for (const trackIndex of cue.trackIndices) {
-      fadeGain(trackIndex, 0, currentGainConfig.exitFadeBeats);
-    }
-  }
-
   // V3.4: Remix start — stop transport and restart from beat 0
   function handleRemixStart(): void {
     stopPlayback();
@@ -1171,27 +1100,6 @@ export function createAudioRouter(
             break;
           case 'rejection_gesture':
             handleRejectionGesture(cue, state);
-            break;
-          case 'quilt_playback_start':
-            handleQuiltPlaybackStart(cue);
-            break;
-          case 'quilt_column_change':
-            handleQuiltColumnChange(cue);
-            break;
-          case 'quilt_reorder':
-            // No immediate audio change — takes effect at next column boundary
-            break;
-          case 'quilt_mute_cell':
-            handleQuiltMuteCell(cue);
-            break;
-          case 'quilt_unmute_cell':
-            handleQuiltUnmuteCell(cue);
-            break;
-          case 'quilt_row_unmute':
-            handleQuiltRowUnmute(cue);
-            break;
-          case 'quilt_row_mute':
-            handleQuiltRowMute(cue);
             break;
           case 'transport':
             handleTransport(cue);

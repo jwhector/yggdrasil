@@ -22,7 +22,7 @@ import { readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
-import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, V34FinaleState } from '../conductor/types';
+import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, FinaleState } from '../conductor/types';
 import { LAYERS_PER_ATTEMPT } from '../conductor/types';
 import { createInitialState, processCommand } from '../conductor';
 import { createPersistence } from './persistence';
@@ -197,11 +197,14 @@ async function main() {
   let currentState: ShowState;
   const existingShow = persistence.getLatestShow();
 
-  if (existingShow) {
+  if (existingShow && existingShow.config?.finale?.vote) {
     console.log(`[Server] Loaded existing show: ${existingShow.id} (version ${existingShow.version})`);
     console.log(`[Server] Show phase: ${existingShow.phase}, Attempt: ${existingShow.currentAttemptIndex}`);
     currentState = existingShow;
   } else {
+    if (existingShow) {
+      console.log('[Server] Existing show has V3.3 config shape, creating fresh show...');
+    }
     console.log('[Server] No existing show found, creating new show from config...');
 
     // Load show configuration
@@ -307,8 +310,8 @@ async function main() {
         persistence.saveTokenEvent(state.id, ta.tokenId, ta.granularType, ta.chapterId, 'activated', null);
       } else if (event.type === 'TOKEN_SPENT') {
         const ts = event as { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number };
-        const finaleV34 = state.finaleState as V34FinaleState | null;
-        const spentToken = finaleV34?.pool.tokens.find(t => t.id === ts.tokenId);
+        const finaleV34 = state.finaleState as FinaleState | null;
+        const spentToken = finaleV34?.pool.tokens.find((t: { id: string }) => t.id === ts.tokenId);
         const chapterId = spentToken?.chapterId ?? '';
         const loopCount = finaleV34?.loopCount ?? null;
         persistence.saveTokenEvent(state.id, ts.tokenId, ts.granularType, chapterId, 'spent', loopCount);
