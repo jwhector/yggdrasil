@@ -6,9 +6,7 @@
  * - Joins as audience with unique user IDs
  * - Votes randomly during auditioning phases
  * - Dismisses intrusive thoughts with staggered timing
- * - Claims quilt cells during assignment (V3.3)
- * - Sets song choices and locks in during preview (V3.3)
- * - Moves cells during playback if audience remix enabled (V3.3)
+ * - Answers emotional questions during finale_vote (V3.4)
  * - Prints aggregate stats
  *
  * Usage:
@@ -30,36 +28,11 @@ const MIN_DISMISS_DELAY_MS = 1500;   // Fastest a user would swipe
 const MAX_DISMISS_DELAY_MS = 8000;   // Slowest
 const DISMISS_STAGGER_MS = 200;      // Per-thought within a user
 
-// V3.3 elegy opt-in timing
-const OPT_IN_MIN_DELAY_MS = 2000;
-const OPT_IN_MAX_DELAY_MS = 10000;
+// V3.4 vote timing
+const VOTE_MIN_DELAY_MS = 1000;      // Fastest answer
+const VOTE_MAX_DELAY_MS = 5000;      // Slowest answer
 
-// V3.3 quilt simulation timing
-const CELL_CLAIM_MIN_DELAY_MS = 500;
-const CELL_CLAIM_MAX_DELAY_MS = 5000;
-const SONG_CHOICE_MIN_DELAY_MS = 1000;
-const SONG_CHOICE_MAX_DELAY_MS = 4000;
-const LOCK_IN_MIN_DELAY_MS = 2000;
-const LOCK_IN_MAX_DELAY_MS = 8000;
-const MOVE_CELL_MIN_DELAY_MS = 3000;
-const MOVE_CELL_MAX_DELAY_MS = 10000;
-
-interface QuiltCellData {
-  id: string;
-  rowIndex: number;
-  columnIndex: number;
-  granularType: string;
-  songIndex: number | null;
-  chapter: string | null;
-  ownerId: string | null;
-}
-
-interface QuiltStateData {
-  cells: QuiltCellData[];
-  columnOrder: number[];
-  playheadColumn: number;
-  loopCount: number;
-}
+const CHAPTERS = ['ambition', 'love', 'avoidance'];
 
 interface ClientState {
   socket: Socket;
@@ -70,12 +43,10 @@ interface ClientState {
   myVote: 'A' | 'B' | null;
   thoughts: { id: string; text: string }[];
   thoughtsDismissed: number;
-  // V3.3 elegy + quilt state
-  optedIn: boolean;
-  claimedCellId: string | null;
-  songChoice: number | null;
-  lockedIn: boolean;
-  lastQuiltState: QuiltStateData | null;
+  // V3.4 vote state
+  pendingQuestion: { questionIndex: number; text: string } | null;
+  questionsAnswered: number;
+  phonesDark: boolean;
 }
 
 const clients: ClientState[] = [];
@@ -84,16 +55,10 @@ let stats = {
   votes: 0,
   thoughtsReceived: 0,
   thoughtsDismissed: 0,
-  // V3.3 stats
-  optedIn: 0,
-  cellsClaimed: 0,
-  cellsReleased: 0,
-  songChoicesSet: 0,
-  lockedIn: 0,
-  cellMoves: 0,
-  quiltStateBroadcasts: 0,
-  playheadAdvances: 0,
-  lastPlayheadColumn: -1,
+  // V3.4 stats
+  questionsReceived: 0,
+  emotionsSubmitted: 0,
+  phonesDark: 0,
 };
 
 function log(msg: string) {
@@ -121,11 +86,9 @@ function createClient(index: number): ClientState {
     myVote: null,
     thoughts: [],
     thoughtsDismissed: 0,
-    optedIn: false,
-    claimedCellId: null,
-    songChoice: null,
-    lockedIn: false,
-    lastQuiltState: null,
+    pendingQuestion: null,
+    questionsAnswered: 0,
+    phonesDark: false,
   };
 
   socket.on('connect', () => {
@@ -172,118 +135,44 @@ function createClient(index: number): ClientState {
       log(`Phase transition: ${prevPhase} → ${client.phase}`);
     }
 
-    // Auto opt-in during elegy phase (staggered)
-    if (client.phase === 'finale_elegy' && !client.optedIn) {
-      const delay = randomDelay(OPT_IN_MIN_DELAY_MS, OPT_IN_MAX_DELAY_MS);
-      setTimeout(() => {
-        if (client.phase === 'finale_elegy' && !client.optedIn) {
-          socket.emit('elegy_opt_in');
-          client.optedIn = true;
-          stats.optedIn++;
-          if (index < 5) {
-            log(`Client ${index}: opted in`);
-          }
-        }
-      }, delay);
-    }
-  });
-
-  // ---- V3.3 Quilt Events ----
-
-  socket.on('quilt_state', (data: QuiltStateData) => {
-    stats.quiltStateBroadcasts++;
-    client.lastQuiltState = data;
-
-    // Track playhead advancement
-    if (data.playheadColumn !== stats.lastPlayheadColumn) {
-      if (stats.lastPlayheadColumn >= 0) {
-        stats.playheadAdvances++;
-      }
-      stats.lastPlayheadColumn = data.playheadColumn;
-    }
-
-    // During assignment: try to claim an unclaimed cell
-    if (client.phase === 'finale_assignment' && !client.claimedCellId) {
-      const unclaimed = data.cells.filter(c => c.ownerId === null);
-      if (unclaimed.length > 0) {
-        const target = unclaimed[Math.floor(Math.random() * unclaimed.length)];
-        const delay = randomDelay(CELL_CLAIM_MIN_DELAY_MS, CELL_CLAIM_MAX_DELAY_MS);
-        setTimeout(() => {
-          if (client.phase === 'finale_assignment' && !client.claimedCellId) {
-            socket.emit('claim_cell', { cellId: target.id });
-            client.claimedCellId = target.id;
-            stats.cellsClaimed++;
-            if (index < 5) {
-              log(`Client ${index}: claimed cell ${target.id}`);
-            }
-          }
-        }, delay);
-      }
-    }
-
-    // During preview: set song choice and lock in
-    if (client.phase === 'finale_preview' && client.claimedCellId && !client.lockedIn) {
-      if (client.songChoice === null) {
-        // Pick a random song (0, 1, or 2)
-        const songIndex = Math.floor(Math.random() * 3);
-        const delay = randomDelay(SONG_CHOICE_MIN_DELAY_MS, SONG_CHOICE_MAX_DELAY_MS);
-        setTimeout(() => {
-          if (client.phase === 'finale_preview' && client.songChoice === null) {
-            socket.emit('set_song', { songIndex });
-            client.songChoice = songIndex;
-            stats.songChoicesSet++;
-            if (index < 5) {
-              log(`Client ${index}: set song choice to ${songIndex}`);
-            }
-
-            // After choosing, lock in after another delay
-            const lockDelay = randomDelay(LOCK_IN_MIN_DELAY_MS, LOCK_IN_MAX_DELAY_MS);
-            setTimeout(() => {
-              if (client.phase === 'finale_preview' && !client.lockedIn) {
-                socket.emit('lock_in');
-                client.lockedIn = true;
-                stats.lockedIn++;
-                if (index < 5) {
-                  log(`Client ${index}: locked in`);
-                }
-              }
-            }, lockDelay);
-          }
-        }, delay);
-      }
-    }
-
-    // During playback: occasionally move cells (if audience remix is enabled)
-    if (client.phase === 'finale_playback' && client.claimedCellId && Math.random() < 0.02) {
-      // Find a random cell to swap with (low probability per broadcast)
-      const otherCells = data.cells.filter(c => c.id !== client.claimedCellId);
-      if (otherCells.length > 0) {
-        const target = otherCells[Math.floor(Math.random() * otherCells.length)];
-        const delay = randomDelay(MOVE_CELL_MIN_DELAY_MS, MOVE_CELL_MAX_DELAY_MS);
-        setTimeout(() => {
-          if (client.phase === 'finale_playback') {
-            socket.emit('move_cell', { targetCellId: target.id });
-            stats.cellMoves++;
-            if (index < 3) {
-              log(`Client ${index}: moved cell to ${target.id}`);
-            }
-          }
-        }, delay);
+    // V3.4: first question arrives embedded in state_sync myFinale
+    if (client.phase === 'finale_vote' && data.myFinale && !client.phonesDark) {
+      const voteView = data.myFinale as {
+        finalePhase: string;
+        currentQuestion: { questionIndex: number; text: string } | null;
+        poolCapReached: boolean;
+      };
+      if (voteView.poolCapReached) {
+        client.phonesDark = true;
+      } else if (voteView.currentQuestion && !client.pendingQuestion) {
+        answerQuestion(client, index, voteView.currentQuestion);
       }
     }
   });
 
-  socket.on('cell_claimed', (data: { cellId: string; userId: string }) => {
-    // Update local tracking if our cell got claimed by someone else (shouldn't happen but defensive)
-    if (data.userId === client.userId) {
-      client.claimedCellId = data.cellId;
+  // ---- V3.4 Finale Vote Events ----
+
+  // Server sends subsequent questions via this event
+  socket.on('question', (data: { questionIndex: number; text: string }) => {
+    stats.questionsReceived++;
+    if (index < 3) {
+      log(`Client ${index}: received question ${data.questionIndex}: "${data.text}"`);
     }
+    answerQuestion(client, index, data);
   });
 
-  socket.on('playhead_update', (data: { columnIndex: number }) => {
-    // Playhead column boundary crossing
-    if (index === 0 && stats.playheadAdvances % 10 === 0) {
-      log(`Playhead at column ${data.columnIndex}`);
+  // Server confirms our emotion was received
+  socket.on('emotion_confirmed', (_data: { chapterId: string; questionIndex: number }) => {
+    // No action needed — next question will arrive via 'question' event
+  });
+
+  // Pool is full — phones go dark
+  socket.on('phones_down', () => {
+    client.phonesDark = true;
+    client.pendingQuestion = null;
+    stats.phonesDark++;
+    if (index < 3) {
+      log(`Client ${index}: phones down (answered ${client.questionsAnswered} questions)`);
     }
   });
 
@@ -303,6 +192,29 @@ function createClient(index: number): ClientState {
   });
 
   return client;
+}
+
+function answerQuestion(client: ClientState, index: number, question: { questionIndex: number; text: string }) {
+  if (client.phonesDark || client.pendingQuestion) return; // Already answering or dark
+  client.pendingQuestion = question;
+
+  const delay = randomDelay(VOTE_MIN_DELAY_MS, VOTE_MAX_DELAY_MS);
+  setTimeout(() => {
+    if (client.pendingQuestion && !client.phonesDark) {
+      const chapterId = CHAPTERS[Math.floor(Math.random() * CHAPTERS.length)];
+      client.socket.emit('submit_emotion', {
+        chapterId,
+        questionIndex: client.pendingQuestion.questionIndex,
+      });
+      stats.emotionsSubmitted++;
+      client.questionsAnswered++;
+      client.pendingQuestion = null;
+
+      if (index < 3) {
+        log(`Client ${index}: answered with ${chapterId} (total: ${client.questionsAnswered})`);
+      }
+    }
+  }, delay);
 }
 
 function simulateDismissals(client: ClientState, index: number) {
@@ -336,14 +248,13 @@ for (let i = 0; i < CLIENT_COUNT; i++) {
 
 // Print stats periodically
 setInterval(() => {
-  const quiltLine = stats.quiltStateBroadcasts > 0
-    ? `, quilt_state: ${stats.quiltStateBroadcasts}, playhead: ${stats.playheadAdvances} advances`
+  const voteLine = stats.emotionsSubmitted > 0
+    ? `, emotions: ${stats.emotionsSubmitted} submitted, questions: ${stats.questionsReceived} received, dark: ${stats.phonesDark}`
     : '';
-  const optInLine = stats.optedIn > 0 ? `, opted-in: ${stats.optedIn}` : '';
-  const claimLine = stats.cellsClaimed > 0
-    ? `, cells: ${stats.cellsClaimed} claimed, songs: ${stats.songChoicesSet} set, locked: ${stats.lockedIn}, moves: ${stats.cellMoves}`
+  const thoughtLine = stats.thoughtsReceived > 0
+    ? `, thoughts: ${stats.thoughtsReceived}/${stats.thoughtsDismissed}`
     : '';
-  log(`Stats: ${stats.connected} connected, ${stats.votes} votes, ${stats.thoughtsReceived}/${stats.thoughtsDismissed} thoughts${optInLine}${quiltLine}${claimLine}`);
+  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}`);
 }, 5000);
 
 // Graceful shutdown

@@ -97,7 +97,7 @@ export function useProjectorState(
     if (!state) return base;
 
     // ---- Finale live mix ----
-    if (state.phase === 'finale_playback' && mixState) {
+    if (state.phase === 'finale_remix' && mixState) {
       const allGranularTypes = ['bass', 'drums', 'pad', 'harmony', 'fx', 'seed'];
       const nodes: Record<string, NodeVisualState> = {};
 

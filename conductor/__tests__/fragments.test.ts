@@ -19,7 +19,7 @@ function makeLayerConfig(index: number): V32LayerConfig {
   };
 }
 
-function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCount: number): V32AttemptConfig {
+function makeAttemptConfig(chapter: string, layerCount: number): V32AttemptConfig {
   return {
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
@@ -32,7 +32,7 @@ function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance', layerCoun
   };
 }
 
-function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avoidance', layerCount: number): AttemptState {
+function makeCompletedAttempt(index: number, chapter: string, layerCount: number): AttemptState {
   const layers = Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i));
   return {
     index,
@@ -58,7 +58,7 @@ function makeCompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avo
   };
 }
 
-function makeCollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avoidance', layerCount: number, collapseAt: number): AttemptState {
+function makeCollapsedAttempt(index: number, chapter: string, layerCount: number, collapseAt: number): AttemptState {
   const layers = Array.from({ length: layerCount }, (_, i) => makeLayerConfig(i));
   return {
     index,
@@ -332,7 +332,7 @@ function makeV32LayerConfig(index: number, group: string): V32LayerConfig {
   };
 }
 
-function makeV32AttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig {
+function makeV32AttemptConfig(chapter: string): V32AttemptConfig {
   return {
     chapter,
     title: chapter.charAt(0).toUpperCase() + chapter.slice(1),
@@ -349,7 +349,7 @@ function makeV32AttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32At
   };
 }
 
-function makeV32CompletedAttempt(index: number, chapter: 'ambition' | 'love' | 'avoidance'): AttemptState {
+function makeV32CompletedAttempt(index: number, chapter: string): AttemptState {
   const config = makeV32AttemptConfig(chapter);
   return {
     index,
@@ -375,7 +375,7 @@ function makeV32CompletedAttempt(index: number, chapter: 'ambition' | 'love' | '
   };
 }
 
-function makeV32CollapsedAttempt(index: number, chapter: 'ambition' | 'love' | 'avoidance', collapseAt: number): AttemptState {
+function makeV32CollapsedAttempt(index: number, chapter: string, collapseAt: number): AttemptState {
   const config = makeV32AttemptConfig(chapter);
   return {
     index,

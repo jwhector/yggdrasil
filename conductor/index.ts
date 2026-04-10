@@ -24,39 +24,14 @@ export { checkThreshold } from './threshold';
 export { generateFragments, generateGranularFragments, extractAttemptResult } from './fragments';
 export type { FragmentAvailability } from './fragments';
 
-// Export assignment functions (V3.3: cell claiming)
-export {
-  autoAssignCells,
-  getConnectedUserIds,
-  getUnclaimedUsers,
-} from './assignment';
-
-// Export quilt functions (V3.3)
-export {
-  createQuiltGrid,
-  deriveColumnCount,
-  claimCell,
-  releaseCell,
-  setCellSong,
-  lockInChoice,
-  assignDefaultSongs,
-  assignRemainingUsers,
-  moveCell,
-  changeCellSong,
-  reorderColumn,
-  swapCells,
-  lockCell,
-  unlockCell,
-  muteCell,
-  unmuteCell,
-  overrideCellSong,
-  resolveTrack,
-  buildTrackMap,
-  advancePlayhead,
-  deriveAvailableSongs,
-  findUserCell,
-} from './quilt';
-export type { QuiltGrid, QuiltResult } from './quilt';
-
 // Export NPC functions
 export { getNpcMessage } from './npc';
+
+// Export token pool functions (V3.4)
+export { createTokenPool, consumeToken, returnToken, isPoolEmpty, getTotalRemaining } from './token-pool';
+
+// Export question engine functions (V3.4)
+export { getNextQuestion, calculateMaxQuestionsPerPerson, shouldCapPool, processEmotion } from './question-engine';
+
+// Export remix engine functions (V3.4)
+export { queueToken, cancelQueue, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';

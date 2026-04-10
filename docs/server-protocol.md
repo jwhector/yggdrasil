@@ -10,10 +10,10 @@
 ### State Sync Strategy
 Full state syncs on every mutation:
 - **Controller**: Full serialized state (all Maps converted to arrays)
-- **Projector**: Public filtered state (quilt grid, assignment/remix state — no individual user data)
-- **Audience**: Personalized state (own cell, own lock-in status, quilt grid, current vote during song-building)
+- **Projector**: Public filtered state (pool counts, active nodes, queue depths, loop state -- no individual user data)
+- **Audience**: Personalized state (own vote question, answer count, pool cap status during finale_vote; phones-down during finale_remix)
 
-### Client → Server Events
+### Client -> Server Events
 
 | Event | Payload | Sender |
 |-------|---------|--------|
@@ -21,47 +21,49 @@ Full state syncs on every mutation:
 | `reconnect` | `{ userId, showId, lastVersion }` | All |
 | `vote` | `{ choice: 'A' \| 'B' }` | Audience (song-building) |
 | `dismiss_thought` | `{ thoughtId, direction: 'left' \| 'right' }` | Audience (intrusive thoughts) |
-| `claim_cell` | `{ cellId }` | Audience (assignment) |
-| `release_cell` | — | Audience (assignment) |
-| `set_song` | `{ songIndex }` | Audience (preview) |
-| `lock_in` | — | Audience (preview) |
-| `move_cell` | `{ targetCellId }` | Audience (playback — validated against audienceRemix config) |
-| `change_song` | `{ songIndex }` | Audience (playback — only when audienceRemix.allowSongChange=true) |
+| `submit_emotion` | `{ chapterId, questionIndex }` | Audience (finale_vote -- chapter selection for current question) |
 | `command` | `ConductorCommand` | Controller |
 
-### Server → Client Events
+### Server -> Client Events
 
 | Event | Payload | Recipients |
 |-------|---------|------------|
 | `state_sync` | `ShowState` (filtered per client type) | All |
 | `identity` | `{ userId }` | New audience members |
-| `quilt_state` | `{ cells, columnOrder, playheadColumn, loopCount }` | All (~2 Hz assignment, ~4 Hz playback) |
-| `cell_claimed` | `{ cellId, userId }` | Audience + Projector (during assignment) |
-| `cell_moved` | `{ cellId, fromPosition, toPosition, swappedWithCellId }` | Audience + Projector (during playback) |
-| `playhead_update` | `{ columnIndex }` | All (during playback, on column boundary) |
-| `column_reordered` | `{ columnOrder }` | All (during playback) |
+| `pool_state` | `{ availableByChapter, totalByChapter, totalRemaining, targetPoolSize }` | Projector + Controller (~2 Hz during finale phases) |
+| `node_update` | `{ granularType, chapterId, trackIndex, persistent, queueDepth }` | Projector + Controller (on token activation/queue change) |
+| `question` | `{ questionIndex, text }` | Individual audience member (next question during finale_vote) |
+| `emotion_confirmed` | `{ chapterId, questionIndex }` | Individual audience member (vote acknowledgment) |
+| `phones_down` | -- | Audience (when pool cap reached or remix starts) |
 | `npc_message` | `{ message: string }` | Audience + Projector |
 | `audition_progress` | `AuditionProgress` | Audience + Projector (song-building, ~4 Hz) |
 | `thoughts_assigned` | `{ thoughts: { id, text }[] }` | Individual audience member (on reveal stakes) |
 | `thought_dismissed` | `{ thoughtId, direction }` | Projector (per-dismiss delta) |
 | `thoughts_state` | `{ thoughts: { id, text, dismissed }[] }` | Projector (bulk on reveal start + reconnect) |
-| `thoughts_clear` | — | Audience + Projector (layer/attempt change) |
+| `thoughts_clear` | -- | Audience + Projector (layer/attempt change) |
 | `error` | `{ message }` | Controller |
 
-**Note on quilt_state:** High-frequency broadcast during assignment and playback phases for responsive grid displays, NOT part of state_sync. During preview the grid is also broadcast so clients see song choices being made.
+**Note on pool_state:** High-frequency broadcast during finale phases for responsive pool visualizations, NOT part of state_sync. Serialized as arrays (chapterId/count pairs) for JSON transport.
 
-**Note on intrusive thoughts:** Server distributes thoughts from a shared pool on `REVEAL_STAKES_SHOWN`. Each audience member gets a random subset (1→3→5 escalating per layer). Dismissals are per-thought deltas sent to projector — no bulk polling. Server tracks state in module-level `activeThoughts` array, cleared on layer resolve.
+**Note on node_update:** Emitted on token activation, queue changes, and node silence events. Provides granular type, current chapter, track index, persistence mode, and queue depth for projector pentagon visualization.
 
-### Removed from V3.2
+**Note on intrusive thoughts:** Server distributes thoughts from a shared pool on `REVEAL_STAKES_SHOWN`. Each audience member gets a random subset (1->3->5 escalating per layer). Dismissals are per-thought deltas sent to projector -- no bulk polling. Server tracks state in module-level `activeThoughts` array, cleared on layer resolve.
+
+### Removed from V3.3
 
 | Removed Event | Replacement |
 |---------------|-------------|
-| `select_type` | `claim_cell` (cell includes type via row) |
-| `set_preference` | `set_song` (during preview only) |
-| `group_update` | `quilt_state` (replaces group size broadcast) |
-| `mix_state` | `quilt_state` (replaces per-type vote distributions) |
-| `assigned` | `cell_claimed` (per-cell, not per-type) |
-| `type_locked` / `type_unlocked` | `cell_locked` / `cell_muted` via state_sync (per-cell, not per-type) |
+| `claim_cell` | Removed -- no cell claiming in V3.4 |
+| `release_cell` | Removed -- no cell claiming in V3.4 |
+| `set_song` | `submit_emotion` (audience selects chapter, not song index) |
+| `lock_in` | Removed -- votes are one-shot, no lock-in needed |
+| `move_cell` | Removed -- no cell grid in V3.4 |
+| `change_song` | Removed -- no audience remix in V3.4 |
+| `quilt_state` | `pool_state` (token pool counts replace quilt grid) |
+| `cell_claimed` | Removed -- no cell assignment in V3.4 |
+| `cell_moved` | Removed -- no cell grid in V3.4 |
+| `playhead_update` | Removed -- loop progress tracked via pool_state |
+| `column_reordered` | Removed -- no column grid in V3.4 |
 
 ---
 
@@ -103,40 +105,42 @@ CREATE TABLE votes (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- V3.3: Quilt cell state
-CREATE TABLE finale_quilt_cells (
+-- V3.4: Audience emotional votes (one row per question answered)
+CREATE TABLE finale_votes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
-  cell_id TEXT NOT NULL,
-  owner_id TEXT,
-  song_index INTEGER,
+  user_id TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  question_index INTEGER NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (show_id) REFERENCES shows(id),
-  UNIQUE(show_id, cell_id)
+  FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 
--- V3.3: Remix events (audience + performer actions during playback)
-CREATE TABLE finale_remix_events (
+-- V3.4: Token spend log (for recovery + analytics)
+CREATE TABLE finale_token_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
-  user_id TEXT,
-  event_type TEXT NOT NULL CHECK(event_type IN ('move', 'reorder', 'swap', 'lock', 'unlock', 'mute', 'unmute', 'override')),
-  payload JSON NOT NULL,
+  token_id TEXT NOT NULL,
+  granular_type TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('queued', 'activated', 'spent', 'cancelled')),
+  loop_number INTEGER,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 ```
 
-**Deprecated tables (kept for historical data):** `finale_groups`, `finale_group_votes`, `ceremony_events` (V3.1), `finale_assignments`, `finale_mix_events` (V3.2).
+**Migration:** The `v34_token_pool_tables` migration (migration 7 in `server/persistence.ts`) creates both V3.4 tables idempotently using `CREATE TABLE IF NOT EXISTS`.
+
+**Deprecated tables (kept for historical data):** `finale_groups`, `finale_group_votes`, `ceremony_events` (V3.1), `finale_assignments`, `finale_mix_events` (V3.2), `finale_quilt_cells`, `finale_remix_events` (V3.3).
 
 ### Persistence Strategy & Recovery
 
 Unchanged from V1. Persist after EVERY state change. Atomic SQLite transactions. Stateless clients. Automatic reconnection with exponential backoff.
 
 **Finale-specific recovery notes:**
-- If the assignment timer expires during a server restart, the system fires ASSIGNMENT_COMPLETE to assign remaining users
-- If the preview timer expires during a server restart, the system fires PREVIEW_COMPLETE and ADVANCE_PHASE
-- Quilt cell state is persisted to `finale_quilt_cells` on each claim/song-set for recovery
-- Remix events (moves, swaps, locks, mutes, overrides) are persisted to `finale_remix_events` for audit/recovery
-- Audio preview files are static assets and require no server state
+- Token pool state is reconstructed from the show state JSON on restart
+- Emotional votes are persisted to `finale_votes` on each `submit_emotion` for recovery and analytics
+- Token events (queue, activate, spend, cancel) are persisted to `finale_token_events` for audit/recovery
+- If the server restarts during `finale_vote`, the pool cap and per-user question counts are restored from ShowState
+- If the server restarts during `finale_remix`, active nodes and queue state are restored from ShowState; the timing engine resumes loop boundary tracking

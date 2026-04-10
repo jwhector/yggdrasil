@@ -1,7 +1,7 @@
 # Client Routes & Visual Identity
 
 > Part of the Yggdrasil Architecture Spec. See [ARCHITECTURE.md](../ARCHITECTURE.md) for index and core concepts.
-> **Related:** [song-building.md](song-building.md) (voting mechanics), [finale.md](finale.md) (finale sub-phases)
+> **Related:** [song-building.md](song-building.md) (voting mechanics), [finale.md](finale.md) (finale phases)
 
 ---
 
@@ -29,33 +29,16 @@
   5. After all thoughts dismissed AND conductor advances to locked_in/collapsed: vote result shown inside cards
 - Intrusive thoughts are mirrored on projector as physics-based membrane bubbles (see `/projector` below)
 
-**Finale — Elegy moment (optional pre-assembly beat):**
-- Full grid of all fragments from all three songs, organized by role
-- Winners glowing, losers/locked fragments visually cracked or dimmed
-- NPC text narrates: "This is what we have left. This is what we lost."
-- Duration: ~10–15 seconds, purely observational, no interaction
+**Finale — Vote (`finale_vote`):**
+- Question cards presented one at a time (one per granular type node)
+- User taps to answer; each answer maps to a song index (0/1/2)
+- Cards use chapter colors to indicate which song each answer corresponds to
+- Progress indicator shows how many questions remain
 
-**Finale — Assignment (V3.3 — Cell Claim):**
-- Empty quilt grid appears: 6 rows (granular types) x N columns (time slices)
-- Users tap a cell to claim it; claimed cells show presence indicator
-- One cell per person; tap another cell to switch
-- Timer counts down; unclaimed users auto-assigned when timer expires
-- Full cells greyed out / unavailable
-
-**Finale — Preview (V3.3 — Sandbox):**
-- Room is silent. Each cell owner's phone shows:
-  - Cell position in mini quilt grid (highlighted)
-  - 3 tappable song cards (Ambition/Love/Avoidance) with chapter colors
-  - Tapping a card plays a private audio preview on the phone speaker
-  - "LOCK IN" button to commit song choice
-- Timer counts down; unconfirmed users get their last-previewed song
-
-**Finale — Playback (V3.3 — Quilt):**
-- Quilt grid with playhead sweeping left to right across columns
-- Own cell highlighted; chapter colors fill cells based on song choices
-- When audience remix is enabled: tap another cell to swap positions
-- Cooldown indicator between moves; song change UI when allowed
-- Spectators (no cell / remix disabled): read-only grid with playhead
+**Finale — Remix (`finale_remix`):**
+- Minimal view or goes dark depending on `audienceInteraction` mode
+- When audience interaction is enabled: UI shows current node state and allows participation
+- When audience interaction is disabled: "listen" state (phones down)
 
 ### `/projector` — Public Display
 
@@ -74,24 +57,17 @@ Rendered on a single `<canvas>` element via `ProjectorCanvas.tsx`. Dark backgrou
 
 See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 
-**Finale — Elegy:**
-- Full fragment grid with winners glowing, losers/locked dimmed
-- NPC text displayed prominently
+**Finale — Vote (`finale_vote`):**
+- `ProjectorFinale` component renders pentagon visualization
+- Pool dots animate around the pentagon, flowing toward active nodes
+- Active nodes glow with chapter colors as audience votes determine song choices
+- Vote progress visible as nodes fill
 
-**Finale — Assignment (V3.3):**
-- Quilt grid with cells filling up in real time as audience claims them
-- Each claimed cell pulses with the granular type's color
-- Unclaimed cells are dim outlines; timer visible
-
-**Finale — Preview (V3.3):**
-- Quilt grid with cells lighting up with chapter colors as users make song choices
-- Room is silent — visual anticipation only
-
-**Finale — Playback (V3.3):**
-- Quilt grid as patchwork of chapter colors (amber/coral/teal)
-- Playhead bar sweeps left to right across columns
-- Cells animate when swapped — both audience and performer moves visible in real time
-- Muted cells dim; locked cells show lock icon
+**Finale — Remix (`finale_remix`):**
+- `ProjectorFinale` component continues rendering the pentagon
+- Active nodes show current song assignment with chapter colors
+- Crossfade transitions animate when nodes change songs
+- Pool dots and node states update in real time as performer controls the remix
 
 ### `/controller` — Performer/Operator Interface
 
@@ -106,7 +82,7 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 | **Threshold** | Read-only current threshold, Last vote's winning proportion, FORCE_COLLAPSE |
 | **Song Rejection** | Trigger rejection effect (OSC command to Ableton) — only for completed songs |
 | **Audio** | Transport Play/Stop, Hard Mute/Panic, Reset Utilities (all gains to 0 dB), Per-layer force on/off |
-| **Finale — Quilt** | Phase actions (Start Assignment/Preview/Playback), full quilt grid with per-cell lock/unlock/mute/unmute/override song, column reorder arrows, cell swap selector (V3.3) |
+| **Finale — Remix** | `RemixController` component — queue management (add/remove/reorder nodes), per-node controls (song override, mute, crossfade), audience interaction toggle, pool stats |
 | **NPC** | Bank of pre-written NPC lines (organized by phase), Free-text input for improvised lines, Fire button |
 | **Live Performance** | Toggle live input tracks (vocal, synth, etc.) |
 | **Emergency** | Pause/Resume show, Export/Import state as JSON, Force reconnect all clients, Reset to lobby |
@@ -115,8 +91,7 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 - Connected clients count
 - Vote counts A vs B, time remaining
 - Threshold status per attempt
-- Assignment: cell claim progress, unclaimed count
-- Quilt: per-cell song choices, locked/muted cells, column order, playhead position, loop count
+- Remix: active nodes, song assignments, pool state, audience interaction mode
 - System health: WebSocket status, Ableton OSC status, error log tail
 
 ---

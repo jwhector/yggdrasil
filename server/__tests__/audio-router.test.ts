@@ -71,7 +71,7 @@ function makeLayerConfig(index: number): V32LayerConfig {
   };
 }
 
-function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig {
+function makeAttemptConfig(chapter: string): V32AttemptConfig {
   return {
     chapter,
     title: chapter,
@@ -544,83 +544,6 @@ describe('AudioRouter', () => {
   });
 
   // --------------------------------------------------------------------------
-  // quilt_playback_start (V3.3)
-  // --------------------------------------------------------------------------
-
-  describe('quilt_playback_start', () => {
-    test('unmutes initial column tracks', async () => {
-      jest.useFakeTimers();
-
-      sendCue(router, state, {
-        type: 'quilt_playback_start',
-        initialColumn: 0,
-        trackIndices: [0, 4, 8],
-      });
-
-      // Advance past waitForOSC timeout and flush microtasks
-      jest.advanceTimersByTime(1000);
-      await Promise.resolve();
-
-      expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 0, 0);
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 8, 0);
-      jest.useRealTimers();
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // quilt_column_change (V3.3)
-  // --------------------------------------------------------------------------
-
-  describe('quilt_column_change', () => {
-    test('mutes outgoing and unmutes incoming tracks at column boundary', () => {
-      sendCue(router, state, {
-        type: 'quilt_column_change',
-        columnIndex: 1,
-        trackChanges: [
-          { granularType: 'bass', muteTracks: [2], unmuteTracks: [4] },
-          { granularType: 'drums', muteTracks: [], unmuteTracks: [6] },
-        ],
-        expectedTracks: [4, 6],
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // mute outgoing
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0); // unmute incoming
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // unmute new
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // quilt_mute_cell / quilt_unmute_cell (V3.3)
-  // --------------------------------------------------------------------------
-
-  describe('quilt_mute_cell', () => {
-    test('mutes the specified track', () => {
-      sendCue(router, state, {
-        type: 'quilt_mute_cell',
-        granularType: 'bass',
-        columnIndex: 0,
-        trackIndices: [4],
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
-    });
-  });
-
-  describe('quilt_unmute_cell', () => {
-    test('unmutes the specified track', () => {
-      sendCue(router, state, {
-        type: 'quilt_unmute_cell',
-        granularType: 'bass',
-        columnIndex: 0,
-        trackIndices: [4],
-      });
-
-      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 0);
-    });
-  });
-
   // --------------------------------------------------------------------------
   // transport
   // --------------------------------------------------------------------------
@@ -695,6 +618,119 @@ describe('AudioRouter', () => {
         (c: any[]) => c[0] === '/live/track/set/mute' && c[2] === 1,
       );
       expect(muteCalls.length).toBe(0);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // remix_start (V3.4)
+  // --------------------------------------------------------------------------
+
+  describe('remix_start', () => {
+    test('stops transport and restarts from beat 0', () => {
+      sendCue(router, state, { type: 'remix_start' });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/song/stop_playing');
+      expect(mockSend).toHaveBeenCalledWith('/live/song/start_playing');
+    });
+
+    test('stop is sent before play', () => {
+      sendCue(router, state, { type: 'remix_start' });
+
+      const calls = mockSend.mock.calls.map((c: any[]) => c[0]);
+      const stopIdx = calls.indexOf('/live/song/stop_playing');
+      const playIdx = calls.indexOf('/live/song/start_playing');
+      expect(stopIdx).toBeLessThan(playIdx);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // node_unmute (V3.4)
+  // --------------------------------------------------------------------------
+
+  describe('node_unmute', () => {
+    test('unmutes all tracks in the bundle and swells gain', () => {
+      sendCue(router, state, { type: 'node_unmute', granularType: 'bass', trackIndices: [5, 6] });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // node_crossfade (V3.4)
+  // --------------------------------------------------------------------------
+
+  describe('node_crossfade', () => {
+    test('fades out muteTracks and fades in unmuteTracks', () => {
+      sendCue(router, state, {
+        type: 'node_crossfade',
+        granularType: 'drums',
+        muteTracks: [3],
+        unmuteTracks: [7],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1); // muted (gain→0)
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 7, 0); // unmuted
+    });
+
+    test('handles multiple tracks per bundle', () => {
+      sendCue(router, state, {
+        type: 'node_crossfade',
+        granularType: 'drums',
+        muteTracks: [3, 4],
+        unmuteTracks: [7, 8],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 3, 1);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 7, 0);
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 8, 0);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // node_instant_crossfade (V3.4)
+  // --------------------------------------------------------------------------
+
+  describe('node_instant_crossfade', () => {
+    test('fades out muteTracks and fades in unmuteTracks immediately', () => {
+      sendCue(router, state, {
+        type: 'node_instant_crossfade',
+        granularType: 'pad',
+        muteTracks: [2],
+        unmuteTracks: [6],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 2, 1); // muted
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // unmuted
+    });
+
+    test('handles empty muteTracks (nothing to fade out)', () => {
+      sendCue(router, state, {
+        type: 'node_instant_crossfade',
+        granularType: 'pad',
+        muteTracks: [],
+        unmuteTracks: [6],
+      });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 6, 0); // unmuted
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // node_fade_out (V3.4)
+  // --------------------------------------------------------------------------
+
+  describe('node_fade_out', () => {
+    test('fades all tracks to silence', () => {
+      // First unmute the tracks so they're in unmutedTracks
+      sendCue(router, state, { type: 'node_unmute', granularType: 'bass', trackIndices: [4, 5] });
+      mockSend.mockClear();
+
+      sendCue(router, state, { type: 'node_fade_out', granularType: 'bass', trackIndices: [4, 5] });
+
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 4, 1); // muted after gain→0
+      expect(mockSend).toHaveBeenCalledWith('/live/track/set/mute', 5, 1);
     });
   });
 

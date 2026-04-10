@@ -1,5 +1,5 @@
 /**
- * State Serialization Utilities (V3.3)
+ * State Serialization Utilities
  *
  * Handles proper serialization/deserialization of ShowState for Socket.IO
  * and backup/persistence.
@@ -8,14 +8,14 @@
  * Solution: Convert Maps to [key, value][] arrays and Sets to arrays before sending,
  *           reconstruct after receiving.
  *
- * Maps/Sets in ShowState (V3.3):
+ * Maps/Sets in ShowState:
  *   - ShowState.users: Map<UserId, User>
- *   - V33FinaleState.quilt.cells: Map<string, QuiltCell>
- *   - V33FinaleState.trackMap: Map<string, Map<number, number[]>>
- *   - V33FinaleState.preview.lockedInUsers: Set<UserId>
- *   - V33FinaleState.remix.lockedCells: Set<string>
- *   - V33FinaleState.remix.mutedCells: Set<string>
- *   - V33FinaleState.remix.lastMoveByUser: Map<UserId, number>
+ *   - FinaleState.vote.questionsAnsweredByUser: Map<UserId, number>
+ *   - FinaleState.pool.availableByChapter: Map<string, number>
+ *   - FinaleState.pool.totalByChapter: Map<string, number>
+ *   - FinaleState.queue: Map<string, QueuedToken[]>
+ *   - FinaleState.active: Map<string, ActiveNode>
+ *   - FinaleState.trackMap: Map<string, Map<number, number[]>>
  *
  * Usage:
  *   Server: socket.emit('state_sync', serializeState(state))
@@ -26,45 +26,36 @@ import type {
   ShowState,
   UserId,
   User,
-  V33FinaleState,
-  QuiltCell,
+  FinaleState,
 } from '@/conductor/types';
 
 // ============================================================================
 // Serialized Types
 // ============================================================================
 
+/** Serialized shape of FinaleState (Maps converted to arrays). */
 export interface SerializedFinaleState {
-  phase: V33FinaleState['phase'];
-  availableFragments: V33FinaleState['availableFragments'];
-  allFragments: V33FinaleState['allFragments'];
-  elegyOptedIn?: string[];
-  quilt: {
-    rows: number;
-    columns: number;
-    barsPerCell: number;
-    cells: [string, QuiltCell][];
-    columnOrder: number[];
-    playheadColumn: number;
-    loopCount: number;
+  phase: 'vote' | 'remix';
+  vote: {
+    questionsAnsweredByUser: [string, number][];
+    maxQuestionsPerPerson: number;
+    poolCapReached: boolean;
   };
-  availableSongs: number[];
+  pool: {
+    tokens: FinaleState['pool']['tokens'];
+    availableByChapter: [string, number][];
+    totalByChapter: [string, number][];
+    totalRemaining: number;
+    targetPoolSize: number;
+  };
+  queue: [string, FinaleState['queue'] extends Map<string, infer V> ? V : never][];
+  active: [string, FinaleState['active'] extends Map<string, infer V> ? V : never][];
+  audienceInteraction: boolean;
+  chapterSongIndex: [string, number][];
   trackMap: [string, [number, number[]][]][];
-  assignment: V33FinaleState['assignment'];
-  preview: {
-    lockedInUsers: UserId[];
-    timerRemaining: number | null;
-  };
-  remix: {
-    lockedCells: string[];
-    mutedCells: string[];
-    lastMoveByUser: [UserId, number][];
-    liveTracksActive: string[];
-    frozenColumn: number | null;
-    frozenActiveTracks: [string, number[]][];
-  };
-  npc: V33FinaleState['npc'];
-  arc?: V33FinaleState['arc'];
+  loopCount: number;
+  loopProgress: number;
+  npc: { currentMessage: string | null };
 }
 
 export interface SerializedShowState {
@@ -85,77 +76,59 @@ export interface SerializedShowState {
 // Finale State Serialize / Deserialize
 // ============================================================================
 
-export function serializeFinaleState(fs: V33FinaleState): SerializedFinaleState {
+export function serializeFinaleState(fs: FinaleState): SerializedFinaleState {
   return {
     phase: fs.phase,
-    availableFragments: fs.availableFragments,
-    allFragments: fs.allFragments,
-    elegyOptedIn: Array.from(fs.elegyOptedIn),
-    quilt: {
-      rows: fs.quilt.rows,
-      columns: fs.quilt.columns,
-      barsPerCell: fs.quilt.barsPerCell,
-      cells: Array.from(fs.quilt.cells.entries()),
-      columnOrder: fs.quilt.columnOrder,
-      playheadColumn: fs.quilt.playheadColumn,
-      loopCount: fs.quilt.loopCount,
+    vote: {
+      questionsAnsweredByUser: Array.from(fs.vote.questionsAnsweredByUser.entries()),
+      maxQuestionsPerPerson: fs.vote.maxQuestionsPerPerson,
+      poolCapReached: fs.vote.poolCapReached,
     },
-    availableSongs: fs.availableSongs,
+    pool: {
+      tokens: fs.pool.tokens,
+      availableByChapter: Array.from(fs.pool.availableByChapter.entries()),
+      totalByChapter: Array.from(fs.pool.totalByChapter.entries()),
+      totalRemaining: fs.pool.totalRemaining,
+      targetPoolSize: fs.pool.targetPoolSize,
+    },
+    queue: Array.from(fs.queue.entries()).map(([gt, tokens]) => [gt, tokens]),
+    active: Array.from(fs.active.entries()).map(([gt, node]) => [gt, node]),
+    audienceInteraction: fs.audienceInteraction,
+    chapterSongIndex: Array.from(fs.chapterSongIndex.entries()),
     trackMap: Array.from(fs.trackMap.entries()).map(
       ([gt, songMap]): [string, [number, number[]][]] => [gt, Array.from(songMap.entries())],
     ),
-    assignment: fs.assignment,
-    preview: {
-      lockedInUsers: Array.from(fs.preview.lockedInUsers),
-      timerRemaining: fs.preview.timerRemaining,
-    },
-    remix: {
-      lockedCells: Array.from(fs.remix.lockedCells),
-      mutedCells: Array.from(fs.remix.mutedCells),
-      lastMoveByUser: Array.from(fs.remix.lastMoveByUser.entries()),
-      liveTracksActive: fs.remix.liveTracksActive,
-      frozenColumn: fs.remix.frozenColumn,
-      frozenActiveTracks: Array.from(fs.remix.frozenActiveTracks.entries()),
-    },
+    loopCount: fs.loopCount,
+    loopProgress: fs.loopProgress,
     npc: fs.npc,
-    arc: fs.arc,
   };
 }
 
-export function deserializeFinaleState(data: SerializedFinaleState): V33FinaleState {
+export function deserializeFinaleState(data: SerializedFinaleState): FinaleState {
   return {
     phase: data.phase,
-    availableFragments: data.availableFragments,
-    allFragments: data.allFragments,
-    elegyOptedIn: new Set(data.elegyOptedIn ?? []),
-    quilt: {
-      rows: data.quilt.rows,
-      columns: data.quilt.columns,
-      barsPerCell: data.quilt.barsPerCell,
-      cells: new Map(data.quilt.cells),
-      columnOrder: data.quilt.columnOrder,
-      playheadColumn: data.quilt.playheadColumn,
-      loopCount: data.quilt.loopCount,
+    vote: {
+      questionsAnsweredByUser: new Map(data.vote.questionsAnsweredByUser),
+      maxQuestionsPerPerson: data.vote.maxQuestionsPerPerson,
+      poolCapReached: data.vote.poolCapReached,
     },
-    availableSongs: data.availableSongs,
+    pool: {
+      tokens: data.pool.tokens,
+      availableByChapter: new Map(data.pool.availableByChapter),
+      totalByChapter: new Map(data.pool.totalByChapter),
+      totalRemaining: data.pool.totalRemaining,
+      targetPoolSize: data.pool.targetPoolSize,
+    },
+    queue: new Map(data.queue),
+    active: new Map(data.active),
+    audienceInteraction: data.audienceInteraction,
+    chapterSongIndex: new Map(data.chapterSongIndex),
     trackMap: new Map(
       data.trackMap.map(([gt, entries]) => [gt, new Map(entries)]),
     ),
-    assignment: data.assignment,
-    preview: {
-      lockedInUsers: new Set(data.preview.lockedInUsers),
-      timerRemaining: data.preview.timerRemaining,
-    },
-    remix: {
-      lockedCells: new Set(data.remix.lockedCells),
-      mutedCells: new Set(data.remix.mutedCells),
-      lastMoveByUser: new Map(data.remix.lastMoveByUser),
-      liveTracksActive: data.remix.liveTracksActive,
-      frozenColumn: data.remix.frozenColumn ?? null,
-      frozenActiveTracks: new Map(data.remix.frozenActiveTracks ?? []),
-    },
+    loopCount: data.loopCount,
+    loopProgress: data.loopProgress,
     npc: data.npc,
-    arc: data.arc ?? null,
   };
 }
 
@@ -174,7 +147,9 @@ export function serializeState(state: ShowState): SerializedShowState {
     currentAttemptIndex: state.currentAttemptIndex,
     attempts: state.attempts,
     users: Array.from(state.users.entries()),
-    finaleState: state.finaleState ? serializeFinaleState(state.finaleState) : null,
+    finaleState: state.finaleState
+      ? serializeFinaleState(state.finaleState as FinaleState)
+      : null,
     config: state.config,
     version: state.version,
     lastUpdated: state.lastUpdated,
@@ -194,7 +169,9 @@ export function deserializeState(data: SerializedShowState): ShowState {
     currentAttemptIndex: data.currentAttemptIndex,
     attempts: data.attempts,
     users: new Map(data.users),
-    finaleState: data.finaleState ? deserializeFinaleState(data.finaleState) : null,
+    finaleState: data.finaleState && data.finaleState.vote
+      ? deserializeFinaleState(data.finaleState)
+      : null,
     config: data.config,
     version: data.version,
     lastUpdated: data.lastUpdated,

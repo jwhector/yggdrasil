@@ -132,75 +132,35 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Rationale:** 3 choices per song makes each choice a dramatic shift (choosing between full musical identities, not individual instruments). The 0.99 threshold at layer 2 means songs almost always collapse — the doubt wins, which is the narrative point. See MIGRATION-V3.2.md Change 2.
 **Impact:** `V32_LAYERS_PER_ATTEMPT = 3`. Existing `LAYERS_PER_ATTEMPT = 6` remains for V3.1 code.
 
-### R24: Cell model is song-choice based (V3.3)
-**Date:** 2026-04-07
-**Decision:** Quilt cells hold a song index (0, 1, 2), not a fragment ID. The grid position (row) determines the granular type. Track resolution: `trackMap[granularType][songIndex] → Ableton trackIndex`.
-**Rationale:** Simpler than fragment-based selection. A cell can move anywhere in the grid and always resolve correctly — the song choice travels with it, and the row determines the instrument. See `docs/finale.md`.
+### R24–R37: V3.3 Quilt decisions (SUPERSEDED)
+**Date:** 2026-04-07 – 2026-04-08
+**Status:** Superseded by V3.4 migration (2026-04-09). V3.3 "Quilt" finale code has been fully removed.
+**Summary:** These decisions covered the quilt grid model, cell-based song selection, audience remix configuration, arc sorting, and energy profiles. They are no longer applicable. See R38–R42 for V3.4 replacements.
 
-### R25: Audience remix is fully configurable (V3.3)
-**Date:** 2026-04-07
-**Decision:** Master toggle to enable/disable audience remix, plus scope (own cell vs any cell), cross-row swaps, cooldown, and whether song choice can change during playback. All via `audienceRemix` in `QuiltConfig`.
-**Rationale:** Allows rapid playtesting of different interaction levels without code changes. Can range from "audience watches, performer remixes alone" to "full audience chaos."
+### R38: Token pool model replaces quilt grid (V3.4)
+**Date:** 2026-04-09
+**Decision:** Finale uses a token pool model instead of a quilt grid. Audience answers emotional questions during `finale_vote`, generating tokens tied to chapters. Performer arranges tokens on a pentagon of granular types during `finale_remix`.
+**Rationale:** The quilt grid was complex (cell claiming, column playhead, arc sorting) and required a 4-phase sequence (elegy → assignment → preview → playback). The token pool simplifies to 2 phases (vote → remix) while preserving the core idea of audience material shaping the finale. The performer has more direct control over the musical arrangement.
 
-### R26: Cross-row swaps are allowed (V3.3)
-**Date:** 2026-04-07
-**Decision:** Moving a cell to a different row changes which instrument plays the song choice. Configurable via `allowCrossRowSwaps`.
-**Rationale:** Musically safe because track resolution always finds the correct audio (`trackMap[newGranularType][songIndex]`).
+### R39: Vote-driven token generation (V3.4)
+**Date:** 2026-04-09
+**Decision:** Each audience vote answer maps to a chapter and generates a token in the pool. Pool fills until `targetPoolSize` is reached. Each person answers up to `maxQuestionsPerPerson` questions (derived from `targetPoolSize / audienceCount`).
+**Rationale:** Creates emotional investment — audience members answer questions about the narrative themes, and their answers literally become the musical material. The cap prevents the pool from growing unboundedly while ensuring everyone contributes roughly equally.
 
-### R27: Performer can override cell song choice (V3.3)
-**Date:** 2026-04-07
-**Decision:** The performer CAN force a specific song for any cell. Available as an emergency/creative tool, but default workflow is reorder/mute/swap.
-**Rationale:** Needed for live performance flexibility. The performer should never be stuck.
+### R40: Loop-quantized crossfades for remix (V3.4)
+**Date:** 2026-04-09
+**Decision:** When the performer queues a token, it activates at the next loop boundary with a beat-locked crossfade. Exception: `audienceInteraction` mode uses instant crossfades.
+**Rationale:** Loop-quantized transitions sound musical — abrupt mid-bar changes are jarring. The audience interaction mode trades musicality for responsiveness, which is appropriate for its "chaos" aesthetic.
 
-### R28: Audience song choice locked after preview by default (V3.3)
-**Date:** 2026-04-07
-**Decision:** After the preview phase, audience song choices are locked. Configurable via `audienceRemix.allowSongChange`. Cell POSITION can always change (if audience remix is enabled).
-**Rationale:** Makes the preview choice consequential. Song change during playback is too chaotic for most shows but available as a config option.
+### R41: Pentagon visualization for remix (V3.4)
+**Date:** 2026-04-09
+**Decision:** Projector shows a pentagon with 5 nodes (bass, drums, pad, harmony, fx) plus pool visualization. Active nodes show chapter color. Pool tokens appear as floating dots.
+**Rationale:** The pentagon maps directly to the 5 granular types and provides a clear spatial metaphor for the performer's arrangement choices. Reuses the existing canvas rendering infrastructure from song-building.
 
-### R29: Loop length is 8 bars (V3.3)
-**Date:** 2026-04-07
-**Decision:** All quilt music is composed for 8-bar loops.
-**Rationale:** Standard loop length that works musically. Column count divides into this (1, 2, 4, or 8 bars per cell).
-
-### R30: Live seed / melody is a quilt row (V3.3)
-**Date:** 2026-04-07
-**Decision:** The live seed is one of the 6 granular type rows (melody/seed), audience-controllable like all other types. The performer's live instruments (vocal, synth, etc.) are separate tracks layered on top of the quilt, not part of the grid.
-**Rationale:** Treats all musical material equally. The performer's live playing is additive, not grid-constrained.
-
-### R31: Visual design should be modular (V3.3)
-**Date:** 2026-04-07
-**Decision:** Build quilt visualization for easy iteration — no locked visual commitments yet.
-**Rationale:** The quilt is a new interaction model. Visual design needs playtesting to discover what works.
-
-### R32: Song energy profiles for sorting (V3.3)
-**Date:** 2026-04-08
-**Decision:** Song 0 (Ambition) = 1.0, Song 1 (Love) = 0.5, Song 2 (Avoidance) = 0.2. Configurable via `arc.songEnergy`.
-**Rationale:** Reflects the existing musical material — Ambition is driving/intense, Love is spacious, Avoidance is sparse/dark.
-
-### R33: Row weight for sorting (V3.3)
-**Date:** 2026-04-08
-**Decision:** drums=0.9, bass=0.8, melody=0.5, harmony=0.4, pad=0.3, fx=0.2. Configurable via `arc.rowWeight`.
-**Rationale:** Rhythm section (drums, bass) has the most impact on perceived energy. The sorting algorithm uses `songEnergy * rowWeight` so drums/bass shape the arc; pad/fx absorb fragmentation.
-
-### R34: Cell size threshold (V3.3)
-**Date:** 2026-04-08
-**Decision:** ≥4 columns → 4 bars/cell. <4 columns → 8 bars/cell. Configurable via `arc.cellSizeThreshold`.
-**Rationale:** Keeps grid loop duration in a musical sweet spot (16-32 bars). Too short and the composition doesn't register; too long and it drags.
-
-### R35: Sort mode selection (V3.3)
-**Date:** 2026-04-08
-**Decision:** Grid loop ≥16 bars → single-pass (3 zones: medium/high/cooldown). <16 bars → multi-pass (3 passes with different energy targets).
-**Rationale:** Single-pass needs enough horizontal space for a full energy arc. Below 16 bars, the arc plays out across multiple shorter loops instead.
-
-### R36: Finale timing is Ableton-driven (V3.3)
-**Date:** 2026-04-08
-**Decision:** Column advances and arc entry/exit groups fire on Ableton beat events (OSC). Raw→sort and sort→exit transitions are triggered by the conductor on grid loop wraps. No wall-clock timers for arc phase transitions.
-**Rationale:** setTimeout chains drift from Ableton's actual playback position over 2+ minutes. Beat-driven timing keeps the grid perfectly synchronized.
-
-### R37: No vertical unity optimization in sorting (V3.3)
-**Date:** 2026-04-08
-**Decision:** The sorting algorithm does NOT try to align columns to the same song across rows. Removed the post-sort `applyVerticalUnitySwaps` pass.
-**Rationale:** Full-column unity (all rows playing the same song) sounded monotonous. The zone-based sorting with shared pool naturally produces inter-row variety — drums might play Ambition in the climax while melody plays Love, which is more musically interesting.
+### R42: Two finale phases instead of four (V3.4)
+**Date:** 2026-04-09
+**Decision:** `finale_vote → finale_remix → ended`. Removed `finale_elegy`, `finale_assignment`, `finale_preview`, `finale_playback`.
+**Rationale:** The 4-phase V3.3 sequence had too many transitions and required complex state management (cell assignment, preview timers, playhead tracking, arc phases). Two phases are simpler to operate live and easier for the audience to follow.
 
 ---
 
@@ -229,20 +189,9 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Notes:** Current spec defines layout requirements and data, not visual style. Theatrical, not analytical.
 **Blocked by:** Visual design collaboration
 
-### O7: Finale freeze → performer takeover UX
-**Status:** Open
-**Questions:** When rotation freezes, what does the projector show? Does the performer get any special controls beyond what the controller already offers?
-**Blocked by:** Performance design / rehearsal
-
-### O9: Crossfade duration at quilt column boundaries
-**Status:** Open
-**Questions:** Hard cuts (0ms) vs smooth crossfade (~100ms) when playhead crosses column boundary and the track for a type changes? Needs playtesting.
-**Blocked by:** Audio playtesting
-
-### O10: Quilt visual design (projector + phone)
-**Status:** Open
-**Questions:** How to display the quilt grid on projector and phones during assignment, preview, and playback? Playhead visualization? Cell swap animations? Modular design per R31.
-**Blocked by:** Visual design collaboration
+### O7: ~~Finale freeze → performer takeover UX~~ → Superseded by V3.4 (performer controls remix directly)
+### O9: ~~Crossfade duration at quilt column boundaries~~ → Superseded by V3.4 (loop-quantized crossfades, see R40)
+### O10: ~~Quilt visual design~~ → Superseded by V3.4 (pentagon visualization, see R41)
 
 ### O8: Ableton session template
 **Status:** Open

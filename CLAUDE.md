@@ -23,7 +23,7 @@ Yggdrasil is an interactive live performance system where ~40 audience members b
 
 **Song-building:** Each attempt has **3 bundled layer groups** (not 6 individual layers). Each group bundles multiple Ableton tracks (e.g., "The Foundation" = bass + drums + percussion). The audience makes 3 binary A/B choices per song — each choice is a big audible vibe shift, not a single instrument swap. Each layer has a **doubt threshold** — if the winning vote proportion falls below it, the song collapses. Thresholds: `[0.50, 0.66, 0.99]`. Each song opens with a **live seed** — a prerecorded loop the performer theatrically "plays" — that anchors the harmonic and rhythmic world. Songs that survive all 3 layers are narratively rejected by the performer (self-sabotage).
 
-**Finale (V3.3 "Quilt"):** After the performer abandons the stage, the system decomposes the layer groups into their **granular types** (bass, drums, seed, pad, harmony, fx) and presents them as a **quilt** — a grid where rows = granular types and columns = time slices along an 8-bar loop. Each audience member **claims one cell** in the quilt, then privately explores which of the 3 songs' material to play in that cell. The quilt plays left to right with a sweeping playhead; at each column boundary, active tracks switch per type based on each cell's song choice. Both audience and the returning performer can **rearrange cells in real time** — swapping positions, reordering columns, locking/muting cells. The result is a shifting patchwork of three songs' material, collaboratively shaped by everyone in the room.
+**Finale (V3.4 "Token Pool"):** After the performer abandons the stage, the audience answers **emotional questions** on their phones (`finale_vote`). Each answer maps to a chapter and generates a **token** in a shared pool. When the pool is full, phones go dark and the performer takes over for `finale_remix` — arranging tokens on a **pentagon** of 5 granular types (bass, drums, pad, harmony, fx). Each node plays one active token at a time; queued tokens activate at loop boundaries with beat-locked crossfades. The performer sculpts the remix in real time, pulling from the audience's emotional choices. An optional `audienceInteraction` mode lets the audience also queue tokens with instant crossfades.
 
 **Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
 
@@ -32,7 +32,7 @@ Yggdrasil is an interactive live performance system where ~40 audience members b
 ## Critical Rules
 
 ### 1. ARCHITECTURE.md + docs/ are the source of truth
-ARCHITECTURE.md and the `docs/` files reflect V3.3. If code contradicts these docs, the docs are correct.
+ARCHITECTURE.md and the `docs/` files reflect V3.4. If code contradicts these docs, the docs are correct.
 
 ### 2. Types first
 When building new features, define the types in `conductor/types.ts` FIRST. Then implement logic. Then wire up server/client. This prevents drift.
@@ -44,7 +44,7 @@ DECISIONS.md has an "Open Decisions" section. If your current task touches one o
 The `conductor/` directory contains pure game logic — no I/O, no Socket.IO, no database calls. All side effects live in `server/`. The conductor receives commands and returns events.
 
 ### 5. High-frequency data bypasses state_sync
-Quilt state, audition progress, and audio metering use dedicated socket events at high frequency (2–30 Hz). They do NOT go through `state_sync` or persistence.
+Pool state, audition progress, and audio metering use dedicated socket events at high frequency (2–30 Hz). They do NOT go through `state_sync` or persistence.
 
 ---
 
@@ -55,7 +55,7 @@ yggdrasil/
 ├── ARCHITECTURE.md              # Architecture spec (index + core concepts)
 ├── docs/                        # Detailed specs (load per-task, see ARCHITECTURE.md index)
 │   ├── song-building.md         # Layers, voting, doubt threshold, collapse, fragments
-│   ├── finale.md                # Finale phases (elegy, assignment, preview, playback) + quilt spec
+│   ├── finale.md                # Finale phases (vote, remix) + token pool spec
 │   ├── data-models.md           # TypeScript interfaces, conductor commands/events
 │   ├── client-routes.md         # /audience, /projector, /controller UI + visual identity
 │   ├── audio-engine.md          # Musical design, OSC protocol, track layout, env vars
@@ -69,23 +69,23 @@ yggdrasil/
 │   ├── conductor.ts             # State machine (show phases + layer phases)
 │   ├── voting.ts                # Vote tallying + doubt threshold check
 │   ├── threshold.ts             # Doubt threshold check
-│   ├── quilt.ts                 # Quilt grid management (cell claiming, song choice, column advancement)
-│   ├── quilt-arc.ts             # Automated playback arc (sorting, energy scoring, arc scheduling)
-│   ├── assignment.ts            # Cell assignment (auto round-robin / self-select claiming)
-│   ├── fragments.ts             # Fragment generation (layer group → granular decomposition for elegy)
+│   ├── question-engine.ts       # Vote phase question delivery logic
+│   ├── remix-engine.ts          # Token pool management and remix state transitions
+│   ├── token-pool.ts            # Token generation from votes
+│   ├── fragments.ts             # Fragment generation (layer group → granular decomposition)
 │   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
 │   ├── npc.ts                   # NPC event-driven message lookup
-│   ├── types.ts                 # Shared types (QuiltCell, GranularType, GranularFragment, etc.)
+│   ├── types.ts                 # Shared types (FinaleState, Token, GranularType, etc.)
 │   └── __tests__/
 │
 ├── server/
 │   ├── index.ts                 # Entry point
-│   ├── socket.ts                # Socket.IO handlers + quilt_state broadcast
+│   ├── socket.ts                # Socket.IO handlers + pool_state broadcast
 │   ├── persistence.ts           # SQLite
 │   ├── backup.ts                # Backup + restore
 │   ├── timing.ts                # Quantized timing + audition progress emission
 │   ├── osc.ts                   # OSC bridge
-│   ├── audio-router.ts          # AUDIO_CUE → OSC mapping (track bundles + quilt crossfades)
+│   ├── audio-router.ts          # AUDIO_CUE → OSC mapping (track bundles + remix crossfades)
 │   └── __tests__/
 │
 ├── app/                         # Next.js pages
@@ -114,24 +114,20 @@ yggdrasil/
 │   │   ├── ThresholdDisplay.tsx # Doubt threshold visualization (audience)
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
-│   │   ├── ElegyGrid.tsx        # Fragment wreckage display
-│   │   ├── QuiltGrid.tsx        # Quilt grid — assignment cell claiming + visual grid
-│   │   ├── QuiltPreview.tsx     # Preview phase — song choice cards + audio preview
-│   │   ├── QuiltRemix.tsx       # Playback phase — draggable quilt cells + playhead
+│   │   ├── ProjectorFinale.tsx  # Projector pentagon + token pool visualization
+│   │   ├── RemixController.tsx  # Controller UI for remix phase
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
 │   └── controller/
 │       ├── ShowControls.tsx     # Phase control buttons
 │       ├── VotingControls.tsx   # Vote management
-│       ├── QuiltRemixControls.tsx # Quilt performer controls — reorder, swap, lock, mute, override
-│       ├── NpcControls.tsx      # NPC line bank + manual fire
 │       ├── EmergencyControls.tsx # Audio panic, state export/import, reset
 │       └── MetricsPanel.tsx     # Telemetry dashboard
 │
 ├── hooks/
 │   ├── useSocket.ts
 │   ├── useShowState.ts
-│   ├── useQuilt.ts              # Quilt state management (quilt_state, cell events, playhead)
+│   ├── useRemixState.ts          # Remix state management (pool_state, queue, active nodes)
 │   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
 │   ├── useAudioPreview.ts       # In-browser audio preview playback
 │   ├── useIntrusiveThoughts.ts  # Audience: server-assigned thought subscription + dismiss
@@ -149,7 +145,7 @@ yggdrasil/
 │                                # Naming: preview-{songIndex}-{granularType}-{option}.mp3
 │
 ├── config/
-│   ├── default-show.json        # Layer groups, granular types, track bundles, thresholds, live seed, quilt config
+│   ├── default-show.json        # Layer groups, granular types, track bundles, thresholds, live seed, finale config
 │   └── ableton-layout.json      # Track bundle mappings + Utility device config
 │
 └── db/
@@ -169,8 +165,8 @@ npm test -- conductor/
 # Run all tests
 npm test
 
-# Type check
-npx tsc --noEmit
+# Type check (covers both client and server tsconfigs)
+npm run typecheck
 
 # Run without Ableton (testing mode)
 OSC_ENABLED=false npm run dev
@@ -198,22 +194,22 @@ npm run dev:network
 4. Conductor emits events → server broadcasts state_sync
 5. Client receives updated state via `useShowState` hook
 
-### High-frequency data (quilt state, audition progress, metering)
+### High-frequency data (pool state, audition progress, metering)
 These do NOT go through state_sync (too slow/heavy):
-- **Quilt state**: Server broadcasts `quilt_state` at ~2-4 Hz during finale phases — cell grid, column order, playhead position
+- **Pool state**: Server broadcasts `pool_state` at ~2-4 Hz during finale phases — token pool, queue, active nodes
 - **Audition progress**: Server broadcasts `audition_progress` at ~4 Hz during song-building auditioning — bar progress, current option, time remaining
 - **Audio metering**: M4L sends at ~15-30 Hz per track, server aggregates, broadcasts to projector at ~10 Hz
 - All use dedicated socket events, not state mutations
 
 ### State filtering by client mode
 - **Controller**: full serialized state (Maps converted to arrays)
-- **Projector**: public state (no per-user data, quilt grid, playhead position)
-- **Audience**: personalized (user's vote, own cell, own song choice, lock-in status, NPC messages)
+- **Projector**: public state (no per-user data, pool visualization, active nodes)
+- **Audience**: personalized (user's vote history, current question, NPC messages)
 
 ### Audio/OSC track layout
 - **No formula.** Track indices are config-driven — defined explicitly per option per granular type in `default-show.json`
 - **Song-building:** Mute/unmute a layer group option = iterate over all tracks in the TrackBundle and send individual OSC commands
-- **Finale quilt:** At each column boundary, resolve `trackMap[granularType][songIndex] → trackIndex` per cell. Crossfade at column boundaries via `GainConfig.crossfadeBeats`.
+- **Finale remix:** Resolve `trackMap[granularType][songIndex] → trackIndices` per active node. Loop-quantized crossfades via Utility device Gain param.
 - **Live seed:** Separate track group per song, unmuted at attempt_build start, muted on collapse/rejection
 - Collapse gesture: return track 0 effects enabled, delayed mute after animation
 - Song rejection gesture: return track 1 effects enabled
@@ -224,7 +220,7 @@ These do NOT go through state_sync (too slow/heavy):
 lobby → opener → attempt_story → attempt_build → attempt_resolve (if completed) →
                                        ↓ (if collapsed)
                  ... (3 attempts) ...
-                 finale_elegy → finale_assignment → finale_preview → finale_playback → ended
+                 finale_vote → finale_remix → ended
 ```
 
-Finale phases: `finale_elegy`, `finale_assignment`, `finale_preview`, `finale_playback`
+Finale phases: `finale_vote` (audience answers emotional questions), `finale_remix` (performer arranges tokens)

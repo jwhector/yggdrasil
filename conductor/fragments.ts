@@ -70,8 +70,8 @@ export function generateFragments(
       // TODO: V3.2 finale rewrite will replace Fragment entirely — this is a bridge
       const layerTypeA = (layerConfig.optionA.tracks[0]?.granularType ?? 'bass') as LayerType;
       const layerTypeB = (layerConfig.optionB.tracks[0]?.granularType ?? 'bass') as LayerType;
-      const audioRefA: AudioReference = { trackIndex: layerConfig.optionA.tracks[0]?.trackIndices[0] ?? 0 };
-      const audioRefB: AudioReference = { trackIndex: layerConfig.optionB.tracks[0]?.trackIndices[0] ?? 0 };
+      const audioRefA: AudioReference = { trackIndices: layerConfig.optionA.tracks[0]?.trackIndices ?? -1 };
+      const audioRefB: AudioReference = { trackIndices: layerConfig.optionB.tracks[0]?.trackIndices ?? -1 };
 
       if (result && (result.status === 'locked_in' || result.status === 'collapsed') && result.chosenOption !== null) {
         // Winner fragment — selectable

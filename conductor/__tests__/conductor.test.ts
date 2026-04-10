@@ -32,7 +32,7 @@ function makeV32LayerConfig(index: number): V32LayerConfig {
 }
 
 function makeAttemptConfig(
-  chapter: 'ambition' | 'love' | 'avoidance',
+  chapter: string,
   layerCount = 3,
   thresholds?: number[],
 ): V32AttemptConfig {
@@ -60,24 +60,18 @@ function createTestConfig(
       makeAttemptConfig('avoidance', layerCount, thresholds),
     ],
     finale: {
-      assignmentMode: 'auto',
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
-      quilt: {
-        maxColumns: 4,
-        loopBars: 8,
-        columnTiming: 'divided' as const,
-        overflowMode: 'spectator' as const,
-        previewTimerMs: 20000,
-        assignmentTimerMs: 30000,
-        audienceRemix: {
-          enabled: true,
-          scope: 'own_cell' as const,
-          allowCrossRowSwaps: true,
-          cooldownLoops: 1,
-          allowSongChange: false,
-        },
+      vote: {
+        questions: [{ text: 'What do you feel?' }],
+        shuffleQuestions: false,
+        targetPoolSize: 10,
+        questionDelayMs: 3000,
+        revealPoolOnProjector: true,
+      },
+      remix: {
+        audienceInteraction: false,
       },
     },
     granularTypes: [
@@ -172,7 +166,7 @@ describe('Show Phase Transitions', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 13; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -189,10 +183,8 @@ describe('Show Phase Transitions', () => {
       'attempt_story',       // attempt 2
       'attempt_build',       // attempt 2
       'attempt_resolve',     // attempt 2
-      'finale_elegy',
-      'finale_assignment',
-      'finale_preview',
-      'finale_playback',
+      'finale_vote',
+      'finale_remix',
       'ended',
     ]);
   });
@@ -225,7 +217,7 @@ describe('Show Phase Transitions', () => {
 
   test('ADVANCE_PHASE returns error when already at ended', () => {
     const state = createTestState();
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 18; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
     }
     expect(state.phase).toBe('ended');
@@ -1215,6 +1207,177 @@ describe('V3.2: 3 Bundled Layer Groups', () => {
 
     const result = state.attempts[0].layerResults[0];
     expect(result.group).toBe('bones'); // first layer group in makeV32LayerConfig
+  });
+});
+
+// ============================================================================
+// V3.4 Finale Phase Integration Tests
+// ============================================================================
+
+describe('V3.4 Finale Phases', () => {
+  function createV34TestConfig(): ShowConfig {
+    return {
+      ...createTestConfig(),
+      finale: {
+        bothOptionsSurvive: true,
+        audioPreviewPath: '/audio/previews',
+        npcMessages: [],
+        vote: {
+          questions: [
+            { text: 'What does he need to hear?' },
+            { text: 'What are you afraid of?' },
+            { text: 'What would you forgive?' },
+          ],
+          shuffleQuestions: false,
+          targetPoolSize: 10,
+          questionDelayMs: 3000,
+          revealPoolOnProjector: true,
+        },
+        remix: {
+          audienceInteraction: false,
+        },
+      },
+    };
+  }
+
+  function createV34TestState(): ShowState {
+    return createInitialState(createV34TestConfig(), 'test-show');
+  }
+
+  function advanceToFinaleVote(state: ShowState): void {
+    // Connect some users first
+    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
+    processCommand(state, { type: 'USER_CONNECT', userId: 'u2' });
+    processCommand(state, { type: 'USER_CONNECT', userId: 'u3' });
+
+    // Jump directly to finale_vote
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'finale_vote' });
+  }
+
+  test('finale_vote phase accepts SUBMIT_EMOTION commands', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+    expect(state.phase).toBe('finale_vote');
+
+    const events = processCommand(state, {
+      type: 'SUBMIT_EMOTION',
+      userId: 'u1',
+      chapterId: 'chapter_0',
+      questionIndex: 0,
+    });
+
+    const emotionEvent = events.find(e => e.type === 'EMOTION_RECEIVED');
+    expect(emotionEvent).toBeDefined();
+    expect((emotionEvent as any).userId).toBe('u1');
+    expect((emotionEvent as any).chapterId).toBe('chapter_0');
+
+    const finaleState = state.finaleState as any;
+    expect(finaleState.pool.tokens).toHaveLength(1);
+    expect(finaleState.pool.availableByChapter.get('chapter_0')).toBe(1);
+  });
+
+  test('finale_vote transitions to finale_remix on START_REMIX', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+
+    // Submit some emotions to build a pool
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u2', chapterId: 'chapter_1', questionIndex: 0 });
+
+    const events = processCommand(state, { type: 'START_REMIX' });
+    expect(state.phase).toBe('finale_remix');
+
+    const phaseChanged = events.find(e => e.type === 'SHOW_PHASE_CHANGED');
+    expect(phaseChanged).toBeDefined();
+    expect((phaseChanged as any).phase).toBe('finale_remix');
+
+    const remixStarted = events.find(e => e.type === 'REMIX_STARTED');
+    expect(remixStarted).toBeDefined();
+  });
+
+  test('finale_remix transitions to ended on END_SHOW', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+
+    const events = processCommand(state, { type: 'END_SHOW' });
+    expect(state.phase).toBe('ended');
+
+    const phaseChanged = events.find(e => e.type === 'SHOW_PHASE_CHANGED');
+    expect(phaseChanged).toBeDefined();
+    expect((phaseChanged as any).phase).toBe('ended');
+  });
+
+  test('QUEUE_TOKEN to silent node activates immediately', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u2', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+
+    const events = processCommand(state, {
+      type: 'QUEUE_TOKEN',
+      granularType: 'bass',
+      chapterId: 'chapter_0',
+    });
+
+    // Silent node — should activate immediately, not queue
+    const activated = events.find(e => e.type === 'TOKEN_ACTIVATED');
+    expect(activated).toBeDefined();
+    expect((activated as any).granularType).toBe('bass');
+    expect((activated as any).chapterId).toBe('chapter_0');
+  });
+
+  test('QUEUE_TOKEN to occupied node queues for next boundary', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u2', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+
+    // First token activates immediately (silent node)
+    processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
+
+    // Second token goes to queue (node is occupied)
+    const events = processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
+    const queued = events.find(e => e.type === 'TOKEN_QUEUED');
+    expect(queued).toBeDefined();
+    expect((queued as any).granularType).toBe('bass');
+  });
+
+  test('LOOP_BOUNDARY spends active token with no replacement', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u2', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+
+    // Activates immediately on silent node
+    processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
+
+    // Boundary spends the active token (no replacement queued)
+    const events = processCommand(state, { type: 'LOOP_BOUNDARY' });
+    const spent = events.find(e => e.type === 'TOKEN_SPENT');
+    expect(spent).toBeDefined();
+    expect((spent as any).granularType).toBe('bass');
+  });
+
+  test('finale_remix transitions to ended when pool is empty', () => {
+    const state = createV34TestState();
+    advanceToFinaleVote(state);
+
+    // Submit exactly 1 token
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+
+    // Activates immediately (silent node)
+    processCommand(state, { type: 'QUEUE_TOKEN', granularType: 'bass', chapterId: 'chapter_0' });
+    // Spend it (no replacement)
+    const events = processCommand(state, { type: 'LOOP_BOUNDARY' });
+
+    expect(events.some(e => e.type === 'POOL_EMPTY')).toBe(true);
+    expect(state.phase).toBe('ended');
   });
 });
 

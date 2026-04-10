@@ -10,7 +10,7 @@
  * - 'controller'  — Performer controller
  *
  * High-frequency channels (NOT via state_sync):
- * - 'quilt_state' → all clients at ~2 Hz (assignment) / ~4 Hz (playback)
+ * - 'pool_state' → projector/controller at ~2 Hz during finale phases
  */
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -22,6 +22,7 @@ import type {
   AttemptState,
   AssignedThought,
   V32LayerConfig,
+  FinaleState,
 } from '../conductor/types';
 import { processCommand } from '../conductor';
 import { assignThoughts, findThoughtsConfig } from '../conductor/intrusive-thoughts';
@@ -49,7 +50,7 @@ interface ClientHeartbeat {
 const HEARTBEAT_INTERVAL_MS = 15000;            // Ping every 15 seconds
 const HEARTBEAT_TIMEOUT_MS = 5000;              // Client must respond within 5 seconds
 const MAX_MISSED_HEARTBEATS = 2;                // 2 missed = mark disconnected
-const QUILT_STATE_BROADCAST_INTERVAL_MS = 250;  // ~4 Hz during playback, ~2 Hz during assignment (throttled)
+const POOL_STATE_BROADCAST_INTERVAL_MS = 500;   // ~2 Hz during finale_vote and finale_remix
 
 // ============================================================================
 // Intrusive thoughts — server-side state
@@ -140,39 +141,29 @@ export function setupSocketHandlers(
   }, HEARTBEAT_INTERVAL_MS);
 
   // ============================================================================
-  // Quilt state broadcast (~2 Hz during assignment, ~4 Hz during playback)
+  // Pool state broadcast (~2 Hz during finale_vote and finale_remix)
   // ============================================================================
 
-  const quiltStateBroadcastInterval = setInterval(() => {
+  const poolStateBroadcastInterval = setInterval(() => {
     const state = getState();
-    const fs = state.finaleState;
+    if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') return;
+
+    const fs = state.finaleState as FinaleState | null;
     if (!fs) return;
 
-    const isAssignment = state.phase === 'finale_assignment' && fs.phase === 'assignment';
-    const isPlayback = state.phase === 'finale_playback' && fs.phase === 'playback';
-    const isPreview = state.phase === 'finale_preview' && fs.phase === 'preview';
-
-    if (!isAssignment && !isPlayback && !isPreview) return;
-
-    const quiltState = {
-      cells: Array.from(fs.quilt.cells.values()).map(c => ({
-        id: c.id,
-        rowIndex: c.rowIndex,
-        columnIndex: c.columnIndex,
-        granularType: c.granularType,
-        songIndex: c.songIndex,
-        chapter: c.chapter,
-        ownerId: c.ownerId,
-      })),
-      columnOrder: fs.quilt.columnOrder,
-      playheadColumn: fs.quilt.playheadColumn,
-      loopCount: fs.quilt.loopCount,
+    const poolState = {
+      availableByChapter: Array.from(fs.pool.availableByChapter.entries()).map(
+        ([chapterId, count]) => ({ chapterId, count })
+      ),
+      totalByChapter: Array.from(fs.pool.totalByChapter.entries()).map(
+        ([chapterId, count]) => ({ chapterId, count })
+      ),
+      totalRemaining: fs.pool.totalRemaining,
     };
 
-    io.to('audience').emit('quilt_state', quiltState);
-    io.to('projector').emit('quilt_state', quiltState);
-    io.to('controller').emit('quilt_state', quiltState);
-  }, QUILT_STATE_BROADCAST_INTERVAL_MS);
+    io.to('projector').emit('pool_state', poolState);
+    io.to('controller').emit('pool_state', poolState);
+  }, POOL_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
   // Cleanup
@@ -180,7 +171,7 @@ export function setupSocketHandlers(
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
-    clearInterval(quiltStateBroadcastInterval);
+    clearInterval(poolStateBroadcastInterval);
   });
 
   // ============================================================================
@@ -394,138 +385,36 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // elegy_opt_in — audience opts in during elegy phase
+    // submit_emotion — audience submits chapter vote during finale_vote
+    //
+    // Payload: { chapterId: string; questionIndex: number }
+    // userId taken from socket session (not payload) for security.
     // ------------------------------------------------------------------
-    socket.on('elegy_opt_in', async () => {
+    socket.on('submit_emotion', async (data: { chapterId: string; questionIndex: number }) => {
       const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
-      const state = getState();
-      const events = processCommand(state, { type: 'ELEGY_OPT_IN', userId });
-
-      // Broadcast opt-in count to all clients for real-time feedback
-      const optInEvent = events.find(e => e.type === 'ELEGY_OPT_IN_RECEIVED') as
-        | { type: 'ELEGY_OPT_IN_RECEIVED'; totalOptedIn: number }
-        | undefined;
-      if (optInEvent) {
-        io.emit('elegy_opt_in_count', { count: optInEvent.totalOptedIn });
+      if (!userId) {
+        console.warn('[Socket] submit_emotion rejected: no userId on socket');
+        return;
       }
 
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // claim_cell — audience claims a quilt cell during assignment
-    //
-    // Payload: { cellId: string }
-    // ------------------------------------------------------------------
-    socket.on('claim_cell', async (data: { cellId: string }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
       const state = getState();
-      const events = processCommand(state, { type: 'CLAIM_CELL', userId, cellId: data.cellId });
-      setState(state, events);
-      persistence.saveState(state);
-
-      // Persist cell claim
-      const cellClaimedEvent = events.find(e => e.type === 'CELL_CLAIMED');
-      if (cellClaimedEvent) {
-        persistence.saveQuiltCell(state.id, data.cellId, userId, null);
+      if (state.phase !== 'finale_vote') {
+        console.warn(`[Socket] submit_emotion rejected: wrong phase (${state.phase})`);
+        return;
       }
 
-      await broadcastEvents(io, events, state);
-    });
+      console.log(`[Socket] Emotion from ${userId}: chapter=${data.chapterId} q=${data.questionIndex}`);
 
-    // ------------------------------------------------------------------
-    // release_cell — audience releases their quilt cell during assignment
-    // ------------------------------------------------------------------
-    socket.on('release_cell', async () => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
+      const events = processCommand(state, {
+        type: 'SUBMIT_EMOTION',
+        userId,
+        chapterId: data.chapterId,
+        questionIndex: data.questionIndex,
+      });
 
-      const state = getState();
-      const events = processCommand(state, { type: 'RELEASE_CELL', userId });
       setState(state, events);
       persistence.saveState(state);
-
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // set_song — audience sets song choice during preview
-    //
-    // Payload: { songIndex: number }
-    // ------------------------------------------------------------------
-    socket.on('set_song', async (data: { songIndex: number }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
-      const state = getState();
-      const events = processCommand(state, { type: 'SET_CELL_SONG', userId, songIndex: data.songIndex });
-      setState(state, events);
-      persistence.saveState(state);
-
-      // Persist song choice
-      const songSetEvent = events.find(e => e.type === 'CELL_SONG_SET') as { cellId: string; songIndex: number } | undefined;
-      if (songSetEvent) {
-        persistence.saveQuiltCell(state.id, songSetEvent.cellId, userId, data.songIndex);
-      }
-
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // lock_in — audience locks in their song choice during preview
-    // ------------------------------------------------------------------
-    socket.on('lock_in', async () => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
-      const state = getState();
-      const events = processCommand(state, { type: 'LOCK_IN_CHOICE', userId });
-      setState(state, events);
-      persistence.saveState(state);
-
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // move_cell — audience moves their cell during playback
-    //
-    // Payload: { targetCellId: string }
-    // ------------------------------------------------------------------
-    socket.on('move_cell', async (data: { targetCellId: string }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
-      const state = getState();
-      const events = processCommand(state, { type: 'MOVE_CELL', userId, targetCellId: data.targetCellId });
-      setState(state, events);
-      persistence.saveState(state);
-
-      // Persist remix event
-      const moveEvent = events.find(e => e.type === 'CELL_MOVED');
-      if (moveEvent) {
-        persistence.saveRemixEvent(state.id, userId, 'move', JSON.stringify(moveEvent));
-      }
-
-      await broadcastEvents(io, events, state);
-    });
-
-    // ------------------------------------------------------------------
-    // change_song — audience changes cell song during playback (when allowed)
-    //
-    // Payload: { songIndex: number }
-    // ------------------------------------------------------------------
-    socket.on('change_song', async (data: { songIndex: number }) => {
-      const userId = (socket as any).userId as UserId;
-      if (!userId) return;
-
-      const state = getState();
-      const events = processCommand(state, { type: 'CHANGE_CELL_SONG', userId, songIndex: data.songIndex });
-      setState(state, events);
-      persistence.saveState(state);
+      persistence.saveFinaleVote(state.id, userId, data.chapterId, data.questionIndex);
 
       await broadcastEvents(io, events, state);
     });
@@ -594,35 +483,24 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      // Persist cell assignments when assignment completes (auto-assigned users)
-      if (processedCommand.type === 'ASSIGNMENT_COMPLETE') {
-        const cellEvents = events.filter(e => e.type === 'CELL_CLAIMED') as
-          Array<{ type: 'CELL_CLAIMED'; cellId: string; userId: UserId }>;
-        for (const ce of cellEvents) {
-          persistence.saveQuiltCell(state.id, ce.cellId, ce.userId, null);
-        }
-      }
-
       // Clear intrusive thoughts when advancing past verdict (layer actually moves on)
       if (processedCommand.type === 'ADVANCE_FROM_VERDICT') {
         clearThoughtsOnAdvance(io);
       }
 
-      // Persist performer remix events
-      if (processedCommand.type === 'LOCK_CELL') {
-        persistence.saveRemixEvent(state.id, null, 'lock', JSON.stringify({ cellId: processedCommand.cellId }));
-      } else if (processedCommand.type === 'UNLOCK_CELL') {
-        persistence.saveRemixEvent(state.id, null, 'unlock', JSON.stringify({ cellId: processedCommand.cellId }));
-      } else if (processedCommand.type === 'MUTE_CELL') {
-        persistence.saveRemixEvent(state.id, null, 'mute', JSON.stringify({ cellId: processedCommand.cellId }));
-      } else if (processedCommand.type === 'UNMUTE_CELL') {
-        persistence.saveRemixEvent(state.id, null, 'unmute', JSON.stringify({ cellId: processedCommand.cellId }));
-      } else if (processedCommand.type === 'SWAP_CELLS') {
-        persistence.saveRemixEvent(state.id, null, 'swap', JSON.stringify({ cellIdA: processedCommand.cellIdA, cellIdB: processedCommand.cellIdB }));
-      } else if (processedCommand.type === 'REORDER_COLUMN') {
-        persistence.saveRemixEvent(state.id, null, 'reorder', JSON.stringify({ fromIndex: processedCommand.fromIndex, toIndex: processedCommand.toIndex }));
-      } else if (processedCommand.type === 'OVERRIDE_CELL_SONG') {
-        persistence.saveRemixEvent(state.id, null, 'override', JSON.stringify({ cellId: processedCommand.cellId, songIndex: processedCommand.songIndex }));
+      // Persist token events
+      for (const event of events) {
+        if (event.type === 'TOKEN_ACTIVATED') {
+          const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
+          persistence.saveTokenEvent(state.id, ta.tokenId, ta.granularType, ta.chapterId, 'activated', null);
+        } else if (event.type === 'TOKEN_SPENT') {
+          const ts = event as { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number };
+          const finaleState = state.finaleState as FinaleState | null;
+          const spentToken = finaleState?.pool.tokens.find(t => t.id === ts.tokenId);
+          const chapterId = spentToken?.chapterId ?? '';
+          const loopCount = finaleState?.loopCount ?? null;
+          persistence.saveTokenEvent(state.id, ts.tokenId, ts.granularType, chapterId, 'spent', loopCount);
+        }
       }
 
       await broadcastEvents(io, events, state);
@@ -692,38 +570,6 @@ export async function broadcastEvents(
         io.to('projector').emit('npc_message', { message: event.message });
         break;
 
-      case 'CELL_CLAIMED':
-        io.to('audience').emit('cell_claimed', { cellId: event.cellId, userId: event.userId });
-        io.to('projector').emit('cell_claimed', { cellId: event.cellId, userId: event.userId });
-        break;
-
-      case 'CELL_MOVED':
-        io.to('audience').emit('cell_moved', {
-          cellId: event.cellId,
-          fromPosition: event.fromPosition,
-          toPosition: event.toPosition,
-          swappedWithCellId: event.swappedWithCellId,
-        });
-        io.to('projector').emit('cell_moved', {
-          cellId: event.cellId,
-          fromPosition: event.fromPosition,
-          toPosition: event.toPosition,
-          swappedWithCellId: event.swappedWithCellId,
-        });
-        break;
-
-      case 'PLAYHEAD_ADVANCED':
-        io.to('audience').emit('playhead_update', { columnIndex: event.columnIndex });
-        io.to('projector').emit('playhead_update', { columnIndex: event.columnIndex });
-        io.to('controller').emit('playhead_update', { columnIndex: event.columnIndex });
-        break;
-
-      case 'COLUMN_REORDERED':
-        io.to('audience').emit('column_reordered', { columnOrder: event.columnOrder });
-        io.to('projector').emit('column_reordered', { columnOrder: event.columnOrder });
-        io.to('controller').emit('column_reordered', { columnOrder: event.columnOrder });
-        break;
-
       case 'REVEAL_STAKES_SHOWN': {
         // Distribute intrusive thoughts to audience + projector
         const attempt = state.attempts[event.attemptIndex];
@@ -757,6 +603,95 @@ export async function broadcastEvents(
         io.to('projector').emit('thoughts_state', {
           thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
         });
+        break;
+      }
+
+      case 'NEXT_QUESTION': {
+        // Send next question directly to the specific audience member
+        const nextQ = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string };
+        const audienceSocksForQ = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForQ) {
+          if ((s as any).userId === nextQ.userId) {
+            s.emit('question', {
+              questionIndex: nextQ.questionIndex,
+              text: nextQ.questionText,
+              chapters: state.config.chapters ?? [],
+            });
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'EMOTION_RECEIVED': {
+        // Confirm the vote to the specific audience member
+        const er = event as { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number };
+        const audienceSocksForEr = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForEr) {
+          if ((s as any).userId === er.userId) {
+            s.emit('emotion_confirmed', { chapterId: er.chapterId, questionIndex: er.questionIndex });
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'POOL_CAP_REACHED':
+        // Phones go dark when pool cap is reached
+        io.to('audience').emit('phones_down');
+        break;
+
+      case 'REMIX_STARTED':
+        // Phones go dark when remix begins
+        io.to('audience').emit('phones_down');
+        break;
+
+      case 'TOKEN_ACTIVATED': {
+        const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
+        io.to('projector').emit('node_update', {
+          granularType: ta.granularType,
+          chapterId: ta.chapterId,
+          status: 'active',
+        });
+        io.to('controller').emit('node_update', {
+          granularType: ta.granularType,
+          chapterId: ta.chapterId,
+          status: 'active',
+        });
+        break;
+      }
+
+      case 'NODE_SILENT': {
+        const ns = event as { type: 'NODE_SILENT'; granularType: string };
+        io.to('projector').emit('node_update', {
+          granularType: ns.granularType,
+          chapterId: null,
+          status: 'silent',
+        });
+        io.to('controller').emit('node_update', {
+          granularType: ns.granularType,
+          chapterId: null,
+          status: 'silent',
+        });
+        break;
+      }
+
+      case 'VOTE_STARTED': {
+        // Send initial questions to all connected audience members
+        const audienceSocksForVote = await io.in('audience').fetchSockets();
+        const voteConfig = state.config.finale.vote;
+        if (voteConfig && voteConfig.questions.length > 0) {
+          const firstQ = voteConfig.questions[0];
+          if (firstQ) {
+            for (const s of audienceSocksForVote) {
+              s.emit('question', {
+                questionIndex: 0,
+                text: firstQ.text,
+                chapters: state.config.chapters ?? [],
+              });
+            }
+          }
+        }
         break;
       }
 
@@ -795,6 +730,37 @@ export function filterStateForClient(
     // -------------------------------------------------------------------------
     case 'projector': {
       const fs = state.finaleState;
+      let finaleStateForClient: object | null = null;
+
+      if (fs) {
+        const finaleFs = fs as FinaleState;
+        finaleStateForClient = {
+          finalePhase: finaleFs.phase,
+          pool: {
+            availableByChapter: Array.from(finaleFs.pool.availableByChapter.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+            totalByChapter: Array.from(finaleFs.pool.totalByChapter.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+            totalRemaining: finaleFs.pool.totalRemaining,
+            targetPoolSize: finaleFs.pool.targetPoolSize,
+            poolCapReached: finaleFs.vote.poolCapReached,
+          },
+          active: Array.from(finaleFs.active.entries()).map(([granularType, node]) => ({
+            granularType,
+            chapterId: node.chapterId,
+            trackIndices: node.trackIndices,
+            persistent: node.persistent,
+          })),
+          queueDepth: Array.from(finaleFs.queue.entries()).map(([granularType, tokens]) => ({
+            granularType,
+            depth: tokens.length,
+          })),
+          validNodes: deriveValidNodes(finaleFs),
+          loopCount: finaleFs.loopCount,
+          loopProgress: finaleFs.loopProgress,
+          audienceInteraction: finaleFs.audienceInteraction,
+          npcMessage: finaleFs.npc.currentMessage,
+        };
+      }
+
       return {
         phase: state.phase,
         paused: state.paused,
@@ -803,36 +769,7 @@ export function filterStateForClient(
         userCount: state.users.size,
         openerSlideState: state.openerSlideState,
         attempts: state.attempts,
-        finaleState: fs ? {
-          finalePhase: fs.phase,
-          availableFragments: fs.availableFragments,
-          allFragments: fs.allFragments,
-          // Quilt grid
-          quilt: {
-            rows: fs.quilt.rows,
-            columns: fs.quilt.columns,
-            cells: Array.from(fs.quilt.cells.values()).map(c => ({
-              id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
-              granularType: c.granularType, songIndex: c.songIndex,
-              chapter: c.chapter, ownerId: c.ownerId,
-            })),
-            columnOrder: fs.quilt.columnOrder,
-            playheadColumn: fs.quilt.playheadColumn,
-            loopCount: fs.quilt.loopCount,
-          },
-          availableSongs: fs.availableSongs,
-          // Arc state
-          arcPhase: fs.arc?.phase ?? null,
-          arcPassIndex: fs.arc?.currentPassIndex ?? null,
-          // Assignment
-          assignmentMode: fs.assignment.mode,
-          assignmentTimerRemaining: fs.assignment.timerRemaining,
-          // Remix
-          lockedCells: Array.from(fs.remix.lockedCells),
-          mutedCells: Array.from(fs.remix.mutedCells),
-          // NPC
-          npcMessage: fs.npc.currentMessage,
-        } : null,
+        finaleState: finaleStateForClient,
         config: state.config,
       };
     }
@@ -863,49 +800,35 @@ export function filterStateForClient(
 
       // Finale personalization
       let myFinale: object | null = null;
-      const fs = state.finaleState;
+      const fs = state.finaleState as FinaleState | null;
       if (fs) {
-        // Find user's cell
-        let myCellId: string | null = null;
-        for (const cell of fs.quilt.cells.values()) {
-          if (cell.ownerId === userId) { myCellId = cell.id; break; }
+        if (state.phase === 'finale_vote') {
+          const answeredCount = fs.vote.questionsAnsweredByUser.get(userId) ?? 0;
+          const voteConfig = state.config.finale.vote;
+          let currentQuestion: { questionIndex: number; text: string } | null = null;
+          if (
+            voteConfig &&
+            !fs.vote.poolCapReached &&
+            answeredCount < fs.vote.maxQuestionsPerPerson &&
+            answeredCount < voteConfig.questions.length
+          ) {
+            const q = voteConfig.questions[answeredCount];
+            if (q) currentQuestion = { questionIndex: answeredCount, text: q.text };
+          }
+          myFinale = {
+            finalePhase: 'vote',
+            currentQuestion,
+            answeredCount,
+            poolCapReached: fs.vote.poolCapReached,
+            chapters: state.config.chapters ?? [],
+            npcMessage: fs.npc.currentMessage,
+          };
+        } else if (state.phase === 'finale_remix') {
+          myFinale = {
+            finalePhase: 'remix',
+            npcMessage: fs.npc.currentMessage,
+          };
         }
-
-        myFinale = {
-          finalePhase: fs.phase,
-          // Quilt grid (shared)
-          quilt: {
-            rows: fs.quilt.rows,
-            columns: fs.quilt.columns,
-            cells: Array.from(fs.quilt.cells.values()).map(c => ({
-              id: c.id, rowIndex: c.rowIndex, columnIndex: c.columnIndex,
-              granularType: c.granularType, songIndex: c.songIndex,
-              chapter: c.chapter, ownerId: c.ownerId,
-            })),
-            columnOrder: fs.quilt.columnOrder,
-            playheadColumn: fs.quilt.playheadColumn,
-          },
-          availableSongs: fs.availableSongs,
-          // Elegy opt-in
-          optedIn: fs.elegyOptedIn.has(userId),
-          optInCount: fs.elegyOptedIn.size,
-          // Arc state
-          arcPhase: fs.arc?.phase ?? null,
-          // Assignment
-          myCellId,
-          assignmentMode: fs.assignment.mode,
-          assignmentTimerRemaining: fs.assignment.timerRemaining,
-          // Preview
-          previewTimerRemaining: fs.preview.timerRemaining,
-          lockedIn: fs.preview.lockedInUsers.has(userId),
-          audioPreviewPath: state.config.finale.audioPreviewPath,
-          // Remix
-          lockedCells: Array.from(fs.remix.lockedCells),
-          mutedCells: Array.from(fs.remix.mutedCells),
-          audienceRemix: state.config.finale.quilt.audienceRemix,
-          // NPC
-          npcMessage: fs.npc.currentMessage,
-        };
       }
 
       return {
@@ -952,4 +875,25 @@ export function filterStateForClient(
     default:
       return serializeState(state);
   }
+}
+
+/**
+ * Derive valid granularType+chapter combos from the finale trackMap.
+ * A combo is valid if trackMap[granularType][songIndex] has entries and
+ * the chapter maps to that songIndex via chapterSongIndex.
+ */
+function deriveValidNodes(fs: FinaleState): Array<{ granularType: string; chapterId: string }> {
+  const result: Array<{ granularType: string; chapterId: string }> = [];
+  for (const [granularType, songMap] of fs.trackMap.entries()) {
+    for (const [songIndex, trackIndices] of songMap.entries()) {
+      if (trackIndices.length === 0) continue;
+      // Reverse-lookup: find chapterId for this songIndex
+      for (const [chapterId, sIdx] of fs.chapterSongIndex.entries()) {
+        if (sIdx === songIndex) {
+          result.push({ granularType, chapterId });
+        }
+      }
+    }
+  }
+  return result;
 }

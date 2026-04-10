@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS finale_mix_events (
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
 
--- V3.3: Quilt cell state
+-- [DEPRECATED V3.3]: Quilt cell state (replaced by finale_votes + finale_token_events in V3.4)
 CREATE TABLE IF NOT EXISTS finale_quilt_cells (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
@@ -107,13 +107,37 @@ CREATE TABLE IF NOT EXISTS finale_quilt_cells (
   UNIQUE(show_id, cell_id)
 );
 
--- V3.3: Remix events (audience + performer actions during playback)
+-- [DEPRECATED V3.3]: Remix events (replaced by finale_token_events in V3.4)
 CREATE TABLE IF NOT EXISTS finale_remix_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   show_id TEXT NOT NULL,
   user_id TEXT,
   event_type TEXT NOT NULL CHECK(event_type IN ('move', 'reorder', 'swap', 'lock', 'unlock', 'mute', 'unmute', 'override')),
   payload JSON NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+
+-- V3.4: Audience emotional votes (one row per question answered)
+CREATE TABLE IF NOT EXISTS finale_votes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  question_index INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (show_id) REFERENCES shows(id)
+);
+
+-- V3.4: Token spend log (for recovery + analytics)
+CREATE TABLE IF NOT EXISTS finale_token_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  token_id TEXT NOT NULL,
+  granular_type TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('queued', 'activated', 'spent', 'cancelled')),
+  loop_number INTEGER,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (show_id) REFERENCES shows(id)
 );
@@ -129,3 +153,5 @@ CREATE INDEX IF NOT EXISTS idx_finale_assignments_show ON finale_assignments(sho
 CREATE INDEX IF NOT EXISTS idx_finale_mix_events_show ON finale_mix_events(show_id);
 CREATE INDEX IF NOT EXISTS idx_finale_quilt_cells_show ON finale_quilt_cells(show_id);
 CREATE INDEX IF NOT EXISTS idx_finale_remix_events_show ON finale_remix_events(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_votes_show ON finale_votes(show_id);
+CREATE INDEX IF NOT EXISTS idx_finale_token_events_show ON finale_token_events(show_id);

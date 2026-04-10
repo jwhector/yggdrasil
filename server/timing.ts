@@ -132,13 +132,20 @@ interface AuditionTrackingState {
 }
 
 /**
- * Loop boundary tracking state (for performer mix pending changes)
+ * Remix loop boundary tracking state (V3.4 token pool).
+ *
+ * Ableton transport loop is the source of truth for loop period. The raw beat
+ * position (0–31 for a 32-beat loop) tells us exactly where we are. We fire
+ * LOOP_BOUNDARY `preCueBeats` before the transport wraps so the crossfade is
+ * already in progress when the new loop starts. The wrap resets the fired flag.
+ *
+ * In fallback mode, a JS interval fires at configuredLoopBoundaryBeats intervals.
  */
-interface LoopTrackingState {
-  lastBoundaryBeat: number;    // Beat number at last loop boundary (-1 = not yet set)
-  loopBeats: number;           // from config.timing.loopBoundaryBeats
-  crossfadeBeats: number;      // How many beats before boundary to fire PREPARE_COLUMN_CROSSFADE
-  crossfadeSent: boolean;      // Whether the pre-cue has been sent for the current interval
+interface RemixLoopTrackingState {
+  active: boolean;
+  preCueBeats: number;          // How many beats before the wrap to fire LOOP_BOUNDARY
+  loopBeats: number;            // configuredLoopBoundaryBeats (for pre-cue threshold)
+  firedThisLoop: boolean;       // Prevents double-firing within the same loop
 }
 
 const BEATS_PER_BAR = 4;
@@ -177,13 +184,11 @@ export function createTimingEngine(
   // Engine state
   let running = false;
   let currentTimer: TimerState | null = null;
-  let assignmentTimer: NodeJS.Timeout | null = null;
   let auditionState: AuditionTrackingState | null = null;
   let fallbackAuditionInterval: NodeJS.Timeout | null = null;
   let fallbackAuditionLoopIndex = 0;
-  let loopState: LoopTrackingState | null = null;
-  let fallbackLoopInterval: NodeJS.Timeout | null = null;
-  let fallbackCrossfadeTimeout: NodeJS.Timeout | null = null;
+  let remixLoopState: RemixLoopTrackingState | null = null;
+  let fallbackRemixLoopInterval: NodeJS.Timeout | null = null;
   let configuredLoopBoundaryBeats: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
@@ -303,197 +308,8 @@ export function createTimingEngine(
     return currentBeatPosition;
   }
 
-  // --------------------------------------------------------------------------
-  // Finale Timers (Assignment — self-select mode only)
-  // --------------------------------------------------------------------------
-
-  function startAssignmentTimer(durationMs: number): void {
-    clearAssignmentTimer();
-    console.log(`[Timing] Assignment timer: ${durationMs}ms`);
-    assignmentTimer = setTimeout(() => {
-      if (!running) return;
-      const state = getState();
-      if (state.phase === 'finale_assignment') {
-        console.log('[Timing] Assignment timer expired → ASSIGNMENT_COMPLETE');
-        sendCommand({ type: 'ASSIGNMENT_COMPLETE' });
-      }
-      assignmentTimer = null;
-    }, durationMs);
-  }
-
-  function clearAssignmentTimer(): void {
-    if (assignmentTimer) {
-      clearTimeout(assignmentTimer);
-      assignmentTimer = null;
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Preview Timer (V3.3)
-  // --------------------------------------------------------------------------
-
-  let previewTimer: NodeJS.Timeout | null = null;
-
-  function startPreviewTimer(durationMs: number): void {
-    clearPreviewTimer();
-    console.log(`[Timing] Preview timer: ${durationMs}ms`);
-    previewTimer = setTimeout(() => {
-      if (!running) return;
-      const state = getState();
-      if (state.phase === 'finale_preview') {
-        console.log('[Timing] Preview timer expired → PREVIEW_COMPLETE');
-        sendCommand({ type: 'PREVIEW_COMPLETE' });
-        sendCommand({ type: 'ADVANCE_PHASE' });
-      }
-      previewTimer = null;
-    }, durationMs);
-  }
-
-  function clearPreviewTimer(): void {
-    if (previewTimer) {
-      clearTimeout(previewTimer);
-      previewTimer = null;
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Arc Tracking (V3.3: beat-driven arc phase triggers)
-  // --------------------------------------------------------------------------
-
-  // Arc entry/exit triggers are driven by Ableton loop boundaries (every 32 beats).
-  // Raw→sort and sort pass transitions are driven by the conductor detecting grid
-  // loop wraps in handleAdvanceQuiltColumn — no timing-level triggers needed for those.
-
-  interface ArcTrackingState {
-    abletonLoopCount: number;
-    lastAbletonLoopBeat: number;
-    triggers: Array<{ atLoop: number; command: ConductorCommand }>;
-    firedTriggers: Set<number>;
-  }
-  let arcTrackingState: ArcTrackingState | null = null;
-
-  /**
-   * Start beat-driven arc tracking. Pre-computes a trigger table of
-   * Ableton loop boundaries → commands (entry/exit row groups).
-   * Raw→sort and sort pass transitions happen in the conductor via grid loop wraps.
-   */
-  function startArcTracking(state: ShowState): void {
-    stopArcTracking();
-
-    const arcConfig = state.config.finale.quilt.arc;
-    if (!arcConfig?.enabled || !state.finaleState?.arc) return;
-
-    const triggers: Array<{ atLoop: number; command: ConductorCommand }> = [];
-
-    // Entry row groups: fire at their abletonLoopIndex
-    // (group 0 is already entered by handleStartPlayback at loop 0)
-    for (let i = 0; i < arcConfig.entrySchedule.length; i++) {
-      const group = arcConfig.entrySchedule[i];
-      if (group.abletonLoopIndex === 0) continue; // Already fired
-      triggers.push({
-        atLoop: group.abletonLoopIndex,
-        command: { type: 'ARC_ENTRY_ROW_GROUP', groupIndex: i },
-      });
-    }
-
-    // Exit row groups: offset by entry + raw + sorted playback duration.
-    // But we don't know the exact Ableton loop count for exit start — the conductor
-    // will set arc.phase = 'exit' when sorted playback is done (via grid loop wraps).
-    // We schedule exit triggers relative to when the exit phase begins, using a
-    // separate mechanism: check arc.phase in the beat handler and count from there.
-    // For simplicity, we'll handle exit triggers reactively (see handleArcBeat below).
-
-    arcTrackingState = {
-      abletonLoopCount: 0,
-      lastAbletonLoopBeat: -1,
-      triggers,
-      firedTriggers: new Set(),
-    };
-
-    console.log(`[Timing] Arc tracking started: ${triggers.length} entry triggers`);
-  }
-
-  // Exit tracking: separate counter that starts when arc enters 'exit' phase
-  let exitLoopCount = 0;
-  let lastExitLoopBeat = -1;
-  let exitTriggersActive = false;
-
-  /**
-   * Called on each Ableton loop boundary (every configuredLoopBoundaryBeats beats).
-   * Fires entry/exit row group commands based on loop count.
-   */
-  function handleArcBeat(monotonicBeat: number): void {
-    if (!arcTrackingState) return;
-
-    const state = getState();
-    const arcPhase = state.finaleState?.arc?.phase;
-    if (!arcPhase) return;
-
-    // Initialize baseline on first beat
-    if (arcTrackingState.lastAbletonLoopBeat < 0) {
-      arcTrackingState.lastAbletonLoopBeat = monotonicBeat;
-      return;
-    }
-
-    const beatsSinceLast = monotonicBeat - arcTrackingState.lastAbletonLoopBeat;
-    if (beatsSinceLast >= configuredLoopBoundaryBeats) {
-      arcTrackingState.lastAbletonLoopBeat = monotonicBeat;
-      arcTrackingState.abletonLoopCount++;
-
-      // Check entry triggers
-      if (arcPhase === 'entry') {
-        for (let i = 0; i < arcTrackingState.triggers.length; i++) {
-          const trigger = arcTrackingState.triggers[i];
-          if (!arcTrackingState.firedTriggers.has(i) && trigger.atLoop <= arcTrackingState.abletonLoopCount) {
-            arcTrackingState.firedTriggers.add(i);
-            sendCommand(trigger.command);
-          }
-        }
-      }
-    }
-
-    // Exit phase tracking: count Ableton loops since exit started
-    if (arcPhase === 'exit') {
-      const arcConfig = state.config.finale.quilt.arc;
-      if (!arcConfig) return;
-
-      if (!exitTriggersActive) {
-        // First time in exit phase — initialize
-        exitTriggersActive = true;
-        exitLoopCount = 0;
-        lastExitLoopBeat = monotonicBeat;
-      }
-
-      const exitBeatsSinceLast = monotonicBeat - lastExitLoopBeat;
-      if (exitBeatsSinceLast >= configuredLoopBoundaryBeats) {
-        lastExitLoopBeat = monotonicBeat;
-        exitLoopCount++;
-
-        // Fire exit group commands
-        for (let i = 0; i < arcConfig.exitSchedule.length; i++) {
-          const group = arcConfig.exitSchedule[i];
-          if (group.abletonLoopIndex === exitLoopCount) {
-            sendCommand({ type: 'ARC_EXIT_ROW_GROUP', groupIndex: i });
-          }
-        }
-      }
-    } else {
-      // Reset exit tracking if we're not in exit phase
-      exitTriggersActive = false;
-    }
-  }
-
-  function stopArcTracking(): void {
-    arcTrackingState = null;
-    exitTriggersActive = false;
-    exitLoopCount = 0;
-    lastExitLoopBeat = -1;
-  }
-
   function clearAllFinaleTimers(): void {
-    clearAssignmentTimer();
-    clearPreviewTimer();
-    stopArcTracking();
+    stopRemixLoopTracking();
   }
 
   // --------------------------------------------------------------------------
@@ -662,91 +478,54 @@ export function createTimingEngine(
   }
 
   // --------------------------------------------------------------------------
-  // Loop Boundary Tracking (Performer Mix)
+  // Remix Loop Boundary Tracking (V3.4)
   // --------------------------------------------------------------------------
 
   /**
-   * Start loop boundary tracking for performer mix phase.
-   * Fires FIRE_PENDING_CHANGES at each 8-bar boundary.
+   * Start loop boundary tracking for the finale_remix phase.
+   * Fires LOOP_BOUNDARY at each 8-bar (loopBoundaryBeats) boundary.
+   * Simpler than V3.3 loop tracking — no crossfade pre-cue, no column logic.
    */
-  function startLoopTracking(): void {
-    stopLoopTracking();
-
-    // Reset beat baseline so rawToMonotonic handles the jump to beat 0 cleanly
-    previousRawBeat = -1;
-    beatWrapOffset = 0;
-    currentAbsoluteBeat = 0;
+  function startRemixLoopTracking(): void {
+    stopRemixLoopTracking();
 
     const state = getState();
-    const columns = state.finaleState?.quilt.columns ?? 1;
-    const columnTiming = state.config.finale.quilt.columnTiming ?? 'divided';
-    const loopBeats = Math.round(
-      columnTiming === 'divided'
-        ? configuredLoopBoundaryBeats / columns
-        : columnTiming === 'half_loop'
-          ? configuredLoopBoundaryBeats / 2
-          : configuredLoopBoundaryBeats
-    );
-    const loopBars = loopBeats / BEATS_PER_BAR;
-
-    const crossfadeBeats = Math.min(
-      state.config.timing.gain?.crossfadeBeats ?? 1,
-      loopBeats - 1, // Clamp: pre-cue can't fire at or before previous boundary
-    );
+    const crossfadeBeats = state.config.timing.gain?.crossfadeBeats ?? 1;
+    const preCueBeats = Math.ceil(crossfadeBeats / 2);
+    const loopBeats = configuredLoopBoundaryBeats;
 
     if (engineConfig.oscBridge && engineConfig.oscBridge.isRunning()) {
-      // OSC mode: track beats
-      loopState = {
-        lastBoundaryBeat: -1,
-        loopBeats,
-        crossfadeBeats,
-        crossfadeSent: false,
-      };
-      console.log(`[Timing] Loop boundary tracking started (OSC, every ${loopBars} bars / ${loopBeats} beats, crossfade ${crossfadeBeats} beats early)`);
+      // OSC mode: fire LOOP_BOUNDARY `preCueBeats` before Ableton transport wraps
+      remixLoopState = { active: true, preCueBeats, loopBeats, firedThisLoop: false };
+      console.log(`[Timing] Remix loop tracking started (OSC, Ableton transport loop, pre-cue ${preCueBeats} beats)`);
     } else {
-      // Fallback: JS interval
+      // Fallback: JS interval (no Ableton transport to detect)
+      remixLoopState = { active: true, preCueBeats, loopBeats, firedThisLoop: false };
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
       const intervalMs = loopBeats * msPerBeat;
-      const crossfadeMs = crossfadeBeats * msPerBeat;
 
-      // Schedule the first pre-cue (subsequent ones are scheduled after each boundary)
-      fallbackCrossfadeTimeout = setTimeout(() => {
+      fallbackRemixLoopInterval = setInterval(() => {
         if (!running) return;
-        sendCommand({ type: 'PREPARE_COLUMN_CROSSFADE' });
-      }, intervalMs - crossfadeMs);
-
-      fallbackLoopInterval = setInterval(() => {
-        if (!running) return;
-        const state = getState();
-        if (state.phase !== 'finale_playback') {
-          stopLoopTracking();
+        const s = getState();
+        if (s.phase !== 'finale_remix') {
+          stopRemixLoopTracking();
           return;
         }
-        sendCommand({ type: 'ADVANCE_QUILT_COLUMN' });
-
-        // Schedule next pre-cue
-        fallbackCrossfadeTimeout = setTimeout(() => {
-          if (!running) return;
-          sendCommand({ type: 'PREPARE_COLUMN_CROSSFADE' });
-        }, intervalMs - crossfadeMs);
+        sendCommand({ type: 'LOOP_BOUNDARY' });
       }, intervalMs);
 
-      console.log(`[Timing] Loop boundary tracking started (fallback, every ${intervalMs.toFixed(0)}ms, crossfade ${crossfadeMs.toFixed(0)}ms early)`);
+      console.log(`[Timing] Remix loop tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
     }
   }
 
   /**
-   * Stop loop boundary tracking.
+   * Stop remix loop boundary tracking.
    */
-  function stopLoopTracking(): void {
-    loopState = null;
-    if (fallbackLoopInterval) {
-      clearInterval(fallbackLoopInterval);
-      fallbackLoopInterval = null;
-    }
-    if (fallbackCrossfadeTimeout) {
-      clearTimeout(fallbackCrossfadeTimeout);
-      fallbackCrossfadeTimeout = null;
+  function stopRemixLoopTracking(): void {
+    remixLoopState = null;
+    if (fallbackRemixLoopInterval) {
+      clearInterval(fallbackRemixLoopInterval);
+      fallbackRemixLoopInterval = null;
     }
   }
 
@@ -842,6 +621,9 @@ export function createTimingEngine(
   function handleBeatEvent(rawBeatNumber: number): void {
     if (!running) return;
 
+    // Capture pre-wrap state for remix loop detection (before rawToMonotonic mutates previousRawBeat)
+    const prevRaw = previousRawBeat;
+
     // Convert wrapping Ableton beats (e.g. 0–31, 0–31, ...) to monotonic
     const monotonicBeat = rawToMonotonic(rawBeatNumber);
     const state = getState();
@@ -875,32 +657,22 @@ export function createTimingEngine(
       }
     }
 
-    // --- Loop boundary tracking (live mix) ---
-    if (!loopState) return;
-    if (state.phase !== 'finale_playback') return;
+    // --- Remix loop boundary (V3.4 — Ableton transport loop is source of truth) ---
+    // Fire LOOP_BOUNDARY `preCueBeats` before the transport wraps so the
+    // crossfade is already in progress when the new loop starts. Reset on wrap.
+    if (remixLoopState?.active && state.phase === 'finale_remix') {
+      // Transport wrapped — reset flag for the new loop
+      if (prevRaw >= 0 && rawBeatNumber < prevRaw) {
+        remixLoopState.firedThisLoop = false;
+      }
 
-    // Initialize baseline on first beat
-    if (loopState.lastBoundaryBeat < 0) {
-      loopState.lastBoundaryBeat = monotonicBeat;
+      // Pre-cue: fire when raw beat reaches the threshold
+      const threshold = remixLoopState.loopBeats - remixLoopState.preCueBeats;
+      if (!remixLoopState.firedThisLoop && rawBeatNumber >= threshold) {
+        remixLoopState.firedThisLoop = true;
+        sendCommand({ type: 'LOOP_BOUNDARY' });
+      }
     }
-
-    const beatsSinceBoundary = monotonicBeat - loopState.lastBoundaryBeat;
-
-    // Pre-cue: start crossfade ahead of boundary
-    if (!loopState.crossfadeSent && beatsSinceBoundary >= loopState.loopBeats - loopState.crossfadeBeats) {
-      loopState.crossfadeSent = true;
-      sendCommand({ type: 'PREPARE_COLUMN_CROSSFADE' });
-    }
-
-    // Boundary: advance playhead state (audio already transitioning)
-    if (beatsSinceBoundary >= loopState.loopBeats) {
-      loopState.lastBoundaryBeat = monotonicBeat;
-      loopState.crossfadeSent = false;
-      sendCommand({ type: 'ADVANCE_QUILT_COLUMN' });
-    }
-
-    // --- Arc entry/exit tracking (on Ableton loop boundaries) ---
-    handleArcBeat(monotonicBeat);
   }
 
   // --------------------------------------------------------------------------
@@ -996,57 +768,10 @@ export function createTimingEngine(
 
     if (showPhaseEvent) {
       cancelCurrentTimer();
-      stopLoopTracking();
       clearAllFinaleTimers();
 
-      if (showPhaseEvent.phase === 'finale_playback') {
-        startLoopTracking();
-        // Start beat-driven arc tracking if arc is enabled
-        startArcTracking(state);
-      }
-    }
-
-    // Assignment started (self-select mode) → start assignment timer
-    const assignmentStartedEvent = events.find(e => e.type === 'ASSIGNMENT_STARTED') as
-      | { type: 'ASSIGNMENT_STARTED'; mode: 'auto' | 'self_select' }
-      | undefined;
-    if (assignmentStartedEvent && assignmentStartedEvent.mode === 'self_select') {
-      const timerMs = state.config.finale.quilt.assignmentTimerMs;
-      if (timerMs > 0) {
-        startAssignmentTimer(timerMs);
-      }
-    }
-
-    // All cells assigned → clear assignment timer
-    if (events.some(e => e.type === 'ALL_CELLS_ASSIGNED')) {
-      clearAssignmentTimer();
-    }
-
-    // Preview started → start preview timer
-    if (events.some(e => e.type === 'PREVIEW_STARTED')) {
-      const timerMs = state.config.finale.quilt.previewTimerMs;
-      if (timerMs > 0) {
-        startPreviewTimer(timerMs);
-      }
-    }
-
-    // All users locked in → clear preview timer (ADVANCE_PHASE handled by conductor/server)
-    if (events.some(e => e.type === 'USER_LOCKED_IN')) {
-      // Check if all cell owners have locked in
-      const fs = state.finaleState;
-      if (fs && fs.phase === 'preview') {
-        let allLocked = true;
-        for (const cell of fs.quilt.cells.values()) {
-          if (cell.ownerId && !fs.preview.lockedInUsers.has(cell.ownerId)) {
-            allLocked = false;
-            break;
-          }
-        }
-        if (allLocked) {
-          clearPreviewTimer();
-          sendCommand({ type: 'PREVIEW_COMPLETE' });
-          sendCommand({ type: 'ADVANCE_PHASE' });
-        }
+      if (showPhaseEvent.phase === 'finale_remix') {
+        startRemixLoopTracking();
       }
     }
   }
@@ -1110,8 +835,8 @@ export function createTimingEngine(
           },
         ]);
       }
-    } else if (state.phase === 'finale_playback') {
-      startLoopTracking();
+    } else if (state.phase === 'finale_remix') {
+      startRemixLoopTracking();
     }
   }
 
@@ -1125,7 +850,6 @@ export function createTimingEngine(
     cancelCurrentTimer();
     clearAllFinaleTimers();
     stopAuditionTracking(); // Also stops progress emission
-    stopLoopTracking();
     stopFallbackBeatTicker();
     beatCallbacks = [];
     previousRawBeat = -1;
@@ -1165,35 +889,10 @@ export function createTimingEngine(
   function recoverTimers(state: ShowState): void {
     if (!state.finaleState) return;
 
-    const elapsed = Date.now() - state.lastUpdated;
-
-    if (state.phase === 'finale_assignment' && state.finaleState.assignment.mode === 'self_select') {
-      const timerRemaining = state.finaleState.assignment.timerRemaining;
-      if (timerRemaining !== null) {
-        const remaining = timerRemaining - elapsed;
-        if (remaining > 0) {
-          console.log(`[Timing] Recovering assignment timer: ${remaining}ms remaining`);
-          startAssignmentTimer(remaining);
-        } else {
-          console.log('[Timing] Assignment timer already expired on recovery → firing ASSIGNMENT_COMPLETE');
-          sendCommand({ type: 'ASSIGNMENT_COMPLETE' });
-        }
-      }
-    }
-
-    if (state.phase === 'finale_preview') {
-      const timerRemaining = state.finaleState.preview.timerRemaining;
-      if (timerRemaining !== null) {
-        const remaining = timerRemaining - elapsed;
-        if (remaining > 0) {
-          console.log(`[Timing] Recovering preview timer: ${remaining}ms remaining`);
-          startPreviewTimer(remaining);
-        } else {
-          console.log('[Timing] Preview timer already expired on recovery → firing PREVIEW_COMPLETE');
-          sendCommand({ type: 'PREVIEW_COMPLETE' });
-          sendCommand({ type: 'ADVANCE_PHASE' });
-        }
-      }
+    // V3.4: finale_remix loop tracking restarts via start() → phase check.
+    // No timer-based recovery needed for remix (loop tracking is stateless).
+    if (state.phase === 'finale_remix') {
+      startRemixLoopTracking();
     }
   }
 
@@ -1213,9 +912,8 @@ export function createTimingEngine(
     currentBeatPosition = null;
     currentBpm = engineConfig.fallbackBpm;
 
-    // Reset audition/loop baselines so they re-anchor to new beats
+    // Reset audition baselines so they re-anchor to new beats
     if (auditionState) auditionState.lastToggleBeat = -1;
-    if (loopState) loopState.lastBoundaryBeat = -1;
 
     // Re-subscribe to Ableton events
     engineConfig.oscBridge.send('/live/song/start_listen/beat');
@@ -1229,8 +927,8 @@ export function createTimingEngine(
       if (attempt?.status === 'in_progress' && attempt.currentLayerPhase === 'auditioning') {
         startAuditionTracking(state);
       }
-    } else if (state.phase === 'finale_playback') {
-      startLoopTracking();
+    } else if (state.phase === 'finale_remix') {
+      startRemixLoopTracking();
     }
   }
 

@@ -20,7 +20,6 @@ import type {
   ShowConfig,
   V32AttemptConfig,
   V32LayerConfig,
-  V33FinaleState,
 } from '../../conductor/types';
 
 // ============================================================================
@@ -38,7 +37,7 @@ function makeLayerConfig(index: number): V32LayerConfig {
   };
 }
 
-function makeAttemptConfig(chapter: 'ambition' | 'love' | 'avoidance'): V32AttemptConfig {
+function makeAttemptConfig(chapter: string): V32AttemptConfig {
   return {
     chapter,
     title: chapter,
@@ -60,23 +59,18 @@ function createTestConfig(): ShowConfig {
       makeAttemptConfig('avoidance'),
     ],
     finale: {
-      assignmentMode: 'auto',
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
-      quilt: {
-        maxColumns: 4,
-        loopBars: 8,
-        overflowMode: 'spectator' as const,
-        previewTimerMs: 20000,
-        assignmentTimerMs: 30000,
-        audienceRemix: {
-          enabled: true,
-          scope: 'own_cell' as const,
-          allowCrossRowSwaps: true,
-          cooldownLoops: 1,
-          allowSongChange: false,
-        },
+      vote: {
+        questions: [],
+        shuffleQuestions: false,
+        targetPoolSize: 120,
+        questionDelayMs: 3000,
+        revealPoolOnProjector: true,
+      },
+      remix: {
+        audienceInteraction: false,
       },
     },
     timing: {
@@ -98,39 +92,6 @@ function advanceToBuild(state: ShowState): void {
   processCommand(state, { type: 'ADVANCE_PHASE' }); // lobby → opener
   processCommand(state, { type: 'ADVANCE_PHASE' }); // opener → attempt_story
   processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
-}
-
-function makeMinimalFinaleState(timerRemaining: number | null = null): V33FinaleState {
-  return {
-    phase: 'assignment',
-    availableFragments: [],
-    allFragments: [],
-    quilt: {
-      rows: 6,
-      columns: 1,
-      barsPerCell: 8,
-      cells: new Map(),
-      columnOrder: [0],
-      playheadColumn: 0,
-      loopCount: 0,
-    },
-    availableSongs: [0, 1, 2],
-    trackMap: new Map(),
-    assignment: {
-      mode: timerRemaining !== null ? 'self_select' : 'auto',
-      timerRemaining,
-    },
-    preview: { lockedInUsers: new Set(), timerRemaining: null },
-    remix: {
-      lockedCells: new Set(),
-      mutedCells: new Set(),
-      lastMoveByUser: new Map(),
-      liveTracksActive: [],
-      frozenColumn: null,
-      frozenActiveTracks: new Map(),
-    },
-    npc: { currentMessage: null },
-  };
 }
 
 // ============================================================================
@@ -470,173 +431,6 @@ describe('TimingEngine', () => {
       }
 
       expect(sendCommand).not.toHaveBeenCalledWith({ type: 'TOGGLE_AUDITION' });
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // Assembly Timer
-  // --------------------------------------------------------------------------
-
-  describe('assembly timer', () => {
-    beforeEach(() => {
-      timingEngine = createTimingEngine(
-        sendCommand,
-        () => state,
-        { enabled: true, oscBridge: null },
-      );
-      timingEngine.start();
-    });
-
-    test('fires ASSIGNMENT_COMPLETE when self-select assignment timer expires', () => {
-      state.phase = 'finale_assignment';
-      state.finaleState = makeMinimalFinaleState(30000);
-      state.config.finale.quilt.assignmentTimerMs = 30000;
-
-      timingEngine.onStateChanged(state, [{
-        type: 'ASSIGNMENT_STARTED',
-        mode: 'self_select',
-        quiltDimensions: { rows: 6, columns: 1 },
-      }]);
-
-      expect(sendCommand).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(30000);
-
-      expect(sendCommand).toHaveBeenCalledWith({ type: 'ASSIGNMENT_COMPLETE' });
-    });
-
-    test('does not start timer for auto assignment', () => {
-      state.phase = 'finale_assignment';
-      state.finaleState = makeMinimalFinaleState();
-
-      timingEngine.onStateChanged(state, [{
-        type: 'ASSIGNMENT_STARTED',
-        mode: 'auto',
-        quiltDimensions: { rows: 6, columns: 1 },
-      }]);
-
-      jest.advanceTimersByTime(60000);
-
-      expect(sendCommand).not.toHaveBeenCalled();
-    });
-
-    test('timer cleared on ALL_CELLS_ASSIGNED', () => {
-      state.phase = 'finale_assignment';
-      state.finaleState = makeMinimalFinaleState(30000);
-      state.config.finale.quilt.assignmentTimerMs = 30000;
-
-      timingEngine.onStateChanged(state, [{
-        type: 'ASSIGNMENT_STARTED',
-        mode: 'self_select',
-        quiltDimensions: { rows: 6, columns: 1 },
-      }]);
-
-      // All cells assigned early (force end)
-      timingEngine.onStateChanged(state, [{
-        type: 'ALL_CELLS_ASSIGNED',
-      }]);
-
-      jest.advanceTimersByTime(30000);
-
-      expect(sendCommand).not.toHaveBeenCalled();
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // Loop Boundary (Playback — fallback mode, stub)
-  // --------------------------------------------------------------------------
-
-  describe('loop boundary (fallback mode)', () => {
-    beforeEach(() => {
-      timingEngine = createTimingEngine(
-        sendCommand,
-        () => state,
-        { enabled: true, oscBridge: null, fallbackBpm: 120 },
-      );
-      timingEngine.start();
-    });
-
-    test('loop tracking fires ADVANCE_QUILT_COLUMN on playback phase', () => {
-      state.phase = 'finale_playback';
-
-      timingEngine.onStateChanged(state, [{
-        type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_playback',
-      }]);
-
-      // 8 bars × 4 beats/bar × (60000ms / 120bpm) = 16000ms
-      jest.advanceTimersByTime(16000);
-
-      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_QUILT_COLUMN' });
-    });
-
-    test('stops loop tracking on show phase change', () => {
-      state.phase = 'finale_playback';
-
-      timingEngine.onStateChanged(state, [{
-        type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_playback',
-      }]);
-
-      // Phase changes away
-      state.phase = 'ended';
-      timingEngine.onStateChanged(state, [{
-        type: 'SHOW_PHASE_CHANGED',
-        phase: 'ended',
-      }]);
-
-      jest.advanceTimersByTime(64000);
-
-      expect(sendCommand).not.toHaveBeenCalled();
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // Loop Boundary (Playback — OSC mode, stub)
-  // --------------------------------------------------------------------------
-
-  describe('loop boundary (OSC mode)', () => {
-    let oscBridge: OSCBridge;
-
-    beforeEach(async () => {
-      oscBridge = createNullOSCBridge();
-      await oscBridge.start();
-      oscBridge.send = jest.fn();
-
-      timingEngine = createTimingEngine(
-        sendCommand,
-        () => state,
-        { enabled: true, oscBridge },
-      );
-      timingEngine.start();
-    });
-
-    test('loop tracking fires ADVANCE_QUILT_COLUMN on playback phase', () => {
-      state.phase = 'finale_playback';
-
-      timingEngine.onStateChanged(state, [{
-        type: 'SHOW_PHASE_CHANGED',
-        phase: 'finale_playback',
-      }]);
-
-      // Beat 1 sets baseline
-      timingEngine.onOSCMessage('/live/song/get/beat', [1]);
-      for (let i = 2; i <= 33; i++) {
-        timingEngine.onOSCMessage('/live/song/get/beat', [i]);
-      }
-
-      expect(sendCommand).toHaveBeenCalledWith({ type: 'ADVANCE_QUILT_COLUMN' });
-    });
-
-    test('does not fire loop boundary when in attempt_build phase', () => {
-      advanceToBuild(state);
-
-      // Loop state not started (no SHOW_PHASE_CHANGED to finale_playback)
-      for (let i = 1; i <= 64; i++) {
-        timingEngine.onOSCMessage('/live/song/get/beat', [i]);
-      }
-
-      expect(sendCommand).not.toHaveBeenCalled();
     });
   });
 
