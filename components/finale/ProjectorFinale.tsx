@@ -145,6 +145,47 @@ export function ProjectorFinale({
 
   const handleMouseUp = useCallback(() => handleDrop(), [handleDrop]);
 
+  // Track whether a drag just ended (to suppress click after drop)
+  const wasDraggingRef = useRef(false);
+
+  // Node tap — advance node when clicking/tapping a pentagon node (not during drag)
+  const handleNodeTap = useCallback((clientX: number, clientY: number) => {
+    if (!interactionEnabled || !socket) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const target = drag.findTarget(x, y);
+    if (target) {
+      socket.emit('command', { type: 'ADVANCE_NODE', granularType: target });
+    }
+  }, [drag, interactionEnabled, socket]);
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    // Suppress click that fires after a drag-and-drop
+    if (wasDraggingRef.current) {
+      wasDraggingRef.current = false;
+      return;
+    }
+    handleNodeTap(e.clientX, e.clientY);
+  }, [handleNodeTap]);
+
+  const handleTouchEndForTap = useCallback((e: React.TouchEvent) => {
+    if (drag.isDragging) {
+      wasDraggingRef.current = true;
+      handleDrop();
+    } else if (e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      handleNodeTap(touch.clientX, touch.clientY);
+    }
+  }, [drag.isDragging, handleDrop, handleNodeTap]);
+
+  // Also mark drag end for mouse
+  const handleMouseUpWithFlag = useCallback(() => {
+    if (drag.isDragging) wasDraggingRef.current = true;
+    handleDrop();
+  }, [drag.isDragging, handleDrop]);
+
   // Pool counter text
   const totalRemaining = poolState.totalRemaining > 0
     ? poolState.totalRemaining
@@ -162,9 +203,10 @@ export function ProjectorFinale({
         touchAction: 'none',
       }}
       onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onTouchEnd={handleTouchEndForTap}
       onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onMouseUp={handleMouseUpWithFlag}
+      onClick={handleClick}
     >
       {size.width > 0 && size.height > 0 && (
         <>

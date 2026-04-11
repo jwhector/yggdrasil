@@ -420,6 +420,7 @@ export type ConductorCommand =
   | { type: 'START_REMIX' }
   | { type: 'QUEUE_TOKEN'; granularType: string; chapterId: string; instant?: boolean }
   | { type: 'CANCEL_QUEUE'; granularType: string }
+  | { type: 'ADVANCE_NODE'; granularType: string }
   | { type: 'TOGGLE_AUDIENCE_INTERACTION' }
   | { type: 'LOOP_BOUNDARY' }
 
@@ -477,6 +478,7 @@ export type ConductorEvent =
   | { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] }
   | { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number }
   | { type: 'NODE_SILENT'; granularType: string }
+  | { type: 'NODE_ADVANCED'; granularType: string }
   | { type: 'POOL_EMPTY' }
 
   // Audio

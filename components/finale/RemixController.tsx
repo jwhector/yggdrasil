@@ -22,7 +22,7 @@ interface RemixControllerProps {
 
 export function RemixController({ fullState, sendCommand, socket }: RemixControllerProps) {
   const finaleState = fullState.finaleState as FinaleState | null;
-  const { queueToken, cancelQueue } = useRemixQueue(sendCommand);
+  const { queueToken, cancelQueue, advanceNode } = useRemixQueue(sendCommand);
   const poolState = useTokenPool(socket);
 
   const granularTypes = fullState.config.granularTypes ?? [];
@@ -64,14 +64,32 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
 
           return (
             <div key={gt.id} style={styles.gridRow}>
-              {/* Type label */}
-              <div style={styles.typeLabel}>
+              {/* Type label — tap to advance node (activate next queued or silence) */}
+              <button
+                onClick={() => advanceNode(gt.id)}
+                style={{
+                  ...styles.typeLabel,
+                  ...styles.typeLabelButton,
+                  borderColor: active
+                    ? chapters.find(c => c.id === active.chapterId)?.color ?? 'rgba(255,255,255,0.15)'
+                    : queueDepth > 0
+                      ? 'rgba(255,255,255,0.25)'
+                      : 'rgba(255,255,255,0.08)',
+                }}
+                title={
+                  queueDepth > 0
+                    ? `Advance ${gt.label}: activate next queued token`
+                    : active
+                      ? `Advance ${gt.label}: silence node`
+                      : `${gt.label}: nothing queued or active`
+                }
+              >
                 <span style={{ ...styles.typeSymbol, color: gt.color }}>{gt.symbol}</span>
                 <span style={styles.typeName}>{gt.label}</span>
                 {active && (
                   <ActiveIndicator chapterId={active.chapterId} chapters={chapters} loopProgress={finaleState.loopProgress} persistent={active.persistent} />
                 )}
-              </div>
+              </button>
 
               {/* Chapter buttons */}
               {chapters.map(ch => {
@@ -285,6 +303,24 @@ function InjectTokens({
       >
         Add
       </button>
+      <button
+        onClick={() => {
+          for (const ch of chapters) {
+            sendCommand({ type: 'INJECT_TOKENS', chapterId: ch.id, count });
+          }
+        }}
+        style={{
+          padding: '4px 10px',
+          borderRadius: 4,
+          border: '1px solid rgba(34, 197, 94, 0.4)',
+          background: 'rgba(34, 197, 94, 0.1)',
+          color: '#86efac',
+          fontSize: '0.75rem',
+          cursor: 'pointer',
+        }}
+      >
+        All
+      </button>
     </div>
   );
 }
@@ -325,7 +361,18 @@ const styles = {
     fontSize: '0.75rem',
     color: 'rgba(255,255,255,0.5)',
     flexShrink: 0,
-  },
+  } as React.CSSProperties,
+  typeLabelButton: {
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: '6px',
+    padding: '6px 8px',
+    cursor: 'pointer',
+    outline: 'none',
+    WebkitTapHighlightColor: 'transparent',
+    transition: 'border-color 0.15s ease',
+    minHeight: '36px',
+  } as React.CSSProperties,
   typeSymbol: {
     fontSize: '0.9rem',
     width: '16px',

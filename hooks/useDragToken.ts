@@ -40,6 +40,8 @@ export interface UseDragTokenReturn extends DragState {
   endDrag: () => string | null;
   /** Register pentagon node drop zones for hit testing. */
   setDropZones: (zones: DropZone[]) => void;
+  /** Hit-test a point against registered drop zones. Returns granularType or null. */
+  findTarget: (x: number, y: number) => string | null;
 }
 
 const SNAP_RADIUS_MULTIPLIER = 1.8;  // Magnetic snap zone = node radius * this
@@ -107,5 +109,6 @@ export function useDragToken(): UseDragTokenReturn {
     moveDrag,
     endDrag,
     setDropZones,
+    findTarget,
   };
 }

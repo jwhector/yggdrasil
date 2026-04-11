@@ -65,16 +65,6 @@ export function queueToken(
     );
   }
 
-  // If the node is silent (no active token), activate immediately — no reason to wait
-  if (!state.active.has(granularType)) {
-    return activateOnSilentNode(
-      { ...state, pool: updatedPool },
-      granularType,
-      chapterId,
-      consumed.token.id,
-    );
-  }
-
   // Add to queue
   const updatedQueue = new Map(state.queue);
   const typeQueue = [...(updatedQueue.get(granularType) ?? [])];
@@ -370,6 +360,146 @@ export function toggleAudienceInteraction(
 }
 
 // ============================================================================
+// Node Advancement (Manual)
+// ============================================================================
+
+/**
+ * Manually advance a node — the performer taps a node to:
+ * - If queued tokens exist: pop the next one and activate it (fade in on silent, crossfade on active)
+ * - If no queue and node is active: spend the active token and fade to silence
+ * - If no queue and node is silent: no-op
+ *
+ * In audience interaction mode, this is the way to silence a persistent node.
+ */
+export function advanceNode(
+  state: FinaleState,
+  granularType: string,
+): { state: FinaleState; events: ConductorEvent[] } {
+  const events: ConductorEvent[] = [];
+  const updatedActive = new Map(state.active);
+  const updatedQueue = new Map(state.queue);
+  let updatedTokens = [...state.pool.tokens];
+
+  const activeNode = updatedActive.get(granularType);
+  const typeQueue = updatedQueue.get(granularType) ?? [];
+
+  if (typeQueue.length > 0) {
+    // Pop next queued token
+    const next = typeQueue[0];
+    updatedQueue.set(granularType, typeQueue.slice(1));
+
+    const songIndex = chapterToSongIndex(next.chapterId, state);
+    const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
+
+    // Mark queued token as playing
+    const tokenIdx = updatedTokens.findIndex(t => t.id === next.tokenId);
+    if (tokenIdx !== -1) {
+      updatedTokens[tokenIdx] = { ...updatedTokens[tokenIdx], status: 'playing' };
+    }
+
+    if (activeNode) {
+      // Spend the outgoing token and crossfade
+      const outIdx = updatedTokens.findIndex(t => t.id === activeNode.tokenId);
+      if (outIdx !== -1) {
+        updatedTokens[outIdx] = { ...updatedTokens[outIdx], status: 'spent' };
+      }
+
+      events.push({
+        type: 'TOKEN_SPENT',
+        granularType,
+        tokenId: activeNode.tokenId,
+        poolRemaining: 0, // Updated below
+      });
+
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: {
+          type: 'node_instant_crossfade',
+          granularType,
+          muteTracks: activeNode.trackIndices,
+          unmuteTracks: trackIndices,
+        },
+      });
+    } else {
+      // Silent node — unmute
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'node_unmute', granularType, trackIndices },
+      });
+    }
+
+    updatedActive.set(granularType, {
+      tokenId: next.tokenId,
+      chapterId: next.chapterId,
+      startedAtLoop: state.loopCount,
+      trackIndices,
+      persistent: state.audienceInteraction,
+    });
+
+    events.push({
+      type: 'TOKEN_ACTIVATED',
+      granularType,
+      chapterId: next.chapterId,
+      tokenId: next.tokenId,
+      trackIndices,
+    });
+  } else if (activeNode) {
+    // No queue — silence the node (works for both regular and persistent/audience-mode tokens)
+    const outIdx = updatedTokens.findIndex(t => t.id === activeNode.tokenId);
+    if (outIdx !== -1) {
+      updatedTokens[outIdx] = { ...updatedTokens[outIdx], status: 'spent' };
+    }
+
+    events.push({
+      type: 'TOKEN_SPENT',
+      granularType,
+      tokenId: activeNode.tokenId,
+      poolRemaining: 0, // Updated below
+    });
+
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: { type: 'node_fade_out', granularType, trackIndices: activeNode.trackIndices },
+    });
+
+    updatedActive.delete(granularType);
+    events.push({ type: 'NODE_SILENT', granularType });
+  } else {
+    // Silent node, no queue — no-op
+    return { state, events: [] };
+  }
+
+  // Compute remaining
+  const totalRemaining = getTotalRemaining({ available: state.pool.availableByChapter, total: state.pool.totalByChapter });
+
+  // Update poolRemaining on TOKEN_SPENT events
+  for (const event of events) {
+    if (event.type === 'TOKEN_SPENT') {
+      (event as any).poolRemaining = totalRemaining;
+    }
+  }
+
+  events.push({ type: 'NODE_ADVANCED', granularType });
+
+  const updatedState: FinaleState = {
+    ...state,
+    pool: { ...state.pool, tokens: updatedTokens, totalRemaining },
+    queue: updatedQueue,
+    active: updatedActive,
+  };
+
+  // Check pool empty
+  const poolEmpty = isPoolEmpty({ available: state.pool.availableByChapter, total: state.pool.totalByChapter });
+  const hasQueued = [...updatedQueue.values()].some(q => q.length > 0);
+  const hasActive = updatedActive.size > 0;
+  if (poolEmpty && !hasQueued && !hasActive) {
+    events.push({ type: 'POOL_EMPTY' });
+  }
+
+  return { state: updatedState, events };
+}
+
+// ============================================================================
 // Track Resolution
 // ============================================================================
 
@@ -390,60 +520,6 @@ export function resolveTrack(
 // ============================================================================
 // Internal Helpers
 // ============================================================================
-
-/**
- * Activate a token immediately on a silent node (no active token playing).
- * Used when queuing to an empty node — no reason to wait for loop boundary.
- */
-function activateOnSilentNode(
-  state: FinaleState,
-  granularType: string,
-  chapterId: string,
-  tokenId: string,
-): { state: FinaleState; events: ConductorEvent[] } {
-  const events: ConductorEvent[] = [];
-  const updatedActive = new Map(state.active);
-  const updatedTokens = [...state.pool.tokens];
-
-  const songIndex = chapterToSongIndex(chapterId, state);
-  const trackIndices = resolveTrack(state.trackMap, granularType, songIndex);
-
-  // Mark token as playing
-  const tokenIdx = updatedTokens.findIndex(t => t.id === tokenId);
-  if (tokenIdx !== -1) {
-    updatedTokens[tokenIdx] = { ...updatedTokens[tokenIdx], status: 'playing' };
-  }
-
-  updatedActive.set(granularType, {
-    tokenId,
-    chapterId,
-    startedAtLoop: state.loopCount,
-    trackIndices,
-    persistent: false,
-  });
-
-  events.push({
-    type: 'TOKEN_ACTIVATED',
-    granularType,
-    chapterId,
-    tokenId,
-    trackIndices,
-  });
-
-  events.push({
-    type: 'AUDIO_CUE',
-    cue: { type: 'node_unmute', granularType, trackIndices },
-  });
-
-  return {
-    state: {
-      ...state,
-      pool: { ...state.pool, tokens: updatedTokens },
-      active: updatedActive,
-    },
-    events,
-  };
-}
 
 /**
  * Instantly activate a token (audience interaction mode).

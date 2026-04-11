@@ -51,6 +51,7 @@ import {
 import {
   queueToken as remixQueueToken,
   cancelQueue as remixCancelQueue,
+  advanceNode as remixAdvanceNode,
   processLoopBoundary as remixProcessLoopBoundary,
   toggleAudienceInteraction as remixToggleAudienceInteraction,
 } from './remix-engine';
@@ -209,6 +210,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleQueueToken(state, command.granularType, command.chapterId, command.instant);
     case 'CANCEL_QUEUE':
       return handleCancelQueue(state, command.granularType);
+    case 'ADVANCE_NODE':
+      return handleAdvanceNode(state, command.granularType);
     case 'TOGGLE_AUDIENCE_INTERACTION':
       return handleToggleAudienceInteraction(state);
     case 'LOOP_BOUNDARY':
@@ -1438,6 +1441,18 @@ function handleCancelQueue(state: ShowState, granularType: string): ConductorEve
   if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
 
   const result = remixCancelQueue(finaleState, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleAdvanceNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'ADVANCE_NODE only valid during finale_remix' }];
+  }
+  const finaleState = state.finaleState as FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = remixAdvanceNode(finaleState, granularType);
   state.finaleState = result.state;
   return result.events;
 }

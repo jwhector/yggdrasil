@@ -8,6 +8,7 @@ import { describe, test, expect } from '@jest/globals';
 import {
   queueToken,
   cancelQueue,
+  advanceNode,
   processLoopBoundary,
   toggleAudienceInteraction,
   resolveTrack,
@@ -88,39 +89,19 @@ function findEvents(events: ConductorEvent[], type: string): ConductorEvent[] {
 // ============================================================================
 
 describe('remix-engine: queueToken', () => {
-  test('queuing to a silent node activates immediately', () => {
+  test('queuing a token consumes from pool and adds to queue', () => {
     const state = makeRemixState();
     const result = queueToken(state, 'bass', 'chapter_0');
 
     expect(result.state.pool.availableByChapter.get('chapter_0')).toBe(4);
-    // Should be active immediately — not in queue
-    expect(result.state.active.has('bass')).toBe(true);
-    expect(result.state.active.get('bass')!.chapterId).toBe('chapter_0');
-    expect(result.state.queue.get('bass') ?? []).toHaveLength(0);
+    expect(result.state.queue.get('bass')).toHaveLength(1);
+    expect(result.state.queue.get('bass')![0].chapterId).toBe('chapter_0');
+    // Should NOT be active — always queued, even on silent nodes
+    expect(result.state.active.has('bass')).toBe(false);
 
-    const activated = findEvent(result.events, 'TOKEN_ACTIVATED');
-    expect(activated).toBeDefined();
-    expect((activated as any).granularType).toBe('bass');
-
-    const unmuteCue = result.events.find(
-      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'node_unmute',
-    );
-    expect(unmuteCue).toBeDefined();
-  });
-
-  test('queuing to an occupied node adds to queue', () => {
-    const state = makeRemixState();
-    // First token activates immediately (silent node)
-    const r1 = queueToken(state, 'bass', 'chapter_0');
-    expect(r1.state.active.has('bass')).toBe(true);
-
-    // Second token goes to queue
-    const r2 = queueToken(r1.state, 'bass', 'chapter_1');
-    expect(r2.state.queue.get('bass')).toHaveLength(1);
-    expect(r2.state.queue.get('bass')![0].chapterId).toBe('chapter_1');
-
-    const queuedEvent = findEvent(r2.events, 'TOKEN_QUEUED');
+    const queuedEvent = findEvent(result.events, 'TOKEN_QUEUED');
     expect(queuedEvent).toBeDefined();
+    expect((queuedEvent as any).granularType).toBe('bass');
     expect((queuedEvent as any).queueDepth).toBe(1);
   });
 
@@ -142,15 +123,13 @@ describe('remix-engine: queueToken', () => {
 
   test('stacking multiple tokens on same node creates queue depth', () => {
     const state = makeRemixState();
-    // First activates immediately (silent node)
     const r1 = queueToken(state, 'bass', 'chapter_0');
-    // Subsequent tokens go to queue
     const r2 = queueToken(r1.state, 'bass', 'chapter_1');
     const r3 = queueToken(r2.state, 'bass', 'chapter_2');
 
-    expect(r3.state.queue.get('bass')).toHaveLength(2);
+    expect(r3.state.queue.get('bass')).toHaveLength(3);
     const lastQueued = findEvent(r3.events, 'TOKEN_QUEUED');
-    expect((lastQueued as any).queueDepth).toBe(2);
+    expect((lastQueued as any).queueDepth).toBe(3);
   });
 });
 
@@ -161,13 +140,11 @@ describe('remix-engine: queueToken', () => {
 describe('remix-engine: cancelQueue', () => {
   test('cancelling queue returns token to pool', () => {
     const state = makeRemixState();
-    // First activates immediately, second goes to queue
-    const r1 = queueToken(state, 'bass', 'chapter_0');
-    const queued = queueToken(r1.state, 'bass', 'chapter_0');
-    expect(queued.state.pool.availableByChapter.get('chapter_0')).toBe(3);
+    const queued = queueToken(state, 'bass', 'chapter_0');
+    expect(queued.state.pool.availableByChapter.get('chapter_0')).toBe(4);
 
     const cancelled = cancelQueue(queued.state, 'bass');
-    expect(cancelled.state.pool.availableByChapter.get('chapter_0')).toBe(4);
+    expect(cancelled.state.pool.availableByChapter.get('chapter_0')).toBe(5);
     expect(cancelled.state.queue.get('bass')).toHaveLength(0);
 
     const cancelEvent = findEvent(cancelled.events, 'TOKEN_CANCELLED');
@@ -184,9 +161,7 @@ describe('remix-engine: cancelQueue', () => {
 
   test('cancelling removes the last queued token (LIFO)', () => {
     const state = makeRemixState();
-    // First activates immediately, then two go to queue
-    const r0 = queueToken(state, 'bass', 'chapter_0');
-    const r1 = queueToken(r0.state, 'bass', 'chapter_0');
+    const r1 = queueToken(state, 'bass', 'chapter_0');
     const r2 = queueToken(r1.state, 'bass', 'chapter_1');
 
     const cancelled = cancelQueue(r2.state, 'bass');
@@ -202,19 +177,33 @@ describe('remix-engine: cancelQueue', () => {
 // ============================================================================
 
 describe('remix-engine: processLoopBoundary', () => {
-  test('loop boundary spends active tokens and emits TOKEN_SPENT', () => {
-    // Queue to silent node — activates immediately
+  test('loop boundary activates queued tokens and emits TOKEN_ACTIVATED', () => {
     const state = makeRemixState();
     const queued = queueToken(state, 'bass', 'chapter_0');
-    expect(queued.state.active.has('bass')).toBe(true);
 
-    // Now bass is active with no replacement queued — boundary spends it
-    const boundary = processLoopBoundary(queued.state);
+    const result = processLoopBoundary(queued.state);
 
-    expect(boundary.state.active.has('bass')).toBe(false);
-    const spent = findEvent(boundary.events, 'TOKEN_SPENT');
+    expect(result.state.active.has('bass')).toBe(true);
+    expect(result.state.active.get('bass')!.chapterId).toBe('chapter_0');
+    expect(result.state.queue.get('bass') ?? []).toHaveLength(0);
+
+    const activated = findEvent(result.events, 'TOKEN_ACTIVATED');
+    expect(activated).toBeDefined();
+    expect((activated as any).granularType).toBe('bass');
+  });
+
+  test('loop boundary spends active tokens and emits TOKEN_SPENT', () => {
+    const state = makeRemixState();
+    const queued = queueToken(state, 'bass', 'chapter_0');
+    const boundary1 = processLoopBoundary(queued.state);
+
+    // Now bass is active with no replacement queued
+    const boundary2 = processLoopBoundary(boundary1.state);
+
+    expect(boundary2.state.active.has('bass')).toBe(false);
+    const spent = findEvent(boundary2.events, 'TOKEN_SPENT');
     expect(spent).toBeDefined();
-    const silent = findEvent(boundary.events, 'NODE_SILENT');
+    const silent = findEvent(boundary2.events, 'NODE_SILENT');
     expect(silent).toBeDefined();
     expect((silent as any).granularType).toBe('bass');
   });
@@ -222,25 +211,26 @@ describe('remix-engine: processLoopBoundary', () => {
   test('active token with queued replacement triggers crossfade', () => {
     const state = makeRemixState();
 
-    // First token activates immediately (silent node)
+    // Queue and activate chapter_0 on bass
     const q1 = queueToken(state, 'bass', 'chapter_0');
-    expect(q1.state.active.get('bass')!.chapterId).toBe('chapter_0');
+    const b1 = processLoopBoundary(q1.state);
+    expect(b1.state.active.get('bass')!.chapterId).toBe('chapter_0');
 
-    // Second token goes to queue (node is occupied)
-    const q2 = queueToken(q1.state, 'bass', 'chapter_1');
+    // Queue chapter_1 replacement
+    const q2 = queueToken(b1.state, 'bass', 'chapter_1');
 
     // Process boundary — should crossfade
-    const b = processLoopBoundary(q2.state);
-    expect(b.state.active.get('bass')!.chapterId).toBe('chapter_1');
+    const b2 = processLoopBoundary(q2.state);
+    expect(b2.state.active.get('bass')!.chapterId).toBe('chapter_1');
 
-    const spentEvent = findEvent(b.events, 'TOKEN_SPENT');
+    const spentEvent = findEvent(b2.events, 'TOKEN_SPENT');
     expect(spentEvent).toBeDefined();
 
-    const activatedEvent = findEvent(b.events, 'TOKEN_ACTIVATED');
+    const activatedEvent = findEvent(b2.events, 'TOKEN_ACTIVATED');
     expect(activatedEvent).toBeDefined();
     expect((activatedEvent as any).chapterId).toBe('chapter_1');
 
-    const crossfadeCue = b.events.find(
+    const crossfadeCue = b2.events.find(
       e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'node_crossfade',
     );
     expect(crossfadeCue).toBeDefined();
@@ -248,24 +238,22 @@ describe('remix-engine: processLoopBoundary', () => {
 
   test('active token with no replacement triggers fade-out and NODE_SILENT', () => {
     const state = makeRemixState();
-    // Activates immediately on silent node
     const q = queueToken(state, 'drums', 'chapter_1');
-    expect(q.state.active.has('drums')).toBe(true);
+    const b1 = processLoopBoundary(q.state);
 
-    // No replacement queued — boundary spends and fades out
-    const b = processLoopBoundary(q.state);
+    // No replacement queued
+    const b2 = processLoopBoundary(b1.state);
 
-    const fadeOut = b.events.find(
+    const fadeOut = b2.events.find(
       e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'node_fade_out',
     );
     expect(fadeOut).toBeDefined();
     expect((fadeOut as any).cue.granularType).toBe('drums');
 
-    expect(findEvent(b.events, 'NODE_SILENT')).toBeDefined();
+    expect(findEvent(b2.events, 'NODE_SILENT')).toBeDefined();
   });
 
   test('pool empty after last token spent emits POOL_EMPTY', () => {
-    // Create state with exactly 1 token
     const singleToken: Token = {
       id: 'token-only',
       ownerId: 'user-1',
@@ -283,28 +271,14 @@ describe('remix-engine: processLoopBoundary', () => {
       },
     });
 
-    // Queue activates immediately (silent node)
     const queued = queueToken(state, 'bass', 'chapter_0');
-    expect(queued.state.active.has('bass')).toBe(true);
+    // Activate it
+    const b1 = processLoopBoundary(queued.state);
+    expect(b1.state.active.has('bass')).toBe(true);
 
     // Spend it (no replacement)
-    const b = processLoopBoundary(queued.state);
-    expect(findEvent(b.events, 'POOL_EMPTY')).toBeDefined();
-  });
-
-  test('loop boundary activates queued tokens on empty nodes', () => {
-    // Manually set up a state with a token in the queue but no active node
-    // (e.g., after the active node was spent in a previous boundary)
-    const state = makeRemixState();
-    const q1 = queueToken(state, 'bass', 'chapter_0');
-    // Spend it
-    const b1 = processLoopBoundary(q1.state);
-    expect(b1.state.active.has('bass')).toBe(false);
-
-    // Now manually queue a token (it will activate immediately since node is silent)
-    const q2 = queueToken(b1.state, 'bass', 'chapter_1');
-    expect(q2.state.active.has('bass')).toBe(true);
-    expect(q2.state.active.get('bass')!.chapterId).toBe('chapter_1');
+    const b2 = processLoopBoundary(b1.state);
+    expect(findEvent(b2.events, 'POOL_EMPTY')).toBeDefined();
   });
 
   test('increments loopCount on each boundary', () => {
@@ -445,6 +419,118 @@ describe('remix-engine: resolveTrack', () => {
 });
 
 // ============================================================================
+// advanceNode
+// ============================================================================
+
+describe('remix-engine: advanceNode', () => {
+  test('advancing a silent node with queued token activates it immediately', () => {
+    const state = makeRemixState();
+    const queued = queueToken(state, 'bass', 'chapter_0');
+    expect(queued.state.active.has('bass')).toBe(false);
+    expect(queued.state.queue.get('bass')).toHaveLength(1);
+
+    const result = advanceNode(queued.state, 'bass');
+
+    expect(result.state.active.has('bass')).toBe(true);
+    expect(result.state.active.get('bass')!.chapterId).toBe('chapter_0');
+    expect(result.state.queue.get('bass') ?? []).toHaveLength(0);
+
+    expect(findEvent(result.events, 'TOKEN_ACTIVATED')).toBeDefined();
+    expect(findEvent(result.events, 'NODE_ADVANCED')).toBeDefined();
+
+    const unmuteCue = result.events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'node_unmute',
+    );
+    expect(unmuteCue).toBeDefined();
+  });
+
+  test('advancing an active node with queued token crossfades immediately', () => {
+    const state = makeRemixState();
+    const q1 = queueToken(state, 'bass', 'chapter_0');
+    // Activate via loop boundary
+    const b1 = processLoopBoundary(q1.state);
+    expect(b1.state.active.get('bass')!.chapterId).toBe('chapter_0');
+
+    // Queue a replacement
+    const q2 = queueToken(b1.state, 'bass', 'chapter_1');
+
+    // Advance — should crossfade immediately
+    const result = advanceNode(q2.state, 'bass');
+    expect(result.state.active.get('bass')!.chapterId).toBe('chapter_1');
+
+    expect(findEvent(result.events, 'TOKEN_SPENT')).toBeDefined();
+    expect(findEvent(result.events, 'TOKEN_ACTIVATED')).toBeDefined();
+    expect(findEvent(result.events, 'NODE_ADVANCED')).toBeDefined();
+
+    const crossfadeCue = result.events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'node_instant_crossfade',
+    );
+    expect(crossfadeCue).toBeDefined();
+  });
+
+  test('advancing an active node with no queue fades out and goes silent', () => {
+    const state = makeRemixState();
+    const q = queueToken(state, 'bass', 'chapter_0');
+    const b = processLoopBoundary(q.state);
+    expect(b.state.active.has('bass')).toBe(true);
+
+    // No queue — advance should silence
+    const result = advanceNode(b.state, 'bass');
+    expect(result.state.active.has('bass')).toBe(false);
+
+    expect(findEvent(result.events, 'TOKEN_SPENT')).toBeDefined();
+    expect(findEvent(result.events, 'NODE_SILENT')).toBeDefined();
+    expect(findEvent(result.events, 'NODE_ADVANCED')).toBeDefined();
+
+    const fadeOut = result.events.find(
+      e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'node_fade_out',
+    );
+    expect(fadeOut).toBeDefined();
+  });
+
+  test('advancing a persistent node (audience mode) with no queue silences it', () => {
+    const state = makeRemixState({ audienceInteraction: true });
+
+    // Activate persistent token via instant
+    const q = queueToken(state, 'bass', 'chapter_0', true);
+    expect(q.state.active.get('bass')!.persistent).toBe(true);
+
+    // Advance with no queue — should silence even though persistent
+    const result = advanceNode(q.state, 'bass');
+    expect(result.state.active.has('bass')).toBe(false);
+
+    expect(findEvent(result.events, 'TOKEN_SPENT')).toBeDefined();
+    expect(findEvent(result.events, 'NODE_SILENT')).toBeDefined();
+  });
+
+  test('advancing a silent node with no queue is a no-op', () => {
+    const state = makeRemixState();
+    const result = advanceNode(state, 'bass');
+    expect(result.events).toHaveLength(0);
+    expect(result.state).toBe(state);
+  });
+
+  test('advancing spends the outgoing active token', () => {
+    const state = makeRemixState();
+    const q = queueToken(state, 'bass', 'chapter_0');
+    const b = processLoopBoundary(q.state);
+    const activeTokenId = b.state.active.get('bass')!.tokenId;
+
+    // Queue replacement and advance
+    const q2 = queueToken(b.state, 'bass', 'chapter_1');
+    const result = advanceNode(q2.state, 'bass');
+
+    const spent = findEvent(result.events, 'TOKEN_SPENT');
+    expect(spent).toBeDefined();
+    expect((spent as any).tokenId).toBe(activeTokenId);
+
+    // Verify the token is marked spent
+    const spentToken = result.state.pool.tokens.find(t => t.id === activeTokenId);
+    expect(spentToken?.status).toBe('spent');
+  });
+});
+
+// ============================================================================
 // Chapter-to-SongIndex Resolution
 // ============================================================================
 
@@ -462,9 +548,10 @@ describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
       },
     });
 
-    // Queue to silent node — activates immediately with correct track
+    // Queue token for "ambition" (songIndex=0) on bass, then activate via boundary
     const r0 = queueToken(state, 'bass', 'ambition');
-    const activated0 = findEvent(r0.events, 'TOKEN_ACTIVATED');
+    const b0 = processLoopBoundary(r0.state);
+    const activated0 = findEvent(b0.events, 'TOKEN_ACTIVATED');
     // bass songIndex=0 → trackIndex 1 (from makeTrackMap: bass index 0, song 0 = [1])
     expect(activated0).toBeDefined();
     expect((activated0 as any).trackIndices).toEqual([1]);
@@ -483,9 +570,10 @@ describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
       },
     });
 
-    // Queue chapter "love" (songIndex=1) on bass → activates immediately with track [2]
+    // Queue chapter "love" (songIndex=1) on bass, then activate via boundary
     const r1 = queueToken(state, 'bass', 'love');
-    const activated1 = findEvent(r1.events, 'TOKEN_ACTIVATED');
+    const b1 = processLoopBoundary(r1.state);
+    const activated1 = findEvent(b1.events, 'TOKEN_ACTIVATED');
     expect(activated1).toBeDefined();
     expect((activated1 as any).trackIndices).toEqual([2]);
   });
@@ -508,9 +596,10 @@ describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
       },
     });
 
-    // Queue to silent node — activates immediately
+    // Queue and activate via boundary
     const r = queueToken(state, 'seed', 'love');
-    const activated = findEvent(r.events, 'TOKEN_ACTIVATED');
+    const b = processLoopBoundary(r.state);
+    const activated = findEvent(b.events, 'TOKEN_ACTIVATED');
     expect(activated).toBeDefined();
     expect((activated as any).trackIndices).toEqual([101]);
   });

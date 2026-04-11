@@ -34,4 +34,4 @@ export { createTokenPool, consumeToken, returnToken, isPoolEmpty, getTotalRemain
 export { getNextQuestion, calculateMaxQuestionsPerPerson, shouldCapPool, processEmotion } from './question-engine';
 
 // Export remix engine functions (V3.4)
-export { queueToken, cancelQueue, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';
+export { queueToken, cancelQueue, advanceNode, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';
