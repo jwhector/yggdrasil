@@ -687,6 +687,13 @@ export function createAudioRouter(
   function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
     const { winnerTrackBundle, loserTrackBundle } = cue;
 
+    // console.log("Locking in tracks:", "winner:", winnerTrackBundle.tracks.map(t => t.trackIndices).flat(), "loser:", loserTrackBundle.tracks.map(t => t.trackIndices).flat());
+
+    // Loser tracks: fade to silent
+    for (const track of loserTrackBundle.tracks) {
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
+    }
+
     // Winner tracks: cancel in-flight fades, snap to full gain
     for (const track of winnerTrackBundle.tracks) {
       for (const idx of track.trackIndices) {
@@ -698,11 +705,6 @@ export function createAudioRouter(
         unmuteTrack(idx);
         fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
       }
-    }
-
-    // Loser tracks: fade to silent
-    for (const track of loserTrackBundle.tracks) {
-      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
     }
   }
 

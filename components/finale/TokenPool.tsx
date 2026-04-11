@@ -14,6 +14,12 @@ import type { ChapterConfig } from '@/conductor/types';
 import { hexToRgb } from '@/components/projector/renderers/shared';
 import type { RGB } from '@/components/projector/renderers/shared';
 
+export interface CollisionZone {
+  x: number;
+  y: number;
+  radius: number;
+}
+
 interface TokenPoolProps {
   /** Available tokens per chapter from pool_state. */
   availableByChapter: Array<{ chapterId: string; count: number }>;
@@ -27,6 +33,8 @@ interface TokenPoolProps {
   onDotDragStart?: (chapterId: string, x: number, y: number) => void;
   /** Whether drag interaction is enabled (finale_remix). */
   interactionEnabled?: boolean;
+  /** Circles that dots should avoid (pentagon nodes). */
+  collisionZones?: CollisionZone[];
 }
 
 interface Dot {
@@ -55,6 +63,7 @@ export function TokenPool({
   height,
   onDotDragStart,
   interactionEnabled = false,
+  collisionZones = [],
 }: TokenPoolProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Dot[]>([]);
@@ -91,9 +100,22 @@ export function TokenPool({
       // Add new dots if needed
       if (needed > 0) {
         for (let i = 0; i < needed; i++) {
+          let x: number, y: number;
+          let attempts = 0;
+          do {
+            x = Math.random() * width * 0.8 + width * 0.1;
+            y = Math.random() * height * 0.6 + height * 0.05;
+            attempts++;
+          } while (
+            attempts < 20 &&
+            collisionZones.some(z => {
+              const dx = x - z.x, dy = y - z.y;
+              return dx * dx + dy * dy < z.radius * z.radius;
+            })
+          );
           newDots.push({
-            x: Math.random() * width * 0.8 + width * 0.1,
-            y: Math.random() * height * 0.6 + height * 0.05,
+            x,
+            y,
             vx: (Math.random() - 0.5) * DRIFT_SPEED,
             vy: (Math.random() - 0.5) * DRIFT_SPEED,
             radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
@@ -150,6 +172,22 @@ export function TokenPool({
         if (dot.x > width - pad) { dot.x = width - pad; dot.vx = -Math.abs(dot.vx); }
         if (dot.y < pad) { dot.y = pad; dot.vy = Math.abs(dot.vy); }
         if (dot.y > height - pad) { dot.y = height - pad; dot.vy = -Math.abs(dot.vy); }
+
+        // Repulsion from collision zones (pentagon nodes)
+        for (const zone of collisionZones) {
+          const dx = dot.x - zone.x;
+          const dy = dot.y - zone.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < zone.radius && dist > 0.1) {
+            const overlap = zone.radius - dist;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            dot.x += nx * overlap * 0.3;
+            dot.y += ny * overlap * 0.3;
+            dot.vx += nx * 0.05;
+            dot.vy += ny * 0.05;
+          }
+        }
 
         // Draw
         const bloomScale = easeOut(dot.age);

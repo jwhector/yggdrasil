@@ -14,8 +14,9 @@ import type { Socket } from 'socket.io-client';
 import type { ChapterConfig, GranularType, ShowPhase, ProjectorFinaleView } from '@/conductor/types';
 import { useTokenPool } from '@/hooks/useTokenPool';
 import { useDragToken } from '@/hooks/useDragToken';
-import { TokenPool } from './TokenPool';
+import { TokenPool, type CollisionZone } from './TokenPool';
 import { PentagonRemix } from './PentagonRemix';
+import { computeLayout, PENTAGON_NODES } from '@/components/projector/renderers/shared';
 
 interface ProjectorFinaleProps {
   socket: Socket | null;
@@ -186,6 +187,20 @@ export function ProjectorFinale({
     handleDrop();
   }, [drag.isDragging, handleDrop]);
 
+  // Collision zones — keep dots away from pentagon nodes during remix
+  const collisionZones: CollisionZone[] = useMemo(() => {
+    if (!isRemix || size.width === 0) return [];
+    const layout = computeLayout(size.width, size.height);
+    const buffer = layout.nodeRadius * 2.5;
+    const zones: CollisionZone[] = PENTAGON_NODES.map(n => ({
+      x: layout.positions[n.id].x,
+      y: layout.positions[n.id].y,
+      radius: buffer,
+    }));
+    zones.push({ x: layout.centerX, y: layout.centerY, radius: layout.seedRadius * 2 });
+    return zones;
+  }, [isRemix, size.width, size.height]);
+
   // Pool counter text
   const totalRemaining = poolState.totalRemaining > 0
     ? poolState.totalRemaining
@@ -217,11 +232,12 @@ export function ProjectorFinale({
             width={size.width}
             height={size.height}
             interactionEnabled={interactionEnabled}
+            collisionZones={collisionZones}
             onDotDragStart={handleDotDragStart}
           />
 
-          {/* Pentagon nodes */}
-          <PentagonRemix
+          {/* Pentagon nodes — only during remix */}
+          {isRemix && <PentagonRemix
             width={size.width}
             height={size.height}
             activeNodes={finaleView.active}
@@ -234,7 +250,7 @@ export function ProjectorFinale({
             validNodes={finaleView.validNodes}
             audienceInteraction={finaleView.audienceInteraction}
             onDropZonesComputed={drag.setDropZones}
-          />
+          />}
         </>
       )}
 

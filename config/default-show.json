@@ -35,44 +35,6 @@
       "layers": [
         {
           "index": 0,
-          "group": "flesh",
-          "labelA": "Tender",
-          "labelB": "Electric",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  21
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  44
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  22
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  44
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "index": 1,
           "group": "bones",
           "labelA": "Rooted",
           "labelB": "Drifting",
@@ -110,6 +72,44 @@
           }
         },
         {
+          "index": 1,
+          "group": "flesh",
+          "labelA": "Tender",
+          "labelB": "Electric",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  21
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  44
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  22
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  44
+                ]
+              }
+            ]
+          }
+        },
+        {
           "index": 2,
           "group": "spark",
           "labelA": "YOU WIN!",
@@ -119,12 +119,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  60
-                ]
-              },
-              {
-                "granularType": "fx",
-                "trackIndices": [
+                  60,
                   61
                 ]
               }
@@ -159,12 +154,12 @@
       "auditionBars": [
         4,
         4,
-        2
+        8
       ],
       "auditionCycles": [
         2,
         2,
-        2
+        1
       ],
       "liveSeed": {
         "trackIndices": [
@@ -175,6 +170,38 @@
       "layers": [
         {
           "index": 0,
+          "group": "flesh",
+          "labelA": "Warm",
+          "labelB": "Cool",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  18, 19
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  20
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  42, 43
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "index": 1,
           "group": "bones",
           "labelA": "Rooted",
           "labelB": "Drifting",
@@ -206,38 +233,6 @@
                 "granularType": "drums",
                 "trackIndices": [
                   36
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "index": 1,
-          "group": "flesh",
-          "labelA": "Warm",
-          "labelB": "Cool",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  18, 19
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  20
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  42, 43
                 ]
               }
             ]
