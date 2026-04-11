@@ -423,7 +423,7 @@
       },
       {
         "event": "vote_outro",
-        "text": "That's all we needed. You can put your phone down now, or continue to fill the pool."
+        "text": "That's might be all we need. You can put your phone down now, or continue to fill the pool."
       },
       {
         "event": "pool_full",

@@ -42,7 +42,9 @@ interface EmotionVoteProps {
 
 const CHAR_INTERVAL_MS = 30;
 const NPC_PAUSE_BETWEEN_MS = 800;
-const FLY_DURATION_MS = 700;
+const MORPH_DURATION_MS = 500;
+const FLY_DURATION_MS = 600;
+const TOTAL_FLY_MS = MORPH_DURATION_MS + FLY_DURATION_MS;
 
 // ============================================================================
 // Deterministic shuffle (mirrors conductor/question-engine.ts)
@@ -93,10 +95,13 @@ export function EmotionVote({
   userId,
   emit,
 }: EmotionVoteProps) {
-  const [stage, setStage] = useState<VoteStage>(poolCapReached ? 'phones_down' : 'intro');
+  const introSeenKey = `ygg_intro_seen_${userId}`;
+  const introAlreadySeen = typeof window !== 'undefined' && localStorage.getItem(introSeenKey) === '1';
+
+  const [stage, setStage] = useState<VoteStage>(poolCapReached ? 'phones_down' : introAlreadySeen ? 'question' : 'intro');
   const [questionIndex, setQuestionIndex] = useState(initialAnsweredCount);
   const [phonesDown, setPhonesDown] = useState(poolCapReached);
-  const [hasShownOutro, setHasShownOutro] = useState(false);
+  const [hasShownOutro, setHasShownOutro] = useState(introAlreadySeen);
 
   // Build the ordered questions list (shuffled or linear)
   const orderedQuestions = useMemo(() => {
@@ -115,8 +120,11 @@ export function EmotionVote({
 
   // Fly animation state
   const [flyChapterId, setFlyChapterId] = useState<string | null>(null);
-  const [flyOrigin, setFlyOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [flyPhase, setFlyPhase] = useState<'morph' | 'fly' | null>(null);
+  const [orbPosition, setOrbPosition] = useState<{ x: number; y: number } | null>(null);
+  const [orbColor, setOrbColor] = useState<string>('#fff');
   const cardRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const iconRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Intro confirmation button visibility
   const [introConfirmVisible, setIntroConfirmVisible] = useState(false);
@@ -199,51 +207,56 @@ export function EmotionVote({
   }, [stage, npcIntro, typewriterPlay]);
 
   const handleIntroConfirm = useCallback(() => {
+    localStorage.setItem(introSeenKey, '1');
     setStage('question');
     setNpcDisplayText('');
     setNpcTypingDone(false);
     setIntroConfirmVisible(false);
-  }, []);
+  }, [introSeenKey]);
 
   // ============================================================================
   // Answer tap handler
   // ============================================================================
 
   const handleAnswerTap = useCallback((chapterId: string) => {
-    if (!currentQuestion || stage !== 'question' || phonesDown) return;
+    if (!currentQuestion || stage !== 'question' || phonesDown || flyChapterId) return;
 
-    // Capture button position for fly animation
-    const btn = cardRefs.current.get(chapterId);
-    if (btn) {
-      const rect = btn.getBoundingClientRect();
-      setFlyOrigin({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    // Capture card center for the orb overlay
+    const cardEl = cardRefs.current.get(chapterId);
+    const identity = getChapterIdentity(chapterId);
+    setOrbColor(identity.color);
+
+    if (cardEl) {
+      const rect = cardEl.getBoundingClientRect();
+      setOrbPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
     } else {
-      setFlyOrigin({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      setOrbPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     }
 
+    // Store values for the timeout closures
+    const tappedQuestionIndex = questionIndex;
+
     setFlyChapterId(chapterId);
-    setStage('fly_animation');
+    setFlyPhase('morph');
 
-    // Emit vote to server
-    emit('submit_emotion', {
-      chapterId,
-      questionIndex,
-    });
+    // Phase 2: morph complete → fly upward
+    setTimeout(() => {
+      setFlyPhase('fly');
+    }, MORPH_DURATION_MS);
 
-    // Advance to next question locally
-    setQuestionIndex(prev => prev + 1);
-  }, [currentQuestion, stage, phonesDown, emit, questionIndex]);
+    // Phase 3: fly complete → advance question, emit to server, transition stage
+    setTimeout(() => {
+      // Send vote to server after animation finishes (triggers projector fly-in)
+      emit('submit_emotion', {
+        chapterId,
+        questionIndex: tappedQuestionIndex,
+      });
 
-  // ============================================================================
-  // Fly animation → npc_outro (first time) or question (subsequent)
-  // ============================================================================
-
-  useEffect(() => {
-    if (stage !== 'fly_animation') return;
-
-    const timer = setTimeout(() => {
+      // Advance question index now that animation is done
+      setQuestionIndex(prev => prev + 1);
       setFlyChapterId(null);
-      setFlyOrigin(null);
+      setFlyPhase(null);
+      setOrbPosition(null);
 
       if (phonesDown) {
         setStage('phones_down');
@@ -251,13 +264,10 @@ export function EmotionVote({
         setHasShownOutro(true);
         setStage('npc_outro');
       } else {
-        // Subsequent answers skip outro — go straight to next question
         setStage('question');
       }
-    }, FLY_DURATION_MS);
-
-    return () => clearTimeout(timer);
-  }, [stage, hasShownOutro, phonesDown]);
+    }, TOTAL_FLY_MS);
+  }, [currentQuestion, stage, phonesDown, flyChapterId, emit, questionIndex, hasShownOutro]);
 
   // ============================================================================
   // NPC outro stage (shown once after first answer)
@@ -306,6 +316,39 @@ export function EmotionVote({
     </div>
   );
 
+  // Orb overlay — appears at card center, gains glow, then flies up
+  const renderOrbOverlay = () => {
+    if (!orbPosition || !flyPhase) return null;
+
+    const isMorphing = flyPhase === 'morph';
+    const isFlying = flyPhase === 'fly';
+
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          left: orbPosition.x,
+          top: orbPosition.y,
+          width: 12,
+          height: 12,
+          borderRadius: '50%',
+          backgroundColor: orbColor,
+          // translate(-50%,-50%) keeps it centered on the coordinate
+          transform: 'translate(-50%, -50%)',
+          boxShadow: isMorphing
+            ? `0 0 0px ${orbColor}00`
+            : `0 0 24px ${orbColor}aa, 0 0 48px ${orbColor}44`,
+          transition: isMorphing
+            ? `box-shadow ${MORPH_DURATION_MS * 0.6}ms ease ${MORPH_DURATION_MS * 0.4}ms`
+            : 'none',
+          animation: isFlying ? `orbFlyUp ${FLY_DURATION_MS}ms ease-in forwards` : undefined,
+          pointerEvents: 'none',
+          zIndex: 1000,
+        }}
+      />
+    );
+  };
+
   const renderAnswerCards = () => {
     if (!currentQuestion) {
       // No more questions — treat as phones down
@@ -318,62 +361,80 @@ export function EmotionVote({
     }
 
     const answers = currentQuestion.answers;
+    const isAnimating = !!flyChapterId;
 
     return (
       <>
-        <div style={styles.questionText}>
+        {/* Question text — fades out when animating */}
+        <div style={{
+          ...styles.questionText,
+          opacity: isAnimating ? 0 : 1,
+          transition: 'opacity 0.35s ease',
+        }}>
           {currentQuestion.text}
         </div>
+
         <div style={styles.cardsContainer}>
           {chapters.map((chapter) => {
             const identity = getChapterIdentity(chapter.id);
             const answerLabel = answers?.find(a => a.chapterId === chapter.id)?.label ?? identity.label;
+            const isTapped = flyChapterId === chapter.id;
+            const isOther = isAnimating && !isTapped;
+
             return (
               <button
                 key={chapter.id}
-                ref={(el) => {
-                  if (el) cardRefs.current.set(chapter.id, el);
-                }}
+                ref={(el) => { if (el) cardRefs.current.set(chapter.id, el); }}
                 onClick={() => handleAnswerTap(chapter.id)}
+                disabled={isAnimating}
                 style={{
                   ...styles.card,
                   borderColor: `${identity.color}44`,
                   backgroundColor: 'rgba(255,255,255,0.04)',
+                  // Tapped card: border shrinks inward and fades
+                  ...(isTapped ? {
+                    borderColor: identity.color,
+                    transform: 'scale(0.3)',
+                    opacity: 0,
+                    borderRadius: '50%',
+                    transition: `all ${MORPH_DURATION_MS}ms ease-in`,
+                  } : {}),
+                  // Other cards fade out
+                  ...(isOther ? {
+                    opacity: 0,
+                    transition: 'opacity 0.3s ease',
+                  } : {}),
                 }}
               >
-                <div style={{ ...styles.cardIcon, color: identity.color }}>
+                {/* Icon — fades out (orb overlay replaces it) */}
+                <div
+                  ref={(el) => { if (el) iconRefs.current.set(chapter.id, el); }}
+                  style={{
+                    ...styles.cardIcon,
+                    color: identity.color,
+                    opacity: isTapped ? 0 : 1,
+                    transition: `opacity ${MORPH_DURATION_MS * 0.3}ms ease`,
+                  }}
+                >
                   {identity.icon}
                 </div>
-                <div style={{ ...styles.cardLabel, color: identity.color }}>
+                {/* Label — fades out */}
+                <div style={{
+                  ...styles.cardLabel,
+                  color: identity.color,
+                  opacity: isTapped ? 0 : 1,
+                  transition: `opacity ${MORPH_DURATION_MS * 0.3}ms ease`,
+                }}>
                   {answerLabel}
                 </div>
               </button>
             );
           })}
         </div>
-      </>
-    );
-  };
 
-  const renderFlyOrb = () => {
-    if (!flyChapterId || !flyOrigin) return null;
-    const identity = getChapterIdentity(flyChapterId);
-    return (
-      <div
-        style={{
-          position: 'fixed',
-          left: flyOrigin.x - 6,
-          top: flyOrigin.y - 6,
-          width: 12,
-          height: 12,
-          borderRadius: '50%',
-          backgroundColor: identity.color,
-          boxShadow: `0 0 20px ${identity.color}88`,
-          animation: `flyUp ${FLY_DURATION_MS}ms ease-in forwards`,
-          pointerEvents: 'none',
-          zIndex: 1000,
-        }}
-      />
+        {/* Orb overlay — appears at icon position, glows, flies up */}
+        {renderOrbOverlay()}
+      </>
     );
   };
 
@@ -424,15 +485,6 @@ export function EmotionVote({
     );
   }
 
-  if (stage === 'fly_animation') {
-    return (
-      <div style={styles.container}>
-        {renderFlyOrb()}
-        <style>{keyframes}</style>
-      </div>
-    );
-  }
-
   if (stage === 'npc_outro') {
     return (
       <div style={styles.container}>
@@ -475,17 +527,17 @@ const keyframes = `
     0%, 100% { opacity: 0; }
     50% { opacity: 1; }
   }
-  @keyframes flyUp {
+  @keyframes orbFlyUp {
     0% {
-      transform: scale(1);
+      transform: translate(-50%, -50%) translateY(0) scale(1);
       opacity: 1;
     }
-    80% {
+    70% {
       opacity: 1;
     }
     100% {
-      transform: scale(0.5) translateY(-100vh);
-      opacity: 0.6;
+      transform: translate(-50%, -50%) translateY(-100vh) scale(0.6);
+      opacity: 0.5;
     }
   }
   @keyframes fadeIn {
