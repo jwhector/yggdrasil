@@ -1372,6 +1372,7 @@ function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorE
     userId,
     questionIndex: answeredCount,
     questionText: question.text,
+    answers: question.answers ?? null,
   }];
 }
 

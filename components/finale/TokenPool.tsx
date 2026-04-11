@@ -5,11 +5,13 @@
  * Each dot = one available token, colored by chapter.
  * Dots drift gently with simple physics. Bloom on creation, absorb into
  * pentagon on spend. Rendered with canvas 2D + requestAnimationFrame.
+ *
+ * Exposes injectDot() via ref for coordinated fly-in animations.
  */
 
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
 import type { ChapterConfig } from '@/conductor/types';
 import { hexToRgb } from '@/components/projector/renderers/shared';
 import type { RGB } from '@/components/projector/renderers/shared';
@@ -18,6 +20,11 @@ export interface CollisionZone {
   x: number;
   y: number;
   radius: number;
+}
+
+export interface TokenPoolHandle {
+  /** Inject a dot at a specific position (from fly-in animation). */
+  injectDot: (chapterId: string, x: number, y: number) => void;
 }
 
 interface TokenPoolProps {
@@ -50,13 +57,12 @@ interface Dot {
 }
 
 const DOT_RADIUS = 6;
-const DOT_SPACING = 2.5;  // Minimum spacing between dots as multiplier of radius
 const DRIFT_SPEED = 0.15;
 const DAMPING = 0.98;
 const BLOOM_DURATION = 0.5;  // Seconds for bloom-in animation
 const TOUCH_TARGET_RADIUS = 22;  // ~44pt touch target
 
-export function TokenPool({
+export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function TokenPool({
   availableByChapter,
   chapters,
   width,
@@ -64,11 +70,14 @@ export function TokenPool({
   onDotDragStart,
   interactionEnabled = false,
   collisionZones = [],
-}: TokenPoolProps) {
+}, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Dot[]>([]);
   const animRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+
+  // Track injected dots to prevent reconciliation duplicates
+  const injectedCountsRef = useRef<Map<string, number>>(new Map());
 
   // Build chapter color map
   const chapterColors = useRef<Map<string, RGB>>(new Map());
@@ -80,6 +89,27 @@ export function TokenPool({
     chapterColors.current = map;
   }, [chapters]);
 
+  // Expose injectDot via ref
+  useImperativeHandle(ref, () => ({
+    injectDot(chapterId: string, x: number, y: number) {
+      const color = chapterColors.current.get(chapterId) ?? { r: 128, g: 128, b: 128 };
+      dotsRef.current.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * DRIFT_SPEED * 0.5,
+        vy: (Math.random() - 0.5) * DRIFT_SPEED * 0.5,
+        radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
+        color,
+        chapterId,
+        age: 0,
+        opacity: 1,
+      });
+      // Track injected count so reconciliation doesn't duplicate
+      const prev = injectedCountsRef.current.get(chapterId) ?? 0;
+      injectedCountsRef.current.set(chapterId, prev + 1);
+    },
+  }), []);
+
   // Reconcile dots with pool state
   useEffect(() => {
     const existing = dotsRef.current;
@@ -90,40 +120,54 @@ export function TokenPool({
 
       // Count existing dots for this chapter
       const existingForChapter = existing.filter(d => d.chapterId === chapterId);
-      const needed = count - existingForChapter.length;
+
+      // Subtract injected dots that haven't been accounted for yet
+      const injected = injectedCountsRef.current.get(chapterId) ?? 0;
+      const adjustedNeeded = count - existingForChapter.length;
 
       // Keep existing dots (up to count)
       for (let i = 0; i < Math.min(existingForChapter.length, count); i++) {
         newDots.push(existingForChapter[i]);
       }
 
-      // Add new dots if needed
-      if (needed > 0) {
-        for (let i = 0; i < needed; i++) {
-          let x: number, y: number;
-          let attempts = 0;
-          do {
-            x = Math.random() * width * 0.8 + width * 0.1;
-            y = Math.random() * height * 0.6 + height * 0.05;
-            attempts++;
-          } while (
-            attempts < 20 &&
-            collisionZones.some(z => {
-              const dx = x - z.x, dy = y - z.y;
-              return dx * dx + dy * dy < z.radius * z.radius;
-            })
-          );
-          newDots.push({
-            x,
-            y,
-            vx: (Math.random() - 0.5) * DRIFT_SPEED,
-            vy: (Math.random() - 0.5) * DRIFT_SPEED,
-            radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
-            color,
-            chapterId,
-            age: 0,
-            opacity: 1,
-          });
+      // If we have injected dots covering the gap, decrement injected count instead of adding
+      if (adjustedNeeded > 0) {
+        const coveredByInjection = Math.min(adjustedNeeded, injected);
+        const actuallyNeeded = adjustedNeeded - coveredByInjection;
+
+        // Decrement injected counter
+        if (coveredByInjection > 0) {
+          injectedCountsRef.current.set(chapterId, injected - coveredByInjection);
+        }
+
+        // Add new dots only for what's not covered by injections
+        if (actuallyNeeded > 0) {
+          for (let i = 0; i < actuallyNeeded; i++) {
+            let x: number, y: number;
+            let attempts = 0;
+            do {
+              x = Math.random() * width * 0.8 + width * 0.1;
+              y = Math.random() * height * 0.6 + height * 0.05;
+              attempts++;
+            } while (
+              attempts < 20 &&
+              collisionZones.some(z => {
+                const dx = x - z.x, dy = y - z.y;
+                return dx * dx + dy * dy < z.radius * z.radius;
+              })
+            );
+            newDots.push({
+              x,
+              y,
+              vx: (Math.random() - 0.5) * DRIFT_SPEED,
+              vy: (Math.random() - 0.5) * DRIFT_SPEED,
+              radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
+              color,
+              chapterId,
+              age: 0,
+              opacity: 1,
+            });
+          }
         }
       }
     }
@@ -281,7 +325,7 @@ export function TokenPool({
       onMouseDown={handleMouseDown}
     />
   );
-}
+});
 
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - Math.min(1, t), 3);

@@ -121,6 +121,26 @@ describe('question-engine: getNextQuestion', () => {
 
     expect(first).toEqual(second);
   });
+
+  test('returns answers when present in question config', () => {
+    const answers = [
+      { chapterId: 'ambition', label: 'Chase it' },
+      { chapterId: 'love', label: 'Hold on' },
+      { chapterId: 'acceptance', label: 'Let go' },
+    ];
+    const config = makeVoteConfig({
+      questions: [
+        { text: 'What matters?', answers },
+        { text: 'What stays?' },
+      ],
+    });
+
+    const q0 = getNextQuestion(config, 0, 3);
+    expect(q0?.answers).toEqual(answers);
+
+    const q1 = getNextQuestion(config, 1, 3);
+    expect(q1?.answers).toBeUndefined();
+  });
 });
 
 // ============================================================================

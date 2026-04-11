@@ -410,8 +410,20 @@
         "text": "He's gone. We need to do this ourselves."
       },
       {
+        "event": "vote_intro_1",
+        "text": "We've lost the conscious mind... "
+      },
+      {
+        "event": "vote_intro_2",
+        "text": "Answer honestly. It's the only way to bring him back."
+      },
+      {
         "event": "vote_start",
         "text": "Tell us what he needs to hear."
+      },
+      {
+        "event": "vote_outro",
+        "text": "That's all we needed. You can put your phone down now, or continue to fill the pool."
       },
       {
         "event": "pool_full",
@@ -424,21 +436,92 @@
     ],
     "vote": {
       "questions": [
-        { "text": "What does he need to hear?" },
-        { "text": "What is he running from?" },
-        { "text": "What would make him stay?" },
-        { "text": "What does he owe himself?" },
-        { "text": "What is he afraid to say?" },
-        { "text": "What would it sound like if he forgave himself?" },
-        { "text": "What part of him is still waiting?" },
-        { "text": "What does the silence sound like?" },
-        { "text": "What would he build if failure didn't exist?" },
-        { "text": "What does he hear when no one is listening?" }
+        {
+          "text": "What does he need to hear?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The truth about what he's chasing" },
+            { "chapterId": "love", "label": "That someone is still here" },
+            { "chapterId": "acceptance", "label": "That it's already enough" }
+          ]
+        },
+        {
+          "text": "What is he running from?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The fear of standing still" },
+            { "chapterId": "love", "label": "The people who got too close" },
+            { "chapterId": "acceptance", "label": "The person he already is" }
+          ]
+        },
+        {
+          "text": "What would make him stay?",
+          "answers": [
+            { "chapterId": "ambition", "label": "Something worth building" },
+            { "chapterId": "love", "label": "Someone worth staying for" },
+            { "chapterId": "acceptance", "label": "Realizing he's already home" }
+          ]
+        },
+        {
+          "text": "What does he owe himself?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The chance to prove it" },
+            { "chapterId": "love", "label": "The grace to be held" },
+            { "chapterId": "acceptance", "label": "The permission to rest" }
+          ]
+        },
+        {
+          "text": "What is he afraid to say?",
+          "answers": [
+            { "chapterId": "ambition", "label": "That he doesn't know the way" },
+            { "chapterId": "love", "label": "That he needs someone" },
+            { "chapterId": "acceptance", "label": "That he's tired of fighting" }
+          ]
+        },
+        {
+          "text": "What would it sound like if he forgave himself?",
+          "answers": [
+            { "chapterId": "ambition", "label": "A deep breath before starting again" },
+            { "chapterId": "love", "label": "A voice saying 'I'm still here'" },
+            { "chapterId": "acceptance", "label": "Silence, finally at peace" }
+          ]
+        },
+        {
+          "text": "What part of him is still waiting?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The part that never got its shot" },
+            { "chapterId": "love", "label": "The part that learned to hide" },
+            { "chapterId": "acceptance", "label": "The part that forgot how to stop" }
+          ]
+        },
+        {
+          "text": "What does the silence sound like?",
+          "answers": [
+            { "chapterId": "ambition", "label": "An engine waiting to ignite" },
+            { "chapterId": "love", "label": "A room where someone just left" },
+            { "chapterId": "acceptance", "label": "Snow falling on still water" }
+          ]
+        },
+        {
+          "text": "What would he build if failure didn't exist?",
+          "answers": [
+            { "chapterId": "ambition", "label": "Something the world remembers" },
+            { "chapterId": "love", "label": "A place where no one leaves" },
+            { "chapterId": "acceptance", "label": "Nothing — just being would be enough" }
+          ]
+        },
+        {
+          "text": "What does he hear when no one is listening?",
+          "answers": [
+            { "chapterId": "ambition", "label": "A drumbeat pushing forward" },
+            { "chapterId": "love", "label": "An echo of every goodbye" },
+            { "chapterId": "acceptance", "label": "His own voice, finally honest" }
+          ]
+        }
       ],
       "shuffleQuestions": true,
       "targetPoolSize": 120,
       "questionDelayMs": 3000,
-      "revealPoolOnProjector": true
+      "revealPoolOnProjector": true,
+      "alarmColor": "#ff0000"
     },
     "remix": {
       "audienceInteraction": false

@@ -102,16 +102,24 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {phase === 'finale_vote' && state.myFinale && (state.myFinale as unknown as AudienceVoteView).finalePhase === 'vote' && (
-        <EmotionVote
-          socket={socket}
-          initialQuestion={(state.myFinale as unknown as AudienceVoteView).currentQuestion}
-          answeredCount={(state.myFinale as unknown as AudienceVoteView).answeredCount}
-          poolCapReached={(state.myFinale as unknown as AudienceVoteView).poolCapReached}
-          chapters={(state.myFinale as unknown as AudienceVoteView).chapters}
-          emit={emit}
-        />
-      )}
+      {phase === 'finale_vote' && state.myFinale && (state.myFinale as unknown as AudienceVoteView).finalePhase === 'vote' && (() => {
+        const voteView = state.myFinale as unknown as AudienceVoteView;
+        return (
+          <EmotionVote
+            socket={socket}
+            questions={voteView.questions ?? []}
+            initialAnsweredCount={voteView.answeredCount}
+            poolCapReached={voteView.poolCapReached}
+            chapters={voteView.chapters}
+            npcIntro={voteView.npcIntro ?? []}
+            npcOutro={voteView.npcOutro ?? null}
+            alarmColor={voteView.alarmColor ?? '#ff0000'}
+            shuffleQuestions={voteView.shuffleQuestions ?? false}
+            userId={state.userId}
+            emit={emit}
+          />
+        );
+      })()}
 
       {phase === 'finale_remix' && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>

@@ -467,7 +467,7 @@ export type ConductorEvent =
   // Finale — Vote phase
   | { type: 'VOTE_STARTED' }
   | { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number; poolSize: number }
-  | { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string }
+  | { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: QuestionAnswer[] | null }
   | { type: 'POOL_CAP_REACHED'; finalPoolSize: number }
   | { type: 'POOL_READY'; pool: TokenPool }
 
@@ -790,9 +790,16 @@ export interface FinaleState {
 // V3.4 Finale Config
 // ============================================================================
 
+/** Per-question answer label mapping a chapter to custom display text. */
+export interface QuestionAnswer {
+  chapterId: string;  // Maps to a chapter (e.g., "ambition")
+  label: string;      // Custom display text (e.g., "The truth about what he's chasing")
+}
+
 /** Question in the vote phase question bank. */
 export interface QuestionConfig {
   text: string;  // e.g., "What does he need to hear?"
+  answers?: QuestionAnswer[];  // Per-question custom answer labels (falls back to chapter.label if absent)
 }
 
 /** Vote phase configuration. */
@@ -802,6 +809,7 @@ export interface VotePhaseConfig {
   targetPoolSize: number;            // Pool cap — total tokens before phones go dark (default: 120)
   questionDelayMs: number;           // Delay between answer and next question (default: 3000)
   revealPoolOnProjector: boolean;    // Show dots blooming on projector in real time (default: true)
+  alarmColor?: string;               // CSS color for alarm edge flash (default: '#ff0000')
 }
 
 /** Remix phase configuration. */
@@ -846,11 +854,15 @@ export type RemixAudioCue =
  */
 export interface AudienceVoteView {
   finalePhase: 'vote';
-  currentQuestion: { questionIndex: number; text: string } | null;  // null = pool cap reached or no more questions
-  answeredCount: number;    // How many questions this user has answered
+  questions: QuestionConfig[];  // Full question bank — client iterates locally
+  answeredCount: number;    // How many questions this user has already answered (for resume)
   poolCapReached: boolean;  // True when phones should go dark
   chapters: ChapterConfig[];  // For rendering the 3 option cards (chapter identity)
   npcMessage: string | null;
+  npcIntro: string[];       // NPC intro messages for client-side staging (vote_intro_1, vote_intro_2)
+  npcOutro: string | null;  // NPC outro message shown after first answer
+  alarmColor: string;       // CSS color for alarm edge flash
+  shuffleQuestions: boolean; // Whether to shuffle question order per user
 }
 
 /**

@@ -14,9 +14,9 @@ import type { Socket } from 'socket.io-client';
 import type { ChapterConfig, GranularType, ShowPhase, ProjectorFinaleView } from '@/conductor/types';
 import { useTokenPool } from '@/hooks/useTokenPool';
 import { useDragToken } from '@/hooks/useDragToken';
-import { TokenPool, type CollisionZone } from './TokenPool';
+import { TokenPool, type CollisionZone, type TokenPoolHandle } from './TokenPool';
 import { PentagonRemix } from './PentagonRemix';
-import { computeLayout, PENTAGON_NODES } from '@/components/projector/renderers/shared';
+import { computeLayout, PENTAGON_NODES, hexToRgb } from '@/components/projector/renderers/shared';
 
 interface ProjectorFinaleProps {
   socket: Socket | null;
@@ -34,7 +34,11 @@ export function ProjectorFinale({
   granularTypes,
 }: ProjectorFinaleProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const tokenPoolRef = useRef<TokenPoolHandle>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+
+  // Flying orbs state
+  const [flyingOrbs, setFlyingOrbs] = useState<Array<{ id: string; chapterId: string; targetX: number; targetY: number }>>([]);
 
   // High-frequency pool state from dedicated socket event
   const poolState = useTokenPool(socket);
@@ -91,6 +95,29 @@ export function ProjectorFinale({
       wakeLock?.release();
     };
   }, []);
+
+  // Listen for token_fly events from audience votes
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleTokenFly = (data: { chapterId: string }) => {
+      // Pick a random landing position in the upper 60% of the screen
+      const targetX = Math.random() * size.width * 0.7 + size.width * 0.15;
+      const targetY = Math.random() * size.height * 0.5 + size.height * 0.05;
+      const id = `fly-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      setFlyingOrbs(prev => [...prev, { id, chapterId: data.chapterId, targetX, targetY }]);
+
+      // After animation completes, inject dot into TokenPool and remove orb
+      setTimeout(() => {
+        tokenPoolRef.current?.injectDot(data.chapterId, targetX, targetY);
+        setFlyingOrbs(prev => prev.filter(o => o.id !== id));
+      }, 800);
+    };
+
+    socket.on('token_fly', handleTokenFly);
+    return () => { socket.off('token_fly', handleTokenFly); };
+  }, [socket, size.width, size.height]);
 
   // Use pool_state (high-frequency) if available, fall back to state_sync data
   const availableByChapter = poolState.totalRemaining > 0
@@ -227,6 +254,7 @@ export function ProjectorFinale({
         <>
           {/* Floating token dots */}
           <TokenPool
+            ref={tokenPoolRef}
             availableByChapter={availableByChapter}
             chapters={chapters}
             width={size.width}
@@ -277,6 +305,46 @@ export function ProjectorFinale({
       }}>
         {totalRemaining} remaining
       </div>
+
+      {/* Flying orbs — token_fly animations from audience */}
+      {flyingOrbs.map(orb => {
+        const chapter = chapters.find(c => c.id === orb.chapterId);
+        const color = chapter?.color ?? '#888';
+        return (
+          <div
+            key={orb.id}
+            style={{
+              position: 'absolute',
+              left: orb.targetX - 6,
+              top: size.height + 20,
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              backgroundColor: color,
+              boxShadow: `0 0 24px ${color}88`,
+              animation: 'tokenFlyIn 0.8s ease-out forwards',
+              '--fly-target-x': `${orb.targetX - 6}px`,
+              '--fly-target-y': `${orb.targetY - 6}px`,
+              pointerEvents: 'none',
+              zIndex: 50,
+            } as React.CSSProperties}
+          />
+        );
+      })}
+      {flyingOrbs.length > 0 && (
+        <style>{`
+          @keyframes tokenFlyIn {
+            0% {
+              transform: translateY(0) scale(1.5);
+              opacity: 1;
+            }
+            100% {
+              transform: translateY(calc(var(--fly-target-y) - ${size.height + 20}px)) scale(0.8);
+              opacity: 0.3;
+            }
+          }
+        `}</style>
+      )}
 
       {/* Hidden video fallback for wake lock on older Safari */}
       <WakeLockVideoFallback />
