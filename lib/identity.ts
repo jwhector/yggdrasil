@@ -26,7 +26,7 @@ export interface LayerIdentity {
 let chapterLookup: Record<string, ChapterIdentity> = {
   ambition:  { color: '#e63946', colorA: '#ff6b6b', colorB: '#c2185b', label: 'Ambition',  icon: '\u25B2' },
   love:      { color: '#f4a261', colorA: '#ffcc80', colorB: '#e65100', label: 'Love',      icon: '\u25CF' },
-  avoidance: { color: '#457b9d', colorA: '#64b5f6', colorB: '#1a237e', label: 'Avoidance', icon: '\u25C6' },
+  acceptance: { color: '#457b9d', colorA: '#64b5f6', colorB: '#1a237e', label: 'Acceptance', icon: '\u25C6' },
 };
 
 let layerLookup: Record<string, LayerIdentity> = {

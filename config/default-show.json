@@ -272,7 +272,7 @@
       ]
     },
     {
-      "chapter": "avoidance",
+      "chapter": "acceptance",
       "title": "Song 3",
       "thresholds": [
         0.5,
@@ -584,7 +584,7 @@
       ]
     },
     {
-      "chapter": "avoidance",
+      "chapter": "acceptance",
       "thoughtsPerPerson": [1, 3, 5],
       "pool": [
         ["Why bother?", "It won't matter", "Nothing changes", "Skip it", "Not worth the effort", "Save your energy", "Nobody notices", "Invisible is safe", "Path of least resistance", "Let it slide", "Numb is fine", "Detach", "Float away", "None of this is real", "Who cares"],

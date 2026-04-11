@@ -56,7 +56,7 @@ function createTestConfig(): ShowConfig {
     attempts: [
       makeAttemptConfig('ambition'),
       makeAttemptConfig('love'),
-      makeAttemptConfig('avoidance'),
+      makeAttemptConfig('acceptance'),
     ],
     finale: {
       bothOptionsSurvive: true,

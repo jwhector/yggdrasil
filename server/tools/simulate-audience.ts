@@ -32,7 +32,7 @@ const DISMISS_STAGGER_MS = 200;      // Per-thought within a user
 const VOTE_MIN_DELAY_MS = 1000;      // Fastest answer
 const VOTE_MAX_DELAY_MS = 5000;      // Slowest answer
 
-const CHAPTERS = ['ambition', 'love', 'avoidance'];
+const CHAPTERS = ['ambition', 'love', 'acceptance'];
 
 interface ClientState {
   socket: Socket;

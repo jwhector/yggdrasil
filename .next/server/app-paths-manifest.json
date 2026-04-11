@@ -1,3 +1,5 @@
 {
-  "/projector/page": "app/projector/page.js"
+  "/projector/page": "app/projector/page.js",
+  "/controller/page": "app/controller/page.js",
+  "/page": "app/page.js"
 }

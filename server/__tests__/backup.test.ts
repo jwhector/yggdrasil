@@ -41,7 +41,7 @@ function createTestConfig(): ShowConfig {
   });
   return {
     layersPerAttempt: 3,
-    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
+    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('acceptance')],
     finale: {
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',

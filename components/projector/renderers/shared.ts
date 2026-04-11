@@ -56,7 +56,7 @@ export const FINALE_CHAPTER_COLORS: Record<string, { primary: RGB; A: RGB; B: RG
     A:       { r: 255, g: 204, b: 128 },   // light peach
     B:       { r: 230, g: 81,  b: 0   },   // burnt orange
   },
-  avoidance: {
+  acceptance: {
     primary: { r: 69,  g: 176, b: 144 },   // teal/green
     A:       { r: 100, g: 181, b: 246 },   // sky blue
     B:       { r: 26,  g: 35,  b: 126 },   // deep indigo

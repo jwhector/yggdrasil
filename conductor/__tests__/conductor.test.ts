@@ -57,7 +57,7 @@ function createTestConfig(
     attempts: [
       makeAttemptConfig('ambition', layerCount, thresholds),
       makeAttemptConfig('love', layerCount, thresholds),
-      makeAttemptConfig('avoidance', layerCount, thresholds),
+      makeAttemptConfig('acceptance', layerCount, thresholds),
     ],
     finale: {
       bothOptionsSurvive: true,

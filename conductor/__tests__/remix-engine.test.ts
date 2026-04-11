@@ -450,13 +450,13 @@ describe('remix-engine: resolveTrack', () => {
 
 describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
   test('non-numeric chapter IDs resolve to correct song index via chapterSongIndex', () => {
-    const tokens = makeTokens({ ambition: 5, love: 5, avoidance: 5 });
+    const tokens = makeTokens({ ambition: 5, love: 5, acceptance: 5 });
     const state = makeRemixState({
-      chapterSongIndex: new Map([['ambition', 0], ['love', 1], ['avoidance', 2]]),
+      chapterSongIndex: new Map([['ambition', 0], ['love', 1], ['acceptance', 2]]),
       pool: {
         tokens,
-        availableByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
-        totalByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
+        availableByChapter: new Map([['ambition', 5], ['love', 5], ['acceptance', 5]]),
+        totalByChapter: new Map([['ambition', 5], ['love', 5], ['acceptance', 5]]),
         totalRemaining: 15,
         targetPoolSize: 15,
       },
@@ -471,13 +471,13 @@ describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
   });
 
   test('different chapters resolve to different track indices', () => {
-    const tokens = makeTokens({ ambition: 5, love: 5, avoidance: 5 });
+    const tokens = makeTokens({ ambition: 5, love: 5, acceptance: 5 });
     const state = makeRemixState({
-      chapterSongIndex: new Map([['ambition', 0], ['love', 1], ['avoidance', 2]]),
+      chapterSongIndex: new Map([['ambition', 0], ['love', 1], ['acceptance', 2]]),
       pool: {
         tokens,
-        availableByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
-        totalByChapter: new Map([['ambition', 5], ['love', 5], ['avoidance', 5]]),
+        availableByChapter: new Map([['ambition', 5], ['love', 5], ['acceptance', 5]]),
+        totalByChapter: new Map([['ambition', 5], ['love', 5], ['acceptance', 5]]),
         totalRemaining: 15,
         targetPoolSize: 15,
       },
@@ -495,14 +495,14 @@ describe('remix-engine: chapterToSongIndex via chapterSongIndex', () => {
     // Add seed entries (simulating liveSeed being included in trackMap)
     trackMap.set('seed', new Map([[0, [100]], [1, [101]], [2, [102]]]));
 
-    const tokens = makeTokens({ ambition: 5, love: 5 });
+    const tokens = makeTokens({ ambition: 5, love: 5, acceptance: 5 });
     const state = makeRemixState({
       chapterSongIndex: new Map([['ambition', 0], ['love', 1]]),
       trackMap,
       pool: {
         tokens,
-        availableByChapter: new Map([['ambition', 5], ['love', 5]]),
-        totalByChapter: new Map([['ambition', 5], ['love', 5]]),
+        availableByChapter: new Map([['ambition', 5], ['love', 5], ['acceptance', 5]]),
+        totalByChapter: new Map([['ambition', 5], ['love', 5], ['acceptance', 5]]),
         totalRemaining: 10,
         targetPoolSize: 10,
       },
