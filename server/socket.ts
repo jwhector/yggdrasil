@@ -752,6 +752,7 @@ export function filterStateForClient(
           queueDepth: Array.from(finaleFs.queue.entries()).map(([granularType, tokens]) => ({
             granularType,
             depth: tokens.length,
+            nextChapterId: tokens[0]?.chapterId ?? null,
           })),
           validNodes: deriveValidNodes(finaleFs),
           loopCount: finaleFs.loopCount,

@@ -32,6 +32,7 @@ interface ActiveNodeView {
 interface QueueDepthView {
   granularType: string;
   depth: number;
+  nextChapterId: string | null;
 }
 
 interface ValidNode {
@@ -112,6 +113,14 @@ export function PentagonRemix({
     return map;
   }, [queueDepths]);
 
+  const nextChapterMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const q of queueDepths) {
+      map.set(q.granularType, q.nextChapterId);
+    }
+    return map;
+  }, [queueDepths]);
+
   // Build set of granular types that are valid for the currently-dragged chapter
   const validForDrag = useMemo(() => {
     if (!dragChapterId) return null;  // Not dragging — no highlighting
@@ -177,8 +186,9 @@ export function PentagonRemix({
         const isHovered = hoverTarget === nodeDef.id;
         const dragValidity = validForDrag === null ? 'none' as const
           : validForDrag.has(nodeDef.id) ? 'valid' as const : 'invalid' as const;
+        const nextChapter = nextChapterMap.get(nodeDef.id) ?? null;
 
-        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, loopProgress, isHovered, dragValidity, chapterColorMap, t);
+        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, loopProgress, isHovered, dragValidity, nextChapter, chapterColorMap, t);
       }
 
       // Draw seed node (center)
@@ -188,7 +198,8 @@ export function PentagonRemix({
         const isHovered = hoverTarget === SEED_ID;
         const dragValidity = validForDrag === null ? 'none' as const
           : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
-        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, loopProgress, isHovered, dragValidity, chapterColorMap, t);
+        const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
+        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, loopProgress, isHovered, dragValidity, nextChapter, chapterColorMap, t);
       }
 
       // Audience interaction indicator
@@ -204,7 +215,7 @@ export function PentagonRemix({
 
     animRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animRef.current);
-  }, [width, height, activeMap, queueMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed]);
+  }, [width, height, activeMap, queueMap, nextChapterMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed]);
 
   return (
     <canvas
@@ -236,11 +247,27 @@ function drawRemixNode(
   loopProgress: number,
   isHovered: boolean,
   dragValidity: 'none' | 'valid' | 'invalid',
+  nextQueuedChapterId: string | null,
   chapterColors: Map<string, RGB>,
   t: number,
 ): void {
   const emptyColor: RGB = { r: 50, g: 50, b: 45 };
   const isDimmed = dragValidity === 'invalid';
+
+  // Queued glow — soft radial glow in the next queued chapter color
+  if (nextQueuedChapterId) {
+    const glowColor = chapterColors.get(nextQueuedChapterId) ?? emptyColor;
+    const glowAlpha = 0.08 + 0.04 * Math.sin(t * 2);
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 2, 0, Math.PI * 2);
+    ctx.fillStyle = rgb(glowColor, glowAlpha);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = rgb(glowColor, glowAlpha * 0.8);
+    ctx.fill();
+  }
 
   // Valid target highlight (pulsing ring when dragging a compatible token)
   if (dragValidity === 'valid' && !isHovered) {

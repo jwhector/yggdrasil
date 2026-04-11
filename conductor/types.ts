@@ -884,7 +884,7 @@ export interface ProjectorFinaleView {
     persistent: boolean;
   }>;
   // Queue depth per granular type (for stack indicators on nodes)
-  queueDepth: Array<{ granularType: string; depth: number }>;
+  queueDepth: Array<{ granularType: string; depth: number; nextChapterId: string | null }>;
   // Valid granularType+chapter combos (have tracks from song-building)
   validNodes: Array<{ granularType: string; chapterId: string }>;
   // Loop state
