@@ -173,6 +173,8 @@ export function drawMembrane(
   amplitude: number,
   time: number,
   seed: number,
+  fillColor?: RGB,
+  strokeColor?: RGB,
 ): void {
   const ampScale = 1 + amplitude * 0.15;
   const ampNoise = noiseIntensity + amplitude * 0.1;
@@ -196,9 +198,9 @@ export function drawMembrane(
   ctx.closePath();
 
   const ampAlpha = alpha * (1 + amplitude * 0.3);
-  ctx.fillStyle = rgb(color, ampAlpha * 0.15);
+  ctx.fillStyle = rgb(fillColor ?? color, ampAlpha * 0.15);
   ctx.fill();
-  ctx.strokeStyle = rgb(color, ampAlpha * 0.5);
+  ctx.strokeStyle = rgb(strokeColor ?? color, ampAlpha * 0.5);
   ctx.lineWidth = 1.5;
   ctx.stroke();
 }

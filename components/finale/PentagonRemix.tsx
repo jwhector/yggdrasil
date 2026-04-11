@@ -15,6 +15,7 @@ import type { ChapterConfig, GranularType } from '@/conductor/types';
 import {
   PENTAGON_NODES,
   computeLayout,
+  drawMembrane,
   hexToRgb,
   rgb,
   smoothNoise,
@@ -254,21 +255,6 @@ function drawRemixNode(
   const emptyColor: RGB = { r: 50, g: 50, b: 45 };
   const isDimmed = dragValidity === 'invalid';
 
-  // Queued glow — soft radial glow in the next queued chapter color
-  if (nextQueuedChapterId) {
-    const glowColor = chapterColors.get(nextQueuedChapterId) ?? emptyColor;
-    const glowAlpha = 0.08 + 0.04 * Math.sin(t * 2);
-    ctx.beginPath();
-    ctx.arc(x, y, radius * 2, 0, Math.PI * 2);
-    ctx.fillStyle = rgb(glowColor, glowAlpha);
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(x, y, radius * 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = rgb(glowColor, glowAlpha * 0.8);
-    ctx.fill();
-  }
-
   // Valid target highlight (pulsing ring when dragging a compatible token)
   if (dragValidity === 'valid' && !isHovered) {
     const pulseAlpha = 0.12 + 0.08 * Math.sin(t * 3);
@@ -304,20 +290,21 @@ function drawRemixNode(
   if (isDimmed) ctx.globalAlpha = 0.25;
 
   if (active) {
-    const color = chapterColors.get(active.chapterId) ?? emptyColor;
+    const activeColor = chapterColors.get(active.chapterId) ?? emptyColor;
+    const queuedColor = nextQueuedChapterId
+      ? chapterColors.get(nextQueuedChapterId) ?? undefined
+      : undefined;
+    const seed = hashSeed(nodeDef.id);
 
-    // Active glow (membrane)
-    const pulseAlpha = 0.5 + 0.2 * Math.sin(t * 2.5);
-    ctx.beginPath();
-    ctx.arc(x, y, radius * 1.6, 0, Math.PI * 2);
-    ctx.fillStyle = rgb(color, pulseAlpha * 0.15);
-    ctx.fill();
+    // Active membrane — fill and stroke can independently show queued vs active color
+    const pulseAlpha = 0.7 + 0.3 * Math.sin(t * 2.5);
+    drawMembrane(ctx, x, y, radius * 1.5, activeColor, pulseAlpha, 0.12, 0, t, seed, activeColor, queuedColor);
 
     // Loop progress ring
     if (loopProgress > 0) {
       ctx.beginPath();
       ctx.arc(x, y, radius * 1.3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * loopProgress);
-      ctx.strokeStyle = rgb(color, 0.5);
+      ctx.strokeStyle = rgb(activeColor, 0.5);
       ctx.lineWidth = 3;
       ctx.lineCap = 'round';
       ctx.stroke();
@@ -327,19 +314,31 @@ function drawRemixNode(
     // Filled core
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = rgb(color, 0.7);
+    ctx.fillStyle = rgb(activeColor, 0.7);
     ctx.fill();
 
     // Persistent indicator (double ring)
     if (active.persistent) {
       ctx.beginPath();
       ctx.arc(x, y, radius * 1.15, 0, Math.PI * 2);
-      ctx.strokeStyle = rgb(color, 0.35);
+      ctx.strokeStyle = rgb(activeColor, 0.35);
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+  } else if (nextQueuedChapterId) {
+    // Silent node with queued token — stroke-only membrane in queued color
+    const qColor = chapterColors.get(nextQueuedChapterId) ?? emptyColor;
+    const seed = hashSeed(nodeDef.id);
+    const pulseAlpha = 0.4 + 0.2 * Math.sin(t * 2);
+    drawMembrane(ctx, x, y, radius * 1.5, emptyColor, pulseAlpha, 0.08, 0, t, seed, emptyColor, qColor);
+
+    // Dim core
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = rgb(emptyColor, 0.25);
+    ctx.fill();
   } else {
-    // Empty node
+    // Empty node — nothing active or queued
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fillStyle = rgb(emptyColor, 0.25);
@@ -385,4 +384,12 @@ function drawRemixNode(
     ctx.textBaseline = 'middle';
     ctx.fillText(`${queueDepth}`, badgeX, badgeY);
   }
+}
+
+function hashSeed(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return h;
 }
