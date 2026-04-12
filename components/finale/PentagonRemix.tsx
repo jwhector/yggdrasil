@@ -179,6 +179,10 @@ export function PentagonRemix({
         ctx.stroke();
       }
 
+      // Global loop ring (interpolated for smooth 60fps)
+      const smoothLoop = getInterpolatedLoopPosition(loopProgress);
+      drawLoopRing(ctx, layout.centerX, layout.centerY, layout.orbitRadius, layout.nodeRadius, smoothLoop);
+
       // Draw nodes
       for (const nodeDef of PENTAGON_NODES) {
         const pos = layout.positions[nodeDef.id];
@@ -392,4 +396,86 @@ function hashSeed(id: string): number {
     h = ((h << 5) - h + id.charCodeAt(i)) | 0;
   }
   return h;
+}
+
+// ---------------------------------------------------------------------------
+// Loop position interpolation (smooth 60fps from ~4 Hz server updates)
+// ---------------------------------------------------------------------------
+
+let loopInterp = {
+  lastServerPos: 0,
+  lastServerTime: 0,
+  velocity: 0,
+};
+
+function getInterpolatedLoopPosition(serverPos: number): number {
+  const now = performance.now();
+
+  if (serverPos !== loopInterp.lastServerPos) {
+    const dt = now - loopInterp.lastServerTime;
+    if (loopInterp.lastServerTime > 0 && dt > 0 && dt < 2000) {
+      let delta = serverPos - loopInterp.lastServerPos;
+      if (delta < -0.5) delta += 1; // wrapped around
+      loopInterp.velocity = delta / dt;
+    }
+    loopInterp.lastServerPos = serverPos;
+    loopInterp.lastServerTime = now;
+  }
+
+  const elapsed = now - loopInterp.lastServerTime;
+  if (loopInterp.velocity <= 0 || elapsed > 1000) {
+    return serverPos;
+  }
+
+  const extrapolated = loopInterp.lastServerPos + loopInterp.velocity * elapsed;
+  // Reset to 0 when wrapping past 1
+  return extrapolated % 1;
+}
+
+/** Reset interpolation state (call when entering/leaving finale). */
+export function resetLoopInterp(): void {
+  loopInterp = { lastServerPos: 0, lastServerTime: 0, velocity: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Global loop ring around pentagon orbit
+// ---------------------------------------------------------------------------
+
+function drawLoopRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  orbitRadius: number,
+  nodeRadius: number,
+  loopPosition: number,
+): void {
+  const ringRadius = orbitRadius + nodeRadius * 2.2;
+  const startAngle = -Math.PI / 2; // 12 o'clock
+
+  // Dim full-circle track
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Progress arc
+  if (loopPosition > 0.001) {
+    const endAngle = startAngle + loopPosition * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, startAngle, endAngle);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+
+    // Leading dot
+    const dotX = cx + Math.cos(endAngle) * ringRadius;
+    const dotY = cy + Math.sin(endAngle) * ringRadius;
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fill();
+  }
 }

@@ -230,11 +230,6 @@ export function ProjectorFinale({
     return zones;
   }, [isRemix, size.width, size.height]);
 
-  // Pool counter text
-  const totalRemaining = poolState.totalRemaining > 0
-    ? poolState.totalRemaining
-    : finaleView.pool.totalRemaining;
-
   return (
     <div
       ref={containerRef}
@@ -295,17 +290,28 @@ export function ProjectorFinale({
         />
       )}
 
-      {/* Pool counter */}
+      {/* Pool counter — per-chapter remaining tokens */}
       <div style={{
         position: 'absolute',
         bottom: 16,
-        right: 20,
-        fontSize: '0.7rem',
-        color: 'rgba(255,255,255,0.15)',
-        letterSpacing: '0.08em',
+        left: 20,
+        display: 'flex',
+        gap: '10px',
+        fontSize: '0.65rem',
+        color: 'rgba(255,255,255,0.12)',
+        letterSpacing: '0.06em',
         fontFamily: 'system-ui',
+        fontVariantNumeric: 'tabular-nums',
       }}>
-        {totalRemaining} remaining
+        {chapters.map(ch => {
+          const count = availableByChapter.find(e => e.chapterId === ch.id)?.count ?? 0;
+          const label = ch.id === 'ambition' ? 'C' : ch.id === 'love' ? 'L' : 'A';
+          return (
+            <span key={ch.id} style={{ color: `${ch.color}44` }}>
+              {label}:{count}
+            </span>
+          );
+        })}
       </div>
 
       {/* Flying orbs — token_fly animations from audience */}
