@@ -14,7 +14,7 @@
  * - Reveal: fill bar inside card showing vote proportion, winner enlarged
  */
 
-import type { V32LayerConfig, Chapter } from '@/conductor/types';
+import type { V32LayerConfig, Chapter, AuditionProgress } from '@/conductor/types';
 import { getChapterIdentity } from '@/lib/identity';
 
 export interface RevealResult {
@@ -33,6 +33,7 @@ export interface OptionCardsProps {
   chapter?: Chapter;
   revealResult?: RevealResult | null;
   dimmed?: boolean;
+  auditionProgress?: AuditionProgress | null;
 }
 
 export function OptionCards({
@@ -44,6 +45,7 @@ export function OptionCards({
   chapter,
   revealResult,
   dimmed,
+  auditionProgress,
 }: OptionCardsProps) {
   const chapterIdentity = chapter ? getChapterIdentity(chapter) : null;
   const colorA = chapterIdentity?.colorA ?? '#6b7280';
@@ -69,6 +71,7 @@ export function OptionCards({
         onVote={onVote}
         isAuditioning={currentAuditionOption === 'A'}
         revealResult={revealResult}
+        barProgress={currentAuditionOption === 'A' ? auditionProgress?.barProgress ?? null : null}
       />
       <OptionCard
         option="B"
@@ -79,6 +82,7 @@ export function OptionCards({
         onVote={onVote}
         isAuditioning={currentAuditionOption === 'B'}
         revealResult={revealResult}
+        barProgress={currentAuditionOption === 'B' ? auditionProgress?.barProgress ?? null : null}
       />
     </div>
   );
@@ -93,6 +97,7 @@ interface OptionCardProps {
   onVote: (choice: 'A' | 'B') => void;
   isAuditioning: boolean;
   revealResult?: RevealResult | null;
+  barProgress: number | null;
 }
 
 function OptionCard({
@@ -104,6 +109,7 @@ function OptionCard({
   onVote,
   isAuditioning,
   revealResult,
+  barProgress,
 }: OptionCardProps) {
   const isSelected = myVote === option;
   const hasVoted = myVote !== null;
@@ -160,14 +166,18 @@ function OptionCard({
     cardOpacity = 0.4;
   }
 
+  const showBar = barProgress !== null;
+  const barRemaining = showBar ? Math.max(0, 1 - barProgress) : 0;
+
   return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
     <button
       onClick={() => { if (!disabled && !isReveal) onVote(option); }}
       disabled={disabled || isReveal}
       aria-pressed={isSelected}
       aria-label={`Option ${option}: ${label}`}
       style={{
-        flex: 1,
+        width: '100%',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -327,5 +337,30 @@ function OptionCard({
         </span>
       )}
     </button>
+
+    {/* Per-option depleting bar — fades in under the active card */}
+    <div
+      style={{
+        width: '100%',
+        height: '6px',
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        borderRadius: '3px',
+        overflow: 'hidden',
+        opacity: showBar ? 1 : 0,
+        transition: 'opacity 0.3s ease',
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${barRemaining * 100}%`,
+          backgroundColor: color,
+          opacity: 0.35,
+          borderRadius: '3px',
+          transition: 'width 250ms linear',
+        }}
+      />
+    </div>
+    </div>
   );
 }

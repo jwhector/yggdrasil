@@ -417,6 +417,17 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     events.push(...handleSetupFinaleV34(state));
   }
 
+  if (nextPhase === 'finale_remix') {
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'live_seed_stop',
+      attemptIndex: 3,
+        trackIndices: state.config.finale.soundscapeTrackIndices,
+      },
+    });
+  }
+
   events.push({
     type: 'SHOW_PHASE_CHANGED',
     phase: nextPhase,
@@ -1348,6 +1359,7 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
 
   return [
     { type: 'VOTE_STARTED' },
+    { type: 'AUDIO_CUE', cue: { type: 'live_seed_start', attemptIndex: 3, trackIndices: state.config.finale.soundscapeTrackIndices } },
   ];
 }
 
@@ -1446,6 +1458,7 @@ function handleStartRemix(state: ShowState): ConductorEvent[] {
     { type: 'SHOW_PHASE_CHANGED', phase: 'finale_remix', attemptIndex: state.currentAttemptIndex },
     { type: 'REMIX_STARTED', pool },
     { type: 'AUDIO_CUE', cue: { type: 'remix_start' } },
+    { type: 'AUDIO_CUE', cue: { type: 'live_seed_stop', attemptIndex: 3, trackIndices: state.config.finale.soundscapeTrackIndices } },
   ];
 }
 

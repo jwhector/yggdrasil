@@ -3,8 +3,8 @@
 /**
  * AuditionBars
  *
- * Depleting progress bars during song-building audition phase.
- * - Per-option bar: depletes as the current option plays
+ * Overall voting window timer during song-building audition phase.
+ * Per-option bars now live inside OptionCards.
  * - Overall bar: depletes as total voting time runs out
  * - Countdown text
  */
@@ -16,21 +16,11 @@ import { getChapterIdentity } from '@/lib/identity';
 interface AuditionBarsProps {
   progress: AuditionProgress;
   chapter: Chapter;
-  currentAuditionOption: 'A' | 'B' | null;
 }
 
-export function AuditionBars({ progress, chapter, currentAuditionOption }: AuditionBarsProps) {
-  const { barProgress, votingWindowMs, elapsedMs } = progress;
+export function AuditionBars({ progress, chapter }: AuditionBarsProps) {
+  const { votingWindowMs, elapsedMs } = progress;
   const chapterIdentity = getChapterIdentity(chapter);
-
-  const optionColor = currentAuditionOption === 'A'
-    ? chapterIdentity.colorA
-    : currentAuditionOption === 'B'
-    ? chapterIdentity.colorB
-    : chapterIdentity.color;
-
-  // Per-option bar depletes (1 → 0)
-  const optionRemaining = Math.max(0, 1 - barProgress);
 
   // Overall bar depletes (1 → 0)
   const totalRemaining = Math.max(0, 1 - Math.min(1, elapsedMs / votingWindowMs));
@@ -39,28 +29,6 @@ export function AuditionBars({ progress, chapter, currentAuditionOption }: Audit
 
   return (
     <div style={{ width: '100%', padding: '0 14px' }}>
-      {/* Per-option depleting bar */}
-      <div
-        style={{
-          width: '100%',
-          height: '8px',
-          backgroundColor: 'rgba(255,255,255,0.04)',
-          borderRadius: '4px',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${optionRemaining * 100}%`,
-            backgroundColor: optionColor,
-            opacity: 0.3,
-            borderRadius: '4px',
-            transition: 'width 250ms linear',
-          }}
-        />
-      </div>
-
       {/* Overall depleting bar */}
       <div
         style={{
@@ -69,7 +37,6 @@ export function AuditionBars({ progress, chapter, currentAuditionOption }: Audit
           backgroundColor: 'rgba(255,255,255,0.03)',
           borderRadius: '3px',
           overflow: 'hidden',
-          marginTop: '14px',
         }}
       >
         <div

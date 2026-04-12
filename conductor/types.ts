@@ -835,6 +835,7 @@ export interface RemixConfig {
 /** Finale configuration (V3.4). */
 export interface FinaleConfig {
   bothOptionsSurvive: boolean;
+  soundscapeTrackIndices: number[];
   audioPreviewPath: string;
   npcMessages: NpcMessageConfig[];
   vote: VotePhaseConfig;

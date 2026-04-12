@@ -318,6 +318,7 @@ function BuildView({
             chapter={chapter}
             revealResult={revealResult}
             dimmed={isDimmed}
+            auditionProgress={auditionProgress}
           />
         )}
 
@@ -327,7 +328,6 @@ function BuildView({
             <AuditionBars
               progress={auditionProgress}
               chapter={chapter}
-              currentAuditionOption={currentAttempt.currentAuditionOption}
             />
           </div>
         )}

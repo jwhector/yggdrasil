@@ -618,20 +618,14 @@ export function createAudioRouter(
     // Build list of track indices to discover
     let trackList: (number | "master")[];
 
-    if (routerState.fragmentTrackIndices.size > 0) {
-      trackList = Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b);
-      trackList.push("master");
-      console.log(`[AudioRouter] Starting device discovery for ${trackList.length} tracks (parallel)...`);
-    } else {
-      // Fallback: query Ableton for total track count
-      oscBridge.send('/live/song/get/num_tracks');
-      const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
-      const numTracks = numTracksResp?.[0] ?? 42;
-      trackList = [];
-      for (let i = 0; i < numTracks; i++) trackList.push(i);
-      trackList.push("master");
-      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (parallel, fallback)...`);
-    }
+    // Query Ableton for total track count
+    oscBridge.send('/live/song/get/num_tracks');
+    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+    const numTracks = numTracksResp?.[0] ?? 42;
+    trackList = [];
+    for (let i = 0; i < numTracks; i++) trackList.push(i);
+    trackList.push("master");
+    console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (parallel, fallback)...`);
 
     // Fire all track discoveries in parallel
     // Temporarily raise listener limit to avoid MaxListenersExceededWarning

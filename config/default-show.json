@@ -410,6 +410,7 @@
   ],
   "finale": {
     "bothOptionsSurvive": false,
+    "soundscapeTrackIndices": [74, 75],
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
       {
