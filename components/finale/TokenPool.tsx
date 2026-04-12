@@ -23,8 +23,8 @@ export interface CollisionZone {
 }
 
 export interface TokenPoolHandle {
-  /** Inject a dot at a specific position (from fly-in animation). */
-  injectDot: (chapterId: string, x: number, y: number) => void;
+  /** Queue a landing position so the next reconciled dot for this chapter spawns there. */
+  queueLandingPosition: (chapterId: string, x: number, y: number) => void;
 }
 
 interface TokenPoolProps {
@@ -76,8 +76,8 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
   const animRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
 
-  // Track injected dots to prevent reconciliation duplicates
-  const injectedCountsRef = useRef<Map<string, number>>(new Map());
+  // Queued landing positions from fly-in animations — reconciliation pops from here
+  const landingQueueRef = useRef<Map<string, Array<{ x: number; y: number }>>>(new Map());
 
   // Build chapter color map
   const chapterColors = useRef<Map<string, RGB>>(new Map());
@@ -89,24 +89,12 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
     chapterColors.current = map;
   }, [chapters]);
 
-  // Expose injectDot via ref
+  // Expose queueLandingPosition via ref
   useImperativeHandle(ref, () => ({
-    injectDot(chapterId: string, x: number, y: number) {
-      const color = chapterColors.current.get(chapterId) ?? { r: 128, g: 128, b: 128 };
-      dotsRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * DRIFT_SPEED * 0.5,
-        vy: (Math.random() - 0.5) * DRIFT_SPEED * 0.5,
-        radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
-        color,
-        chapterId,
-        age: 0,
-        opacity: 1,
-      });
-      // Track injected count so reconciliation doesn't duplicate
-      const prev = injectedCountsRef.current.get(chapterId) ?? 0;
-      injectedCountsRef.current.set(chapterId, prev + 1);
+    queueLandingPosition(chapterId: string, x: number, y: number) {
+      const queue = landingQueueRef.current.get(chapterId) ?? [];
+      queue.push({ x, y });
+      landingQueueRef.current.set(chapterId, queue);
     },
   }), []);
 
@@ -120,30 +108,27 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
 
       // Count existing dots for this chapter
       const existingForChapter = existing.filter(d => d.chapterId === chapterId);
-
-      // Subtract injected dots that haven't been accounted for yet
-      const injected = injectedCountsRef.current.get(chapterId) ?? 0;
-      const adjustedNeeded = count - existingForChapter.length;
+      const needed = count - existingForChapter.length;
 
       // Keep existing dots (up to count)
       for (let i = 0; i < Math.min(existingForChapter.length, count); i++) {
         newDots.push(existingForChapter[i]);
       }
 
-      // If we have injected dots covering the gap, decrement injected count instead of adding
-      if (adjustedNeeded > 0) {
-        const coveredByInjection = Math.min(adjustedNeeded, injected);
-        const actuallyNeeded = adjustedNeeded - coveredByInjection;
+      // Spawn new dots — use queued landing positions first, then random
+      if (needed > 0) {
+        const queue = landingQueueRef.current.get(chapterId) ?? [];
 
-        // Decrement injected counter
-        if (coveredByInjection > 0) {
-          injectedCountsRef.current.set(chapterId, injected - coveredByInjection);
-        }
+        for (let i = 0; i < needed; i++) {
+          const queued = queue.shift();
+          let x: number, y: number;
 
-        // Add new dots only for what's not covered by injections
-        if (actuallyNeeded > 0) {
-          for (let i = 0; i < actuallyNeeded; i++) {
-            let x: number, y: number;
+          if (queued) {
+            // Use the fly-in landing position
+            x = queued.x;
+            y = queued.y;
+          } else {
+            // Fall back to random position
             let attempts = 0;
             do {
               x = Math.random() * width * 0.8 + width * 0.1;
@@ -156,18 +141,19 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
                 return dx * dx + dy * dy < z.radius * z.radius;
               })
             );
-            newDots.push({
-              x,
-              y,
-              vx: (Math.random() - 0.5) * DRIFT_SPEED,
-              vy: (Math.random() - 0.5) * DRIFT_SPEED,
-              radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
-              color,
-              chapterId,
-              age: 0,
-              opacity: 1,
-            });
           }
+
+          newDots.push({
+            x,
+            y,
+            vx: (Math.random() - 0.5) * DRIFT_SPEED,
+            vy: (Math.random() - 0.5) * DRIFT_SPEED,
+            radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
+            color,
+            chapterId,
+            age: 0,
+            opacity: 1,
+          });
         }
       }
     }

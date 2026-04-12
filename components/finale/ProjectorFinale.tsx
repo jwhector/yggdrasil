@@ -106,11 +106,13 @@ export function ProjectorFinale({
       const targetY = Math.random() * size.height * 0.5 + size.height * 0.05;
       const id = `fly-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
+      // Queue the landing position so reconciliation spawns the dot there
+      tokenPoolRef.current?.queueLandingPosition(data.chapterId, targetX, targetY);
+
       setFlyingOrbs(prev => [...prev, { id, chapterId: data.chapterId, targetX, targetY }]);
 
-      // After animation completes, inject dot into TokenPool and remove orb
+      // Remove the fly-in orb after animation completes (pool_state reconciliation handles the dot)
       setTimeout(() => {
-        tokenPoolRef.current?.injectDot(data.chapterId, targetX, targetY);
         setFlyingOrbs(prev => prev.filter(o => o.id !== id));
       }, 800);
     };

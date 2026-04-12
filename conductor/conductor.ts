@@ -225,6 +225,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     case 'INJECT_TOKENS':
       return handleInjectTokens(state, command.chapterId, command.count);
 
+    // Failsafe
+    case 'GENERATE_VALID_FINALE':
+      return handleGenerateValidFinale(state);
+
     // Recovery
     case 'EXPORT_STATE':
       // Handled at server layer; conductor just acknowledges
@@ -1527,6 +1531,54 @@ function handleInjectTokens(state: ShowState, chapterId: string, count: number):
   fs.pool.totalRemaining += count;
 
   return [{ type: 'STATE_UPDATED', version: state.version }];
+}
+
+/**
+ * Failsafe: generate a valid finale from a blank show.
+ * Populates synthetic layerResults on all attempts using config-driven defaultWinners,
+ * then transitions to finale_vote and initializes FinaleState with a valid trackMap.
+ * If already in finale_vote, just rebuilds the trackMap from current attempt state.
+ */
+function handleGenerateValidFinale(state: ShowState): ConductorEvent[] {
+  const events: ConductorEvent[] = [];
+
+  // Populate synthetic layerResults for every attempt
+  for (let i = 0; i < state.attempts.length; i++) {
+    const attempt = state.attempts[i];
+    const config = state.config.attempts[i];
+    if (!config) continue;
+
+    const defaultWinners = config.defaultWinners ?? config.layers.map(() => 'A' as const);
+
+    attempt.status = 'completed';
+    attempt.currentLayerIndex = config.layers.length - 1;
+    attempt.currentLayerPhase = 'locked_in';
+    attempt.collapsedAtLayer = null;
+    attempt.layerResults = config.layers.map((layer, layerIdx) => ({
+      layerIndex: layer.index,
+      group: layer.group,
+      status: 'locked_in' as const,
+      chosenOption: defaultWinners[layerIdx] ?? 'A',
+      winningProportion: 1.0,
+      thresholdRequired: config.thresholds[layerIdx] ?? 0.5,
+      passed: true,
+    }));
+  }
+
+  // If not already in a finale phase, transition to finale_vote
+  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
+    state.phase = 'finale_vote';
+    events.push({
+      type: 'SHOW_PHASE_CHANGED',
+      phase: 'finale_vote',
+      attemptIndex: state.currentAttemptIndex,
+    });
+  }
+
+  // (Re)initialize the finale state with valid trackMap built from the synthetic results
+  events.push(...handleSetupFinaleV34(state));
+
+  return events;
 }
 
 /**

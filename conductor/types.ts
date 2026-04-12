@@ -430,6 +430,9 @@ export type ConductorCommand =
   // Testing — inject tokens directly into the pool
   | { type: 'INJECT_TOKENS'; chapterId: string; count: number }
 
+  // Failsafe — generate a valid finale from a blank show using config-driven default winners
+  | { type: 'GENERATE_VALID_FINALE' }
+
   // Recovery
   | { type: 'EXPORT_STATE' }
   | { type: 'IMPORT_STATE'; state: ShowState }
@@ -592,6 +595,7 @@ export interface V32AttemptConfig {
   tempos: number[];                       // Per-layer BPM
   auditionBars: number[];                 // Bars per option during audition
   auditionCycles: number[];               // A-B cycles per layer
+  defaultWinners?: ('A' | 'B')[];         // Failsafe: predetermined winners per layer for GENERATE_VALID_FINALE
 }
 
 /**
