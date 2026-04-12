@@ -31,6 +31,7 @@
         "trackIndices": [
           6
         ],
+        "armTrackIndices": [70],
         "label": "The seed"
       },
       "layers": [
@@ -167,6 +168,7 @@
         "trackIndices": [
           10
         ],
+        "armTrackIndices": [71],
         "label": "The seed"
       },
       "layers": [
@@ -296,6 +298,8 @@
         "trackIndices": [
           16
         ],
+        "armTrackIndices": [72, 73],
+        "armMuteExceptions": [73],
         "label": "The seed"
       },
       "layers": [
@@ -544,7 +548,10 @@
       "ceremonySwellBeats": 4,
       "crossfadeBeats": 4,
       "unityGainValue": 0,
-      "stepsPerBeat": 3
+      "stepsPerBeat": 3,
+      "masterDuckGain": 0.6,
+      "masterDuckBeats": 4,
+      "masterUnduckBeats": 4
     }
   },
   "openerSlides": [

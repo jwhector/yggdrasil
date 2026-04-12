@@ -125,6 +125,22 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
               >
                 RESET UTILITIES
               </button>
+
+              <button
+                onClick={() => send({ type: 'MASTER_DUCK' })}
+                style={{ ...btn, ...btnSecondary }}
+                title="Duck master gain for speech"
+              >
+                DUCK
+              </button>
+
+              <button
+                onClick={() => send({ type: 'MASTER_UNDUCK' })}
+                style={{ ...btn, ...btnSecondary }}
+                title="Restore master gain to full"
+              >
+                UNDUCK
+              </button>
             </div>
           </div>
 

@@ -73,6 +73,9 @@ export const DEFAULT_GAIN_CONFIG = {
   crossfadeBeats: 1,
   unityGainValue: 0.5,
   stepsPerBeat: 2,
+  masterDuckGain: 0.3,
+  masterDuckBeats: 2,
+  masterUnduckBeats: 1,
 } as const;
 
 /**
@@ -186,6 +189,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [{ type: 'AUDIO_CUE', cue: { type: 'master_panic' } }];
     case 'RESET_UTILITIES':
       return [{ type: 'AUDIO_CUE', cue: { type: 'reset_utilities' } }];
+    case 'MASTER_DUCK':
+      return [{ type: 'AUDIO_CUE', cue: { type: 'master_duck' } }];
+    case 'MASTER_UNDUCK':
+      return [{ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } }];
 
     // Connection
     case 'USER_CONNECT':
@@ -372,7 +379,13 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     state.currentAttemptIndex = attemptIndex;
   }
 
+  const prevPhase = state.phase;
   state.phase = nextPhase;
+
+  // Unduck master when leaving attempt_build (covers attempt_resolve transition, next attempt_story, etc.)
+  if (prevPhase === 'attempt_build' && nextPhase !== 'attempt_build') {
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } });
+  }
 
   // Phase entry side effects
   if (nextPhase === 'opener') {
@@ -394,6 +407,8 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
         cue: { type: 'live_seed_start', attemptIndex: state.currentAttemptIndex, trackIndices: attemptConfig.liveSeed.trackIndices },
       });
     }
+    // Duck master for performer speech (unducked when audition starts)
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_duck' } });
   }
 
   if (nextPhase === 'finale_vote') {
@@ -475,6 +490,8 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
         layerIndex: attempt.currentLayerIndex,
       },
     },
+    // Unduck master for audition playback
+    { type: 'AUDIO_CUE', cue: { type: 'master_unduck' } },
     {
       type: 'AUDIO_CUE',
       cue: {
@@ -674,6 +691,12 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
       },
     },
     {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'master_unduck',
+      },
+    },
+    {
       type: 'AUDITION_OPTION_CHANGED',
       attemptIndex: attempt.index,
       layerIndex: attempt.currentLayerIndex,
@@ -742,7 +765,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   const layerIndex = attempt.currentLayerIndex;
   const layerConfig = attempt.layerPlan[layerIndex];
 
-  // 0. Stop audition audio
+  // 0. Stop audition audio and duck master for reveal/speech
   if (attempt.currentAuditionOption !== null) {
     events.push({
       type: 'AUDIO_CUE',
@@ -754,6 +777,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
         trackBundle: getLayerTrackBundle(attempt, attempt.currentAuditionOption),
       },
     });
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_duck' } });
     attempt.currentAuditionOption = null;
   }
 
@@ -898,6 +922,8 @@ function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
       type: 'AUDIO_CUE',
       cue: { type: 'collapse_gesture', attemptIndex: attempt.index },
     });
+    // Unduck master — song collapsed, leaving build phase
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } });
   } else {
     // Lock in the layer but don't advance to next layer yet — verdict animation plays first
     const winner = attempt.currentVoteResult?.winner ?? 'A';
@@ -994,6 +1020,8 @@ function handleAdvanceFromVerdict(state: ShowState): ConductorEvent[] {
 
       const events: ConductorEvent[] = [];
       events.push({ type: 'ATTEMPT_COMPLETED', attemptIndex: attempt.index });
+      // Unduck master — song completed, leaving build phase
+      events.push({ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } });
 
       state.phase = 'attempt_resolve';
       events.push({

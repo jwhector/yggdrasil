@@ -328,6 +328,9 @@ export interface GainConfig {
   crossfadeBeats: number;       // Beats for node crossfade — both fade-out and fade-in (default 1)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
   stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
+  masterDuckGain: number;       // Ducked master gain level during speech (default 0.3)
+  masterDuckBeats: number;      // Beats to ramp master to ducked level (default 2)
+  masterUnduckBeats: number;    // Beats to ramp master back to unity (default 1)
 }
 
 export interface TimingConfig {
@@ -366,7 +369,11 @@ export type AudioCue =
   /** V3.4: immediate crossfade (no loop boundary wait) — used in audience interaction mode */
   | { type: 'node_instant_crossfade'; granularType: string; muteTracks: number[]; unmuteTracks: number[] }
   /** V3.4: fade a node's tracks to silence (nothing queued) */
-  | { type: 'node_fade_out'; granularType: string; trackIndices: number[] };
+  | { type: 'node_fade_out'; granularType: string; trackIndices: number[] }
+  /** Duck master gain (performer speaking between auditions) */
+  | { type: 'master_duck' }
+  /** Unduck master gain (audition starting or leaving attempt_build) */
+  | { type: 'master_unduck' };
 
 // ============================================================================
 // Conductor Commands (Input)
@@ -405,6 +412,8 @@ export type ConductorCommand =
   | { type: 'AUDIO_PANIC' }
   | { type: 'MASTER_PANIC' }            // Authoritative: query Ableton, mute all non-foldable tracks
   | { type: 'RESET_UTILITIES' }         // Emergency: reset all Utility gains to 0 dB
+  | { type: 'MASTER_DUCK' }
+  | { type: 'MASTER_UNDUCK' }
 
   // Connection
   | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
@@ -572,6 +581,8 @@ export interface LayerGroup {
 /** Config for the live seed tracks that play throughout a song-building attempt. */
 export interface LiveSeedConfig {
   trackIndices: number[];
+  armTrackIndices?: number[];   // Input tracks to arm for recording (falls back to trackIndices if absent)
+  armMuteExceptions?: number[]; // Tracks that get armed but stay muted (e.g., vocoder carrier)
   label?: string;
 }
 
