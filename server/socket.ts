@@ -159,6 +159,7 @@ export function setupSocketHandlers(
         ([chapterId, count]) => ({ chapterId, count })
       ),
       totalRemaining: fs.pool.totalRemaining,
+      loopProgress: fs.loopProgress,
     };
 
     io.to('projector').emit('pool_state', poolState);

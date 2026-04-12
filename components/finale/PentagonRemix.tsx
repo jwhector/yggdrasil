@@ -193,7 +193,7 @@ export function PentagonRemix({
           : validForDrag.has(nodeDef.id) ? 'valid' as const : 'invalid' as const;
         const nextChapter = nextChapterMap.get(nodeDef.id) ?? null;
 
-        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, loopProgress, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
       }
 
       // Draw seed node (center)
@@ -204,7 +204,7 @@ export function PentagonRemix({
         const dragValidity = validForDrag === null ? 'none' as const
           : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
         const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
-        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, loopProgress, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
       }
 
       // Audience interaction indicator
@@ -249,7 +249,6 @@ function drawRemixNode(
   nodeDef: { id: string; symbol: string; label: string },
   active: { chapterId: string; persistent: boolean } | undefined,
   queueDepth: number,
-  loopProgress: number,
   isHovered: boolean,
   dragValidity: 'none' | 'valid' | 'invalid',
   nextQueuedChapterId: string | null,
@@ -303,17 +302,6 @@ function drawRemixNode(
     // Active membrane — fill and stroke can independently show queued vs active color
     const pulseAlpha = 0.7 + 0.3 * Math.sin(t * 2.5);
     drawMembrane(ctx, x, y, radius * 1.5, activeColor, pulseAlpha, 0.12, 0, t, seed, activeColor, queuedColor);
-
-    // Loop progress ring
-    if (loopProgress > 0) {
-      ctx.beginPath();
-      ctx.arc(x, y, radius * 1.3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * loopProgress);
-      ctx.strokeStyle = rgb(activeColor, 0.5);
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-      ctx.lineCap = 'butt';
-    }
 
     // Filled core
     ctx.beginPath();

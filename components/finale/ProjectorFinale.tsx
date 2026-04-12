@@ -267,7 +267,7 @@ export function ProjectorFinale({
             height={size.height}
             activeNodes={finaleView.active}
             queueDepths={finaleView.queueDepth}
-            loopProgress={finaleView.loopProgress}
+            loopProgress={poolState.loopProgress}
             chapters={chapters}
             granularTypes={granularTypes}
             hoverTarget={drag.hoverTarget}

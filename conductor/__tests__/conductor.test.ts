@@ -61,6 +61,7 @@ function createTestConfig(
     ],
     finale: {
       bothOptionsSurvive: true,
+      soundscapeTrackIndices: [],
       audioPreviewPath: '/audio/previews',
       npcMessages: [],
       vote: {
@@ -1220,6 +1221,7 @@ describe('V3.4 Finale Phases', () => {
       ...createTestConfig(),
       finale: {
         bothOptionsSurvive: true,
+        soundscapeTrackIndices: [],
         audioPreviewPath: '/audio/previews',
         npcMessages: [],
         vote: {
