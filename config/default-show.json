@@ -26,53 +26,17 @@
         2,
         1
       ],
+      "defaultWinners": ["B", "B", "A"],
       "liveSeed": {
         "trackIndices": [
           6
         ],
+        "armTrackIndices": [70],
         "label": "The seed"
       },
       "layers": [
         {
           "index": 0,
-          "group": "flesh",
-          "labelA": "Tender",
-          "labelB": "Electric",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  21
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  44
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  22
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  44
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "index": 1,
           "group": "bones",
           "labelA": "Rooted",
           "labelB": "Drifting",
@@ -110,6 +74,44 @@
           }
         },
         {
+          "index": 1,
+          "group": "flesh",
+          "labelA": "Tender",
+          "labelB": "Electric",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  21
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  44
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  22
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  44
+                ]
+              }
+            ]
+          }
+        },
+        {
           "index": 2,
           "group": "spark",
           "labelA": "YOU WIN!",
@@ -119,12 +121,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  60
-                ]
-              },
-              {
-                "granularType": "fx",
-                "trackIndices": [
+                  60,
                   61
                 ]
               }
@@ -159,22 +156,56 @@
       "auditionBars": [
         4,
         4,
-        2
+        8
       ],
       "auditionCycles": [
         2,
         2,
-        2
+        1
       ],
+      "defaultWinners": ["A", "A", "A"],
       "liveSeed": {
         "trackIndices": [
           10
         ],
+        "armTrackIndices": [71],
         "label": "The seed"
       },
       "layers": [
         {
           "index": 0,
+          "group": "flesh",
+          "labelA": "Warm",
+          "labelB": "Cool",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  18, 19
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "harmony",
+                "trackIndices": [
+                  20
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  42, 43
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "index": 1,
           "group": "bones",
           "labelA": "Rooted",
           "labelB": "Drifting",
@@ -212,38 +243,6 @@
           }
         },
         {
-          "index": 1,
-          "group": "flesh",
-          "labelA": "Warm",
-          "labelB": "Cool",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  18, 19
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "harmony",
-                "trackIndices": [
-                  20
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  42, 43
-                ]
-              }
-            ]
-          }
-        },
-        {
           "index": 2,
           "group": "spark",
           "labelA": "Bright. Sharp.",
@@ -272,7 +271,7 @@
       ]
     },
     {
-      "chapter": "avoidance",
+      "chapter": "acceptance",
       "title": "Song 3",
       "thresholds": [
         0.5,
@@ -294,10 +293,13 @@
         2,
         2
       ],
+      "defaultWinners": ["A", "A", "A"],
       "liveSeed": {
         "trackIndices": [
           16
         ],
+        "armTrackIndices": [72, 73],
+        "armMuteExceptions": [73],
         "label": "The seed"
       },
       "layers": [
@@ -408,6 +410,7 @@
   ],
   "finale": {
     "bothOptionsSurvive": false,
+    "soundscapeTrackIndices": [74, 75],
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
       {
@@ -415,8 +418,20 @@
         "text": "He's gone. We need to do this ourselves."
       },
       {
+        "event": "vote_intro_1",
+        "text": "We've lost the conscious mind... "
+      },
+      {
+        "event": "vote_intro_2",
+        "text": "Answer honestly. It's the only way to bring him back."
+      },
+      {
         "event": "vote_start",
         "text": "Tell us what he needs to hear."
+      },
+      {
+        "event": "vote_outro",
+        "text": "That's might be all we need. You can put your phone down now, or continue to fill the pool."
       },
       {
         "event": "pool_full",
@@ -429,21 +444,92 @@
     ],
     "vote": {
       "questions": [
-        { "text": "What does he need to hear?" },
-        { "text": "What is he running from?" },
-        { "text": "What would make him stay?" },
-        { "text": "What does he owe himself?" },
-        { "text": "What is he afraid to say?" },
-        { "text": "What would it sound like if he forgave himself?" },
-        { "text": "What part of him is still waiting?" },
-        { "text": "What does the silence sound like?" },
-        { "text": "What would he build if failure didn't exist?" },
-        { "text": "What does he hear when no one is listening?" }
+        {
+          "text": "What does he need to hear?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The truth about what he's chasing" },
+            { "chapterId": "love", "label": "That someone is still here" },
+            { "chapterId": "acceptance", "label": "That it's already enough" }
+          ]
+        },
+        {
+          "text": "What is he running from?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The fear of standing still" },
+            { "chapterId": "love", "label": "The people who got too close" },
+            { "chapterId": "acceptance", "label": "The person he already is" }
+          ]
+        },
+        {
+          "text": "What would make him stay?",
+          "answers": [
+            { "chapterId": "ambition", "label": "Something worth building" },
+            { "chapterId": "love", "label": "Someone worth staying for" },
+            { "chapterId": "acceptance", "label": "Realizing he's already home" }
+          ]
+        },
+        {
+          "text": "What does he owe himself?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The chance to prove it" },
+            { "chapterId": "love", "label": "The grace to be held" },
+            { "chapterId": "acceptance", "label": "The permission to rest" }
+          ]
+        },
+        {
+          "text": "What is he afraid to say?",
+          "answers": [
+            { "chapterId": "ambition", "label": "That he doesn't know the way" },
+            { "chapterId": "love", "label": "That he needs someone" },
+            { "chapterId": "acceptance", "label": "That he's tired of fighting" }
+          ]
+        },
+        {
+          "text": "What would it sound like if he forgave himself?",
+          "answers": [
+            { "chapterId": "ambition", "label": "A deep breath before starting again" },
+            { "chapterId": "love", "label": "A voice saying 'I'm still here'" },
+            { "chapterId": "acceptance", "label": "Silence, finally at peace" }
+          ]
+        },
+        {
+          "text": "What part of him is still waiting?",
+          "answers": [
+            { "chapterId": "ambition", "label": "The part that never got its shot" },
+            { "chapterId": "love", "label": "The part that learned to hide" },
+            { "chapterId": "acceptance", "label": "The part that forgot how to stop" }
+          ]
+        },
+        {
+          "text": "What does the silence sound like?",
+          "answers": [
+            { "chapterId": "ambition", "label": "An engine waiting to ignite" },
+            { "chapterId": "love", "label": "A room where someone just left" },
+            { "chapterId": "acceptance", "label": "Snow falling on still water" }
+          ]
+        },
+        {
+          "text": "What would he build if failure didn't exist?",
+          "answers": [
+            { "chapterId": "ambition", "label": "Something the world remembers" },
+            { "chapterId": "love", "label": "A place where no one leaves" },
+            { "chapterId": "acceptance", "label": "Nothing — just being would be enough" }
+          ]
+        },
+        {
+          "text": "What does he hear when no one is listening?",
+          "answers": [
+            { "chapterId": "ambition", "label": "A drumbeat pushing forward" },
+            { "chapterId": "love", "label": "An echo of every goodbye" },
+            { "chapterId": "acceptance", "label": "His own voice, finally honest" }
+          ]
+        }
       ],
       "shuffleQuestions": true,
       "targetPoolSize": 120,
       "questionDelayMs": 3000,
-      "revealPoolOnProjector": true
+      "revealPoolOnProjector": true,
+      "alarmColor": "#ff0000"
     },
     "remix": {
       "audienceInteraction": false
@@ -463,37 +549,113 @@
       "ceremonySwellBeats": 4,
       "crossfadeBeats": 4,
       "unityGainValue": 0,
-      "stepsPerBeat": 3
+      "stepsPerBeat": 3,
+      "masterDuckGain": 0.6,
+      "masterDuckBeats": 4,
+      "masterUnduckBeats": 4
     }
   },
   "openerSlides": [
     {
       "point": "Bachelor of Science in Chemistry",
-      "subPoints": ["Duration: 1 year, 7 months", "Abandoned because: an identity crisis about the trajectory of our entire life pushed us to almost drop out completely, but we instead decided to switch to a much easier and generally more creative computer science major"]
+      "media": {
+        "type": "image",
+        "src": "/opener-media/chemistry.jpg"
+      },
+      "subPoints": [
+        { "label": "Duration:", "value": "1 year, 7 months" },
+        { "label": "Abandoned because:", "value": "an identity crisis about the trajectory of our entire life pushed us to almost drop out completely, but we instead decided to switch to a much easier and generally more creative computer science major" }
+      ]
     },
     {
       "point": "A musical about QAnon conspiracy theories",
-      "subPoints": ["Duration: 4 months", "Abandoned because: after we made 5 (pretty good) demos, the pressure of collaboration, coordination, and the shame of imperfection drove us back"]
+      "media": {
+        "type": "audio",
+        "src": "/opener-media/sheeple.wav"
+      },
+      "subPoints": [
+        { "label": "Duration:", "value": "4 months" },
+        { "label": "Abandoned because:", "value": "after we made 5 (pretty good) demos, the pressure of collaboration, coordination, and the shame of imperfection drove us back" }
+      ]
     },
     {
-      "point": "Engineer at a startup a friend of ours created based on his *extremely* lucrative idea which definitely had the potential to fulfill our desire to make money on our own time in the way we’d been hoping to for years…",
-      "subPoints": ["Duration: 7 months", "Abandoned because: we felt a higher \"spiritual\" calling"]
+      "point": "Engineer at a startup a friend of ours created",
+      "subPoints": [
+        { "label": "Duration:", "value": "7 months" },
+        { "label": "Abandoned because:", "value": "we felt a higher \"spiritual\" calling" }
+      ]
     },
     {
       "point": "Said spiritual awakening and subsequent dedication of our entire life to the quest to discover the meaning of life, the universe, and everything",
-      "subPoints": ["Duration: 1 year, 42 days", "Abandoned because: meditation is boring as hell"]
+      "subPoints": [
+        { "label": "Duration:", "value": "1 year, 42 days" },
+        { "label": "Abandoned because:", "value": "meditation is boring as hell" }
+      ]
     },
     {
       "point": "An addiction to video games and all kinds of mindless scrolling",
-      "subPoints": ["Duration: ongoing"]
+      "subPoints": [
+        { "label": "Duration:", "value": "ongoing" }
+      ]
     },
     {
       "point": "A different startup designed to help people get their lives together",
-      "subPoints": ["Duration: 4 months", "Abandoned because: we couldn't get our life together"]
+      "media": {
+        "type": "image",
+        "src": "/opener-media/hrizn.png"
+      },
+      "subPoints": [
+        { "label": "Duration:", "value": "4 months" },
+        { "label": "Abandoned because:", "value": "we couldn’t get our life together" }
+      ]
     }
   ],
   "lobby": {
-    "waitingMessage": "The show will begin shortly."
+    "waitingMessage": "The show will begin shortly.",
+    "onboarding": {
+      "buttonLabel": "WHERE AM I?",
+      "sections": [
+        {
+          "type": "narrative",
+          "body": "You are a subconscious fragment of Jared's mind, being given consciousness for the very first time, thanks to this technology."
+        },
+        {
+          "type": "practical",
+          "heading": "BEFORE WE BEGIN",
+          "items": [
+            "Keep your phone with you throughout the show",
+            "Please enable Do Not Disturb",
+            "Silence all notifications",
+            "Keep your phone on and connected to the internet"
+          ]
+        },
+        {
+          "type": "cues",
+          "heading": "VISUAL CUES",
+          "cues": [
+            {
+              "icon": "phone",
+              "label": "PICK UP YOUR PHONE",
+              "description": "When this icon flashes on the projector screen, please pick up your device."
+            },
+            {
+              "icon": "no-phone",
+              "label": "PUT YOUR PHONE DOWN",
+              "description": "When this icon appears, please put your phone down and listen."
+            }
+          ]
+        },
+        {
+          "type": "disclaimer",
+          "body": "This is an experimental piece of live technology. Please bear with any brief interruptions gracefully."
+        },
+        {
+          "type": "reconnect",
+          "heading": "IF SOMETHING GOES WRONG",
+          "body": "If you see \"STATION CONNECTION LOST\" on your screen, or are having difficulties connecting, please refresh the page. The experience will resume where you left off."
+        }
+      ]
+    }
   },
   "seatIds": [],
   "chapters": [
@@ -584,7 +746,7 @@
       ]
     },
     {
-      "chapter": "avoidance",
+      "chapter": "acceptance",
       "thoughtsPerPerson": [1, 3, 5],
       "pool": [
         ["Why bother?", "It won't matter", "Nothing changes", "Skip it", "Not worth the effort", "Save your energy", "Nobody notices", "Invisible is safe", "Path of least resistance", "Let it slide", "Numb is fine", "Detach", "Float away", "None of this is real", "Who cares"],

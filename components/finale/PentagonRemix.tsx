@@ -15,6 +15,7 @@ import type { ChapterConfig, GranularType } from '@/conductor/types';
 import {
   PENTAGON_NODES,
   computeLayout,
+  drawMembrane,
   hexToRgb,
   rgb,
   smoothNoise,
@@ -32,6 +33,7 @@ interface ActiveNodeView {
 interface QueueDepthView {
   granularType: string;
   depth: number;
+  nextChapterId: string | null;
 }
 
 interface ValidNode {
@@ -112,6 +114,14 @@ export function PentagonRemix({
     return map;
   }, [queueDepths]);
 
+  const nextChapterMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const q of queueDepths) {
+      map.set(q.granularType, q.nextChapterId);
+    }
+    return map;
+  }, [queueDepths]);
+
   // Build set of granular types that are valid for the currently-dragged chapter
   const validForDrag = useMemo(() => {
     if (!dragChapterId) return null;  // Not dragging — no highlighting
@@ -169,6 +179,10 @@ export function PentagonRemix({
         ctx.stroke();
       }
 
+      // Global loop ring (interpolated for smooth 60fps)
+      const smoothLoop = getInterpolatedLoopPosition(loopProgress);
+      drawLoopRing(ctx, layout.centerX, layout.centerY, layout.orbitRadius, layout.nodeRadius, smoothLoop);
+
       // Draw nodes
       for (const nodeDef of PENTAGON_NODES) {
         const pos = layout.positions[nodeDef.id];
@@ -177,8 +191,9 @@ export function PentagonRemix({
         const isHovered = hoverTarget === nodeDef.id;
         const dragValidity = validForDrag === null ? 'none' as const
           : validForDrag.has(nodeDef.id) ? 'valid' as const : 'invalid' as const;
+        const nextChapter = nextChapterMap.get(nodeDef.id) ?? null;
 
-        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, loopProgress, isHovered, dragValidity, chapterColorMap, t);
+        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
       }
 
       // Draw seed node (center)
@@ -188,7 +203,8 @@ export function PentagonRemix({
         const isHovered = hoverTarget === SEED_ID;
         const dragValidity = validForDrag === null ? 'none' as const
           : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
-        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, loopProgress, isHovered, dragValidity, chapterColorMap, t);
+        const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
+        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
       }
 
       // Audience interaction indicator
@@ -204,7 +220,7 @@ export function PentagonRemix({
 
     animRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animRef.current);
-  }, [width, height, activeMap, queueMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed]);
+  }, [width, height, activeMap, queueMap, nextChapterMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed]);
 
   return (
     <canvas
@@ -233,9 +249,9 @@ function drawRemixNode(
   nodeDef: { id: string; symbol: string; label: string },
   active: { chapterId: string; persistent: boolean } | undefined,
   queueDepth: number,
-  loopProgress: number,
   isHovered: boolean,
   dragValidity: 'none' | 'valid' | 'invalid',
+  nextQueuedChapterId: string | null,
   chapterColors: Map<string, RGB>,
   t: number,
 ): void {
@@ -277,42 +293,44 @@ function drawRemixNode(
   if (isDimmed) ctx.globalAlpha = 0.25;
 
   if (active) {
-    const color = chapterColors.get(active.chapterId) ?? emptyColor;
+    const activeColor = chapterColors.get(active.chapterId) ?? emptyColor;
+    const queuedColor = nextQueuedChapterId
+      ? chapterColors.get(nextQueuedChapterId) ?? undefined
+      : undefined;
+    const seed = hashSeed(nodeDef.id);
 
-    // Active glow (membrane)
-    const pulseAlpha = 0.5 + 0.2 * Math.sin(t * 2.5);
-    ctx.beginPath();
-    ctx.arc(x, y, radius * 1.6, 0, Math.PI * 2);
-    ctx.fillStyle = rgb(color, pulseAlpha * 0.15);
-    ctx.fill();
-
-    // Loop progress ring
-    if (loopProgress > 0) {
-      ctx.beginPath();
-      ctx.arc(x, y, radius * 1.3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * loopProgress);
-      ctx.strokeStyle = rgb(color, 0.5);
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-      ctx.lineCap = 'butt';
-    }
+    // Active membrane — fill and stroke can independently show queued vs active color
+    const pulseAlpha = 0.7 + 0.3 * Math.sin(t * 2.5);
+    drawMembrane(ctx, x, y, radius * 1.5, activeColor, pulseAlpha, 0.12, 0, t, seed, activeColor, queuedColor);
 
     // Filled core
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = rgb(color, 0.7);
+    ctx.fillStyle = rgb(activeColor, 0.7);
     ctx.fill();
 
     // Persistent indicator (double ring)
     if (active.persistent) {
       ctx.beginPath();
       ctx.arc(x, y, radius * 1.15, 0, Math.PI * 2);
-      ctx.strokeStyle = rgb(color, 0.35);
+      ctx.strokeStyle = rgb(activeColor, 0.35);
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+  } else if (nextQueuedChapterId) {
+    // Silent node with queued token — stroke-only membrane in queued color
+    const qColor = chapterColors.get(nextQueuedChapterId) ?? emptyColor;
+    const seed = hashSeed(nodeDef.id);
+    const pulseAlpha = 0.4 + 0.2 * Math.sin(t * 2);
+    drawMembrane(ctx, x, y, radius * 1.5, emptyColor, pulseAlpha, 0.08, 0, t, seed, emptyColor, qColor);
+
+    // Dim core
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = rgb(emptyColor, 0.25);
+    ctx.fill();
   } else {
-    // Empty node
+    // Empty node — nothing active or queued
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fillStyle = rgb(emptyColor, 0.25);
@@ -357,5 +375,95 @@ function drawRemixNode(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`${queueDepth}`, badgeX, badgeY);
+  }
+}
+
+function hashSeed(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+// ---------------------------------------------------------------------------
+// Loop position interpolation (smooth 60fps from ~4 Hz server updates)
+// ---------------------------------------------------------------------------
+
+let loopInterp = {
+  lastServerPos: 0,
+  lastServerTime: 0,
+  velocity: 0,
+};
+
+function getInterpolatedLoopPosition(serverPos: number): number {
+  const now = performance.now();
+
+  if (serverPos !== loopInterp.lastServerPos) {
+    const dt = now - loopInterp.lastServerTime;
+    if (loopInterp.lastServerTime > 0 && dt > 0 && dt < 2000) {
+      let delta = serverPos - loopInterp.lastServerPos;
+      if (delta < -0.5) delta += 1; // wrapped around
+      loopInterp.velocity = delta / dt;
+    }
+    loopInterp.lastServerPos = serverPos;
+    loopInterp.lastServerTime = now;
+  }
+
+  const elapsed = now - loopInterp.lastServerTime;
+  if (loopInterp.velocity <= 0 || elapsed > 1000) {
+    return serverPos;
+  }
+
+  const extrapolated = loopInterp.lastServerPos + loopInterp.velocity * elapsed;
+  // Reset to 0 when wrapping past 1
+  return extrapolated % 1;
+}
+
+/** Reset interpolation state (call when entering/leaving finale). */
+export function resetLoopInterp(): void {
+  loopInterp = { lastServerPos: 0, lastServerTime: 0, velocity: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Global loop ring around pentagon orbit
+// ---------------------------------------------------------------------------
+
+function drawLoopRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  orbitRadius: number,
+  nodeRadius: number,
+  loopPosition: number,
+): void {
+  const ringRadius = orbitRadius + nodeRadius * 2.2;
+  const startAngle = -Math.PI / 2; // 12 o'clock
+
+  // Dim full-circle track
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Progress arc
+  if (loopPosition > 0.001) {
+    const endAngle = startAngle + loopPosition * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, startAngle, endAngle);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+
+    // Leading dot
+    const dotX = cx + Math.cos(endAngle) * ringRadius;
+    const dotY = cy + Math.sin(endAngle) * ringRadius;
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fill();
   }
 }

@@ -47,6 +47,8 @@ export interface TimingEngineConfig {
   fallbackBpm: number;
   /** Callback for audition progress updates (~4 Hz during auditioning) */
   onAuditionProgress?: (progress: AuditionProgress) => void;
+  /** Callback for remix loop progress updates (every beat during finale_remix) */
+  onRemixLoopProgress?: (progress: number) => void;
 }
 
 /** Beat position within the current musical context. */
@@ -189,6 +191,8 @@ export function createTimingEngine(
   let fallbackAuditionLoopIndex = 0;
   let remixLoopState: RemixLoopTrackingState | null = null;
   let fallbackRemixLoopInterval: NodeJS.Timeout | null = null;
+  let fallbackRemixProgressInterval: NodeJS.Timeout | null = null;
+  let fallbackRemixLoopStartTime: number = 0;
   let configuredLoopBoundaryBeats: number = 32; // Set from config on start/state change
 
   // Beat callback scheduler state
@@ -503,6 +507,7 @@ export function createTimingEngine(
       remixLoopState = { active: true, preCueBeats, loopBeats, firedThisLoop: false };
       const msPerBeat = 60000 / engineConfig.fallbackBpm;
       const intervalMs = loopBeats * msPerBeat;
+      fallbackRemixLoopStartTime = Date.now();
 
       fallbackRemixLoopInterval = setInterval(() => {
         if (!running) return;
@@ -511,8 +516,19 @@ export function createTimingEngine(
           stopRemixLoopTracking();
           return;
         }
+        fallbackRemixLoopStartTime = Date.now();
         sendCommand({ type: 'LOOP_BOUNDARY' });
       }, intervalMs);
+
+      // Progress emission (~4 Hz) in fallback mode
+      if (engineConfig.onRemixLoopProgress) {
+        fallbackRemixProgressInterval = setInterval(() => {
+          if (!running) return;
+          const elapsed = Date.now() - fallbackRemixLoopStartTime;
+          const progress = Math.min(elapsed / intervalMs, 1.0);
+          engineConfig.onRemixLoopProgress!(progress);
+        }, 250);
+      }
 
       console.log(`[Timing] Remix loop tracking started (fallback, every ${intervalMs.toFixed(0)}ms)`);
     }
@@ -526,6 +542,10 @@ export function createTimingEngine(
     if (fallbackRemixLoopInterval) {
       clearInterval(fallbackRemixLoopInterval);
       fallbackRemixLoopInterval = null;
+    }
+    if (fallbackRemixProgressInterval) {
+      clearInterval(fallbackRemixProgressInterval);
+      fallbackRemixProgressInterval = null;
     }
   }
 
@@ -671,6 +691,11 @@ export function createTimingEngine(
       if (!remixLoopState.firedThisLoop && rawBeatNumber >= threshold) {
         remixLoopState.firedThisLoop = true;
         sendCommand({ type: 'LOOP_BOUNDARY' });
+      }
+
+      // Update loop progress (0.0–1.0) from raw beat position
+      if (engineConfig.onRemixLoopProgress && remixLoopState.loopBeats > 0) {
+        engineConfig.onRemixLoopProgress(rawBeatNumber / remixLoopState.loopBeats);
       }
     }
   }

@@ -343,6 +343,10 @@ async function main() {
         onAuditionProgress: (progress) => {
           io.to('audience').to('projector').emit('audition_progress', progress);
         },
+        onRemixLoopProgress: (progress) => {
+          const fs = getState().finaleState as FinaleState | null;
+          if (fs) fs.loopProgress = progress;
+        },
       }
     );
   }

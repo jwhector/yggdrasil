@@ -41,6 +41,7 @@ import type {
   GranularType,
   TokenPool,
 } from './types';
+import { getSlideMaxStep } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import {
@@ -51,6 +52,7 @@ import {
 import {
   queueToken as remixQueueToken,
   cancelQueue as remixCancelQueue,
+  advanceNode as remixAdvanceNode,
   processLoopBoundary as remixProcessLoopBoundary,
   toggleAudienceInteraction as remixToggleAudienceInteraction,
 } from './remix-engine';
@@ -72,6 +74,9 @@ export const DEFAULT_GAIN_CONFIG = {
   crossfadeBeats: 1,
   unityGainValue: 0.5,
   stepsPerBeat: 2,
+  masterDuckGain: 0.3,
+  masterDuckBeats: 2,
+  masterUnduckBeats: 1,
 } as const;
 
 /**
@@ -99,6 +104,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     auditionLoopIndex: 0,
     currentVoteResult: null,
     revealStakesShown: false,
+    songRejected: false,
   }));
 
   return {
@@ -185,6 +191,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return [{ type: 'AUDIO_CUE', cue: { type: 'master_panic' } }];
     case 'RESET_UTILITIES':
       return [{ type: 'AUDIO_CUE', cue: { type: 'reset_utilities' } }];
+    case 'MASTER_DUCK':
+      return [{ type: 'AUDIO_CUE', cue: { type: 'master_duck' } }];
+    case 'MASTER_UNDUCK':
+      return [{ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } }];
 
     // Connection
     case 'USER_CONNECT':
@@ -209,6 +219,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleQueueToken(state, command.granularType, command.chapterId, command.instant);
     case 'CANCEL_QUEUE':
       return handleCancelQueue(state, command.granularType);
+    case 'ADVANCE_NODE':
+      return handleAdvanceNode(state, command.granularType);
     case 'TOGGLE_AUDIENCE_INTERACTION':
       return handleToggleAudienceInteraction(state);
     case 'LOOP_BOUNDARY':
@@ -221,6 +233,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Testing — inject tokens into the pool
     case 'INJECT_TOKENS':
       return handleInjectTokens(state, command.chapterId, command.count);
+
+    // Failsafe
+    case 'GENERATE_VALID_FINALE':
+      return handleGenerateValidFinale(state);
 
     // Recovery
     case 'EXPORT_STATE':
@@ -280,20 +296,20 @@ function handleAdvanceSlide(state: ShowState): ConductorEvent[] {
   const cur = state.openerSlideState;
 
   if (cur === null) {
-    // Blank → show first point (no sub-points yet)
-    state.openerSlideState = { pointIndex: 0, subPointIndex: -1 };
+    // Blank → show first slide title
+    state.openerSlideState = { pointIndex: 0, stepIndex: 0 };
   } else {
     const slide = slides[cur.pointIndex];
-    const maxSub = (slide.subPoints?.length ?? 0) - 1;
+    const maxStep = getSlideMaxStep(slide);
 
-    if (cur.subPointIndex < maxSub) {
-      // Reveal next sub-point
-      state.openerSlideState = { pointIndex: cur.pointIndex, subPointIndex: cur.subPointIndex + 1 };
+    if (cur.stepIndex < maxStep) {
+      // Reveal next step within this slide
+      state.openerSlideState = { pointIndex: cur.pointIndex, stepIndex: cur.stepIndex + 1 };
     } else if (cur.pointIndex < slides.length - 1) {
-      // Next point
-      state.openerSlideState = { pointIndex: cur.pointIndex + 1, subPointIndex: -1 };
+      // Next slide
+      state.openerSlideState = { pointIndex: cur.pointIndex + 1, stepIndex: 0 };
     } else {
-      // Past last point → blank
+      // Past last slide → blank
       state.openerSlideState = null;
     }
   }
@@ -365,7 +381,13 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
     state.currentAttemptIndex = attemptIndex;
   }
 
+  const prevPhase = state.phase;
   state.phase = nextPhase;
+
+  // Unduck master when leaving attempt_build (covers attempt_resolve transition, next attempt_story, etc.)
+  if (prevPhase === 'attempt_build' && nextPhase !== 'attempt_build') {
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } });
+  }
 
   // Phase entry side effects
   if (nextPhase === 'opener') {
@@ -387,12 +409,25 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
         cue: { type: 'live_seed_start', attemptIndex: state.currentAttemptIndex, trackIndices: attemptConfig.liveSeed.trackIndices },
       });
     }
+    // Duck master for performer speech (unducked when audition starts)
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_duck' } });
   }
 
   if (nextPhase === 'finale_vote') {
     // Auto-setup V3.4 finale state
     console.log('handleAdvancePhase: auto-setup V3.4 finale state');
     events.push(...handleSetupFinaleV34(state));
+  }
+
+  if (nextPhase === 'finale_remix') {
+    events.push({
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'live_seed_stop',
+      attemptIndex: 3,
+        trackIndices: state.config.finale.soundscapeTrackIndices,
+      },
+    });
   }
 
   events.push({
@@ -468,6 +503,8 @@ function handleStartAudition(state: ShowState): ConductorEvent[] {
         layerIndex: attempt.currentLayerIndex,
       },
     },
+    // Unduck master for audition playback
+    { type: 'AUDIO_CUE', cue: { type: 'master_unduck' } },
     {
       type: 'AUDIO_CUE',
       cue: {
@@ -667,6 +704,12 @@ function handleRerunVote(state: ShowState): ConductorEvent[] {
       },
     },
     {
+      type: 'AUDIO_CUE',
+      cue: {
+        type: 'master_unduck',
+      },
+    },
+    {
       type: 'AUDITION_OPTION_CHANGED',
       attemptIndex: attempt.index,
       layerIndex: attempt.currentLayerIndex,
@@ -704,6 +747,12 @@ function handleTriggerRejection(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
+  if (attempt.songRejected) {
+    return []; // Already rejected; ignore duplicate
+  }
+
+  attempt.songRejected = true;
+
   const events: ConductorEvent[] = [
     { type: 'SONG_REJECTED', attemptIndex: attempt.index },
     { type: 'AUDIO_CUE', cue: { type: 'rejection_gesture', attemptIndex: attempt.index } },
@@ -735,7 +784,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   const layerIndex = attempt.currentLayerIndex;
   const layerConfig = attempt.layerPlan[layerIndex];
 
-  // 0. Stop audition audio
+  // 0. Stop audition audio — master stays unducked for the reveal sequence
   if (attempt.currentAuditionOption !== null) {
     events.push({
       type: 'AUDIO_CUE',
@@ -891,6 +940,8 @@ function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
       type: 'AUDIO_CUE',
       cue: { type: 'collapse_gesture', attemptIndex: attempt.index },
     });
+    // Unduck master — song collapsed, leaving build phase
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } });
   } else {
     // Lock in the layer but don't advance to next layer yet — verdict animation plays first
     const winner = attempt.currentVoteResult?.winner ?? 'A';
@@ -947,6 +998,8 @@ function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
           : EMPTY_TRACK_BUNDLE,
       },
     });
+    // Duck master after lock-in — performer narrates before next layer
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_duck' } });
   }
 
   // Don't clear currentVoteResult yet — projector needs it for verdict animation.
@@ -987,6 +1040,8 @@ function handleAdvanceFromVerdict(state: ShowState): ConductorEvent[] {
 
       const events: ConductorEvent[] = [];
       events.push({ type: 'ATTEMPT_COMPLETED', attemptIndex: attempt.index });
+      // Unduck master — song completed, leaving build phase
+      events.push({ type: 'AUDIO_CUE', cue: { type: 'master_unduck' } });
 
       state.phase = 'attempt_resolve';
       events.push({
@@ -1244,6 +1299,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     auditionLoopIndex: 0,
     currentVoteResult: null,
     revealStakesShown: false,
+    songRejected: false,
   }));
 
   return [
@@ -1313,6 +1369,7 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
 
   return [
     { type: 'VOTE_STARTED' },
+    { type: 'AUDIO_CUE', cue: { type: 'live_seed_start', attemptIndex: 3, trackIndices: state.config.finale.soundscapeTrackIndices } },
   ];
 }
 
@@ -1369,6 +1426,7 @@ function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorE
     userId,
     questionIndex: answeredCount,
     questionText: question.text,
+    answers: question.answers ?? null,
   }];
 }
 
@@ -1410,6 +1468,7 @@ function handleStartRemix(state: ShowState): ConductorEvent[] {
     { type: 'SHOW_PHASE_CHANGED', phase: 'finale_remix', attemptIndex: state.currentAttemptIndex },
     { type: 'REMIX_STARTED', pool },
     { type: 'AUDIO_CUE', cue: { type: 'remix_start' } },
+    { type: 'AUDIO_CUE', cue: { type: 'live_seed_stop', attemptIndex: 3, trackIndices: state.config.finale.soundscapeTrackIndices } },
   ];
 }
 
@@ -1438,6 +1497,18 @@ function handleCancelQueue(state: ShowState, granularType: string): ConductorEve
   if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
 
   const result = remixCancelQueue(finaleState, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleAdvanceNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'ADVANCE_NODE only valid during finale_remix' }];
+  }
+  const finaleState = state.finaleState as FinaleState;
+  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = remixAdvanceNode(finaleState, granularType);
   state.finaleState = result.state;
   return result.events;
 }
@@ -1511,6 +1582,54 @@ function handleInjectTokens(state: ShowState, chapterId: string, count: number):
   fs.pool.totalRemaining += count;
 
   return [{ type: 'STATE_UPDATED', version: state.version }];
+}
+
+/**
+ * Failsafe: generate a valid finale from a blank show.
+ * Populates synthetic layerResults on all attempts using config-driven defaultWinners,
+ * then transitions to finale_vote and initializes FinaleState with a valid trackMap.
+ * If already in finale_vote, just rebuilds the trackMap from current attempt state.
+ */
+function handleGenerateValidFinale(state: ShowState): ConductorEvent[] {
+  const events: ConductorEvent[] = [];
+
+  // Populate synthetic layerResults for every attempt
+  for (let i = 0; i < state.attempts.length; i++) {
+    const attempt = state.attempts[i];
+    const config = state.config.attempts[i];
+    if (!config) continue;
+
+    const defaultWinners = config.defaultWinners ?? config.layers.map(() => 'A' as const);
+
+    attempt.status = 'completed';
+    attempt.currentLayerIndex = config.layers.length - 1;
+    attempt.currentLayerPhase = 'locked_in';
+    attempt.collapsedAtLayer = null;
+    attempt.layerResults = config.layers.map((layer, layerIdx) => ({
+      layerIndex: layer.index,
+      group: layer.group,
+      status: 'locked_in' as const,
+      chosenOption: defaultWinners[layerIdx] ?? 'A',
+      winningProportion: 1.0,
+      thresholdRequired: config.thresholds[layerIdx] ?? 0.5,
+      passed: true,
+    }));
+  }
+
+  // If not already in a finale phase, transition to finale_vote
+  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
+    state.phase = 'finale_vote';
+    events.push({
+      type: 'SHOW_PHASE_CHANGED',
+      phase: 'finale_vote',
+      attemptIndex: state.currentAttemptIndex,
+    });
+  }
+
+  // (Re)initialize the finale state with valid trackMap built from the synthetic results
+  events.push(...handleSetupFinaleV34(state));
+
+  return events;
 }
 
 /**

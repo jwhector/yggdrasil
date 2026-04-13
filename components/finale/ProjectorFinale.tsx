@@ -14,8 +14,9 @@ import type { Socket } from 'socket.io-client';
 import type { ChapterConfig, GranularType, ShowPhase, ProjectorFinaleView } from '@/conductor/types';
 import { useTokenPool } from '@/hooks/useTokenPool';
 import { useDragToken } from '@/hooks/useDragToken';
-import { TokenPool } from './TokenPool';
+import { TokenPool, type CollisionZone, type TokenPoolHandle } from './TokenPool';
 import { PentagonRemix } from './PentagonRemix';
+import { computeLayout, PENTAGON_NODES, hexToRgb } from '@/components/projector/renderers/shared';
 
 interface ProjectorFinaleProps {
   socket: Socket | null;
@@ -33,7 +34,11 @@ export function ProjectorFinale({
   granularTypes,
 }: ProjectorFinaleProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const tokenPoolRef = useRef<TokenPoolHandle>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+
+  // Flying orbs state
+  const [flyingOrbs, setFlyingOrbs] = useState<Array<{ id: string; chapterId: string; targetX: number; targetY: number }>>([]);
 
   // High-frequency pool state from dedicated socket event
   const poolState = useTokenPool(socket);
@@ -91,6 +96,31 @@ export function ProjectorFinale({
     };
   }, []);
 
+  // Listen for token_fly events from audience votes
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleTokenFly = (data: { chapterId: string }) => {
+      // Pick a random landing position in the upper 60% of the screen
+      const targetX = Math.random() * size.width * 0.7 + size.width * 0.15;
+      const targetY = Math.random() * size.height * 0.5 + size.height * 0.05;
+      const id = `fly-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      // Queue the landing position so reconciliation spawns the dot there
+      tokenPoolRef.current?.queueLandingPosition(data.chapterId, targetX, targetY);
+
+      setFlyingOrbs(prev => [...prev, { id, chapterId: data.chapterId, targetX, targetY }]);
+
+      // Remove the fly-in orb after animation completes (pool_state reconciliation handles the dot)
+      setTimeout(() => {
+        setFlyingOrbs(prev => prev.filter(o => o.id !== id));
+      }, 800);
+    };
+
+    socket.on('token_fly', handleTokenFly);
+    return () => { socket.off('token_fly', handleTokenFly); };
+  }, [socket, size.width, size.height]);
+
   // Use pool_state (high-frequency) if available, fall back to state_sync data
   const availableByChapter = poolState.totalRemaining > 0
     ? poolState.availableByChapter
@@ -145,10 +175,60 @@ export function ProjectorFinale({
 
   const handleMouseUp = useCallback(() => handleDrop(), [handleDrop]);
 
-  // Pool counter text
-  const totalRemaining = poolState.totalRemaining > 0
-    ? poolState.totalRemaining
-    : finaleView.pool.totalRemaining;
+  // Track whether a drag just ended (to suppress click after drop)
+  const wasDraggingRef = useRef(false);
+
+  // Node tap — advance node when clicking/tapping a pentagon node (not during drag)
+  const handleNodeTap = useCallback((clientX: number, clientY: number) => {
+    if (!interactionEnabled || !socket) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const target = drag.findTarget(x, y);
+    if (target) {
+      socket.emit('command', { type: 'ADVANCE_NODE', granularType: target });
+    }
+  }, [drag, interactionEnabled, socket]);
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    // Suppress click that fires after a drag-and-drop
+    if (wasDraggingRef.current) {
+      wasDraggingRef.current = false;
+      return;
+    }
+    handleNodeTap(e.clientX, e.clientY);
+  }, [handleNodeTap]);
+
+  const handleTouchEndForTap = useCallback((e: React.TouchEvent) => {
+    if (drag.isDragging) {
+      wasDraggingRef.current = true;
+      handleDrop();
+    } else if (e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      handleNodeTap(touch.clientX, touch.clientY);
+    }
+  }, [drag.isDragging, handleDrop, handleNodeTap]);
+
+  // Also mark drag end for mouse
+  const handleMouseUpWithFlag = useCallback(() => {
+    if (drag.isDragging) wasDraggingRef.current = true;
+    handleDrop();
+  }, [drag.isDragging, handleDrop]);
+
+  // Collision zones — keep dots away from pentagon nodes during remix
+  const collisionZones: CollisionZone[] = useMemo(() => {
+    if (!isRemix || size.width === 0) return [];
+    const layout = computeLayout(size.width, size.height);
+    const buffer = layout.nodeRadius * 2.5;
+    const zones: CollisionZone[] = PENTAGON_NODES.map(n => ({
+      x: layout.positions[n.id].x,
+      y: layout.positions[n.id].y,
+      radius: buffer,
+    }));
+    zones.push({ x: layout.centerX, y: layout.centerY, radius: layout.seedRadius * 2 });
+    return zones;
+  }, [isRemix, size.width, size.height]);
 
   return (
     <div
@@ -162,29 +242,32 @@ export function ProjectorFinale({
         touchAction: 'none',
       }}
       onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onTouchEnd={handleTouchEndForTap}
       onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onMouseUp={handleMouseUpWithFlag}
+      onClick={handleClick}
     >
       {size.width > 0 && size.height > 0 && (
         <>
           {/* Floating token dots */}
           <TokenPool
+            ref={tokenPoolRef}
             availableByChapter={availableByChapter}
             chapters={chapters}
             width={size.width}
             height={size.height}
             interactionEnabled={interactionEnabled}
+            collisionZones={collisionZones}
             onDotDragStart={handleDotDragStart}
           />
 
-          {/* Pentagon nodes */}
-          <PentagonRemix
+          {/* Pentagon nodes — only during remix */}
+          {isRemix && <PentagonRemix
             width={size.width}
             height={size.height}
             activeNodes={finaleView.active}
             queueDepths={finaleView.queueDepth}
-            loopProgress={finaleView.loopProgress}
+            loopProgress={poolState.loopProgress}
             chapters={chapters}
             granularTypes={granularTypes}
             hoverTarget={drag.hoverTarget}
@@ -192,7 +275,7 @@ export function ProjectorFinale({
             validNodes={finaleView.validNodes}
             audienceInteraction={finaleView.audienceInteraction}
             onDropZonesComputed={drag.setDropZones}
-          />
+          />}
         </>
       )}
 
@@ -207,18 +290,69 @@ export function ProjectorFinale({
         />
       )}
 
-      {/* Pool counter */}
+      {/* Pool counter — per-chapter remaining tokens */}
       <div style={{
         position: 'absolute',
         bottom: 16,
-        right: 20,
-        fontSize: '0.7rem',
-        color: 'rgba(255,255,255,0.15)',
-        letterSpacing: '0.08em',
+        left: 20,
+        display: 'flex',
+        gap: '10px',
+        fontSize: '0.65rem',
+        color: 'rgba(255,255,255,0.12)',
+        letterSpacing: '0.06em',
         fontFamily: 'system-ui',
+        fontVariantNumeric: 'tabular-nums',
       }}>
-        {totalRemaining} remaining
+        {chapters.map(ch => {
+          const count = availableByChapter.find(e => e.chapterId === ch.id)?.count ?? 0;
+          const label = ch.id === 'ambition' ? 'C' : ch.id === 'love' ? 'L' : 'A';
+          return (
+            <span key={ch.id} style={{ color: `${ch.color}44` }}>
+              {label}:{count}
+            </span>
+          );
+        })}
       </div>
+
+      {/* Flying orbs — token_fly animations from audience */}
+      {flyingOrbs.map(orb => {
+        const chapter = chapters.find(c => c.id === orb.chapterId);
+        const color = chapter?.color ?? '#888';
+        return (
+          <div
+            key={orb.id}
+            style={{
+              position: 'absolute',
+              left: orb.targetX - 6,
+              top: size.height + 20,
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              backgroundColor: color,
+              boxShadow: `0 0 24px ${color}88`,
+              animation: 'tokenFlyIn 0.8s ease-out forwards',
+              '--fly-target-x': `${orb.targetX - 6}px`,
+              '--fly-target-y': `${orb.targetY - 6}px`,
+              pointerEvents: 'none',
+              zIndex: 50,
+            } as React.CSSProperties}
+          />
+        );
+      })}
+      {flyingOrbs.length > 0 && (
+        <style>{`
+          @keyframes tokenFlyIn {
+            0% {
+              transform: translateY(0) scale(1.5);
+              opacity: 1;
+            }
+            100% {
+              transform: translateY(calc(var(--fly-target-y) - ${size.height + 20}px)) scale(0.8);
+              opacity: 0.3;
+            }
+          }
+        `}</style>
+      )}
 
       {/* Hidden video fallback for wake lock on older Safari */}
       <WakeLockVideoFallback />

@@ -54,7 +54,7 @@ function makeCompletedAttempt(index: number, chapter: string, layerCount: number
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -93,7 +93,7 @@ function makeCollapsedAttempt(index: number, chapter: string, layerCount: number
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -169,7 +169,7 @@ describe('generateFragments', () => {
   test('skips pending attempts entirely', () => {
     const pending: AttemptState = {
       index: 2,
-      chapter: 'avoidance',
+      chapter: 'acceptance',
       layerPlan: [makeLayerConfig(0)],
       currentLayerIndex: 0,
       currentLayerPhase: 'locked',
@@ -179,9 +179,9 @@ describe('generateFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
-      currentVoteResult: null, revealStakesShown: false,
+      currentVoteResult: null, revealStakesShown: false, songRejected: false,
     };
-    const configs = [makeAttemptConfig('avoidance', 1)];
+    const configs = [makeAttemptConfig('acceptance', 1)];
     const fragments = generateFragments([pending], configs);
     expect(fragments).toHaveLength(0);
   });
@@ -371,7 +371,7 @@ function makeV32CompletedAttempt(index: number, chapter: string): AttemptState {
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -418,7 +418,7 @@ function makeV32CollapsedAttempt(index: number, chapter: string, collapseAt: num
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -487,11 +487,11 @@ describe('generateGranularFragments', () => {
   test('fragment count across full show with bothOptionsSurvive=true', () => {
     const attempt0 = makeV32CompletedAttempt(0, 'ambition');
     const attempt1 = makeV32CompletedAttempt(1, 'love');
-    const attempt2 = makeV32CompletedAttempt(2, 'avoidance');
+    const attempt2 = makeV32CompletedAttempt(2, 'acceptance');
     const configs = [
       makeV32AttemptConfig('ambition'),
       makeV32AttemptConfig('love'),
-      makeV32AttemptConfig('avoidance'),
+      makeV32AttemptConfig('acceptance'),
     ];
     const fragments = generateGranularFragments([attempt0, attempt1, attempt2], configs, '/audio', true);
 
@@ -503,11 +503,11 @@ describe('generateGranularFragments', () => {
   test('fragment count across full show with bothOptionsSurvive=false', () => {
     const attempt0 = makeV32CompletedAttempt(0, 'ambition');
     const attempt1 = makeV32CompletedAttempt(1, 'love');
-    const attempt2 = makeV32CompletedAttempt(2, 'avoidance');
+    const attempt2 = makeV32CompletedAttempt(2, 'acceptance');
     const configs = [
       makeV32AttemptConfig('ambition'),
       makeV32AttemptConfig('love'),
-      makeV32AttemptConfig('avoidance'),
+      makeV32AttemptConfig('acceptance'),
     ];
     const fragments = generateGranularFragments([attempt0, attempt1, attempt2], configs, '/audio', false);
 
@@ -557,7 +557,7 @@ describe('generateGranularFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
-      currentVoteResult: null, revealStakesShown: false,
+      currentVoteResult: null, revealStakesShown: false, songRejected: false,
     };
     const configs = [makeV32AttemptConfig('ambition')];
     const fragments = generateGranularFragments([pending], configs, '/audio', true);

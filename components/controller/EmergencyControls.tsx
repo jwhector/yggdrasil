@@ -27,7 +27,7 @@ interface EmergencyControlsProps {
   sendCommand: (cmd: ConductorCommand) => void;
 }
 
-type ConfirmAction = 'reset' | 'reconnect' | 'newshow' | null;
+type ConfirmAction = 'reset' | 'reconnect' | 'newshow' | 'generate-finale' | null;
 
 export function EmergencyControls({ fullState, rawState, sendCommand }: EmergencyControlsProps) {
   const [confirm, setConfirm] = useState<ConfirmAction>(null);
@@ -125,6 +125,22 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
               >
                 RESET UTILITIES
               </button>
+
+              <button
+                onClick={() => send({ type: 'MASTER_DUCK' })}
+                style={{ ...btn, ...btnSecondary }}
+                title="Duck master gain for speech"
+              >
+                DUCK
+              </button>
+
+              <button
+                onClick={() => send({ type: 'MASTER_UNDUCK' })}
+                style={{ ...btn, ...btnSecondary }}
+                title="Restore master gain to full"
+              >
+                UNDUCK
+              </button>
             </div>
           </div>
 
@@ -157,6 +173,13 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                   style={{ ...btn, ...btnDanger }}
                 >
                   New Show
+                </button>
+                <button
+                  onClick={() => setConfirm('generate-finale')}
+                  style={{ ...btn, ...btnWarning }}
+                  title="Force-populate all attempts with default winners and jump to finale_vote"
+                >
+                  Generate Valid Finale
                 </button>
               </div>
             ) : confirm === 'reconnect' ? (
@@ -195,7 +218,7 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : confirm === 'newshow' ? (
               <div style={styles.confirmBox}>
                 <p style={styles.confirmText}>Start a completely new show? This generates a new show ID, reloads config from disk, and clears all users.</p>
                 <div style={styles.buttonRow}>
@@ -204,6 +227,21 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                     style={{ ...btn, ...btnDanger }}
                   >
                     Confirm New Show
+                  </button>
+                  <button onClick={() => setConfirm(null)} style={{ ...btn, ...btnSecondary }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={styles.confirmBox}>
+                <p style={styles.confirmText}>Generate a valid finale state using default winners from config? This overwrites all attempt results and jumps to finale_vote.</p>
+                <div style={styles.buttonRow}>
+                  <button
+                    onClick={() => { send({ type: 'GENERATE_VALID_FINALE' }); setConfirm(null); }}
+                    style={{ ...btn, ...btnWarning }}
+                  >
+                    Confirm Generate Finale
                   </button>
                   <button onClick={() => setConfirm(null)} style={{ ...btn, ...btnSecondary }}>
                     Cancel

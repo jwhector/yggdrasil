@@ -49,7 +49,7 @@ function createTestConfig(): ShowConfig {
       { id: 'bass', label: 'Bass', color: '#000', symbol: '■' },
       { id: 'drums', label: 'Drums', color: '#000', symbol: '▲' },
     ],
-    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('avoidance')],
+    attempts: [makeAttempt('ambition'), makeAttempt('love'), makeAttempt('acceptance')],
     finale: {
       bothOptionsSurvive: true,
       audioPreviewPath: '/audio/previews',

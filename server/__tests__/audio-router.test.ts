@@ -90,7 +90,7 @@ function createTestConfig(): ShowConfig {
     attempts: [
       makeAttemptConfig('ambition'),
       makeAttemptConfig('love'),
-      makeAttemptConfig('avoidance'),
+      makeAttemptConfig('acceptance'),
     ],
     finale: {
       assignmentMode: 'auto' as const,

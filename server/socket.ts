@@ -159,6 +159,7 @@ export function setupSocketHandlers(
         ([chapterId, count]) => ({ chapterId, count })
       ),
       totalRemaining: fs.pool.totalRemaining,
+      loopProgress: fs.loopProgress,
     };
 
     io.to('projector').emit('pool_state', poolState);
@@ -608,13 +609,14 @@ export async function broadcastEvents(
 
       case 'NEXT_QUESTION': {
         // Send next question directly to the specific audience member
-        const nextQ = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string };
+        const nextQ = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: Array<{ chapterId: string; label: string }> | null };
         const audienceSocksForQ = await io.in('audience').fetchSockets();
         for (const s of audienceSocksForQ) {
           if ((s as any).userId === nextQ.userId) {
             s.emit('question', {
               questionIndex: nextQ.questionIndex,
               text: nextQ.questionText,
+              answers: nextQ.answers ?? null,
               chapters: state.config.chapters ?? [],
             });
             break;
@@ -633,6 +635,8 @@ export async function broadcastEvents(
             break;
           }
         }
+        // Relay token fly animation to projector
+        io.to('projector').emit('token_fly', { chapterId: er.chapterId });
         break;
       }
 
@@ -687,6 +691,7 @@ export async function broadcastEvents(
               s.emit('question', {
                 questionIndex: 0,
                 text: firstQ.text,
+                answers: firstQ.answers ?? null,
                 chapters: state.config.chapters ?? [],
               });
             }
@@ -752,6 +757,7 @@ export function filterStateForClient(
           queueDepth: Array.from(finaleFs.queue.entries()).map(([granularType, tokens]) => ({
             granularType,
             depth: tokens.length,
+            nextChapterId: tokens[0]?.chapterId ?? null,
           })),
           validNodes: deriveValidNodes(finaleFs),
           loopCount: finaleFs.loopCount,
@@ -805,23 +811,24 @@ export function filterStateForClient(
         if (state.phase === 'finale_vote') {
           const answeredCount = fs.vote.questionsAnsweredByUser.get(userId) ?? 0;
           const voteConfig = state.config.finale.vote;
-          let currentQuestion: { questionIndex: number; text: string } | null = null;
-          if (
-            voteConfig &&
-            !fs.vote.poolCapReached &&
-            answeredCount < fs.vote.maxQuestionsPerPerson &&
-            answeredCount < voteConfig.questions.length
-          ) {
-            const q = voteConfig.questions[answeredCount];
-            if (q) currentQuestion = { questionIndex: answeredCount, text: q.text };
-          }
+          // Resolve NPC intro/outro messages from config for client-side staging
+          const npcMessages = state.config.finale.npcMessages ?? [];
+          const npcIntro = npcMessages
+            .filter((m: { event: string; text: string }) => m.event === 'vote_intro_1' || m.event === 'vote_intro_2')
+            .map((m: { text: string }) => m.text);
+          const npcOutro = npcMessages.find((m: { event: string }) => m.event === 'vote_outro')?.text ?? null;
+
           myFinale = {
             finalePhase: 'vote',
-            currentQuestion,
+            questions: voteConfig?.questions ?? [],
             answeredCount,
             poolCapReached: fs.vote.poolCapReached,
             chapters: state.config.chapters ?? [],
             npcMessage: fs.npc.currentMessage,
+            npcIntro,
+            npcOutro,
+            alarmColor: voteConfig?.alarmColor ?? '#ff0000',
+            shuffleQuestions: voteConfig?.shuffleQuestions ?? false,
           };
         } else if (state.phase === 'finale_remix') {
           myFinale = {

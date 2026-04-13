@@ -56,7 +56,7 @@ export const FINALE_CHAPTER_COLORS: Record<string, { primary: RGB; A: RGB; B: RG
     A:       { r: 255, g: 204, b: 128 },   // light peach
     B:       { r: 230, g: 81,  b: 0   },   // burnt orange
   },
-  avoidance: {
+  acceptance: {
     primary: { r: 69,  g: 176, b: 144 },   // teal/green
     A:       { r: 100, g: 181, b: 246 },   // sky blue
     B:       { r: 26,  g: 35,  b: 126 },   // deep indigo
@@ -173,6 +173,8 @@ export function drawMembrane(
   amplitude: number,
   time: number,
   seed: number,
+  fillColor?: RGB,
+  strokeColor?: RGB,
 ): void {
   const ampScale = 1 + amplitude * 0.15;
   const ampNoise = noiseIntensity + amplitude * 0.1;
@@ -196,9 +198,9 @@ export function drawMembrane(
   ctx.closePath();
 
   const ampAlpha = alpha * (1 + amplitude * 0.3);
-  ctx.fillStyle = rgb(color, ampAlpha * 0.15);
+  ctx.fillStyle = rgb(fillColor ?? color, ampAlpha * 0.15);
   ctx.fill();
-  ctx.strokeStyle = rgb(color, ampAlpha * 0.5);
+  ctx.strokeStyle = rgb(strokeColor ?? color, ampAlpha * 0.5);
   ctx.lineWidth = 1.5;
   ctx.stroke();
 }

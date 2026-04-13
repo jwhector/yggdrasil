@@ -5,14 +5,27 @@
  * Each dot = one available token, colored by chapter.
  * Dots drift gently with simple physics. Bloom on creation, absorb into
  * pentagon on spend. Rendered with canvas 2D + requestAnimationFrame.
+ *
+ * Exposes injectDot() via ref for coordinated fly-in animations.
  */
 
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
 import type { ChapterConfig } from '@/conductor/types';
 import { hexToRgb } from '@/components/projector/renderers/shared';
 import type { RGB } from '@/components/projector/renderers/shared';
+
+export interface CollisionZone {
+  x: number;
+  y: number;
+  radius: number;
+}
+
+export interface TokenPoolHandle {
+  /** Queue a landing position so the next reconciled dot for this chapter spawns there. */
+  queueLandingPosition: (chapterId: string, x: number, y: number) => void;
+}
 
 interface TokenPoolProps {
   /** Available tokens per chapter from pool_state. */
@@ -27,6 +40,8 @@ interface TokenPoolProps {
   onDotDragStart?: (chapterId: string, x: number, y: number) => void;
   /** Whether drag interaction is enabled (finale_remix). */
   interactionEnabled?: boolean;
+  /** Circles that dots should avoid (pentagon nodes). */
+  collisionZones?: CollisionZone[];
 }
 
 interface Dot {
@@ -42,24 +57,27 @@ interface Dot {
 }
 
 const DOT_RADIUS = 6;
-const DOT_SPACING = 2.5;  // Minimum spacing between dots as multiplier of radius
 const DRIFT_SPEED = 0.15;
 const DAMPING = 0.98;
 const BLOOM_DURATION = 0.5;  // Seconds for bloom-in animation
 const TOUCH_TARGET_RADIUS = 22;  // ~44pt touch target
 
-export function TokenPool({
+export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function TokenPool({
   availableByChapter,
   chapters,
   width,
   height,
   onDotDragStart,
   interactionEnabled = false,
-}: TokenPoolProps) {
+  collisionZones = [],
+}, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Dot[]>([]);
   const animRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+
+  // Queued landing positions from fly-in animations — reconciliation pops from here
+  const landingQueueRef = useRef<Map<string, Array<{ x: number; y: number }>>>(new Map());
 
   // Build chapter color map
   const chapterColors = useRef<Map<string, RGB>>(new Map());
@@ -70,6 +88,15 @@ export function TokenPool({
     }
     chapterColors.current = map;
   }, [chapters]);
+
+  // Expose queueLandingPosition via ref
+  useImperativeHandle(ref, () => ({
+    queueLandingPosition(chapterId: string, x: number, y: number) {
+      const queue = landingQueueRef.current.get(chapterId) ?? [];
+      queue.push({ x, y });
+      landingQueueRef.current.set(chapterId, queue);
+    },
+  }), []);
 
   // Reconcile dots with pool state
   useEffect(() => {
@@ -88,12 +115,37 @@ export function TokenPool({
         newDots.push(existingForChapter[i]);
       }
 
-      // Add new dots if needed
+      // Spawn new dots — use queued landing positions first, then random
       if (needed > 0) {
+        const queue = landingQueueRef.current.get(chapterId) ?? [];
+
         for (let i = 0; i < needed; i++) {
+          const queued = queue.shift();
+          let x: number, y: number;
+
+          if (queued) {
+            // Use the fly-in landing position
+            x = queued.x;
+            y = queued.y;
+          } else {
+            // Fall back to random position
+            let attempts = 0;
+            do {
+              x = Math.random() * width * 0.8 + width * 0.1;
+              y = Math.random() * height * 0.6 + height * 0.05;
+              attempts++;
+            } while (
+              attempts < 20 &&
+              collisionZones.some(z => {
+                const dx = x - z.x, dy = y - z.y;
+                return dx * dx + dy * dy < z.radius * z.radius;
+              })
+            );
+          }
+
           newDots.push({
-            x: Math.random() * width * 0.8 + width * 0.1,
-            y: Math.random() * height * 0.6 + height * 0.05,
+            x,
+            y,
             vx: (Math.random() - 0.5) * DRIFT_SPEED,
             vy: (Math.random() - 0.5) * DRIFT_SPEED,
             radius: DOT_RADIUS + (Math.random() - 0.5) * 2,
@@ -150,6 +202,22 @@ export function TokenPool({
         if (dot.x > width - pad) { dot.x = width - pad; dot.vx = -Math.abs(dot.vx); }
         if (dot.y < pad) { dot.y = pad; dot.vy = Math.abs(dot.vy); }
         if (dot.y > height - pad) { dot.y = height - pad; dot.vy = -Math.abs(dot.vy); }
+
+        // Repulsion from collision zones (pentagon nodes)
+        for (const zone of collisionZones) {
+          const dx = dot.x - zone.x;
+          const dy = dot.y - zone.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < zone.radius && dist > 0.1) {
+            const overlap = zone.radius - dist;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            dot.x += nx * overlap * 0.3;
+            dot.y += ny * overlap * 0.3;
+            dot.vx += nx * 0.05;
+            dot.vy += ny * 0.05;
+          }
+        }
 
         // Draw
         const bloomScale = easeOut(dot.age);
@@ -243,7 +311,7 @@ export function TokenPool({
       onMouseDown={handleMouseDown}
     />
   );
-}
+});
 
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - Math.min(1, t), 3);

@@ -69,6 +69,9 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   crossfadeBeats: 1,
   unityGainValue: 0,
   stepsPerBeat: 2,
+  masterDuckGain: 0.3,
+  masterDuckBeats: 2,
+  masterUnduckBeats: 1,
 };
 
 const COLLAPSE_TEMPO_RAMP_DURATION_MS = 2000;
@@ -138,8 +141,8 @@ interface TrackDeviceInfo {
 interface AudioRouterState {
   /** Tracks currently unmuted in Ableton (for legibility tracking) */
   unmutedTracks: Set<number>;
-  /** Per-track gain and fade state */
-  trackGains: Map<number, TrackGainState>;
+  /** Per-track gain and fade state (includes 'master' for master track ducking) */
+  trackGains: Map<number | 'master', TrackGainState>;
   /** Cached Utility device info per track (populated by discoverDevices) */
   deviceCache: Map<"master" | number, TrackDeviceInfo>;
   /** Whether device discovery has completed */
@@ -212,10 +215,10 @@ export function createAudioRouter(
   // Internal Helpers
   // --------------------------------------------------------------------------
 
-  function getOrCreateTrackGainState(trackIndex: number): TrackGainState {
+  function getOrCreateTrackGainState(trackIndex: number | 'master'): TrackGainState {
     let gs = routerState.trackGains.get(trackIndex);
     if (!gs) {
-      gs = { currentGain: 0, activeFadeId: null, subBeatTimers: [] };
+      gs = { currentGain: trackIndex === 'master' ? 1 : 0, activeFadeId: null, subBeatTimers: [] };
       routerState.trackGains.set(trackIndex, gs);
     }
     return gs;
@@ -241,12 +244,13 @@ export function createAudioRouter(
    * - Sends gain to Utility device (falls back to mute/unmute if no device cached)
    * - If gain === 0 → mutes the track after setting gain (legibility)
    */
-  function setGain(trackIndex: number, gain: number): void {
+  function setGain(trackIndex: number | 'master', gain: number): void {
     const clampedGain = Math.max(0, Math.min(1, gain));
+    const isMaster = trackIndex === 'master';
 
-    // Unmute before any audible gain (so session view shows track as active)
-    if (clampedGain > 0) {
-      unmuteTrack(trackIndex);
+    // Unmute before any audible gain (skip for master — master is never muted)
+    if (clampedGain > 0 && !isMaster) {
+      unmuteTrack(trackIndex as number);
     }
 
     const deviceInfo = routerState.deviceCache.get(trackIndex);
@@ -263,8 +267,7 @@ export function createAudioRouter(
       );
     } else {
       // Fallback: no Utility device — mute/unmute is the only lever
-      // (gain > 0 already unmuted above; gain === 0 will mute below)
-      if (routerState.discoveryComplete) {
+      if (routerState.discoveryComplete && !isMaster) {
         console.warn(`[AudioRouter] Track ${trackIndex} has no cached Utility device — using mute/unmute fallback`);
       }
     }
@@ -272,9 +275,9 @@ export function createAudioRouter(
     const gs = getOrCreateTrackGainState(trackIndex);
     gs.currentGain = clampedGain;
 
-    // Mute after gain reaches zero (so session view shows track as inactive)
-    if (clampedGain === 0) {
-      muteTrack(trackIndex);
+    // Mute after gain reaches zero (skip for master)
+    if (clampedGain === 0 && !isMaster) {
+      muteTrack(trackIndex as number);
     }
   }
 
@@ -288,7 +291,7 @@ export function createAudioRouter(
    * - Returns the fadeId (can be used to cancel with timingEngine.cancelCallbacks).
    */
   function fadeGain(
-    trackIndex: number,
+    trackIndex: number | 'master',
     targetGain: number,
     durationBeats: number,
     startBeat?: number,
@@ -314,9 +317,9 @@ export function createAudioRouter(
       return fadeId;
     }
 
-    // If fading in, unmute now so session view shows track active before first beat
-    if (targetGain > 0) {
-      unmuteTrack(trackIndex);
+    // If fading in, unmute now so session view shows track active before first beat (skip for master)
+    if (targetGain > 0 && trackIndex !== 'master') {
+      unmuteTrack(trackIndex as number);
     }
 
     const startGain = gs.currentGain;
@@ -615,20 +618,14 @@ export function createAudioRouter(
     // Build list of track indices to discover
     let trackList: (number | "master")[];
 
-    if (routerState.fragmentTrackIndices.size > 0) {
-      trackList = Array.from(routerState.fragmentTrackIndices).sort((a, b) => a - b);
-      trackList.push("master");
-      console.log(`[AudioRouter] Starting device discovery for ${trackList.length} tracks (parallel)...`);
-    } else {
-      // Fallback: query Ableton for total track count
-      oscBridge.send('/live/song/get/num_tracks');
-      const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
-      const numTracks = numTracksResp?.[0] ?? 42;
-      trackList = [];
-      for (let i = 0; i < numTracks; i++) trackList.push(i);
-      trackList.push("master");
-      console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (parallel, fallback)...`);
-    }
+    // Query Ableton for total track count
+    oscBridge.send('/live/song/get/num_tracks');
+    const numTracksResp = await waitForOSC('/live/song/get/num_tracks');
+    const numTracks = numTracksResp?.[0] ?? 42;
+    trackList = [];
+    for (let i = 0; i < numTracks; i++) trackList.push(i);
+    trackList.push("master");
+    console.log(`[AudioRouter] Starting device discovery for ${numTracks} tracks (parallel, fallback)...`);
 
     // Fire all track discoveries in parallel
     // Temporarily raise listener limit to avoid MaxListenersExceededWarning
@@ -687,6 +684,13 @@ export function createAudioRouter(
   function handleLockIn(cue: Extract<AudioCue, { type: 'lock_in' }>): void {
     const { winnerTrackBundle, loserTrackBundle } = cue;
 
+    // console.log("Locking in tracks:", "winner:", winnerTrackBundle.tracks.map(t => t.trackIndices).flat(), "loser:", loserTrackBundle.tracks.map(t => t.trackIndices).flat());
+
+    // Loser tracks: fade to silent
+    for (const track of loserTrackBundle.tracks) {
+      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
+    }
+
     // Winner tracks: cancel in-flight fades, snap to full gain
     for (const track of winnerTrackBundle.tracks) {
       for (const idx of track.trackIndices) {
@@ -698,11 +702,6 @@ export function createAudioRouter(
         unmuteTrack(idx);
         fadeGain(idx, 1.0, currentGainConfig.entrySwellBeats);
       }
-    }
-
-    // Loser tracks: fade to silent
-    for (const track of loserTrackBundle.tracks) {
-      for (const idx of track.trackIndices) fadeGain(idx, 0, currentGainConfig.lockInFadeBeats);
     }
   }
 
@@ -918,6 +917,15 @@ export function createAudioRouter(
     for (const idx of cue.trackIndices) {
       fadeGain(idx, 0, xfadeBeats);
     }
+  }
+
+  // V3.4: Duck/unduck master Utility gain for performer speech during song building
+  function handleMasterDuck(): void {
+    fadeGain('master', currentGainConfig.masterDuckGain ?? 0.3, currentGainConfig.masterDuckBeats ?? 2);
+  }
+
+  function handleMasterUnduck(): void {
+    fadeGain('master', 1.0, currentGainConfig.masterUnduckBeats ?? 1);
   }
 
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
@@ -1139,6 +1147,12 @@ export function createAudioRouter(
           case 'node_fade_out':
             handleNodeFadeOut(cue);
             break;
+          case 'master_duck':
+            handleMasterDuck();
+            break;
+          case 'master_unduck':
+            handleMasterUnduck();
+            break;
         }
       }
 
@@ -1150,7 +1164,32 @@ export function createAudioRouter(
       }
 
       if (event.type === 'SHOW_PHASE_CHANGED') {
-        const phaseEvent = event as { type: 'SHOW_PHASE_CHANGED'; phase: string };
+        const phaseEvent = event as { type: 'SHOW_PHASE_CHANGED'; phase: string; attemptIndex?: number };
+
+        // Arm live seed tracks on attempt_story entry (performer prepares to "play" the seed)
+        if (phaseEvent.phase === 'attempt_story' && phaseEvent.attemptIndex != null) {
+          const attemptCfg = state.config.attempts[phaseEvent.attemptIndex];
+          const armTracks = attemptCfg?.liveSeed?.armTrackIndices ?? attemptCfg?.liveSeed?.trackIndices ?? [];
+          const muteExceptions = new Set(attemptCfg?.liveSeed?.armMuteExceptions ?? []);
+          for (const idx of armTracks) {
+            if (!muteExceptions.has(idx)) {
+              unmuteTrack(idx);
+              fadeGain(idx, 1.0, 0);
+            }
+            oscBridge.send('/live/track/set/arm', idx, 1);
+          }
+        }
+
+        // Disarm live seed tracks on attempt_build entry (seed is now unmuted via live_seed_start)
+        if (phaseEvent.phase === 'attempt_build' && phaseEvent.attemptIndex != null) {
+          const attemptCfg = state.config.attempts[phaseEvent.attemptIndex];
+          const armTracks = attemptCfg?.liveSeed?.armTrackIndices ?? attemptCfg?.liveSeed?.trackIndices ?? [];
+          for (const idx of armTracks) {
+            oscBridge.send('/live/track/set/arm', idx, 0);
+            muteTrack(idx);
+          }
+        }
+
         if (phaseEvent.phase === 'finale_elegy') {
           oscBridge.send('/live/song/set/tempo', routerState.baseTempo);
           console.log(`[AudioRouter] Tempo reset to ${routerState.baseTempo} BPM at finale_elegy`);

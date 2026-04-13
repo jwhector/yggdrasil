@@ -14,6 +14,7 @@ import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts'
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
 import { EmotionVote } from '@/components/finale/EmotionVote';
+import { MedistationLobby } from '@/components/MedistationLobby';
 import type { AudienceAttemptView, AudienceVoteView, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
@@ -67,7 +68,7 @@ function AudienceContent() {
     );
   }
 
-  const { phase, paused, config } = state;
+  const { phase, paused } = state;
 
   console.log(state);
 
@@ -81,7 +82,7 @@ function AudienceContent() {
 
       {/* Phase routing */}
       {phase === 'lobby' && (
-        <LobbyScreen message={config.lobby.waitingMessage} />
+        <MedistationLobby onboardingConfig={state.config.lobby.onboarding} />
       )}
 
       {(phase === 'opener' || phase === 'attempt_story') && (
@@ -102,16 +103,24 @@ function AudienceContent() {
         <DarkListenScreen />
       )}
 
-      {phase === 'finale_vote' && state.myFinale && (state.myFinale as unknown as AudienceVoteView).finalePhase === 'vote' && (
-        <EmotionVote
-          socket={socket}
-          initialQuestion={(state.myFinale as unknown as AudienceVoteView).currentQuestion}
-          answeredCount={(state.myFinale as unknown as AudienceVoteView).answeredCount}
-          poolCapReached={(state.myFinale as unknown as AudienceVoteView).poolCapReached}
-          chapters={(state.myFinale as unknown as AudienceVoteView).chapters}
-          emit={emit}
-        />
-      )}
+      {phase === 'finale_vote' && state.myFinale && (state.myFinale as unknown as AudienceVoteView).finalePhase === 'vote' && (() => {
+        const voteView = state.myFinale as unknown as AudienceVoteView;
+        return (
+          <EmotionVote
+            socket={socket}
+            questions={voteView.questions ?? []}
+            initialAnsweredCount={voteView.answeredCount}
+            poolCapReached={voteView.poolCapReached}
+            chapters={voteView.chapters}
+            npcIntro={voteView.npcIntro ?? []}
+            npcOutro={voteView.npcOutro ?? null}
+            alarmColor={voteView.alarmColor ?? '#ff0000'}
+            shuffleQuestions={voteView.shuffleQuestions ?? false}
+            userId={state.userId}
+            emit={emit}
+          />
+        );
+      })()}
 
       {phase === 'finale_remix' && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
@@ -134,22 +143,27 @@ function AudienceContent() {
 
 function Screen({ children }: { children?: React.ReactNode }) {
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        width: '100%',
-        backgroundColor: '#000',
-        color: '#fff',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-      }}
-    >
-      {children}
-    </main>
+    <>
+      <style>{`
+        .audience-screen {
+          min-height: 100vh;
+          min-height: 100dvh;
+          width: 100%;
+          background-color: #000;
+          color: #fff;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          overflow: hidden;
+          font-family: system-ui, -apple-system, sans-serif;
+        }
+      `}</style>
+      <main className="audience-screen">
+        {children}
+      </main>
+    </>
   );
 }
 
@@ -163,27 +177,6 @@ function DarkListenScreen() {
       <PulsingDot />
       <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em' }}>
         LISTEN
-      </p>
-    </div>
-  );
-}
-
-function LobbyScreen({ message }: { message: string }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '24px',
-        padding: '32px',
-        textAlign: 'center',
-        maxWidth: '400px',
-      }}
-    >
-      <PulsingDot />
-      <p style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>
-        {message}
       </p>
     </div>
   );
@@ -310,6 +303,7 @@ function BuildView({
             chapter={chapter}
             revealResult={revealResult}
             dimmed={isDimmed}
+            auditionProgress={auditionProgress}
           />
         )}
 
@@ -319,7 +313,6 @@ function BuildView({
             <AuditionBars
               progress={auditionProgress}
               chapter={chapter}
-              currentAuditionOption={currentAttempt.currentAuditionOption}
             />
           </div>
         )}

@@ -132,6 +132,7 @@ export interface AttemptState {
   auditionLoopIndex: number;                  // 0-based count of loops completed
   currentVoteResult: VoteResult | null;       // Set during revealing phase, cleared on lock-in
   revealStakesShown: boolean;                 // True after REVEAL_STAKES fires in current revealing phase
+  songRejected: boolean;                      // True after TRIGGER_REJECTION fires in attempt_resolve
 }
 
 /** Static configuration for a single attempt. */
@@ -262,8 +263,31 @@ export interface ShowState {
 
 /** Current position in the opener slide deck. */
 export interface OpenerSlidePosition {
-  pointIndex: number;                   // Which point (0-based)
-  subPointIndex: number;                // -1 = point only, 0+ = sub-points revealed up to this index
+  pointIndex: number;                   // Which slide (0-based)
+  stepIndex: number;                    // Linear step within the slide (0 = title only)
+}
+
+// ============================================================================
+// Onboarding Config (lobby landing page)
+// ============================================================================
+
+export interface OnboardingCue {
+  icon: string;          // 'brain' | 'eyelid' — resolved to SVGs client-side
+  label: string;         // e.g. "PICK UP YOUR PHONE"
+  description: string;
+}
+
+export interface OnboardingSection {
+  type: 'narrative' | 'practical' | 'cues' | 'disclaimer' | 'reconnect';
+  heading?: string | null;
+  body?: string;
+  items?: string[];
+  cues?: OnboardingCue[];
+}
+
+export interface OnboardingConfig {
+  buttonLabel: string;
+  sections: OnboardingSection[];
 }
 
 // ============================================================================
@@ -280,16 +304,44 @@ export interface ShowConfig {
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;             // Text displayed while waiting
+    onboarding?: OnboardingConfig;      // Onboarding flow after landing animation
   };
   seatIds: SeatId[];                    // Known seats for QR code generation
   intrusiveThoughts?: IntrusiveThoughtsConfig[];  // Per-attempt, per-layer thought strings
   openerSlides?: OpenerSlide[];          // Slide deck for opener phase
 }
 
-/** A single opener slide: a main point with optional sub-points. */
+// ── Opener slide types ──────────────────────────────────────────────────────
+
+export type SlideMediaType = 'image' | 'video' | 'audio';
+
+export interface SlideMedia {
+  type: SlideMediaType;
+  src: string;          // Path relative to /public, e.g. "/opener-media/photo.jpg"
+  alt?: string;         // Accessibility text
+  autoplay?: boolean;   // Video/audio — default true
+  loop?: boolean;       // Video/audio — default false
+  muted?: boolean;      // Video — default true (projector uses separate audio)
+}
+
+export interface SlideSubPoint {
+  label: string;        // e.g. "Duration:"
+  value: string;        // e.g. "1 year, 7 months"
+}
+
+/** A single opener slide: a main point with optional media and structured sub-points. */
 export interface OpenerSlide {
   point: string;
-  subPoints?: string[];
+  media?: SlideMedia;           // Shown as its own step after the title
+  subPoints?: SlideSubPoint[];  // Each label and value is a separate advance step
+}
+
+/** Compute the max stepIndex for a given slide. */
+export function getSlideMaxStep(slide: OpenerSlide): number {
+  let steps = 0; // step 0 = title
+  if (slide.media) steps++;
+  if (slide.subPoints) steps += slide.subPoints.length * 2; // label + value each
+  return steps;
 }
 
 /** Intrusive thoughts config — shared pool distributed by the server. */
@@ -328,6 +380,9 @@ export interface GainConfig {
   crossfadeBeats: number;       // Beats for node crossfade — both fade-out and fade-in (default 1)
   unityGainValue: number;       // Normalized Ableton param value for 0 dB (default 0.85)
   stepsPerBeat: number;         // Sub-steps per beat for gain interpolation (default 2; 1 = no sub-beats)
+  masterDuckGain: number;       // Ducked master gain level during speech (default 0.3)
+  masterDuckBeats: number;      // Beats to ramp master to ducked level (default 2)
+  masterUnduckBeats: number;    // Beats to ramp master back to unity (default 1)
 }
 
 export interface TimingConfig {
@@ -366,7 +421,11 @@ export type AudioCue =
   /** V3.4: immediate crossfade (no loop boundary wait) — used in audience interaction mode */
   | { type: 'node_instant_crossfade'; granularType: string; muteTracks: number[]; unmuteTracks: number[] }
   /** V3.4: fade a node's tracks to silence (nothing queued) */
-  | { type: 'node_fade_out'; granularType: string; trackIndices: number[] };
+  | { type: 'node_fade_out'; granularType: string; trackIndices: number[] }
+  /** Duck master gain (performer speaking between auditions) */
+  | { type: 'master_duck' }
+  /** Unduck master gain (audition starting or leaving attempt_build) */
+  | { type: 'master_unduck' };
 
 // ============================================================================
 // Conductor Commands (Input)
@@ -405,6 +464,8 @@ export type ConductorCommand =
   | { type: 'AUDIO_PANIC' }
   | { type: 'MASTER_PANIC' }            // Authoritative: query Ableton, mute all non-foldable tracks
   | { type: 'RESET_UTILITIES' }         // Emergency: reset all Utility gains to 0 dB
+  | { type: 'MASTER_DUCK' }
+  | { type: 'MASTER_UNDUCK' }
 
   // Connection
   | { type: 'USER_CONNECT'; userId: UserId; seatId?: SeatId }
@@ -420,6 +481,7 @@ export type ConductorCommand =
   | { type: 'START_REMIX' }
   | { type: 'QUEUE_TOKEN'; granularType: string; chapterId: string; instant?: boolean }
   | { type: 'CANCEL_QUEUE'; granularType: string }
+  | { type: 'ADVANCE_NODE'; granularType: string }
   | { type: 'TOGGLE_AUDIENCE_INTERACTION' }
   | { type: 'LOOP_BOUNDARY' }
 
@@ -428,6 +490,9 @@ export type ConductorCommand =
 
   // Testing — inject tokens directly into the pool
   | { type: 'INJECT_TOKENS'; chapterId: string; count: number }
+
+  // Failsafe — generate a valid finale from a blank show using config-driven default winners
+  | { type: 'GENERATE_VALID_FINALE' }
 
   // Recovery
   | { type: 'EXPORT_STATE' }
@@ -466,7 +531,7 @@ export type ConductorEvent =
   // Finale — Vote phase
   | { type: 'VOTE_STARTED' }
   | { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number; poolSize: number }
-  | { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string }
+  | { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: QuestionAnswer[] | null }
   | { type: 'POOL_CAP_REACHED'; finalPoolSize: number }
   | { type: 'POOL_READY'; pool: TokenPool }
 
@@ -477,6 +542,7 @@ export type ConductorEvent =
   | { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] }
   | { type: 'TOKEN_SPENT'; granularType: string; tokenId: string; poolRemaining: number }
   | { type: 'NODE_SILENT'; granularType: string }
+  | { type: 'NODE_ADVANCED'; granularType: string }
   | { type: 'POOL_EMPTY' }
 
   // Audio
@@ -567,6 +633,8 @@ export interface LayerGroup {
 /** Config for the live seed tracks that play throughout a song-building attempt. */
 export interface LiveSeedConfig {
   trackIndices: number[];
+  armTrackIndices?: number[];   // Input tracks to arm for recording (falls back to trackIndices if absent)
+  armMuteExceptions?: number[]; // Tracks that get armed but stay muted (e.g., vocoder carrier)
   label?: string;
 }
 
@@ -590,6 +658,7 @@ export interface V32AttemptConfig {
   tempos: number[];                       // Per-layer BPM
   auditionBars: number[];                 // Bars per option during audition
   auditionCycles: number[];               // A-B cycles per layer
+  defaultWinners?: ('A' | 'B')[];         // Failsafe: predetermined winners per layer for GENERATE_VALID_FINALE
 }
 
 /**
@@ -674,7 +743,7 @@ export interface AudienceClientState {
   currentAttempt: AudienceAttemptView | null;
   myFinale: AudienceVoteView | AudienceRemixView | null;
   config: {
-    lobby: { waitingMessage: string };
+    lobby: { waitingMessage: string; onboarding?: OnboardingConfig };
     chapters: ChapterConfig[];
     granularTypes: GranularType[];
     intrusiveThoughts: IntrusiveThoughtsConfig[];
@@ -788,9 +857,16 @@ export interface FinaleState {
 // V3.4 Finale Config
 // ============================================================================
 
+/** Per-question answer label mapping a chapter to custom display text. */
+export interface QuestionAnswer {
+  chapterId: string;  // Maps to a chapter (e.g., "ambition")
+  label: string;      // Custom display text (e.g., "The truth about what he's chasing")
+}
+
 /** Question in the vote phase question bank. */
 export interface QuestionConfig {
   text: string;  // e.g., "What does he need to hear?"
+  answers?: QuestionAnswer[];  // Per-question custom answer labels (falls back to chapter.label if absent)
 }
 
 /** Vote phase configuration. */
@@ -800,6 +876,7 @@ export interface VotePhaseConfig {
   targetPoolSize: number;            // Pool cap — total tokens before phones go dark (default: 120)
   questionDelayMs: number;           // Delay between answer and next question (default: 3000)
   revealPoolOnProjector: boolean;    // Show dots blooming on projector in real time (default: true)
+  alarmColor?: string;               // CSS color for alarm edge flash (default: '#ff0000')
 }
 
 /** Remix phase configuration. */
@@ -810,6 +887,7 @@ export interface RemixConfig {
 /** Finale configuration (V3.4). */
 export interface FinaleConfig {
   bothOptionsSurvive: boolean;
+  soundscapeTrackIndices: number[];
   audioPreviewPath: string;
   npcMessages: NpcMessageConfig[];
   vote: VotePhaseConfig;
@@ -844,11 +922,15 @@ export type RemixAudioCue =
  */
 export interface AudienceVoteView {
   finalePhase: 'vote';
-  currentQuestion: { questionIndex: number; text: string } | null;  // null = pool cap reached or no more questions
-  answeredCount: number;    // How many questions this user has answered
+  questions: QuestionConfig[];  // Full question bank — client iterates locally
+  answeredCount: number;    // How many questions this user has already answered (for resume)
   poolCapReached: boolean;  // True when phones should go dark
   chapters: ChapterConfig[];  // For rendering the 3 option cards (chapter identity)
   npcMessage: string | null;
+  npcIntro: string[];       // NPC intro messages for client-side staging (vote_intro_1, vote_intro_2)
+  npcOutro: string | null;  // NPC outro message shown after first answer
+  alarmColor: string;       // CSS color for alarm edge flash
+  shuffleQuestions: boolean; // Whether to shuffle question order per user
 }
 
 /**
@@ -882,7 +964,7 @@ export interface ProjectorFinaleView {
     persistent: boolean;
   }>;
   // Queue depth per granular type (for stack indicators on nodes)
-  queueDepth: Array<{ granularType: string; depth: number }>;
+  queueDepth: Array<{ granularType: string; depth: number; nextChapterId: string | null }>;
   // Valid granularType+chapter combos (have tracks from song-building)
   validNodes: Array<{ granularType: string; chapterId: string }>;
   // Loop state

@@ -35,7 +35,7 @@ The audience is framed as the performer's inner council — parts of the subcons
 | Term | Definition |
 |------|------------|
 | **Attempt** | One story/song-building cycle. The show has 3 attempts, each tied to a chapter. |
-| **Chapter** | A thematic identity: Ambition (Song 1), Love (Song 2), Avoidance (Song 3). Chapters have consistent colors/icons throughout. |
+| **Chapter** | A thematic identity: Ambition (Song 1), Love (Song 2), Acceptance (Song 3). Chapters have consistent colors/icons throughout. |
 | **Layer Group** | A bundled set of Ableton tracks that the audience votes on as a unit. Each attempt has **3 layer groups** (bones, flesh, spark). Each group bundles multiple granular types (e.g., bones = bass + drums). |
 | **Granular Type** | An individual musical role within a layer group: bass, drums, pad, harmony, fx. Plus **seed** — the live seed tracks from song-building, which become controllable fragments in the finale. During song-building, layer groups are bundled. During the finale, they are decomposed for individual control. |
 | **TrackBundle** | A collection of `GranularTrackRef` entries — the Ableton tracks for one option (A or B) of a layer group. Config-driven, not formula-based. |

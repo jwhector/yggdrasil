@@ -14,12 +14,14 @@ export interface PoolState {
   availableByChapter: Array<{ chapterId: string; count: number }>;
   totalByChapter: Array<{ chapterId: string; count: number }>;
   totalRemaining: number;
+  loopProgress: number;
 }
 
 const EMPTY_POOL: PoolState = {
   availableByChapter: [],
   totalByChapter: [],
   totalRemaining: 0,
+  loopProgress: 0,
 };
 
 export function useTokenPool(socket: Socket | null): PoolState {

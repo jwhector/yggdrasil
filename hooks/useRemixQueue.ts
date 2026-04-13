@@ -16,6 +16,8 @@ export interface RemixQueueActions {
   queueToken: (granularType: string, chapterId: string, instant?: boolean) => void;
   /** Cancel the last queued token for a granular type. */
   cancelQueue: (granularType: string) => void;
+  /** Manually advance a node — activates next queued token, or silences if no queue. */
+  advanceNode: (granularType: string) => void;
   /** Optimistic queue depths — used for immediate UI feedback. */
   optimisticQueue: Map<string, number>;
 }
@@ -45,5 +47,9 @@ export function useRemixQueue(
     });
   }, [sendCommand]);
 
-  return { queueToken, cancelQueue, optimisticQueue };
+  const advanceNode = useCallback((granularType: string) => {
+    sendCommand({ type: 'ADVANCE_NODE', granularType });
+  }, [sendCommand]);
+
+  return { queueToken, cancelQueue, advanceNode, optimisticQueue };
 }

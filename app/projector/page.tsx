@@ -8,6 +8,8 @@ import { LobbyDisplay } from '@/components/LobbyDisplay';
 import { ProjectorFinale } from '@/components/finale/ProjectorFinale';
 import { ProjectorCanvas } from '@/components/projector/ProjectorCanvas';
 import { OpenerSlides } from '@/components/projector/OpenerSlides';
+import { PhoneCue } from '@/components/projector/PhoneCue';
+import { derivePhoneCue } from '@/hooks/useShowStepper';
 import type { ProjectorFinaleView } from '@/conductor/types';
 
 const SHOW_ID = 'default-show';
@@ -18,55 +20,71 @@ export default function ProjectorPage() {
   const auditionProgress = useAuditionProgress(socket, state?.phase, currentAttempt?.currentLayerPhase);
   useProjectorThoughts(socket);
 
+  const phoneCue = state ? derivePhoneCue(state) : null;
+
   if (isLoading || !state) {
     return <ProjectorDark />;
   }
 
   const { phase, userCount } = state;
 
+  let content: React.ReactNode;
+
   switch (phase) {
     case 'lobby':
-      return (
+      content = (
         <LobbyDisplay
           content={state.config.lobby.waitingMessage}
           userCount={userCount}
         />
       );
+      break;
 
     case 'opener': {
       const slides = state.config.openerSlides;
       if (slides?.length && state.openerSlideState !== undefined) {
-        return <OpenerSlides slides={slides} position={state.openerSlideState} />;
+        content = <OpenerSlides slides={slides} position={state.openerSlideState} />;
+      } else {
+        content = <ProjectorDark />;
       }
-      return <ProjectorDark />;
+      break;
     }
 
     case 'attempt_story':
     case 'attempt_build':
     case 'attempt_resolve':
-      return <ProjectorCanvas state={state} currentAttempt={currentAttempt} auditionProgress={auditionProgress} />;
+      content = <ProjectorCanvas state={state} currentAttempt={currentAttempt} auditionProgress={auditionProgress} />;
+      break;
 
     case 'finale_vote':
     case 'finale_remix': {
       const finaleV34 = state.finaleState as ProjectorFinaleView | null;
-      if (!finaleV34) return <ProjectorDark />;
-      return (
-        <ProjectorFinale
-          socket={socket}
-          phase={phase}
-          finaleView={finaleV34}
-          chapters={state.config.chapters ?? []}
-          granularTypes={state.config.granularTypes ?? []}
-        />
-      );
+      if (!finaleV34) {
+        content = <ProjectorDark />;
+      } else {
+        content = (
+          <ProjectorFinale
+            socket={socket}
+            phase={phase}
+            finaleView={finaleV34}
+            chapters={state.config.chapters ?? []}
+            granularTypes={state.config.granularTypes ?? []}
+          />
+        );
+      }
+      break;
     }
 
-    case 'ended':
-      return <ProjectorDark />;
-
     default:
-      return <ProjectorDark />;
+      content = <ProjectorDark />;
   }
+
+  return (
+    <>
+      {content}
+      <PhoneCue cue={phoneCue} />
+    </>
+  );
 }
 
 // ---------------------------------------------------------------------------
