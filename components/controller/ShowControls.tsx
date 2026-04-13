@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import type { ShowState, ShowPhase, ConductorCommand } from '@/conductor/types';
+import { getSlideMaxStep } from '@/conductor/types';
 
 interface ShowControlsProps {
   fullState: ShowState;
@@ -57,15 +58,15 @@ export function ShowControls({ fullState, sendCommand }: ShowControlsProps) {
   const openerSlides = fullState.config.openerSlides;
   const showSlideButton = phase === 'opener' && openerSlides && openerSlides.length > 0;
 
-  // Compute total steps: for each slide, 1 (point) + subPoints.length, plus final blank
+  // Compute total steps: for each slide, 1 (title) + getSlideMaxStep(s), plus final blank
   const totalSteps = openerSlides
-    ? openerSlides.reduce((sum, s) => sum + 1 + (s.subPoints?.length ?? 0), 0) + 1
+    ? openerSlides.reduce((sum, s) => sum + 1 + getSlideMaxStep(s), 0) + 1
     : 0;
   const slideState = fullState.openerSlideState;
   const currentStep = slideState === null || slideState === undefined
     ? 0
     : openerSlides
-      ? openerSlides.slice(0, slideState.pointIndex).reduce((sum, s) => sum + 1 + (s.subPoints?.length ?? 0), 0) + 1 + (slideState.subPointIndex >= 0 ? slideState.subPointIndex + 1 : 0)
+      ? openerSlides.slice(0, slideState.pointIndex).reduce((sum, s) => sum + 1 + getSlideMaxStep(s), 0) + 1 + slideState.stepIndex
       : 0;
 
   const canStartAudition =

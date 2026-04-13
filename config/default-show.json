@@ -558,27 +558,56 @@
   "openerSlides": [
     {
       "point": "Bachelor of Science in Chemistry",
-      "subPoints": ["Duration: 1 year, 7 months", "Abandoned because: an identity crisis about the trajectory of our entire life pushed us to almost drop out completely, but we instead decided to switch to a much easier and generally more creative computer science major"]
+      "media": {
+        "type": "image",
+        "src": "/opener-media/chemistry.jpg"
+      },
+      "subPoints": [
+        { "label": "Duration:", "value": "1 year, 7 months" },
+        { "label": "Abandoned because:", "value": "an identity crisis about the trajectory of our entire life pushed us to almost drop out completely, but we instead decided to switch to a much easier and generally more creative computer science major" }
+      ]
     },
     {
       "point": "A musical about QAnon conspiracy theories",
-      "subPoints": ["Duration: 4 months", "Abandoned because: after we made 5 (pretty good) demos, the pressure of collaboration, coordination, and the shame of imperfection drove us back"]
+      "media": {
+        "type": "audio",
+        "src": "/opener-media/sheeple.wav"
+      },
+      "subPoints": [
+        { "label": "Duration:", "value": "4 months" },
+        { "label": "Abandoned because:", "value": "after we made 5 (pretty good) demos, the pressure of collaboration, coordination, and the shame of imperfection drove us back" }
+      ]
     },
     {
-      "point": "Engineer at a startup a friend of ours created based on his *extremely* lucrative idea which definitely had the potential to fulfill our desire to make money on our own time in the way we’d been hoping to for years…",
-      "subPoints": ["Duration: 7 months", "Abandoned because: we felt a higher \"spiritual\" calling"]
+      "point": "Engineer at a startup a friend of ours created",
+      "subPoints": [
+        { "label": "Duration:", "value": "7 months" },
+        { "label": "Abandoned because:", "value": "we felt a higher \"spiritual\" calling" }
+      ]
     },
     {
       "point": "Said spiritual awakening and subsequent dedication of our entire life to the quest to discover the meaning of life, the universe, and everything",
-      "subPoints": ["Duration: 1 year, 42 days", "Abandoned because: meditation is boring as hell"]
+      "subPoints": [
+        { "label": "Duration:", "value": "1 year, 42 days" },
+        { "label": "Abandoned because:", "value": "meditation is boring as hell" }
+      ]
     },
     {
       "point": "An addiction to video games and all kinds of mindless scrolling",
-      "subPoints": ["Duration: ongoing"]
+      "subPoints": [
+        { "label": "Duration:", "value": "ongoing" }
+      ]
     },
     {
       "point": "A different startup designed to help people get their lives together",
-      "subPoints": ["Duration: 4 months", "Abandoned because: we couldn't get our life together"]
+      "media": {
+        "type": "image",
+        "src": "/opener-media/hrizn.png"
+      },
+      "subPoints": [
+        { "label": "Duration:", "value": "4 months" },
+        { "label": "Abandoned because:", "value": "we couldn’t get our life together" }
+      ]
     }
   ],
   "lobby": {

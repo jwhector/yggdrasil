@@ -262,8 +262,8 @@ export interface ShowState {
 
 /** Current position in the opener slide deck. */
 export interface OpenerSlidePosition {
-  pointIndex: number;                   // Which point (0-based)
-  subPointIndex: number;                // -1 = point only, 0+ = sub-points revealed up to this index
+  pointIndex: number;                   // Which slide (0-based)
+  stepIndex: number;                    // Linear step within the slide (0 = title only)
 }
 
 // ============================================================================
@@ -286,10 +286,37 @@ export interface ShowConfig {
   openerSlides?: OpenerSlide[];          // Slide deck for opener phase
 }
 
-/** A single opener slide: a main point with optional sub-points. */
+// ── Opener slide types ──────────────────────────────────────────────────────
+
+export type SlideMediaType = 'image' | 'video' | 'audio';
+
+export interface SlideMedia {
+  type: SlideMediaType;
+  src: string;          // Path relative to /public, e.g. "/opener-media/photo.jpg"
+  alt?: string;         // Accessibility text
+  autoplay?: boolean;   // Video/audio — default true
+  loop?: boolean;       // Video/audio — default false
+  muted?: boolean;      // Video — default true (projector uses separate audio)
+}
+
+export interface SlideSubPoint {
+  label: string;        // e.g. "Duration:"
+  value: string;        // e.g. "1 year, 7 months"
+}
+
+/** A single opener slide: a main point with optional media and structured sub-points. */
 export interface OpenerSlide {
   point: string;
-  subPoints?: string[];
+  media?: SlideMedia;           // Shown as its own step after the title
+  subPoints?: SlideSubPoint[];  // Each label and value is a separate advance step
+}
+
+/** Compute the max stepIndex for a given slide. */
+export function getSlideMaxStep(slide: OpenerSlide): number {
+  let steps = 0; // step 0 = title
+  if (slide.media) steps++;
+  if (slide.subPoints) steps += slide.subPoints.length * 2; // label + value each
+  return steps;
 }
 
 /** Intrusive thoughts config — shared pool distributed by the server. */

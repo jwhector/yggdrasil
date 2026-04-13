@@ -41,6 +41,7 @@ import type {
   GranularType,
   TokenPool,
 } from './types';
+import { getSlideMaxStep } from './types';
 import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import {
@@ -294,20 +295,20 @@ function handleAdvanceSlide(state: ShowState): ConductorEvent[] {
   const cur = state.openerSlideState;
 
   if (cur === null) {
-    // Blank → show first point (no sub-points yet)
-    state.openerSlideState = { pointIndex: 0, subPointIndex: -1 };
+    // Blank → show first slide title
+    state.openerSlideState = { pointIndex: 0, stepIndex: 0 };
   } else {
     const slide = slides[cur.pointIndex];
-    const maxSub = (slide.subPoints?.length ?? 0) - 1;
+    const maxStep = getSlideMaxStep(slide);
 
-    if (cur.subPointIndex < maxSub) {
-      // Reveal next sub-point
-      state.openerSlideState = { pointIndex: cur.pointIndex, subPointIndex: cur.subPointIndex + 1 };
+    if (cur.stepIndex < maxStep) {
+      // Reveal next step within this slide
+      state.openerSlideState = { pointIndex: cur.pointIndex, stepIndex: cur.stepIndex + 1 };
     } else if (cur.pointIndex < slides.length - 1) {
-      // Next point
-      state.openerSlideState = { pointIndex: cur.pointIndex + 1, subPointIndex: -1 };
+      // Next slide
+      state.openerSlideState = { pointIndex: cur.pointIndex + 1, stepIndex: 0 };
     } else {
-      // Past last point → blank
+      // Past last slide → blank
       state.openerSlideState = null;
     }
   }
