@@ -10,10 +10,12 @@
  * in .env.local. If empty or unset, no passcode is required.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
+import { useShowStepper } from '@/hooks/useShowStepper';
 import { MetricsPanel } from '@/components/controller/MetricsPanel';
+import { ShowStepper } from '@/components/controller/ShowStepper';
 import { ShowControls } from '@/components/controller/ShowControls';
 import { VotingControls } from '@/components/controller/VotingControls';
 import { EmergencyControls } from '@/components/controller/EmergencyControls';
@@ -54,6 +56,23 @@ function ControllerContent() {
     userId
   );
 
+  const { step, phoneCue, advance } = useShowStepper(fullState, sendCommand);
+
+  // Keyboard shortcut: Space or Right Arrow advances the show
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === ' ' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        advance();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [advance]);
+
   if (isLoading || !fullState) {
     return (
       <div style={styles.loadingScreen}>
@@ -77,6 +96,9 @@ function ControllerContent() {
         connectionState={connectionState}
         reconnect={reconnect}
       />
+
+      {/* Linear show progression — single NEXT button */}
+      <ShowStepper step={step} phoneCue={phoneCue} advance={advance} />
 
       {/* Show phase management — always visible */}
       <ShowControls fullState={fullState} sendCommand={sendCommand} />

@@ -104,6 +104,7 @@ export function createInitialState(config: ShowConfig, showId: string): ShowStat
     auditionLoopIndex: 0,
     currentVoteResult: null,
     revealStakesShown: false,
+    songRejected: false,
   }));
 
   return {
@@ -746,6 +747,12 @@ function handleTriggerRejection(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No active attempt' }];
   }
 
+  if (attempt.songRejected) {
+    return []; // Already rejected; ignore duplicate
+  }
+
+  attempt.songRejected = true;
+
   const events: ConductorEvent[] = [
     { type: 'SONG_REJECTED', attemptIndex: attempt.index },
     { type: 'AUDIO_CUE', cue: { type: 'rejection_gesture', attemptIndex: attempt.index } },
@@ -1291,6 +1298,7 @@ function handleResetToLobby(state: ShowState, preserveUsers: boolean): Conductor
     auditionLoopIndex: 0,
     currentVoteResult: null,
     revealStakesShown: false,
+    songRejected: false,
   }));
 
   return [

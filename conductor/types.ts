@@ -132,6 +132,7 @@ export interface AttemptState {
   auditionLoopIndex: number;                  // 0-based count of loops completed
   currentVoteResult: VoteResult | null;       // Set during revealing phase, cleared on lock-in
   revealStakesShown: boolean;                 // True after REVEAL_STAKES fires in current revealing phase
+  songRejected: boolean;                      // True after TRIGGER_REJECTION fires in attempt_resolve
 }
 
 /** Static configuration for a single attempt. */

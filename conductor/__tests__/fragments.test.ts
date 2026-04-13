@@ -54,7 +54,7 @@ function makeCompletedAttempt(index: number, chapter: string, layerCount: number
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -93,7 +93,7 @@ function makeCollapsedAttempt(index: number, chapter: string, layerCount: number
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -179,7 +179,7 @@ describe('generateFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
-      currentVoteResult: null, revealStakesShown: false,
+      currentVoteResult: null, revealStakesShown: false, songRejected: false,
     };
     const configs = [makeAttemptConfig('acceptance', 1)];
     const fragments = generateFragments([pending], configs);
@@ -371,7 +371,7 @@ function makeV32CompletedAttempt(index: number, chapter: string): AttemptState {
     collapsedAtLayer: null,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -418,7 +418,7 @@ function makeV32CollapsedAttempt(index: number, chapter: string, collapseAt: num
     collapsedAtLayer: collapseAt,
     currentAuditionOption: null,
     auditionLoopIndex: 0,
-    currentVoteResult: null, revealStakesShown: false,
+    currentVoteResult: null, revealStakesShown: false, songRejected: false,
   };
 }
 
@@ -557,7 +557,7 @@ describe('generateGranularFragments', () => {
       collapsedAtLayer: null,
       currentAuditionOption: null,
       auditionLoopIndex: 0,
-      currentVoteResult: null, revealStakesShown: false,
+      currentVoteResult: null, revealStakesShown: false, songRejected: false,
     };
     const configs = [makeV32AttemptConfig('ambition')];
     const fragments = generateGranularFragments([pending], configs, '/audio', true);
