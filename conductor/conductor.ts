@@ -784,7 +784,7 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
   const layerIndex = attempt.currentLayerIndex;
   const layerConfig = attempt.layerPlan[layerIndex];
 
-  // 0. Stop audition audio and duck master for reveal/speech
+  // 0. Stop audition audio — master stays unducked for the reveal sequence
   if (attempt.currentAuditionOption !== null) {
     events.push({
       type: 'AUDIO_CUE',
@@ -796,7 +796,6 @@ function resolveCurrentLayer(state: ShowState, attempt: AttemptState): Conductor
         trackBundle: getLayerTrackBundle(attempt, attempt.currentAuditionOption),
       },
     });
-    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_duck' } });
     attempt.currentAuditionOption = null;
   }
 
@@ -999,6 +998,8 @@ function handleAdvanceFromReveal(state: ShowState): ConductorEvent[] {
           : EMPTY_TRACK_BUNDLE,
       },
     });
+    // Duck master after lock-in — performer narrates before next layer
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'master_duck' } });
   }
 
   // Don't clear currentVoteResult yet — projector needs it for verdict animation.

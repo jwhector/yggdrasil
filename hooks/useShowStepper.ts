@@ -196,11 +196,16 @@ export function useShowStepper(
     : IDLE_STEP;
   const phoneCue = fullState ? derivePhoneCue(fullState) : null;
 
+  // Keep step in a ref so advance() has a stable identity
+  const stepRef = useRef(currentStep);
+  stepRef.current = currentStep;
+
   const advance = useCallback(() => {
-    if (!currentStep.blocked && currentStep.command) {
-      sendCommand(currentStep.command);
+    const s = stepRef.current;
+    if (!s.blocked && s.command) {
+      sendCommand(s.command);
     }
-  }, [currentStep, sendCommand]);
+  }, [sendCommand]);
 
   return { step: currentStep, phoneCue, advance };
 }
