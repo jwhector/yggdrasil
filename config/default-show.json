@@ -611,7 +611,51 @@
     }
   ],
   "lobby": {
-    "waitingMessage": "The show will begin shortly."
+    "waitingMessage": "The show will begin shortly.",
+    "onboarding": {
+      "buttonLabel": "WHERE AM I?",
+      "sections": [
+        {
+          "type": "narrative",
+          "body": "You are a subconscious fragment of Jared's mind, being given consciousness for the very first time, thanks to this technology."
+        },
+        {
+          "type": "practical",
+          "heading": "BEFORE WE BEGIN",
+          "items": [
+            "Keep your phone with you throughout the show",
+            "Please enable Do Not Disturb",
+            "Silence all notifications",
+            "Keep your phone on and connected to the internet"
+          ]
+        },
+        {
+          "type": "cues",
+          "heading": "VISUAL CUES",
+          "cues": [
+            {
+              "icon": "phone",
+              "label": "PICK UP YOUR PHONE",
+              "description": "When this icon flashes on the projector screen, please pick up your device."
+            },
+            {
+              "icon": "no-phone",
+              "label": "PUT YOUR PHONE DOWN",
+              "description": "When this icon appears, please put your phone down and listen."
+            }
+          ]
+        },
+        {
+          "type": "disclaimer",
+          "body": "This is an experimental piece of live technology. Please bear with any brief interruptions gracefully."
+        },
+        {
+          "type": "reconnect",
+          "heading": "IF SOMETHING GOES WRONG",
+          "body": "If you see \"STATION CONNECTION LOST\" on your screen, or are having difficulties connecting, please refresh the page. The experience will resume where you left off."
+        }
+      ]
+    }
   },
   "seatIds": [],
   "chapters": [

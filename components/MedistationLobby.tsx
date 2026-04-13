@@ -1,8 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { MedistationOnboarding } from './MedistationOnboarding';
+import type { OnboardingConfig } from '@/conductor/types';
 
-export function MedistationLobby() {
+interface Props {
+  onboardingConfig?: OnboardingConfig;
+}
+
+export function MedistationLobby({ onboardingConfig }: Props) {
+  const [view, setView] = useState<'animation' | 'exiting' | 'onboarding'>('animation');
   const stageRef = useRef<HTMLDivElement>(null);
   const staircaseRef = useRef<HTMLDivElement>(null);
   const line1Ref = useRef<HTMLDivElement>(null);
@@ -17,6 +24,82 @@ export function MedistationLobby() {
   const subtitleRef = useRef<HTMLDivElement>(null);
   const dotRef = useRef<HTMLDivElement>(null);
   const ambientRef = useRef<HTMLDivElement>(null);
+  const whereBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Align staircase so 's' sits above the gap — shared by both run and showFinalState
+  const alignStaircase = useCallback(() => {
+    const staircase = staircaseRef.current;
+    const fallingS = fallingSRef.current;
+    const prefix = prefixRef.current;
+    if (!staircase || !fallingS || !prefix) return;
+
+    const sRect = fallingS.getBoundingClientRect();
+    const sCenterX = sRect.left + sRect.width / 2;
+    const prefixRect = prefix.getBoundingClientRect();
+    const gapCenterX = prefixRect.right;
+    staircase.style.transform = `translateX(${gapCenterX - sCenterX}px)`;
+  }, []);
+
+  // Show the post-animation resting state without replaying (used when returning from onboarding)
+  const showFinalState = useCallback(() => {
+    const stage = stageRef.current;
+    const staircase = staircaseRef.current;
+    const line1 = line1Ref.current;
+    const line2 = line2Ref.current;
+    const line3 = line3Ref.current;
+    const fallingS = fallingSRef.current;
+    const theU = theURef.current;
+    const prefix = prefixRef.current;
+    const suffix = suffixRef.current;
+    const sTrack = sTrackRef.current;
+    const dockedS = dockedSRef.current;
+    const subtitle = subtitleRef.current;
+    const dot = dotRef.current;
+    const ambient = ambientRef.current;
+    const whereBtn = whereBtnRef.current;
+
+    if (!stage || !staircase || !line1 || !line2 || !line3 || !fallingS || !theU || !prefix || !suffix || !sTrack || !dockedS || !subtitle || !dot || !ambient) return;
+
+    // Staircase visible
+    line1.style.opacity = '1'; line1.style.transform = 'none'; line1.style.filter = 'none';
+    line2.style.opacity = '1'; line2.style.transform = 'none'; line2.style.filter = 'none';
+    line3.style.opacity = '1'; line3.style.transform = 'none'; line3.style.filter = 'none';
+    line1.classList.add('ms-show');
+    line2.classList.add('ms-show');
+    line3.classList.add('ms-show');
+
+    // Falling S hidden, U shifted
+    fallingS.style.opacity = '0';
+    fallingS.style.animation = 'none';
+    const sWidth = fallingS.getBoundingClientRect().width;
+    theU.style.transform = `translateX(${sWidth * 0.5}px)`;
+
+    // medi + tation visible
+    prefix.style.opacity = '1'; prefix.style.filter = 'none';
+    suffix.style.opacity = '1'; suffix.style.filter = 'none';
+    prefix.classList.add('ms-show');
+    suffix.classList.add('ms-show');
+
+    // Gap open, docked S visible
+    dockedS.style.opacity = '';
+    const dWidth = dockedS.getBoundingClientRect().width;
+    sTrack.style.transition = 'none';
+    sTrack.style.width = dWidth + 'px';
+    dockedS.classList.add('ms-visible');
+
+    // Subtitle, dot, ambient
+    subtitle.classList.add('ms-visible');
+    dot.classList.add('ms-visible');
+    ambient.classList.add('ms-visible');
+
+    // Align staircase
+    alignStaircase();
+
+    // Where button
+    if (whereBtn && onboardingConfig) {
+      whereBtn.classList.add('ms-btn-visible');
+    }
+  }, [alignStaircase, onboardingConfig]);
 
   const runAnimation = useCallback(() => {
     const stage = stageRef.current;
@@ -33,6 +116,7 @@ export function MedistationLobby() {
     const subtitle = subtitleRef.current;
     const dot = dotRef.current;
     const ambient = ambientRef.current;
+    const whereBtn = whereBtnRef.current;
 
     if (!stage || !staircase || !line1 || !line2 || !line3 || !fallingS || !theU || !prefix || !suffix || !sTrack || !dockedS || !subtitle || !dot || !ambient) return;
 
@@ -60,6 +144,7 @@ export function MedistationLobby() {
     subtitle.classList.remove('ms-visible');
     dot.classList.remove('ms-visible');
     ambient.classList.remove('ms-visible');
+    if (whereBtn) whereBtn.classList.remove('ms-btn-visible');
 
     void stage.offsetHeight;
 
@@ -72,12 +157,7 @@ export function MedistationLobby() {
 
     void stage.offsetHeight;
 
-    const sRect = fallingS.getBoundingClientRect();
-    const sCenterX = sRect.left + sRect.width / 2;
-    const prefixRect = prefix.getBoundingClientRect();
-    const gapCenterX = prefixRect.right;
-    const shiftX = gapCenterX - sCenterX;
-    staircase.style.transform = `translateX(${shiftX}px)`;
+    alignStaircase();
 
     // Reset opacity for animation
     line1.style.opacity = ''; line1.style.transform = '';
@@ -161,20 +241,45 @@ export function MedistationLobby() {
         setTimeout(() => subtitle.classList.add('ms-visible'), 700);
         setTimeout(() => dot.classList.add('ms-visible'), 1300);
         setTimeout(() => ambient.classList.add('ms-visible'), 400);
+        // Show "Where am I?" button after afterglow
+        if (whereBtn && onboardingConfig) {
+          setTimeout(() => whereBtn.classList.add('ms-btn-visible'), 2200);
+        }
       }, FALL_DUR - 20);
     }, FALL_AT);
-  }, []);
+  }, [alignStaircase, onboardingConfig]);
 
   useEffect(() => {
-    // Wait a tick for fonts/layout
     const timer = setTimeout(runAnimation, 100);
     return () => clearTimeout(timer);
   }, [runAnimation]);
 
+  const handleWhereClick = () => {
+    setView('exiting');
+    // After fade-out completes, switch to onboarding
+    setTimeout(() => setView('onboarding'), 500);
+  };
+
+  const handleBack = () => {
+    setView('animation');
+    // Show final state immediately on next frame
+    requestAnimationFrame(() => showFinalState());
+  };
+
   return (
     <>
       <style>{styles}</style>
-      <div className="ms-stage" ref={stageRef}>
+      <div
+        className="ms-stage"
+        ref={stageRef}
+        style={{
+          opacity: view === 'exiting' ? 0 : view === 'onboarding' ? 0 : 1,
+          transform: view === 'exiting' ? 'translateY(-15px)' : 'translateY(0)',
+          transition: 'opacity 0.5s ease, transform 0.5s ease',
+          pointerEvents: view === 'onboarding' ? 'none' : 'auto',
+          position: view === 'onboarding' ? 'absolute' : 'relative',
+        }}
+      >
         <div className="ms-ambient" ref={ambientRef} />
 
         <div className="ms-staircase" ref={staircaseRef}>
@@ -196,7 +301,21 @@ export function MedistationLobby() {
 
         <div className="ms-subtitle" ref={subtitleRef}>a live experience</div>
         <div className="ms-dot" ref={dotRef} />
+
+        {onboardingConfig && (
+          <button
+            className="ms-where-btn"
+            ref={whereBtnRef}
+            onClick={handleWhereClick}
+          >
+            {onboardingConfig.buttonLabel}
+          </button>
+        )}
       </div>
+
+      {view === 'onboarding' && onboardingConfig && (
+        <MedistationOnboarding config={onboardingConfig} onBack={handleBack} />
+      )}
     </>
   );
 }
@@ -417,4 +536,29 @@ const styles = `
     transition: opacity 1.5s ease;
   }
   .ms-ambient.ms-visible { opacity: 1; }
+
+  .ms-where-btn {
+    background: none;
+    border: 1px solid rgba(232, 228, 223, 0.15);
+    color: rgba(232, 228, 223, 0.3);
+    font-family: 'Anybody', sans-serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 0.5rem 1.2rem;
+    border-radius: 2px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.5s ease, border-color 0.3s, color 0.3s;
+    margin-top: 1.5rem;
+    pointer-events: none;
+  }
+  .ms-where-btn.ms-btn-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .ms-where-btn:hover {
+    border-color: #d4a574;
+    color: #d4a574;
+  }
 `;

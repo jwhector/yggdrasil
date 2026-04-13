@@ -267,6 +267,29 @@ export interface OpenerSlidePosition {
 }
 
 // ============================================================================
+// Onboarding Config (lobby landing page)
+// ============================================================================
+
+export interface OnboardingCue {
+  icon: string;          // 'brain' | 'eyelid' — resolved to SVGs client-side
+  label: string;         // e.g. "PICK UP YOUR PHONE"
+  description: string;
+}
+
+export interface OnboardingSection {
+  type: 'narrative' | 'practical' | 'cues' | 'disclaimer' | 'reconnect';
+  heading?: string | null;
+  body?: string;
+  items?: string[];
+  cues?: OnboardingCue[];
+}
+
+export interface OnboardingConfig {
+  buttonLabel: string;
+  sections: OnboardingSection[];
+}
+
+// ============================================================================
 // Show Config
 // ============================================================================
 
@@ -280,6 +303,7 @@ export interface ShowConfig {
   timing: TimingConfig;
   lobby: {
     waitingMessage: string;             // Text displayed while waiting
+    onboarding?: OnboardingConfig;      // Onboarding flow after landing animation
   };
   seatIds: SeatId[];                    // Known seats for QR code generation
   intrusiveThoughts?: IntrusiveThoughtsConfig[];  // Per-attempt, per-layer thought strings
@@ -718,7 +742,7 @@ export interface AudienceClientState {
   currentAttempt: AudienceAttemptView | null;
   myFinale: AudienceVoteView | AudienceRemixView | null;
   config: {
-    lobby: { waitingMessage: string };
+    lobby: { waitingMessage: string; onboarding?: OnboardingConfig };
     chapters: ChapterConfig[];
     granularTypes: GranularType[];
     intrusiveThoughts: IntrusiveThoughtsConfig[];

@@ -82,7 +82,7 @@ function AudienceContent() {
 
       {/* Phase routing */}
       {phase === 'lobby' && (
-        <MedistationLobby />
+        <MedistationLobby onboardingConfig={state.config.lobby.onboarding} />
       )}
 
       {(phase === 'opener' || phase === 'attempt_story') && (
