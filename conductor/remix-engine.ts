@@ -351,6 +351,11 @@ export function toggleAudienceInteraction(
         updatedActive.set(granularType, { ...node, persistent: false });
       }
     }
+  } else {
+    // Enabling: mark all tokens as persistent
+    for (const [granularType, node] of updatedActive) {
+      updatedActive.set(granularType, { ...node, persistent: true });
+    }
   }
 
   return {

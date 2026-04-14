@@ -463,7 +463,7 @@
         {
           "text": "What do we owe ourselves most?",
           "answers": [
-            { "chapterId": "ambition", "label": "A deep belief in ourself" },
+            { "chapterId": "ambition", "label": "Another chance" },
             { "chapterId": "love", "label": "The grace to be held" },
             { "chapterId": "acceptance", "label": "The permission to rest" }
           ]

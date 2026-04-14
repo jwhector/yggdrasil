@@ -95,13 +95,10 @@ export function EmotionVote({
   userId,
   emit,
 }: EmotionVoteProps) {
-  const introSeenKey = `ygg_intro_seen_${userId}`;
-  const introAlreadySeen = typeof window !== 'undefined' && localStorage.getItem(introSeenKey) === '1';
-
-  const [stage, setStage] = useState<VoteStage>(poolCapReached ? 'phones_down' : introAlreadySeen ? 'question' : 'intro');
+  const [stage, setStage] = useState<VoteStage>(poolCapReached ? 'phones_down' : 'intro');
   const [questionIndex, setQuestionIndex] = useState(initialAnsweredCount);
   const [phonesDown, setPhonesDown] = useState(poolCapReached);
-  const [hasShownOutro, setHasShownOutro] = useState(introAlreadySeen);
+  const [hasShownOutro, setHasShownOutro] = useState(false);
 
   // Build the ordered questions list (shuffled or linear)
   const orderedQuestions = useMemo(() => {
@@ -207,12 +204,11 @@ export function EmotionVote({
   }, [stage, npcIntro, typewriterPlay]);
 
   const handleIntroConfirm = useCallback(() => {
-    localStorage.setItem(introSeenKey, '1');
     setStage('question');
     setNpcDisplayText('');
     setNpcTypingDone(false);
     setIntroConfirmVisible(false);
-  }, [introSeenKey]);
+  }, []);
 
   // ============================================================================
   // Answer tap handler
@@ -365,25 +361,30 @@ export function EmotionVote({
 
     return (
       <>
-        {/* Question text — fades out when animating */}
+        {/* Question text — word-by-word blur reveal, fades out when animating */}
         <div style={{
           ...styles.questionText,
           opacity: isAnimating ? 0 : 1,
           transition: 'opacity 0.35s ease',
         }}>
-          {currentQuestion.text}
+          <WordReveal key={questionIndex} text={currentQuestion.text} />
         </div>
 
         <div style={styles.cardsContainer}>
-          {chapters.map((chapter) => {
+          {chapters.map((chapter, cardIndex) => {
             const identity = getChapterIdentity(chapter.id);
             const answerLabel = answers?.find(a => a.chapterId === chapter.id)?.label ?? identity.label;
             const isTapped = flyChapterId === chapter.id;
             const isOther = isAnimating && !isTapped;
 
+            // Stagger cards after the word reveal finishes
+            const wordCount = currentQuestion.text.split(/\s+/).length;
+            const textDoneMs = (wordCount - 1) * WORD_STAGGER_MS + WORD_ANIM_MS;
+            const cardDelayMs = textDoneMs + cardIndex * 500;
+
             return (
               <button
-                key={chapter.id}
+                key={`${questionIndex}-${chapter.id}`}
                 ref={(el) => { if (el) cardRefs.current.set(chapter.id, el); }}
                 onClick={() => handleAnswerTap(chapter.id)}
                 disabled={isAnimating}
@@ -391,6 +392,10 @@ export function EmotionVote({
                   ...styles.card,
                   borderColor: `${identity.color}44`,
                   backgroundColor: 'rgba(255,255,255,0.04)',
+                  // Entrance animation (unless mid-tap animation)
+                  ...(!isTapped && !isOther ? {
+                    animation: `cardBlurIn 1000ms cubic-bezier(0.23, 1, 0.32, 1) ${cardDelayMs}ms both`,
+                  } : {}),
                   // Tapped card: border shrinks inward and fades
                   ...(isTapped ? {
                     borderColor: identity.color,
@@ -511,6 +516,33 @@ export function EmotionVote({
 }
 
 // ============================================================================
+// Word-by-word blur reveal
+// ============================================================================
+
+const WORD_STAGGER_MS = 120;
+const WORD_ANIM_MS = 500;
+
+function WordReveal({ text }: { text: string }) {
+  const words = text.split(/\s+/);
+  return (
+    <>
+      {words.map((word, i) => (
+        <span
+          key={i}
+          style={{
+            display: 'inline-block',
+            animation: `wordBlurIn ${WORD_ANIM_MS}ms cubic-bezier(0.23, 1, 0.32, 1) ${i * WORD_STAGGER_MS}ms both`,
+            marginRight: '0.3em',
+          }}
+        >
+          {word}
+        </span>
+      ))}
+    </>
+  );
+}
+
+// ============================================================================
 // CSS Keyframes
 // ============================================================================
 
@@ -543,6 +575,34 @@ const keyframes = `
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes cardBlurIn {
+    0% {
+      opacity: 0;
+      filter: blur(6px);
+      -webkit-filter: blur(6px);
+      transform: translateX(-8px);
+    }
+    100% {
+      opacity: 1;
+      filter: blur(0px);
+      -webkit-filter: blur(0px);
+      transform: translateX(0);
+    }
+  }
+  @keyframes wordBlurIn {
+    0% {
+      opacity: 0;
+      filter: blur(8px);
+      -webkit-filter: blur(8px);
+      transform: translateY(4px);
+    }
+    100% {
+      opacity: 1;
+      filter: blur(0px);
+      -webkit-filter: blur(0px);
+      transform: translateY(0);
+    }
   }
 `;
 
@@ -666,8 +726,9 @@ const styles = {
 
   // Question text
   questionText: {
-    fontSize: '1.3rem',
-    fontWeight: 400,
+    fontSize: '1.5rem',
+    fontWeight: 300,
+    fontFamily: "'Cormorant Garamond', serif",
     color: 'rgba(255,255,255,0.85)',
     textAlign: 'center' as const,
     lineHeight: 1.5,
