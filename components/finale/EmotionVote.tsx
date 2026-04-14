@@ -42,9 +42,10 @@ interface EmotionVoteProps {
 
 const CHAR_INTERVAL_MS = 30;
 const NPC_PAUSE_BETWEEN_MS = 800;
-const MORPH_DURATION_MS = 500;
-const FLY_DURATION_MS = 600;
-const TOTAL_FLY_MS = MORPH_DURATION_MS + FLY_DURATION_MS;
+const COLLAPSE_DURATION_MS = 300;   // Card shell fade duration
+const TOTAL_FLY_MS = 1100;          // Total spiral-up animation
+// Keep old name for morph phase timing in handleAnswerTap
+const MORPH_DURATION_MS = COLLAPSE_DURATION_MS;
 
 // ============================================================================
 // Deterministic shuffle (mirrors conductor/question-engine.ts)
@@ -117,11 +118,7 @@ export function EmotionVote({
 
   // Fly animation state
   const [flyChapterId, setFlyChapterId] = useState<string | null>(null);
-  const [flyPhase, setFlyPhase] = useState<'morph' | 'fly' | null>(null);
-  const [orbPosition, setOrbPosition] = useState<{ x: number; y: number } | null>(null);
-  const [orbColor, setOrbColor] = useState<string>('#fff');
   const cardRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const iconRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Intro confirmation button visibility
   const [introConfirmVisible, setIntroConfirmVisible] = useState(false);
@@ -217,42 +214,19 @@ export function EmotionVote({
   const handleAnswerTap = useCallback((chapterId: string) => {
     if (!currentQuestion || stage !== 'question' || phonesDown || flyChapterId) return;
 
-    // Capture card center for the orb overlay
-    const cardEl = cardRefs.current.get(chapterId);
-    const identity = getChapterIdentity(chapterId);
-    setOrbColor(identity.color);
-
-    if (cardEl) {
-      const rect = cardEl.getBoundingClientRect();
-      setOrbPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-    } else {
-      setOrbPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    }
-
-    // Store values for the timeout closures
     const tappedQuestionIndex = questionIndex;
 
     setFlyChapterId(chapterId);
-    setFlyPhase('morph');
 
-    // Phase 2: morph complete → fly upward
+    // After collapse + fly complete → advance question, emit to server
     setTimeout(() => {
-      setFlyPhase('fly');
-    }, MORPH_DURATION_MS);
-
-    // Phase 3: fly complete → advance question, emit to server, transition stage
-    setTimeout(() => {
-      // Send vote to server after animation finishes (triggers projector fly-in)
       emit('submit_emotion', {
         chapterId,
         questionIndex: tappedQuestionIndex,
       });
 
-      // Advance question index now that animation is done
       setQuestionIndex(prev => prev + 1);
       setFlyChapterId(null);
-      setFlyPhase(null);
-      setOrbPosition(null);
 
       if (phonesDown) {
         setStage('phones_down');
@@ -312,39 +286,6 @@ export function EmotionVote({
     </div>
   );
 
-  // Orb overlay — appears at card center, gains glow, then flies up
-  const renderOrbOverlay = () => {
-    if (!orbPosition || !flyPhase) return null;
-
-    const isMorphing = flyPhase === 'morph';
-    const isFlying = flyPhase === 'fly';
-
-    return (
-      <div
-        style={{
-          position: 'fixed',
-          left: orbPosition.x,
-          top: orbPosition.y,
-          width: 12,
-          height: 12,
-          borderRadius: '50%',
-          backgroundColor: orbColor,
-          // translate(-50%,-50%) keeps it centered on the coordinate
-          transform: 'translate(-50%, -50%)',
-          boxShadow: isMorphing
-            ? `0 0 0px ${orbColor}00`
-            : `0 0 24px ${orbColor}aa, 0 0 48px ${orbColor}44`,
-          transition: isMorphing
-            ? `box-shadow ${MORPH_DURATION_MS * 0.6}ms ease ${MORPH_DURATION_MS * 0.4}ms`
-            : 'none',
-          animation: isFlying ? `orbFlyUp ${FLY_DURATION_MS}ms ease-in forwards` : undefined,
-          pointerEvents: 'none',
-          zIndex: 1000,
-        }}
-      />
-    );
-  };
-
   const renderAnswerCards = () => {
     if (!currentQuestion) {
       // No more questions — treat as phones down
@@ -377,68 +318,27 @@ export function EmotionVote({
             const isTapped = flyChapterId === chapter.id;
             const isOther = isAnimating && !isTapped;
 
-            // Stagger cards after the word reveal finishes
             const wordCount = currentQuestion.text.split(/\s+/).length;
             const textDoneMs = (wordCount - 1) * WORD_STAGGER_MS + WORD_ANIM_MS;
             const cardDelayMs = textDoneMs + cardIndex * 500;
 
             return (
-              <button
+              <OrbCard
                 key={`${questionIndex}-${chapter.id}`}
-                ref={(el) => { if (el) cardRefs.current.set(chapter.id, el); }}
-                onClick={() => handleAnswerTap(chapter.id)}
-                disabled={isAnimating}
-                style={{
-                  ...styles.card,
-                  borderColor: `${identity.color}44`,
-                  backgroundColor: 'rgba(255,255,255,0.04)',
-                  // Entrance animation (unless mid-tap animation)
-                  ...(!isTapped && !isOther ? {
-                    animation: `cardBlurIn 1000ms cubic-bezier(0.23, 1, 0.32, 1) ${cardDelayMs}ms both`,
-                  } : {}),
-                  // Tapped card: border shrinks inward and fades
-                  ...(isTapped ? {
-                    borderColor: identity.color,
-                    transform: 'scale(0.3)',
-                    opacity: 0,
-                    borderRadius: '50%',
-                    transition: `all ${MORPH_DURATION_MS}ms ease-in`,
-                  } : {}),
-                  // Other cards fade out
-                  ...(isOther ? {
-                    opacity: 0,
-                    transition: 'opacity 0.3s ease',
-                  } : {}),
-                }}
-              >
-                {/* Icon — fades out (orb overlay replaces it) */}
-                <div
-                  ref={(el) => { if (el) iconRefs.current.set(chapter.id, el); }}
-                  style={{
-                    ...styles.cardIcon,
-                    color: identity.color,
-                    opacity: isTapped ? 0 : 1,
-                    transition: `opacity ${MORPH_DURATION_MS * 0.3}ms ease`,
-                  }}
-                >
-                  {identity.icon}
-                </div>
-                {/* Label — fades out */}
-                <div style={{
-                  ...styles.cardLabel,
-                  color: identity.color,
-                  opacity: isTapped ? 0 : 1,
-                  transition: `opacity ${MORPH_DURATION_MS * 0.3}ms ease`,
-                }}>
-                  {answerLabel}
-                </div>
-              </button>
+                chapterId={chapter.id}
+                label={answerLabel}
+                color={identity.color}
+                index={cardIndex}
+                isTapped={isTapped}
+                isOther={isOther}
+                entranceDelay={cardDelayMs}
+                onTap={() => handleAnswerTap(chapter.id)}
+                cardRef={(el) => { if (el) cardRefs.current.set(chapter.id, el); }}
+              />
             );
           })}
         </div>
 
-        {/* Orb overlay — appears at icon position, glows, flies up */}
-        {renderOrbOverlay()}
       </>
     );
   };
@@ -513,6 +413,239 @@ export function EmotionVote({
   }
 
   return null;
+}
+
+// ============================================================================
+// Orbital orb card
+// ============================================================================
+
+function OrbCard({
+  chapterId,
+  label,
+  color,
+  index,
+  isTapped,
+  isOther,
+  entranceDelay,
+  onTap,
+  cardRef,
+}: {
+  chapterId: string;
+  label: string;
+  color: string;
+  index: number;
+  isTapped: boolean;
+  isOther: boolean;
+  entranceDelay: number;
+  onTap: () => void;
+  cardRef: (el: HTMLButtonElement | null) => void;
+}) {
+  const orb1Ref = useRef<HTMLDivElement>(null);
+  const orb2Ref = useRef<HTMLDivElement>(null);
+  const orbContainerRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number>(0);
+  const angleRef = useRef(index * 2.1);
+  const collapseStartRef = useRef<number | null>(null);
+
+  // Per-card orbit variations
+  const orbConfigs = [
+    { centerLeft: '65%', centerTop: '45%', radiusX: 55, tilt: 0.35, speed: 0.007 },
+    { centerLeft: '55%', centerTop: '55%', radiusX: 65, tilt: 0.25, speed: 0.005 },
+    { centerLeft: '70%', centerTop: '50%', radiusX: 50, tilt: 0.4,  speed: 0.009 },
+  ];
+  const orbCfg = orbConfigs[index % orbConfigs.length];
+
+  // Start collapse timer when tapped
+  useEffect(() => {
+    if (isTapped && collapseStartRef.current === null) {
+      collapseStartRef.current = performance.now();
+    }
+    if (!isTapped) {
+      collapseStartRef.current = null;
+    }
+  }, [isTapped]);
+
+  useEffect(() => {
+    const speed = orbCfg.speed;
+    const baseRadius = orbCfg.radiusX;
+    const tilt = orbCfg.tilt;
+
+    const animate = () => {
+      const orb1 = orb1Ref.current;
+      const orb2 = orb2Ref.current;
+      const container = orbContainerRef.current;
+      if (!orb1 || !orb2) return;
+
+      const now = performance.now();
+
+      // Overall progress through the entire animation (0 → 1 over TOTAL_FLY_MS)
+      let t = 0;
+      if (collapseStartRef.current !== null) {
+        t = Math.min((now - collapseStartRef.current) / TOTAL_FLY_MS, 1);
+      }
+
+      // Ease curve: slow start, accelerating
+      const ease = t * t;
+
+      // Normal speed when idle, fast spin on tap accelerating further
+      angleRef.current += t > 0 ? speed * (5 + ease * 25) : speed;
+      const a = angleRef.current;
+      // Radius holds for the first ~30%, then collapses with acceleration
+      const radiusT = Math.max(0, (t - 0.15) / 0.85);
+      const radiusEase = radiusT * radiusT;
+      const radiusX = baseRadius * (1 - radiusEase);
+
+      // Blur stays soft throughout (14 → 6)
+      const blur1 = 14 - ease * 8;
+      const blur2 = 12 - ease * 6;
+
+      // Second orb fades into first as they merge
+      const orb2Fade = 1 - ease * 0.9;
+      const mergeScale = 1 + ease * 0.3;
+
+      const x1 = Math.cos(a) * radiusX;
+      const depth1 = Math.sin(a);
+      const y1 = depth1 * radiusX * tilt;
+      const scale1 = (1 + depth1 * 0.4) * mergeScale;
+      const opacity1 = Math.min(0.3 + depth1 * 0.2 + ease * 0.7, 1);
+
+      const x2 = Math.cos(a + Math.PI) * radiusX;
+      const depth2 = Math.sin(a + Math.PI);
+      const y2 = depth2 * radiusX * tilt;
+      const scale2 = (1 + depth2 * 0.4) * mergeScale * orb2Fade;
+      const opacity2 = Math.min((0.3 + depth2 * 0.2) * orb2Fade, 1);
+
+      // Upward movement starts immediately but slowly, accelerates with the spiral
+      if (t > 0 && container) {
+        const flyY = -window.innerHeight * ease * 1.2;
+        const flyOpacity = 1 - t * 0.5;
+        container.style.transform = `translateY(${flyY}px)`;
+        container.style.opacity = String(flyOpacity);
+      }
+
+      orb1.style.transform = `translate(${x1}px, ${y1}px) scale(${scale1})`;
+      orb1.style.opacity = String(opacity1);
+      orb1.style.filter = `blur(${blur1}px)`;
+      orb1.style.zIndex = depth1 > 0 ? '3' : '1';
+
+      orb2.style.transform = `translate(${x2}px, ${y2}px) scale(${scale2})`;
+      orb2.style.opacity = String(opacity2);
+      orb2.style.filter = `blur(${blur2}px)`;
+      orb2.style.zIndex = depth2 > 0 ? '3' : '1';
+
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [index, isTapped, orbCfg.speed, orbCfg.radiusX, orbCfg.tilt]);
+
+  const accent = color;
+
+  return (
+    <button
+      ref={cardRef}
+      onClick={onTap}
+      disabled={isTapped || isOther}
+      style={{
+        position: 'relative',
+        width: '100%',
+        maxWidth: 300,
+        height: 90,
+        borderRadius: 12,
+        background: '#111',
+        border: `1px solid ${accent}44`,
+        overflow: isTapped ? 'visible' : 'hidden',
+        cursor: 'pointer',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation' as const,
+        outline: 'none',
+        // Entrance animation
+        ...(!isTapped && !isOther ? {
+          animation: `cardBlurIn 1000ms cubic-bezier(0.23, 1, 0.32, 1) ${entranceDelay}ms both`,
+        } : {}),
+        // Tapped: card shell fades away, orbs collapse inside
+        ...(isTapped ? {
+          borderColor: 'transparent',
+          background: 'transparent',
+          transition: `border-color ${COLLAPSE_DURATION_MS * 0.6}ms ease, background ${COLLAPSE_DURATION_MS * 0.6}ms ease`,
+        } : {}),
+        // Others fade out
+        ...(isOther ? {
+          opacity: 0,
+          transition: 'opacity 0.3s ease',
+        } : {}),
+      }}
+    >
+      {/* Orbital orb container — per-card positioning */}
+      <div
+        ref={orbContainerRef}
+        style={{
+          position: 'absolute',
+          top: orbCfg.centerTop,
+          left: orbCfg.centerLeft,
+          width: 0,
+          height: 0,
+        }}
+      >
+        <div
+          ref={orb1Ref}
+          style={{
+            position: 'absolute',
+            width: 40,
+            height: 40,
+            marginLeft: -20,
+            marginTop: -20,
+            borderRadius: '50%',
+            background: `radial-gradient(circle at 40% 40%, ${accent}cc, ${accent}55)`,
+            filter: 'blur(14px)',
+            willChange: 'transform, opacity',
+          }}
+        />
+        <div
+          ref={orb2Ref}
+          style={{
+            position: 'absolute',
+            width: 30,
+            height: 30,
+            marginLeft: -15,
+            marginTop: -15,
+            borderRadius: '50%',
+            background: `radial-gradient(circle at 40% 40%, ${accent}aa, ${accent}33)`,
+            filter: 'blur(12px)',
+            willChange: 'transform, opacity',
+          }}
+        />
+      </div>
+
+      {/* Text content */}
+      <div style={{
+        position: 'relative',
+        zIndex: 4,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        padding: '0 20px',
+        gap: 4,
+        pointerEvents: 'none',
+        opacity: isTapped ? 0 : 1,
+        transition: `opacity ${MORPH_DURATION_MS * 0.3}ms ease`,
+      }}>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          fontSize: '1.05rem',
+          fontWeight: 300,
+          color: '#e8e4df',
+          lineHeight: 1.4,
+        }}>
+          {label}
+        </div>
+      </div>
+    </button>
+  );
 }
 
 // ============================================================================
@@ -741,36 +874,10 @@ const styles = {
   cardsContainer: {
     display: 'flex',
     flexDirection: 'column' as const,
-    gap: '12px',
+    gap: '14px',
     width: '100%',
     maxWidth: '300px',
-  },
-  card: {
-    display: 'flex',
     alignItems: 'center',
-    gap: '14px',
-    padding: '18px 20px',
-    borderRadius: '12px',
-    border: '1.5px solid rgba(255,255,255,0.15)',
-    background: 'rgba(255,255,255,0.04)',
-    cursor: 'pointer',
-    WebkitTapHighlightColor: 'transparent',
-    touchAction: 'manipulation' as const,
-    outline: 'none',
-    fontFamily: 'inherit',
-    textAlign: 'left' as const,
-    transition: 'all 0.2s ease',
-  } as React.CSSProperties,
-  cardIcon: {
-    fontSize: '1.4rem',
-    width: '28px',
-    textAlign: 'center' as const,
-    flexShrink: 0,
-  },
-  cardLabel: {
-    fontSize: '0.95rem',
-    fontWeight: 500,
-    lineHeight: 1.4,
   },
 
   // Outro stage

@@ -219,22 +219,44 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
           }
         }
 
-        // Draw
+        // Draw — layered radial gradients for a soft, luminous look
         const bloomScale = easeOut(dot.age);
         const r = dot.radius * bloomScale;
         const alpha = dot.opacity * bloomScale;
+        const { r: cr, g: cg, b: cb } = dot.color;
 
         if (r > 0.5 && alpha > 0.01) {
-          // Glow
+          // Outer haze — wide, very faint
+          const hazeR = r * 5;
+          const haze = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, hazeR);
+          haze.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha * 0.12})`);
+          haze.addColorStop(0.4, `rgba(${cr},${cg},${cb},${alpha * 0.04})`);
+          haze.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
           ctx.beginPath();
-          ctx.arc(dot.x, dot.y, r * 2.5, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${dot.color.r},${dot.color.g},${dot.color.b},${alpha * 0.08})`;
+          ctx.arc(dot.x, dot.y, hazeR, 0, Math.PI * 2);
+          ctx.fillStyle = haze;
           ctx.fill();
 
-          // Core
+          // Mid glow — soft bloom
+          const glowR = r * 2.5;
+          const glow = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, glowR);
+          glow.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha * 0.35})`);
+          glow.addColorStop(0.5, `rgba(${cr},${cg},${cb},${alpha * 0.1})`);
+          glow.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
           ctx.beginPath();
-          ctx.arc(dot.x, dot.y, r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${dot.color.r},${dot.color.g},${dot.color.b},${alpha * 0.85})`;
+          ctx.arc(dot.x, dot.y, glowR, 0, Math.PI * 2);
+          ctx.fillStyle = glow;
+          ctx.fill();
+
+          // Core — bright center with soft edge
+          const coreR = r * 1.2;
+          const core = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, coreR);
+          core.addColorStop(0, `rgba(${Math.min(cr + 60, 255)},${Math.min(cg + 60, 255)},${Math.min(cb + 60, 255)},${alpha * 0.9})`);
+          core.addColorStop(0.4, `rgba(${cr},${cg},${cb},${alpha * 0.6})`);
+          core.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+          ctx.beginPath();
+          ctx.arc(dot.x, dot.y, coreR, 0, Math.PI * 2);
+          ctx.fillStyle = core;
           ctx.fill();
         }
       }
