@@ -562,8 +562,8 @@
     {
       "point": "A musical about QAnon conspiracy theories",
       "media": {
-        "type": "audio",
-        "src": "/opener-media/sheeple.wav"
+        "type": "video",
+        "src": "/opener-media/anons.mov"
       },
       "subPoints": [
         { "label": "Duration:", "value": "4 months" },

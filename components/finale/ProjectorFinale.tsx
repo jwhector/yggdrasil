@@ -188,32 +188,38 @@ export function ProjectorFinale({
     drag.moveDrag(touch.clientX, touch.clientY);
   }, [drag]);
 
-  const handleTouchEnd = useCallback(() => handleDrop(), [handleDrop]);
-
   // Mouse handlers (desktop testing)
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!drag.isDragging) return;
     drag.moveDrag(e.clientX, e.clientY);
   }, [drag]);
 
-  const handleMouseUp = useCallback(() => handleDrop(), [handleDrop]);
-
-  // Node tap — advance node on mousedown/touchstart (not click/touchend)
-  // This avoids confusion with drag-end events.
-  // Guard against touch devices firing both touchstart + synthetic mousedown.
+  // Node tap — requires down AND up on the same node.
+  // On down, record the hit node. On up, confirm the same node is still under the pointer.
+  // If a drag starts in between, the down target is cleared.
   const touchHandledRef = useRef(false);
+  const nodeDownTargetRef = useRef<string | null>(null);
+
+  const hitTestNode = useCallback((clientX: number, clientY: number): string | null => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return drag.findTarget(clientX - rect.left, clientY - rect.top);
+  }, [drag]);
 
   const handleNodeDown = useCallback((clientX: number, clientY: number) => {
-    if (drag.isDragging || !interactionEnabled || !socket) return;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    const target = drag.findTarget(x, y);
-    if (target) {
-      socket.emit('command', { type: 'ADVANCE_NODE', granularType: target });
+    if (drag.isDragging || !interactionEnabled) return;
+    nodeDownTargetRef.current = hitTestNode(clientX, clientY);
+  }, [drag.isDragging, interactionEnabled, hitTestNode]);
+
+  const handleNodeUp = useCallback((clientX: number, clientY: number) => {
+    const downTarget = nodeDownTargetRef.current;
+    nodeDownTargetRef.current = null;
+    if (!downTarget || drag.isDragging || !interactionEnabled || !socket) return;
+    const upTarget = hitTestNode(clientX, clientY);
+    if (upTarget === downTarget) {
+      socket.emit('command', { type: 'ADVANCE_NODE', granularType: downTarget });
     }
-  }, [drag, interactionEnabled, socket]);
+  }, [drag.isDragging, interactionEnabled, socket, hitTestNode]);
 
   const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
     if (touchHandledRef.current) {
@@ -223,12 +229,25 @@ export function ProjectorFinale({
     handleNodeDown(e.clientX, e.clientY);
   }, [handleNodeDown]);
 
+  const handleContainerMouseUp = useCallback((e: React.MouseEvent) => {
+    handleDrop();
+    handleNodeUp(e.clientX, e.clientY);
+  }, [handleDrop, handleNodeUp]);
+
   const handleContainerTouchStart = useCallback((e: React.TouchEvent) => {
     touchHandledRef.current = true;
     if (e.touches.length > 0) {
       handleNodeDown(e.touches[0].clientX, e.touches[0].clientY);
     }
   }, [handleNodeDown]);
+
+  const handleContainerTouchEnd = useCallback((e: React.TouchEvent) => {
+    handleDrop();
+    if (e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      handleNodeUp(touch.clientX, touch.clientY);
+    }
+  }, [handleDrop, handleNodeUp]);
 
   // Collision zones — keep dots away from pentagon nodes during remix
   const collisionZones: CollisionZone[] = useMemo(() => {
@@ -257,10 +276,10 @@ export function ProjectorFinale({
       }}
       onTouchStart={handleContainerTouchStart}
       onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onTouchEnd={handleContainerTouchEnd}
       onMouseDown={handleContainerMouseDown}
       onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onMouseUp={handleContainerMouseUp}
     >
       {size.width > 0 && size.height > 0 && (
         <>
@@ -352,33 +371,82 @@ export function ProjectorFinale({
             key={orb.id}
             style={{
               position: 'absolute',
-              left: orb.targetX - 6,
+              left: orb.targetX,
               top: size.height + 20,
-              width: 12,
-              height: 12,
-              borderRadius: '50%',
-              backgroundColor: color,
-              boxShadow: `0 0 24px ${color}88`,
+              width: 0,
+              height: 0,
               animation: 'tokenFlyIn 0.8s ease-out forwards',
-              '--fly-target-x': `${orb.targetX - 6}px`,
-              '--fly-target-y': `${orb.targetY - 6}px`,
+              '--fly-target-y': `${orb.targetY}px`,
+              '--fly-start-y': `${size.height + 20}px`,
               pointerEvents: 'none',
               zIndex: 50,
             } as React.CSSProperties}
-          />
+          >
+            {/* Outer haze */}
+            <div style={{
+              position: 'absolute',
+              width: 60,
+              height: 60,
+              marginLeft: -30,
+              marginTop: -30,
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${color}20 0%, ${color}08 40%, transparent 70%)`,
+              animation: 'tokenFlyHaze 0.8s ease-out forwards',
+            }} />
+            {/* Mid glow */}
+            <div style={{
+              position: 'absolute',
+              width: 30,
+              height: 30,
+              marginLeft: -15,
+              marginTop: -15,
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${color}55 0%, ${color}18 50%, transparent 100%)`,
+              animation: 'tokenFlyGlow 0.8s ease-out forwards',
+            }} />
+            {/* Core */}
+            <div style={{
+              position: 'absolute',
+              width: 14,
+              height: 14,
+              marginLeft: -7,
+              marginTop: -7,
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${color}ee 0%, ${color}99 40%, transparent 100%)`,
+              animation: 'tokenFlyCore 0.8s ease-out forwards',
+            }} />
+          </div>
         );
       })}
       {flyingOrbs.length > 0 && (
         <style>{`
           @keyframes tokenFlyIn {
             0% {
-              transform: translateY(0) scale(1.5);
-              opacity: 1;
+              transform: translateY(0) scale(1.8);
+              filter: blur(12px);
+              -webkit-filter: blur(12px);
+            }
+            60% {
+              filter: blur(4px);
+              -webkit-filter: blur(4px);
             }
             100% {
-              transform: translateY(calc(var(--fly-target-y) - ${size.height + 20}px)) scale(0.8);
-              opacity: 0.3;
+              transform: translateY(calc(var(--fly-target-y) - var(--fly-start-y))) scale(1);
+              filter: blur(0px);
+              -webkit-filter: blur(0px);
             }
+          }
+          @keyframes tokenFlyHaze {
+            0% { opacity: 0.3; transform: scale(2); }
+            100% { opacity: 0.6; transform: scale(1); }
+          }
+          @keyframes tokenFlyGlow {
+            0% { opacity: 0.2; transform: scale(1.8); }
+            100% { opacity: 0.8; transform: scale(1); }
+          }
+          @keyframes tokenFlyCore {
+            0% { opacity: 0.4; transform: scale(1.5); }
+            100% { opacity: 1; transform: scale(1); }
           }
         `}</style>
       )}
