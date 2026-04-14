@@ -431,7 +431,7 @@
       },
       {
         "event": "vote_outro",
-        "text": "That's might be all we need. You can put your phone down now, or continue to fill the pool."
+        "text": "That might be all we need. You can put your phone down now, or continue to fill the pool."
       },
       {
         "event": "pool_full",
@@ -445,47 +445,39 @@
     "vote": {
       "questions": [
         {
-          "text": "What does he need to hear?",
+          "text": "What does it mean, to be enough?",
           "answers": [
-            { "chapterId": "ambition", "label": "The truth about what he's chasing" },
-            { "chapterId": "love", "label": "That someone is still here" },
-            { "chapterId": "acceptance", "label": "That it's already enough" }
+            { "chapterId": "ambition", "label": "To have the courage to act imperfectly" },
+            { "chapterId": "love", "label": "To hold onto love, despite the flaws" },
+            { "chapterId": "acceptance", "label": "To accept yourself as you are" }
           ]
         },
         {
-          "text": "What is he running from?",
-          "answers": [
-            { "chapterId": "ambition", "label": "The fear of standing still" },
-            { "chapterId": "love", "label": "The people who got too close" },
-            { "chapterId": "acceptance", "label": "The person he already is" }
-          ]
-        },
-        {
-          "text": "What would make him stay?",
+          "text": "What makes us stay?",
           "answers": [
             { "chapterId": "ambition", "label": "Something worth building" },
             { "chapterId": "love", "label": "Someone worth staying for" },
-            { "chapterId": "acceptance", "label": "Realizing he's already home" }
+            { "chapterId": "acceptance", "label": "Realizing we're already home" }
           ]
         },
         {
-          "text": "What does he owe himself?",
+          "text": "What do we owe ourselves most?",
           "answers": [
-            { "chapterId": "ambition", "label": "The chance to prove it" },
+            { "chapterId": "ambition", "label": "A deep belief in ourself" },
             { "chapterId": "love", "label": "The grace to be held" },
             { "chapterId": "acceptance", "label": "The permission to rest" }
           ]
         },
         {
-          "text": "What is he afraid to say?",
+          "text": "What holds us together in the darkest moments?",
           "answers": [
-            { "chapterId": "ambition", "label": "That he doesn't know the way" },
-            { "chapterId": "love", "label": "That he needs someone" },
-            { "chapterId": "acceptance", "label": "That he's tired of fighting" }
+            { "chapterId": "ambition", "label": "The hope for a better future" },
+            { "chapterId": "love", "label": "Each other" },
+            { "chapterId": "acceptance", "label": "Knowing this, too, shall pass" }
           ]
         },
         {
-          "text": "What would it sound like if he forgave himself?",
+          "text": "What is the sound of forgiveness?",
           "answers": [
             { "chapterId": "ambition", "label": "A deep breath before starting again" },
             { "chapterId": "love", "label": "A voice saying 'I'm still here'" },
@@ -493,27 +485,27 @@
           ]
         },
         {
-          "text": "What part of him is still waiting?",
+          "text": "Which part of us needs nurturing most?",
           "answers": [
-            { "chapterId": "ambition", "label": "The part that never got its shot" },
-            { "chapterId": "love", "label": "The part that learned to hide" },
-            { "chapterId": "acceptance", "label": "The part that forgot how to stop" }
+            { "chapterId": "ambition", "label": "The inner child" },
+            { "chapterId": "love", "label": "The caregiver" },
+            { "chapterId": "acceptance", "label": "The lonely spirit" }
           ]
         },
         {
-          "text": "What does the silence sound like?",
+          "text": "?",
           "answers": [
-            { "chapterId": "ambition", "label": "An engine waiting to ignite" },
-            { "chapterId": "love", "label": "A room where someone just left" },
-            { "chapterId": "acceptance", "label": "Snow falling on still water" }
+            { "chapterId": "ambition", "label": "" },
+            { "chapterId": "love", "label": "" },
+            { "chapterId": "acceptance", "label": "" }
           ]
         },
         {
-          "text": "What would he build if failure didn't exist?",
+          "text": "What would we build if we were never afraid?",
           "answers": [
-            { "chapterId": "ambition", "label": "Something the world remembers" },
-            { "chapterId": "love", "label": "A place where no one leaves" },
-            { "chapterId": "acceptance", "label": "Nothing — just being would be enough" }
+            { "chapterId": "ambition", "label": "A legacy" },
+            { "chapterId": "love", "label": "A community" },
+            { "chapterId": "acceptance", "label": "A life of peace" }
           ]
         },
         {
@@ -731,7 +723,7 @@
       "chapter": "ambition",
       "thoughtsPerPerson": [1, 3, 5],
       "pool": [
-        ["What if they hate it?", "You're not ready", "This is a mistake", "Too late to stop", "They see right through you", "You're faking it", "Everyone knows", "It's already falling apart", "You peaked years ago", "Not good enough", "Try harder", "Still not enough", "Who asked you?", "Sit down", "Stay small"],
+        ["It'll only work once", "What happens when you stop?", "This is a mistake", "Past your prime", "Embarrassing...", "Fragile...", "It's already falling apart", "You peaked years ago", "Not good enough", "Still not enough"],
         ["Nobody's listening", "They're just being polite", "Stop while you're ahead", "You're boring them", "They want you to fail", "This is embarrassing", "You sound desperate", "The silence says everything", "Read the room", "They're laughing at you", "Cringe", "Do less", "Way too much", "Tone it down", "Spare us"],
         ["You'll never finish anything", "It was better in your head", "Walk away now", "This was always going to fail", "You don't have it", "Talent isn't real", "Give up gracefully", "Save some dignity", "Another abandoned project", "Classic you", "History repeating", "What's the point?", "Nobody cares", "Forget it", "Move on"]
       ]
@@ -740,18 +732,18 @@
       "chapter": "love",
       "thoughtsPerPerson": [1, 3, 5],
       "pool": [
-        ["You don't deserve this", "They'll leave eventually", "Don't get attached", "Walls up", "Keep your distance", "Love is a word", "It never lasts", "You know how this ends", "Protect yourself", "Don't be naive", "Hearts are fragile", "Yours especially", "Too vulnerable", "Close the door", "Stay guarded"],
-        ["You're too much", "You're not enough", "They're pretending", "It's pity", "They'll get bored", "You're a burden", "High maintenance", "They'll find someone better", "Don't get comfortable", "Enjoy it while it lasts", "The clock is ticking", "Already slipping", "Cracks showing", "Smile through it", "Fake it"],
-        ["Love is a trap", "You'll ruin it", "Run before they do", "Self-sabotage incoming", "Push them away first", "Better alone", "Safer alone", "You always do this", "Predictable destruction", "Watch yourself", "Here it comes", "The pattern repeats", "You can't help it", "Broken by design", "Unlovable"]
+        ["You don't deserve this", "They'll leave eventually", "Don't get attached", "Walls up", "Keep your distance", "It never lasts", "You know how this ends", "Protect yourself", "Don't be naive", "Hearts are fragile", "Too vulnerable", "Close the door", "Stay guarded"],
+        ["You're too much", "You're not enough", "They're pretending", "It's pity", "You're affectionless", "Faking it", "Burden.", "You're missing out", "Don't get comfortable", "Enjoy it while it lasts", "Clock's ticking..."],
+        ["You've ruined it", "You'll ruin it", "Run.", "Detach.", "Better alone", "Safer alone", "You always do this", "Predictable.", "Watch yourself", "You can't help it", "Unlovable"]
       ]
     },
     {
       "chapter": "acceptance",
       "thoughtsPerPerson": [1, 3, 5],
       "pool": [
-        ["Why bother?", "It won't matter", "Nothing changes", "Skip it", "Not worth the effort", "Save your energy", "Nobody notices", "Invisible is safe", "Path of least resistance", "Let it slide", "Numb is fine", "Detach", "Float away", "None of this is real", "Who cares"],
-        ["Just let it go", "You're wasting everyone's time", "Disappear", "Shrink smaller", "Take up less space", "Be invisible", "Melt into the background", "Don't make waves", "Quiet down", "Exist quieter", "Fade out", "Dissolve", "Evaporate", "Go transparent", "Be nothing"],
-        ["You were never going to finish", "Give up gracefully", "Silence is easier", "Void is comfortable", "Emptiness has no expectations", "Zero risk zero pain", "Already gone", "Checked out long ago", "The absence of trying", "Blissful apathy", "Sweet surrender", "White flag", "Done", "Gone", "Blank"]
+        ["Why bother?", "It won't matter", "Failure.", "Pitiful.", "Save your energy", "Nobody notices", "Easy way out", "Waste of space", "Work harder"],
+        ["Waste of time.", "Disappear.", "Melt into the background", "Fuck-up.", "Leave.", "Fade out", "Dissolve", "Go transparent", "Be nothing"],
+        ["You were never going to finish", "Fearful and sad", "Silence is easier", "Void is comfortable", "Emptiness has no expectations", "Already gone", "Checked out long ago", "The absence of trying", "Blissful apathy", "Sweet surrender", "White flag", "Done", "Gone", "Blank"]
       ]
     }
   ],

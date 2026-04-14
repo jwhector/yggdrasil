@@ -424,7 +424,7 @@ function transitionToPhase(state: ShowState, nextPhase: ShowPhase, seqIndex: num
       type: 'AUDIO_CUE',
       cue: {
         type: 'live_seed_stop',
-      attemptIndex: 3,
+        attemptIndex: 3,
         trackIndices: state.config.finale.soundscapeTrackIndices,
       },
     });
@@ -887,7 +887,8 @@ function handleRevealStakes(state: ShowState): ConductorEvent[] {
     attemptIndex: attempt.index,
     layerIndex: attempt.currentLayerIndex,
     threshold,
-  }];
+  },
+  { type: 'AUDIO_CUE', cue: { type: 'master_unduck' } }];
 }
 
 /**
