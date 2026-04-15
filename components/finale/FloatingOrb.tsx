@@ -57,7 +57,7 @@ export const FloatingOrb = memo(function FloatingOrb({
   const glowSize = radius * 5;   // 2.5x radius diameter
   const coreSize = radius * 2.4; // 1.2x radius diameter
 
-  const placedScale = isPlaced ? 0.6 : 1;
+  const placedScale = isPlaced ? 0.7 : 1;
   const dragScale = isDragging ? 1.4 : 1;
   const scale = placedScale * dragScale;
 
@@ -74,8 +74,8 @@ export const FloatingOrb = memo(function FloatingOrb({
         width: 0,
         height: 0,
         transform: `scale(${scale})`,
-        transition: isDragging ? 'none' : 'transform 0.3s ease, opacity 0.3s ease',
-        opacity: isPlaced && !isDragging ? 0.5 : 1,
+        transition: isDragging ? 'none' : 'transform 1s ease-out, opacity 1s ease-out',
+        opacity: 1,
         zIndex: isDragging ? 200 : 50,
         pointerEvents: onTouchStart ? 'auto' : 'none',
         touchAction: 'none',
@@ -95,20 +95,22 @@ export const FloatingOrb = memo(function FloatingOrb({
           }}
         />
       )}
-      {/* Outer haze */}
-      <div
-        style={{
-          position: 'absolute',
-          width: hazeSize,
-          height: hazeSize,
-          left: -hazeSize / 2,
-          top: -hazeSize / 2,
-          borderRadius: '50%',
-          background: `radial-gradient(circle, rgba(${r},${g},${b},${a * 0.12}) 0%, rgba(${r},${g},${b},${a * 0.04}) 40%, transparent 70%)`,
-          pointerEvents: 'none',
-        }}
-      />
-      {/* Mid glow */}
+      {/* Outer haze — suppressed when placed to keep orbs tight */}
+      {!isPlaced && (
+        <div
+          style={{
+            position: 'absolute',
+            width: hazeSize,
+            height: hazeSize,
+            left: -hazeSize / 2,
+            top: -hazeSize / 2,
+            borderRadius: '50%',
+            background: `radial-gradient(circle, rgba(${r},${g},${b},${a * 0.12}) 0%, rgba(${r},${g},${b},${a * 0.04}) 40%, transparent 70%)`,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      {/* Mid glow — tighter when placed */}
       <div
         style={{
           position: 'absolute',
@@ -117,7 +119,9 @@ export const FloatingOrb = memo(function FloatingOrb({
           left: -glowSize / 2,
           top: -glowSize / 2,
           borderRadius: '50%',
-          background: `radial-gradient(circle, rgba(${r},${g},${b},${a * 0.35}) 0%, rgba(${r},${g},${b},${a * 0.1}) 50%, transparent 100%)`,
+          background: isPlaced
+            ? `radial-gradient(circle, rgba(${r},${g},${b},${a * 0.5}) 0%, rgba(${r},${g},${b},${a * 0.15}) 50%, transparent 100%)`
+            : `radial-gradient(circle, rgba(${r},${g},${b},${a * 0.35}) 0%, rgba(${r},${g},${b},${a * 0.1}) 50%, transparent 100%)`,
           pointerEvents: 'none',
         }}
       />

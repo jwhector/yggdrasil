@@ -86,15 +86,15 @@ function AudienceContent() {
     }
   }, [remixView, floatingOrbs]);
 
-  // Tally + socket events for remix phase
+  // Tally + socket events for remix phase — use animated recall for decay/scatter
   const handleOrbDecayed = useCallback((orbIndex: number) => {
     const orb = floatingOrbs.orbs[orbIndex];
-    if (orb) floatingOrbs.recallOrb(orb.id);
+    if (orb) floatingOrbs.animateRecallOrb(orb.id);
   }, [floatingOrbs]);
 
   const handleScatter = useCallback(() => {
     for (const orb of floatingOrbs.orbs) {
-      if (orb.placedOnNode) floatingOrbs.recallOrb(orb.id);
+      if (orb.placedOnNode) floatingOrbs.animateRecallOrb(orb.id);
     }
   }, [floatingOrbs]);
 
@@ -223,15 +223,32 @@ function AudienceContent() {
             pointerEvents: 'none',
           }}
         >
-          {floatingOrbs.orbs.map(orb => {
+          {floatingOrbs.orbs.map((orb) => {
             const isDragging = dragOrbId === orb.id;
             const isPlaced = orb.placedOnNode !== null;
             const canDrag = phase === 'finale_remix';
             const bloom = orb.age >= 1 ? 1 : 1 - Math.pow(1 - orb.age, 3);
 
-            // Use drag position when being dragged, otherwise orb's physics position
-            const displayX = isDragging && dragPos ? dragPos.x : orb.x;
-            const displayY = isDragging && dragPos ? dragPos.y : orb.y;
+            // Spread placed orbs around the node edge
+            let displayX = orb.x;
+            let displayY = orb.y;
+            if (isDragging && dragPos) {
+              displayX = dragPos.x;
+              displayY = dragPos.y;
+            } else if (isPlaced && orb.placedOnNode) {
+              const nodePos = remixRef.current?.getNodeViewportPosition(orb.placedOnNode);
+              if (nodePos) {
+                // Count how many of our orbs are on this same node (and our position among them)
+                const siblingsOnNode = floatingOrbs.orbs.filter(o => o.placedOnNode === orb.placedOnNode);
+                const myIndex = siblingsOnNode.indexOf(orb);
+                const count = siblingsOnNode.length;
+                const spreadRadius = 14 + count * 2; // grows slightly with more orbs
+                const angleOffset = -Math.PI / 2; // start from top
+                const angle = angleOffset + (myIndex / count) * Math.PI * 2;
+                displayX = nodePos.x + Math.cos(angle) * spreadRadius;
+                displayY = nodePos.y + Math.sin(angle) * spreadRadius;
+              }
+            }
 
             return (
               <FloatingOrb
@@ -301,6 +318,16 @@ function AudienceContent() {
           granularTypes={remixView.granularTypes ?? state.config.granularTypes}
           fallbackMode={remixView.fallbackMode ?? false}
           hoverNode={hoverNode}
+          onResetOrbs={() => {
+            // Emit recall for each placed orb to the server
+            for (const orb of floatingOrbs.orbs) {
+              if (orb.placedOnNode) {
+                remix.emitRecallOrb(orb.index);
+              }
+            }
+            // Animated spring return for all orbs
+            floatingOrbs.resetAllOrbs();
+          }}
         />
       )}
 

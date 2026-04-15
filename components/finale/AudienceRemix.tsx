@@ -27,6 +27,7 @@ export interface AudienceRemixProps {
   granularTypes: GranularType[];
   fallbackMode: boolean;
   hoverNode: string | null;  // Which node is being hovered during drag
+  onResetOrbs?: () => void;  // Return all orbs to floating positions
 }
 
 /** Exposed to parent for drag hit-testing. */
@@ -52,7 +53,7 @@ interface NodePosition {
 
 const RATIO = {
   node: 0.2,
-  seed: 0.16,
+  seed: 0.28,   // Larger than outer nodes (0.2) — matches projector skeleton proportions
   snap: 0.35,
   centerY: 0.42,
 };
@@ -133,7 +134,7 @@ function computeHeight(w: number): number {
 // ============================================================================
 
 export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>(
-  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode }, ref) {
+  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, onResetOrbs }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -157,7 +158,7 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
     const nodePositions = computeNodePositions(layout);
     const allNodePositions = [
       ...nodePositions,
-      { id: 'seed', x: layout.centerX, y: layout.centerY, label: 'SEED', symbol: '\u2726', color: '#e5e5e5' },
+      { id: 'seed', x: layout.centerX, y: layout.centerY, label: 'HEART', symbol: '\u2726', color: '#e5e5e5' },
     ];
 
     // Expose node hit-testing to parent
@@ -243,6 +244,11 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
                 const hasTally = tally && tally.votes.length > 0;
                 const r = node.id === 'seed' ? layout.seedRadius : layout.nodeRadius;
 
+                // Resolve dominant chapter color for node fill
+                const dominantId = tally?.dominantChapter ?? null;
+                const dominantChapter = dominantId ? chapters.find(c => c.id === dominantId) : null;
+                const activeColor = dominantChapter?.color ?? null;
+
                 return (
                   <g key={node.id}>
                     {hasTally && (
@@ -260,9 +266,14 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
                       cx={node.x}
                       cy={node.y}
                       r={r}
-                      fill={isHover ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)'}
-                      stroke={isHover ? 'rgba(255,255,255,0.4)' : tally?.locked ? `${node.color}88` : 'rgba(255,255,255,0.1)'}
-                      strokeWidth={isHover ? 2 : 1}
+                      fill={isHover ? 'rgba(255,255,255,0.06)' : 'none'}
+                      stroke={
+                        isHover ? 'rgba(255,255,255,0.4)'
+                        : activeColor ? `${activeColor}88`
+                        : tally?.locked ? `${node.color}88`
+                        : 'rgba(255,255,255,0.1)'
+                      }
+                      strokeWidth={isHover ? 2 : activeColor ? 1.5 : 1}
                       strokeDasharray={tally?.locked ? '3 2' : undefined}
                     />
 
@@ -277,19 +288,17 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
                       {node.symbol}
                     </text>
 
-                    {node.id !== 'seed' && (
-                      <text
-                        x={node.x}
-                        y={node.y + r + Math.max(10, r * 0.5)}
-                        textAnchor="middle"
-                        fill="rgba(255,255,255,0.2)"
-                        fontSize={Math.max(7, Math.round(r * 0.35))}
-                        fontWeight={500}
-                        letterSpacing="0.08em"
-                      >
-                        {node.label}
-                      </text>
-                    )}
+                    <text
+                      x={node.x}
+                      y={node.y + r + TALLY_GAP_PX + tallyMaxExtend + Math.max(6, r * 0.3)}
+                      textAnchor="middle"
+                      fill="rgba(255,255,255,0.2)"
+                      fontSize={Math.max(7, Math.round(layout.nodeRadius * 0.35))}
+                      fontWeight={500}
+                      letterSpacing="0.08em"
+                    >
+                      {node.label}
+                    </text>
 
                     {tally?.locked && (
                       <text
@@ -319,6 +328,30 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
         }}>
           YOUR ORBS SHAPE THE MUSIC
         </p>
+
+        {onResetOrbs && (
+          <button
+            onClick={onResetOrbs}
+            style={{
+              marginTop: '12px',
+              padding: '8px 20px',
+              borderRadius: '6px',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.04)',
+              color: 'rgba(255,255,255,0.3)',
+              fontSize: '0.65rem',
+              fontWeight: 500,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+              touchAction: 'manipulation',
+              outline: 'none',
+            }}
+          >
+            Reset intentions
+          </button>
+        )}
       </div>
     );
   }

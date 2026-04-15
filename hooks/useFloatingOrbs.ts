@@ -40,7 +40,12 @@ export interface UseFloatingOrbsReturn {
   orbs: FloatingOrbState[];
   addOrb: (chapterId: string, x: number, y: number) => void;
   placeOrb: (orbId: string, nodeId: string) => void;
+  /** Recall a single orb — instant reposition to home with fade-in (used after drag release). */
   recallOrb: (orbId: string) => void;
+  /** Recall a single orb with animated spring return (used for decay/scatter). */
+  animateRecallOrb: (orbId: string) => void;
+  /** Recall all placed orbs with animated spring return (used for "Reset intentions" button). */
+  resetAllOrbs: () => void;
   reconcileWithServer: (serverOrbs: AudienceOrb[]) => void;
   setPlacedPosition: (orbId: string, x: number, y: number) => void;
   /** Set the ID of the orb currently being dragged — skips spring physics for it. */
@@ -209,11 +214,37 @@ export function useFloatingOrbs(): UseFloatingOrbsReturn {
     const orb = orbsRef.current.find(o => o.id === orbId);
     if (orb) {
       orb.placedOnNode = null;
-      // Give it a small velocity toward home for a natural return
-      orb.vx = (orb.homeX - orb.x) * 0.05;
-      orb.vy = (orb.homeY - orb.y) * 0.05;
+      // Instant snap to home — fade back in via bloom reset
+      orb.x = orb.homeX;
+      orb.y = orb.homeY;
+      orb.vx = 0;
+      orb.vy = 0;
+      orb.age = 0; // Full bloom from zero — matches projector's 0.5s ease-out
       setRenderTick(t => t + 1);
     }
+  }, []);
+
+  const animateRecallOrb = useCallback((orbId: string) => {
+    const orb = orbsRef.current.find(o => o.id === orbId);
+    if (orb) {
+      orb.placedOnNode = null;
+      // Animated spring return — give velocity toward home
+      orb.vx = (orb.homeX - orb.x) * 0.08;
+      orb.vy = (orb.homeY - orb.y) * 0.08;
+      setRenderTick(t => t + 1);
+    }
+  }, []);
+
+  const resetAllOrbs = useCallback(() => {
+    for (const orb of orbsRef.current) {
+      if (orb.placedOnNode) {
+        orb.placedOnNode = null;
+        // Animated spring return — give velocity toward home
+        orb.vx = (orb.homeX - orb.x) * 0.08;
+        orb.vy = (orb.homeY - orb.y) * 0.08;
+      }
+    }
+    setRenderTick(t => t + 1);
   }, []);
 
   const setPlacedPosition = useCallback((orbId: string, x: number, y: number) => {
@@ -272,5 +303,5 @@ export function useFloatingOrbs(): UseFloatingOrbsReturn {
   void renderTick;
   const orbs = orbsRef.current;
 
-  return { orbs, addOrb, placeOrb, recallOrb, reconcileWithServer, setPlacedPosition, setDragging };
+  return { orbs, addOrb, placeOrb, recallOrb, animateRecallOrb, resetAllOrbs, reconcileWithServer, setPlacedPosition, setDragging };
 }
