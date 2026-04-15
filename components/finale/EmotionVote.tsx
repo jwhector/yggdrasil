@@ -12,7 +12,6 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import type { Socket } from 'socket.io-client';
 import type { ChapterConfig, QuestionConfig } from '@/conductor/types';
 import { getChapterIdentity } from '@/lib/identity';
 
@@ -20,20 +19,18 @@ import { getChapterIdentity } from '@/lib/identity';
 // Types
 // ============================================================================
 
-type VoteStage = 'intro' | 'question' | 'fly_animation' | 'npc_outro' | 'phones_down';
+type VoteStage = 'intro' | 'question' | 'fly_animation' | 'done';
 
 interface EmotionVoteProps {
-  socket: Socket | null;
   questions: QuestionConfig[];
   initialAnsweredCount: number;
-  poolCapReached: boolean;
   chapters: ChapterConfig[];
   npcIntro: string[];
-  npcOutro: string | null;
   alarmColor: string;
   shuffleQuestions: boolean;
   userId: string;
   emit: (event: string, data: unknown) => void;
+  onOrbLanded?: (chapterId: string, position: { x: number; y: number }) => void;
 }
 
 // ============================================================================
@@ -84,22 +81,19 @@ function shuffleWithSeed<T>(items: readonly T[], seed: string): T[] {
 // ============================================================================
 
 export function EmotionVote({
-  socket,
   questions,
   initialAnsweredCount,
-  poolCapReached,
   chapters,
   npcIntro,
-  npcOutro,
   alarmColor,
   shuffleQuestions,
   userId,
   emit,
+  onOrbLanded,
 }: EmotionVoteProps) {
-  const [stage, setStage] = useState<VoteStage>(poolCapReached ? 'phones_down' : 'intro');
+  const allDone = initialAnsweredCount >= questions.length;
+  const [stage, setStage] = useState<VoteStage>(allDone ? 'done' : 'intro');
   const [questionIndex, setQuestionIndex] = useState(initialAnsweredCount);
-  const [phonesDown, setPhonesDown] = useState(poolCapReached);
-  const [hasShownOutro, setHasShownOutro] = useState(false);
 
   // Build the ordered questions list (shuffled or linear)
   const orderedQuestions = useMemo(() => {
@@ -122,30 +116,6 @@ export function EmotionVote({
 
   // Intro confirmation button visibility
   const [introConfirmVisible, setIntroConfirmVisible] = useState(false);
-
-  // ============================================================================
-  // Socket listeners
-  // ============================================================================
-
-  useEffect(() => {
-    if (!socket) return;
-
-    const handlePhonesDown = () => {
-      setPhonesDown(true);
-      setStage('phones_down');
-    };
-
-    socket.on('phones_down', handlePhonesDown);
-    return () => { socket.off('phones_down', handlePhonesDown); };
-  }, [socket]);
-
-  // Update phones-down from props
-  useEffect(() => {
-    if (poolCapReached) {
-      setPhonesDown(true);
-      setStage('phones_down');
-    }
-  }, [poolCapReached]);
 
   // ============================================================================
   // NPC Typewriter
@@ -212,57 +182,37 @@ export function EmotionVote({
   // ============================================================================
 
   const handleAnswerTap = useCallback((chapterId: string) => {
-    if (!currentQuestion || stage !== 'question' || phonesDown || flyChapterId) return;
+    if (!currentQuestion || stage !== 'question' || flyChapterId) return;
 
     const tappedQuestionIndex = questionIndex;
 
+    // Pre-compute landing position for the persistent orb
+    const landingX = window.innerWidth * (0.2 + Math.random() * 0.6);
+    const landingY = window.innerHeight * (0.08 + Math.random() * 0.17);
+
     setFlyChapterId(chapterId);
 
-    // After collapse + fly complete → advance question, emit to server
+    // After collapse + fly complete → spawn persistent orb, advance question, emit to server
     setTimeout(() => {
+      onOrbLanded?.(chapterId, { x: landingX, y: landingY });
+
       emit('submit_emotion', {
         chapterId,
         questionIndex: tappedQuestionIndex,
       });
 
-      setQuestionIndex(prev => prev + 1);
+      const nextIndex = questionIndex + 1;
+      setQuestionIndex(nextIndex);
       setFlyChapterId(null);
 
-      if (phonesDown) {
-        setStage('phones_down');
-      } else if (!hasShownOutro) {
-        setHasShownOutro(true);
-        setStage('npc_outro');
+      // If more questions remain, show the next one; otherwise done
+      if (nextIndex >= orderedQuestions.length) {
+        setStage('done');
       } else {
         setStage('question');
       }
     }, TOTAL_FLY_MS);
-  }, [currentQuestion, stage, phonesDown, flyChapterId, emit, questionIndex, hasShownOutro]);
-
-  // ============================================================================
-  // NPC outro stage (shown once after first answer)
-  // ============================================================================
-
-  useEffect(() => {
-    if (stage !== 'npc_outro') return;
-    const outroMessages = npcOutro ? [npcOutro] : [];
-    const cleanup = typewriterPlay(outroMessages, () => {
-      // Typing done — continue button will show
-    });
-    return cleanup;
-  }, [stage, npcOutro, typewriterPlay]);
-
-  const handleContinue = useCallback(() => {
-    setNpcDisplayText('');
-    setNpcTypingDone(false);
-
-    if (phonesDown || questionIndex >= orderedQuestions.length) {
-      setStage('phones_down');
-      return;
-    }
-
-    setStage('question');
-  }, [phonesDown, questionIndex, orderedQuestions.length]);
+  }, [currentQuestion, stage, flyChapterId, emit, questionIndex, orderedQuestions.length, onOrbLanded]);
 
   // ============================================================================
   // Render helpers
@@ -347,12 +297,11 @@ export function EmotionVote({
   // Stage renders
   // ============================================================================
 
-  if (stage === 'phones_down') {
+  if (stage === 'done') {
     return (
       <div style={styles.container}>
         <div style={styles.phonesDown}>
-          <div style={styles.phonesDownText}>Put your phone down.</div>
-          <div style={styles.phonesDownSub}>Listen.</div>
+          <div style={styles.phonesDownText}>Your intentions have been heard.</div>
         </div>
       </div>
     );
@@ -385,28 +334,6 @@ export function EmotionVote({
     return (
       <div style={styles.container}>
         {renderAnswerCards()}
-        <style>{keyframes}</style>
-      </div>
-    );
-  }
-
-  if (stage === 'npc_outro') {
-    return (
-      <div style={styles.container}>
-        <div style={styles.outroContent}>
-          {renderNpc()}
-          {npcTypingDone && (
-            <button
-              onClick={handleContinue}
-              style={{
-                ...styles.continueButton,
-                animation: 'fadeIn 0.6s ease forwards',
-              }}
-            >
-              Continue
-            </button>
-          )}
-        </div>
         <style>{keyframes}</style>
       </div>
     );

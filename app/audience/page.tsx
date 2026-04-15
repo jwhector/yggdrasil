@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useRef, useCallback, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useShowState } from '@/hooks/useShowState';
@@ -14,8 +14,12 @@ import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts'
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
 import { EmotionVote } from '@/components/finale/EmotionVote';
+import { AudienceRemix, type AudienceRemixHandle } from '@/components/finale/AudienceRemix';
+import { FloatingOrb } from '@/components/finale/FloatingOrb';
+import { useFloatingOrbs } from '@/hooks/useFloatingOrbs';
+import { useAudienceRemix } from '@/hooks/useAudienceRemix';
 import { MedistationLobby } from '@/components/MedistationLobby';
-import type { AudienceAttemptView, AudienceVoteView, AuditionProgress as AuditionProgressData } from '@/conductor/types';
+import type { AudienceAttemptView, AudienceVoteView, AudienceRemixView, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -54,9 +58,140 @@ function AudienceContent() {
     currentAttempt?.currentLayerPhase,
   );
 
+  // Floating orbs — persist across vote and remix phases
+  const floatingOrbs = useFloatingOrbs();
+  const remixRef = useRef<AudienceRemixHandle>(null);
+  const reconciled = useRef(false);
+
+  // Drag state for floating orbs during remix
+  const [dragOrbId, setDragOrbId] = useState<string | null>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [hoverNode, setHoverNode] = useState<string | null>(null);
+
+  // When an orb lands after the EmotionVote fly animation
+  const handleOrbLanded = useCallback((chapterId: string, position: { x: number; y: number }) => {
+    floatingOrbs.addOrb(chapterId, position.x, position.y);
+  }, [floatingOrbs]);
+
+  // Reconcile floating orbs with server state when remix starts
+  const phase = state?.phase;
+  const remixView = phase === 'finale_remix' && state?.myFinale
+    ? state.myFinale as unknown as AudienceRemixView
+    : null;
+
+  useEffect(() => {
+    if (remixView && !reconciled.current) {
+      reconciled.current = true;
+      floatingOrbs.reconcileWithServer(remixView.orbs ?? []);
+    }
+  }, [remixView, floatingOrbs]);
+
+  // Tally + socket events for remix phase — use animated recall for decay/scatter
+  const handleOrbDecayed = useCallback((orbIndex: number) => {
+    const orb = floatingOrbs.orbs[orbIndex];
+    if (orb) floatingOrbs.animateRecallOrb(orb.id);
+  }, [floatingOrbs]);
+
+  const handleScatter = useCallback(() => {
+    for (const orb of floatingOrbs.orbs) {
+      if (orb.placedOnNode) floatingOrbs.animateRecallOrb(orb.id);
+    }
+  }, [floatingOrbs]);
+
+  const remix = useAudienceRemix(
+    socket,
+    remixView?.nodeTallies ?? [],
+    remixView?.enabledNodes ?? [],
+    handleOrbDecayed,
+    handleScatter,
+  );
+
+  // Orb touch drag handlers — use document-level listeners for move/end
+  // so they work regardless of pointer-events on intermediate layers
+  const dragOrbIdRef = useRef<string | null>(null);
+
+  const handleOrbTouchStart = useCallback((orbId: string, e: React.TouchEvent) => {
+    if (phase !== 'finale_remix') return;
+    e.preventDefault();
+    setDragOrbId(orbId);
+    dragOrbIdRef.current = orbId;
+    floatingOrbs.setDragging(orbId);
+    const touch = e.touches[0];
+    setDragPos({ x: touch.clientX, y: touch.clientY });
+    const node = remixRef.current?.findNode(touch.clientX, touch.clientY) ?? null;
+    setHoverNode(node);
+  }, [phase, floatingOrbs]);
+
+  useEffect(() => {
+    if (!dragOrbId) return;
+
+    const onMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      setDragPos({ x: touch.clientX, y: touch.clientY });
+      const node = remixRef.current?.findNode(touch.clientX, touch.clientY) ?? null;
+      setHoverNode(node);
+    };
+
+    const onEnd = () => {
+      const currentDragId = dragOrbIdRef.current;
+      if (!currentDragId) return;
+      const orb = floatingOrbs.orbs.find(o => o.id === currentDragId);
+
+      // Use the last hover node from state for drop target
+      setHoverNode(currentHover => {
+        if (currentHover && orb) {
+          floatingOrbs.placeOrb(currentDragId, currentHover);
+          remix.emitPlaceOrb(orb.index, currentHover);
+          const nodePos = remixRef.current?.getNodeViewportPosition(currentHover);
+          if (nodePos) floatingOrbs.setPlacedPosition(currentDragId, nodePos.x, nodePos.y);
+        } else if (orb?.placedOnNode) {
+          floatingOrbs.recallOrb(currentDragId);
+          remix.emitRecallOrb(orb.index);
+        }
+        return null;
+      });
+
+      setDragOrbId(null);
+      setDragPos(null);
+      dragOrbIdRef.current = null;
+      floatingOrbs.setDragging(null);
+    };
+
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
+
+    return () => {
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+    };
+  }, [dragOrbId, floatingOrbs, remix]);
+
   const handleVote = (choice: 'A' | 'B') => {
     emit('vote', { choice });
   };
+
+  // Lock scroll during finale phases to prevent pull-to-refresh and bouncing
+  useEffect(() => {
+    const isFinale = phase === 'finale_vote' || phase === 'finale_remix';
+    if (!isFinale) return;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
+
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+      document.body.style.height = '';
+    };
+  }, [phase]);
 
   // Loading / not yet connected
   if (isLoading || !state) {
@@ -68,9 +203,8 @@ function AudienceContent() {
     );
   }
 
-  const { phase, paused } = state;
-
-  console.log(state);
+  const { paused } = state;
+  const showOrbs = floatingOrbs.orbs.length > 0 && (phase === 'finale_vote' || phase === 'finale_remix');
 
   return (
     <Screen>
@@ -79,6 +213,60 @@ function AudienceContent() {
 
       {/* Disconnect overlay */}
       <DisconnectOverlay connectionState={connectionState} hasGivenUp={hasGivenUp} onReconnect={reconnect} />
+
+      {/* Persistent floating orb layer — above phase content */}
+      {showOrbs && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 60,
+            pointerEvents: 'none',
+          }}
+        >
+          {floatingOrbs.orbs.map((orb) => {
+            const isDragging = dragOrbId === orb.id;
+            const isPlaced = orb.placedOnNode !== null;
+            const canDrag = phase === 'finale_remix';
+            const bloom = orb.age >= 1 ? 1 : 1 - Math.pow(1 - orb.age, 3);
+
+            // Spread placed orbs around the node edge
+            let displayX = orb.x;
+            let displayY = orb.y;
+            if (isDragging && dragPos) {
+              displayX = dragPos.x;
+              displayY = dragPos.y;
+            } else if (isPlaced && orb.placedOnNode) {
+              const nodePos = remixRef.current?.getNodeViewportPosition(orb.placedOnNode);
+              if (nodePos) {
+                // Count how many of our orbs are on this same node (and our position among them)
+                const siblingsOnNode = floatingOrbs.orbs.filter(o => o.placedOnNode === orb.placedOnNode);
+                const myIndex = siblingsOnNode.indexOf(orb);
+                const count = siblingsOnNode.length;
+                const spreadRadius = 14 + count * 2; // grows slightly with more orbs
+                const angleOffset = -Math.PI / 2; // start from top
+                const angle = angleOffset + (myIndex / count) * Math.PI * 2;
+                displayX = nodePos.x + Math.cos(angle) * spreadRadius;
+                displayY = nodePos.y + Math.sin(angle) * spreadRadius;
+              }
+            }
+
+            return (
+              <FloatingOrb
+                key={orb.id}
+                x={displayX}
+                y={displayY}
+                radius={orb.radius}
+                color={orb.color}
+                opacity={bloom}
+                isDragging={isDragging}
+                isPlaced={isPlaced}
+                onTouchStart={canDrag ? (e) => handleOrbTouchStart(orb.id, e) : undefined}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* Phase routing */}
       {phase === 'lobby' && (
@@ -107,27 +295,39 @@ function AudienceContent() {
         const voteView = state.myFinale as unknown as AudienceVoteView;
         return (
           <EmotionVote
-            socket={socket}
             questions={voteView.questions ?? []}
             initialAnsweredCount={voteView.answeredCount}
-            poolCapReached={voteView.poolCapReached}
             chapters={voteView.chapters}
             npcIntro={voteView.npcIntro ?? []}
-            npcOutro={voteView.npcOutro ?? null}
             alarmColor={voteView.alarmColor ?? '#ff0000'}
             shuffleQuestions={voteView.shuffleQuestions ?? false}
             userId={state.userId}
             emit={emit}
+            onOrbLanded={handleOrbLanded}
           />
         );
       })()}
 
-      {phase === 'finale_remix' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
-          <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
-            LISTEN
-          </p>
-        </div>
+      {phase === 'finale_remix' && remixView && (
+        <AudienceRemix
+          ref={remixRef}
+          tallies={remix.tallies}
+          chapters={remixView.chapters ?? state.config.chapters}
+          granularTypes={remixView.granularTypes ?? state.config.granularTypes}
+          fallbackMode={remixView.fallbackMode ?? false}
+          hoverNode={hoverNode}
+          enabledNodes={remix.enabledNodes}
+          onResetOrbs={() => {
+            // Emit recall for each placed orb to the server
+            for (const orb of floatingOrbs.orbs) {
+              if (orb.placedOnNode) {
+                remix.emitRecallOrb(orb.index);
+              }
+            }
+            // Animated spring return for all orbs
+            floatingOrbs.resetAllOrbs();
+          }}
+        />
       )}
 
       {phase === 'ended' && (

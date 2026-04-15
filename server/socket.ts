@@ -167,12 +167,39 @@ export function setupSocketHandlers(
   }, POOL_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
+  // Node tally broadcast (~2 Hz during finale_remix with audience orbs)
+  // ============================================================================
+
+  const tallyBroadcastInterval = setInterval(() => {
+    const state = getState();
+    if (state.phase !== 'finale_remix') return;
+
+    const fs = state.finaleState as FinaleState | null;
+    if (!fs || fs.fallbackMode) return;
+    if (fs.nodeTallies.size === 0) return;
+
+    const tallies = Array.from(fs.nodeTallies.entries()).map(([granularType, tally]) => ({
+      granularType,
+      dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,
+      locked: tally.locked,
+      votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+    }));
+
+    const enabledNodes = Array.from(fs.enabledNodes);
+
+    io.to('projector').emit('node_tally', { tallies, enabledNodes });
+    io.to('controller').emit('node_tally', { tallies, enabledNodes });
+    io.to('audience').emit('node_tally', { tallies, enabledNodes });
+  }, POOL_STATE_BROADCAST_INTERVAL_MS);
+
+  // ============================================================================
   // Cleanup
   // ============================================================================
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
     clearInterval(poolStateBroadcastInterval);
+    clearInterval(tallyBroadcastInterval);
   });
 
   // ============================================================================
@@ -417,7 +444,93 @@ export function setupSocketHandlers(
       persistence.saveState(state);
       persistence.saveFinaleVote(state.id, userId, data.chapterId, data.questionIndex);
 
-      await broadcastEvents(io, events, state);
+      // Lightweight emit — skip full state_sync broadcast (pool counts reach
+      // projector/controller via the 2Hz pool_state interval instead).
+      // Only emit targeted events to the submitting user + projector.
+      for (const event of events) {
+        if (event.type === 'EMOTION_RECEIVED') {
+          const er = event as { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number };
+          socket.emit('emotion_confirmed', { chapterId: er.chapterId, questionIndex: er.questionIndex });
+          io.to('projector').emit('token_fly', { chapterId: er.chapterId });
+        } else if (event.type === 'NEXT_QUESTION') {
+          const nq = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: Array<{ chapterId: string; label: string }> | null };
+          socket.emit('question', {
+            questionIndex: nq.questionIndex,
+            text: nq.questionText,
+            answers: nq.answers ?? null,
+            chapters: state.config.chapters ?? [],
+          });
+        }
+      }
+
+      // Emit vote progress to controller for live completion tracking
+      const fs = state.finaleState as FinaleState | null;
+      if (fs) {
+        const totalQuestions = state.config.finale.vote?.questions?.length ?? 0;
+        let completedUsers = 0;
+        for (const [, count] of fs.vote.questionsAnsweredByUser) {
+          if (count >= totalQuestions) completedUsers++;
+        }
+        io.to('controller').emit('vote_progress', {
+          completedUsers,
+          totalUsers: state.users.size,
+          totalOrbs: fs.pool.tokens.length,
+        });
+      }
+    });
+
+    // ------------------------------------------------------------------
+    // place_orb — audience places an orb on a remix node
+    //
+    // Payload: { orbIndex: number; granularType: string }
+    // userId taken from socket session (not payload) for security.
+    // ------------------------------------------------------------------
+    socket.on('place_orb', async (data: { orbIndex: number; granularType: string }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] place_orb rejected: no userId on socket');
+        return;
+      }
+
+      const state = getState();
+      if (state.phase !== 'finale_remix') return;
+
+      const events = processCommand(state, {
+        type: 'PLACE_ORB',
+        userId,
+        orbIndex: data.orbIndex,
+        granularType: data.granularType,
+      });
+
+      setState(state, events);
+      // Lightweight — skip full state_sync. Tallies reach all clients via 2Hz node_tally.
+      // AUDIO_CUE events are processed by the setState hook (audio router).
+    });
+
+    // ------------------------------------------------------------------
+    // recall_orb — audience recalls an orb back to hand
+    //
+    // Payload: { orbIndex: number }
+    // userId taken from socket session (not payload) for security.
+    // ------------------------------------------------------------------
+    socket.on('recall_orb', async (data: { orbIndex: number }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] recall_orb rejected: no userId on socket');
+        return;
+      }
+
+      const state = getState();
+      if (state.phase !== 'finale_remix') return;
+
+      const events = processCommand(state, {
+        type: 'RECALL_ORB',
+        userId,
+        orbIndex: data.orbIndex,
+      });
+
+      setState(state, events);
+      // Lightweight — skip full state_sync. Tallies reach all clients via 2Hz node_tally.
     });
 
     // ------------------------------------------------------------------
@@ -640,15 +753,18 @@ export async function broadcastEvents(
         break;
       }
 
-      case 'POOL_CAP_REACHED':
-        // Phones go dark when pool cap is reached
-        io.to('audience').emit('phones_down');
-        break;
+      // POOL_CAP_REACHED removed — everyone answers orbsPerPerson questions, no cap
 
-      case 'REMIX_STARTED':
-        // Phones go dark when remix begins
-        io.to('audience').emit('phones_down');
+      case 'REMIX_STARTED': {
+        // In audience swarm mode, audience keeps their phones for orb placement.
+        // In performer-only mode, phones go dark.
+        const fs = state.finaleState as FinaleState | null;
+        const hasAudienceOrbs = fs && fs.audienceOrbs.size > 0;
+        if (!hasAudienceOrbs) {
+          io.to('audience').emit('phones_down');
+        }
         break;
+      }
 
       case 'TOKEN_ACTIVATED': {
         const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
@@ -677,6 +793,38 @@ export async function broadcastEvents(
           chapterId: null,
           status: 'silent',
         });
+        break;
+      }
+
+      case 'ORB_DECAYED': {
+        // Notify the specific audience member that their orb decayed
+        const od = event as { type: 'ORB_DECAYED'; userId: UserId; orbIndex: number; granularType: string };
+        const audienceSocksForDecay = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForDecay) {
+          if ((s as any).userId === od.userId) {
+            s.emit('orb_decayed', { orbIndex: od.orbIndex, granularType: od.granularType });
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'NODES_SCATTERED': {
+        // Notify affected audience members that their orbs were scattered
+        const ns2 = event as { type: 'NODES_SCATTERED'; granularType: string | null; affectedUsers: UserId[] };
+        const audienceSocksForScatter = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForScatter) {
+          const uid = (s as any).userId as UserId | undefined;
+          if (uid && ns2.affectedUsers.includes(uid)) {
+            s.emit('scatter', { granularType: ns2.granularType });
+          }
+        }
+        break;
+      }
+
+      case 'FALLBACK_ACTIVATED': {
+        // Performer took over — send phones_down to audience
+        io.to('audience').emit('phones_down');
         break;
       }
 
@@ -746,7 +894,6 @@ export function filterStateForClient(
             totalByChapter: Array.from(finaleFs.pool.totalByChapter.entries()).map(([chapterId, count]) => ({ chapterId, count })),
             totalRemaining: finaleFs.pool.totalRemaining,
             targetPoolSize: finaleFs.pool.targetPoolSize,
-            poolCapReached: finaleFs.vote.poolCapReached,
           },
           active: Array.from(finaleFs.active.entries()).map(([granularType, node]) => ({
             granularType,
@@ -764,6 +911,15 @@ export function filterStateForClient(
           loopProgress: finaleFs.loopProgress,
           audienceInteraction: finaleFs.audienceInteraction,
           npcMessage: finaleFs.npc.currentMessage,
+          fallbackMode: finaleFs.fallbackMode,
+          nodeTallies: Array.from(finaleFs.nodeTallies.entries()).map(([granularType, tally]) => ({
+            granularType,
+            dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,
+            locked: tally.locked,
+            votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+          })),
+          orbDecayLoops: finaleFs.orbDecayLoops,
+          instantCrossfade: finaleFs.instantCrossfade,
         };
       }
 
@@ -822,18 +978,32 @@ export function filterStateForClient(
             finalePhase: 'vote',
             questions: voteConfig?.questions ?? [],
             answeredCount,
-            poolCapReached: fs.vote.poolCapReached,
             chapters: state.config.chapters ?? [],
             npcMessage: fs.npc.currentMessage,
             npcIntro,
-            npcOutro,
             alarmColor: voteConfig?.alarmColor ?? '#ff0000',
             shuffleQuestions: voteConfig?.shuffleQuestions ?? false,
           };
         } else if (state.phase === 'finale_remix') {
+          const userOrbs = fs.audienceOrbs.get(userId);
           myFinale = {
             finalePhase: 'remix',
             npcMessage: fs.npc.currentMessage,
+            fallbackMode: fs.fallbackMode,
+            orbs: userOrbs?.orbs ?? [],
+            nodeTallies: Array.from(fs.nodeTallies.entries()).map(([granularType, tally]) => ({
+              granularType,
+              votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+              dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,
+              locked: tally.locked,
+              lockedChapter: tally.lockedChapter,
+            })),
+            chapters: state.config.chapters ?? [],
+            granularTypes: state.config.granularTypes ?? [],
+            enabledNodes: Array.from(fs.enabledNodes),
+            orbDecayLoops: fs.orbDecayLoops,
+            instantCrossfade: fs.instantCrossfade,
+            loopCount: fs.loopCount,
           };
         }
       }

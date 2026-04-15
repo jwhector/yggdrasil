@@ -22,7 +22,7 @@ import type {
 
 /**
  * Get the next question for a user based on how many they've answered.
- * Returns null if the user has answered maxPerPerson or all questions are exhausted.
+ * Returns null if all questions are exhausted.
  *
  * When shuffleQuestions is true, question order is deterministic per userId
  * (seeded by hashing the userId) so reconnecting users get the same order.
@@ -30,10 +30,8 @@ import type {
 export function getNextQuestion(
   config: VotePhaseConfig,
   answeredCount: number,
-  maxPerPerson: number,
   userId?: UserId,
 ): QuestionConfig | null {
-  if (answeredCount >= maxPerPerson) return null;
   if (answeredCount >= config.questions.length) return null;
 
   if (config.shuffleQuestions && userId) {
@@ -42,29 +40,6 @@ export function getNextQuestion(
   }
 
   return config.questions[answeredCount] ?? null;
-}
-
-/**
- * Calculate max questions per person from pool cap and audience size.
- * ceil(targetPoolSize / audienceCount) — ensures we can fill the pool.
- */
-export function calculateMaxQuestionsPerPerson(
-  targetPoolSize: number,
-  audienceCount: number,
-): number {
-  if (audienceCount <= 0) return 0;
-  return Math.ceil(targetPoolSize / audienceCount);
-}
-
-/**
- * Check if the pool cap has been reached.
- * Hard ceiling — once totalTokens >= targetPoolSize, no new questions are sent.
- */
-export function shouldCapPool(
-  totalTokens: number,
-  targetPoolSize: number,
-): boolean {
-  return totalTokens >= targetPoolSize;
 }
 
 // ============================================================================
@@ -131,18 +106,6 @@ export function processEmotion(
     questionIndex,
     poolSize: updatedTokens.length,
   });
-
-  // Check pool cap
-  if (shouldCapPool(updatedTokens.length, state.pool.targetPoolSize) && !state.vote.poolCapReached) {
-    updatedState.vote = {
-      ...updatedState.vote,
-      poolCapReached: true,
-    };
-    events.push({
-      type: 'POOL_CAP_REACHED',
-      finalPoolSize: updatedTokens.length,
-    });
-  }
 
   return { state: updatedState, events };
 }

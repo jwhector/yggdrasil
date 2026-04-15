@@ -32,7 +32,22 @@ const DISMISS_STAGGER_MS = 200;      // Per-thought within a user
 const VOTE_MIN_DELAY_MS = 1000;      // Fastest answer
 const VOTE_MAX_DELAY_MS = 5000;      // Slowest answer
 
+// V3.4 remix orb timing
+const ORB_INITIAL_PLACE_MIN_MS = 2000;    // First orb placement delay
+const ORB_INITIAL_PLACE_MAX_MS = 8000;
+const ORB_PLACE_STAGGER_MS = 1500;        // Delay between placing successive orbs
+const ORB_REPLACE_MIN_MS = 10000;         // Min time before moving an orb
+const ORB_REPLACE_MAX_MS = 30000;         // Max time before moving an orb
+const ORB_REPLACE_CHANCE = 0.4;           // Probability of moving (vs doing nothing) per tick
+
 const CHAPTERS = ['ambition', 'love', 'acceptance'];
+const GRANULAR_TYPES = ['bass', 'drums', 'pad', 'harmony', 'fx', 'seed'];
+
+interface OrbState {
+  index: number;
+  chapterId: string;
+  placedOnNode: string | null;
+}
 
 interface ClientState {
   socket: Socket;
@@ -47,6 +62,10 @@ interface ClientState {
   pendingQuestion: { questionIndex: number; text: string } | null;
   questionsAnswered: number;
   phonesDark: boolean;
+  // V3.4 remix orb state
+  orbs: OrbState[];
+  orbsPlaced: boolean;       // True once initial placement is done
+  replaceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const clients: ClientState[] = [];
@@ -59,6 +78,10 @@ let stats = {
   questionsReceived: 0,
   emotionsSubmitted: 0,
   phonesDark: 0,
+  // V3.4 remix stats
+  orbsPlaced: 0,
+  orbsRecalled: 0,
+  orbsMoved: 0,
 };
 
 function log(msg: string) {
@@ -89,6 +112,9 @@ function createClient(index: number): ClientState {
     pendingQuestion: null,
     questionsAnswered: 0,
     phonesDark: false,
+    orbs: [],
+    orbsPlaced: false,
+    replaceTimer: null,
   };
 
   socket.on('connect', () => {
@@ -135,17 +161,54 @@ function createClient(index: number): ClientState {
       log(`Phase transition: ${prevPhase} → ${client.phase}`);
     }
 
-    // V3.4: first question arrives embedded in state_sync myFinale
+    // V3.4: detect finale_vote and bootstrap first question from the questions array
+    // No pool cap — everyone answers orbsPerPerson (6) questions
     if (client.phase === 'finale_vote' && data.myFinale && !client.phonesDark) {
       const voteView = data.myFinale as {
         finalePhase: string;
-        currentQuestion: { questionIndex: number; text: string } | null;
-        poolCapReached: boolean;
+        questions: { text: string }[];
+        answeredCount: number;
       };
-      if (voteView.poolCapReached) {
-        client.phonesDark = true;
-      } else if (voteView.currentQuestion && !client.pendingQuestion) {
-        answerQuestion(client, index, voteView.currentQuestion);
+      if (
+        voteView.questions &&
+        voteView.answeredCount === client.questionsAnswered &&
+        client.questionsAnswered < voteView.questions.length &&
+        !client.pendingQuestion
+      ) {
+        // Counts match and we're not already answering — bootstrap next question
+        const nextQ = voteView.questions[voteView.answeredCount];
+        if (nextQ) {
+          answerQuestion(client, index, { questionIndex: voteView.answeredCount, text: nextQ.text });
+        }
+      }
+    }
+
+    // V3.4 remix: receive orbs and start placing them
+    if (client.phase === 'finale_remix' && data.myFinale) {
+      const remixView = data.myFinale as {
+        finalePhase: string;
+        fallbackMode: boolean;
+        orbs: { index: number; chapterId: string; placedOnNode: string | null }[];
+      };
+      if (remixView.finalePhase === 'remix' && !remixView.fallbackMode) {
+        // Initialize local orb state from server on first sync
+        if (client.orbs.length === 0 && remixView.orbs.length > 0) {
+          client.orbs = remixView.orbs.map(o => ({
+            index: o.index,
+            chapterId: o.chapterId,
+            placedOnNode: o.placedOnNode,
+          }));
+          client.phonesDark = false;
+
+          if (index < 3) {
+            log(`Client ${index}: received ${client.orbs.length} orbs (chapters: ${client.orbs.map(o => o.chapterId).join(', ')})`);
+          }
+
+          // Start placing orbs with a staggered delay
+          if (!client.orbsPlaced) {
+            simulateInitialPlacement(client, index);
+          }
+        }
       }
     }
   });
@@ -174,6 +237,33 @@ function createClient(index: number): ClientState {
     if (index < 3) {
       log(`Client ${index}: phones down (answered ${client.questionsAnswered} questions)`);
     }
+  });
+
+  // ---- V3.4 Remix Orb Events ----
+
+  socket.on('orb_decayed', (data: { orbIndex: number }) => {
+    const orb = client.orbs[data.orbIndex];
+    if (orb) {
+      orb.placedOnNode = null;
+      // Re-place the decayed orb after a short delay
+      const delay = randomDelay(2000, 6000);
+      setTimeout(() => {
+        if (client.phase !== 'finale_remix' || client.phonesDark) return;
+        const node = GRANULAR_TYPES[Math.floor(Math.random() * GRANULAR_TYPES.length)];
+        placeOrbOnNode(client, index, data.orbIndex, node);
+      }, delay);
+    }
+  });
+
+  socket.on('scatter', (_data: { granularType: string | null }) => {
+    // All our orbs were scattered — re-place them staggered
+    for (const orb of client.orbs) {
+      orb.placedOnNode = null;
+    }
+    if (index < 3) {
+      log(`Client ${index}: orbs scattered, re-placing...`);
+    }
+    simulateInitialPlacement(client, index);
   });
 
   // Handle server-assigned intrusive thoughts
@@ -234,6 +324,95 @@ function simulateDismissals(client: ClientState, index: number) {
 }
 
 // ============================================================================
+// Remix Orb Simulation
+// ============================================================================
+
+/**
+ * Place a single orb on a node. Emits socket event and updates local state.
+ */
+function placeOrbOnNode(client: ClientState, index: number, orbIndex: number, granularType: string) {
+  if (client.phase !== 'finale_remix' || client.phonesDark) return;
+  const orb = client.orbs[orbIndex];
+  if (!orb) return;
+
+  const wasPlaced = orb.placedOnNode !== null;
+  const prevNode = orb.placedOnNode;
+  orb.placedOnNode = granularType;
+  client.socket.emit('place_orb', { orbIndex, granularType });
+
+  if (wasPlaced && prevNode !== granularType) {
+    stats.orbsMoved++;
+  } else if (!wasPlaced) {
+    stats.orbsPlaced++;
+  }
+
+  if (index < 3) {
+    const action = wasPlaced ? `moved orb ${orbIndex} ${prevNode}→${granularType}` : `placed orb ${orbIndex} on ${granularType}`;
+    log(`Client ${index}: ${action} (${orb.chapterId})`);
+  }
+}
+
+/**
+ * Simulate initial orb placement — stagger placing all orbs over several seconds.
+ * Mimics a user discovering the UI and placing orbs one by one.
+ */
+function simulateInitialPlacement(client: ClientState, index: number) {
+  const startDelay = randomDelay(ORB_INITIAL_PLACE_MIN_MS, ORB_INITIAL_PLACE_MAX_MS);
+
+  client.orbs.forEach((orb, i) => {
+    if (orb.placedOnNode !== null) return; // Already placed (e.g. from state recovery)
+    const delay = startDelay + i * (ORB_PLACE_STAGGER_MS + Math.random() * 1500);
+    setTimeout(() => {
+      if (client.phase !== 'finale_remix' || client.phonesDark) return;
+      if (orb.placedOnNode !== null) return; // Placed by a scatter re-place in the interim
+      const node = GRANULAR_TYPES[Math.floor(Math.random() * GRANULAR_TYPES.length)];
+      placeOrbOnNode(client, index, i, node);
+    }, delay);
+  });
+
+  // After all initial placements, start the replace loop
+  const totalPlacementTime = startDelay + client.orbs.length * (ORB_PLACE_STAGGER_MS + 1500);
+  setTimeout(() => {
+    client.orbsPlaced = true;
+    startReplaceLoop(client, index);
+  }, totalPlacementTime);
+}
+
+/**
+ * Periodically move a random placed orb to a different node.
+ * Simulates audience engagement — people shift votes over time.
+ */
+function startReplaceLoop(client: ClientState, index: number) {
+  function scheduleNext() {
+    if (client.phase !== 'finale_remix' || client.phonesDark) {
+      client.replaceTimer = null;
+      return;
+    }
+
+    const delay = randomDelay(ORB_REPLACE_MIN_MS, ORB_REPLACE_MAX_MS);
+    client.replaceTimer = setTimeout(() => {
+      if (client.phase !== 'finale_remix' || client.phonesDark) return;
+
+      if (Math.random() < ORB_REPLACE_CHANCE) {
+        // Pick a random placed orb and move it to a different node
+        const placedOrbs = client.orbs.filter(o => o.placedOnNode !== null);
+        if (placedOrbs.length > 0) {
+          const orb = placedOrbs[Math.floor(Math.random() * placedOrbs.length)];
+          // Pick a different node
+          const otherNodes = GRANULAR_TYPES.filter(n => n !== orb.placedOnNode);
+          const newNode = otherNodes[Math.floor(Math.random() * otherNodes.length)];
+          placeOrbOnNode(client, index, orb.index, newNode);
+        }
+      }
+
+      scheduleNext();
+    }, delay);
+  }
+
+  scheduleNext();
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -254,13 +433,17 @@ setInterval(() => {
   const thoughtLine = stats.thoughtsReceived > 0
     ? `, thoughts: ${stats.thoughtsReceived}/${stats.thoughtsDismissed}`
     : '';
-  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}`);
+  const orbLine = stats.orbsPlaced > 0
+    ? `, orbs: ${stats.orbsPlaced} placed, ${stats.orbsMoved} moved, ${stats.orbsRecalled} recalled`
+    : '';
+  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}${orbLine}`);
 }, 5000);
 
 // Graceful shutdown
 process.on('SIGINT', () => {
   log('Shutting down...');
   for (const client of clients) {
+    if (client.replaceTimer) clearTimeout(client.replaceTimer);
     client.socket.disconnect();
   }
   process.exit(0);

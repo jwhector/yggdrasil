@@ -54,8 +54,6 @@ function makeRemixState(overrides?: Partial<FinaleState>): FinaleState {
     phase: 'remix',
     vote: {
       questionsAnsweredByUser: new Map(),
-      maxQuestionsPerPerson: 3,
-      poolCapReached: true,
     },
     pool: {
       tokens,
@@ -72,6 +70,12 @@ function makeRemixState(overrides?: Partial<FinaleState>): FinaleState {
     loopCount: 0,
     loopProgress: 0,
     npc: { currentMessage: null },
+    audienceOrbs: new Map(),
+    nodeTallies: new Map(),
+    orbDecayLoops: 3,
+    instantCrossfade: false,
+    enabledNodes: new Set<string>(),
+    fallbackMode: false,
     ...overrides,
   };
 }

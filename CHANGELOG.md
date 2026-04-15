@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## 2026-04-15 — V3.4 Audience Swarm Remix ("Swarm Orbs")
+
+Audience-interactive finale remix: personal orbs generated during voting persist into remix phase, where audience drags them onto pentagon nodes to collectively shape the music.
+
+### New files
+- **`conductor/audience-remix.ts`** — Pure engine: orb placement, recall, tally computation, decay, scatter, lock/unlock (26 tests)
+- **`components/finale/FloatingOrb.tsx`** — Single orb DOM element with 3-layer CSS radial gradient glow (matches projector TokenPool canvas style)
+- **`components/finale/AudienceRemix.tsx`** — Audience phone: responsive SVG pentagon with polar tally wedges; exposes node hit-testing via forwardRef
+- **`hooks/useFloatingOrbs.ts`** — Orb accumulation + spring physics across vote/remix phases (home positions in scattered row, wobble, drag-skip)
+- **`hooks/useAudienceRemix.ts`** — Tally subscription (node_tally ~2Hz), decay/scatter event handling, place_orb/recall_orb socket emission
+
+### Conductor changes (`conductor/conductor.ts`)
+- 9 new command handlers: PLACE_ORB, RECALL_ORB, SET_DECAY_RATE, SET_CROSSFADE_MODE, SCATTER_NODE, SCATTER_ALL, LOCK_NODE, UNLOCK_NODE, FALLBACK_PERFORMER_REMIX
+- `handleStartRemix` initializes audience orbs from vote-phase tokens
+- `handleLoopBoundary` runs processDecay + tally-based crossfade detection
+- `emitTallyCrossfades()` bridges tally changes to AUDIO_CUE events (node_crossfade / node_instant_crossfade / node_unmute / node_fade_out)
+- Vote phase question count capped at `orbsPerPerson` (default 6)
+
+### Server changes (`server/socket.ts`)
+- `place_orb` / `recall_orb` socket listeners (audience → server, userId from session)
+- `node_tally` broadcast at ~2Hz during finale_remix
+- Event handlers: ORB_DECAYED (targeted), NODES_SCATTERED (targeted), FALLBACK_ACTIVATED (phones_down)
+- REMIX_STARTED skips phones_down when audience orbs active
+- `filterStateForClient` updated for audience (AudienceRemixView) and projector (tally data)
+
+### UI changes
+- **`components/finale/EmotionVote.tsx`** — `onOrbLanded` prop; OrbCard fly animation spawns persistent FloatingOrb at landing position
+- **`app/audience/page.tsx`** — Persistent FloatingOrbLayer (fixed position, viewport coordinates); useFloatingOrbs instantiated at page level; drag interaction via document-level touch listeners; server orb reconciliation on remix start; body scroll lock during finale phases
+- **`components/finale/RemixController.tsx`** — SwarmControls section: decay slider, crossfade mode toggle, scatter buttons, lock/unlock per node, performer fallback button
+
+### Other changes
+- **`lib/serialization.ts`** — Defensive defaults for audienceOrbs/nodeTallies (handles old state without new fields)
+- **`config/default-show.json`** — remix section: orbsPerPerson, orbDecayLoops, tallyBroadcastMs, instantCrossfade
+- **`server/tools/simulate-audience.ts`** — Full finale simulation: vote phase answers + remix phase orb placement, decay re-placement, scatter re-placement
+
+### Type additions (`conductor/types.ts`)
+- AudienceOrb, UserRemixState, NodeVoteTally
+- 9 ConductorCommand variants, 10 ConductorEvent variants
+- RemixConfig expanded, FinaleState extended, AudienceRemixView
+
+### Documentation
+- `docs/finale.md` — Rewritten for Swarm Orbs model
+- `CLAUDE.md` — Updated finale description, project structure, phase descriptions
+- `DECISIONS.md` — Resolved finale open questions
+
+### Test count: **385** (15 suites). All passing.
+
+---
+
 ## 2026-04-09 — V3.4 Migration Phase 8: Cleanup & Documentation
 
 Remove all V3.3 "Quilt" finale code and update documentation to V3.4 "Token Pool" model.

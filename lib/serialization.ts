@@ -27,6 +27,8 @@ import type {
   UserId,
   User,
   FinaleState,
+  UserRemixState,
+  NodeVoteTally,
 } from '@/conductor/types';
 
 // ============================================================================
@@ -38,8 +40,6 @@ export interface SerializedFinaleState {
   phase: 'vote' | 'remix';
   vote: {
     questionsAnsweredByUser: [string, number][];
-    maxQuestionsPerPerson: number;
-    poolCapReached: boolean;
   };
   pool: {
     tokens: FinaleState['pool']['tokens'];
@@ -56,6 +56,12 @@ export interface SerializedFinaleState {
   loopCount: number;
   loopProgress: number;
   npc: { currentMessage: string | null };
+  audienceOrbs: [string, UserRemixState][];
+  nodeTallies: [string, { granularType: string; votes: [string, number][]; dominantChapter: string | null; locked: boolean; lockedChapter: string | null }][];
+  enabledNodes: string[];
+  orbDecayLoops: number;
+  instantCrossfade: boolean;
+  fallbackMode: boolean;
 }
 
 export interface SerializedShowState {
@@ -81,8 +87,6 @@ export function serializeFinaleState(fs: FinaleState): SerializedFinaleState {
     phase: fs.phase,
     vote: {
       questionsAnsweredByUser: Array.from(fs.vote.questionsAnsweredByUser.entries()),
-      maxQuestionsPerPerson: fs.vote.maxQuestionsPerPerson,
-      poolCapReached: fs.vote.poolCapReached,
     },
     pool: {
       tokens: fs.pool.tokens,
@@ -101,6 +105,15 @@ export function serializeFinaleState(fs: FinaleState): SerializedFinaleState {
     loopCount: fs.loopCount,
     loopProgress: fs.loopProgress,
     npc: fs.npc,
+    audienceOrbs: Array.from((fs.audienceOrbs ?? new Map()).entries()),
+    nodeTallies: Array.from((fs.nodeTallies ?? new Map()).entries()).map(([gt, tally]) => [gt, {
+      ...tally,
+      votes: Array.from(tally.votes.entries()),
+    }]),
+    enabledNodes: Array.from(fs.enabledNodes ?? []),
+    orbDecayLoops: fs.orbDecayLoops ?? 3,
+    instantCrossfade: fs.instantCrossfade ?? false,
+    fallbackMode: fs.fallbackMode ?? false,
   };
 }
 
@@ -109,8 +122,6 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
     phase: data.phase,
     vote: {
       questionsAnsweredByUser: new Map(data.vote.questionsAnsweredByUser),
-      maxQuestionsPerPerson: data.vote.maxQuestionsPerPerson,
-      poolCapReached: data.vote.poolCapReached,
     },
     pool: {
       tokens: data.pool.tokens,
@@ -129,6 +140,17 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
     loopCount: data.loopCount,
     loopProgress: data.loopProgress,
     npc: data.npc,
+    audienceOrbs: new Map(data.audienceOrbs ?? []),
+    nodeTallies: new Map(
+      (data.nodeTallies ?? []).map(([gt, tally]) => [gt, {
+        ...tally,
+        votes: new Map(tally.votes),
+      }] as [string, NodeVoteTally]),
+    ),
+    enabledNodes: new Set(data.enabledNodes ?? []),
+    orbDecayLoops: data.orbDecayLoops ?? 3,
+    instantCrossfade: data.instantCrossfade ?? false,
+    fallbackMode: data.fallbackMode ?? false,
   };
 }
 

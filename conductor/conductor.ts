@@ -46,7 +46,6 @@ import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import {
   getNextQuestion,
-  calculateMaxQuestionsPerPerson,
   processEmotion,
 } from './question-engine';
 import {
@@ -55,8 +54,23 @@ import {
   advanceNode as remixAdvanceNode,
   processLoopBoundary as remixProcessLoopBoundary,
   toggleAudienceInteraction as remixToggleAudienceInteraction,
+  resolveTrack as resolveRemixTrack,
 } from './remix-engine';
 import { createTokenPool } from './token-pool';
+import {
+  createUserOrbs,
+  placeOrb as audiencePlaceOrb,
+  recallOrb as audienceRecallOrb,
+  processDecay as audienceProcessDecay,
+  scatterNode as audienceScatterNode,
+  lockNode as audienceLockNode,
+  unlockNode as audienceUnlockNode,
+  setDecayRate as audienceSetDecayRate,
+  setCrossfadeMode as audienceSetCrossfadeMode,
+  enableNode as audienceEnableNode,
+  disableNode as audienceDisableNode,
+  getEffectiveChapter,
+} from './audience-remix';
 
 // ============================================================================
 // State Initialization
@@ -211,9 +225,6 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleSubmitEmotion(state, command.userId, command.chapterId, command.questionIndex);
     case 'REQUEST_NEXT_QUESTION':
       return handleRequestNextQuestion(state, command.userId);
-    case 'POOL_CAP_REACHED':
-      return handlePoolCapReached(state);
-
     // Finale — Remix phase (V3.4)
     case 'START_REMIX':
       return handleStartRemix(state);
@@ -227,6 +238,30 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleToggleAudienceInteraction(state);
     case 'LOOP_BOUNDARY':
       return handleLoopBoundary(state);
+
+    // Finale — Audience Remix (swarm orbs)
+    case 'PLACE_ORB':
+      return handlePlaceOrb(state, command.userId, command.orbIndex, command.granularType);
+    case 'RECALL_ORB':
+      return handleRecallOrb(state, command.userId, command.orbIndex);
+    case 'SET_DECAY_RATE':
+      return handleSetDecayRate(state, command.loops);
+    case 'SET_CROSSFADE_MODE':
+      return handleSetCrossfadeMode(state, command.instant);
+    case 'SCATTER_NODE':
+      return handleScatterNode(state, command.granularType);
+    case 'SCATTER_ALL':
+      return handleScatterAll(state);
+    case 'LOCK_NODE':
+      return handleLockNode(state, command.granularType, command.chapterId);
+    case 'UNLOCK_NODE':
+      return handleUnlockNode(state, command.granularType);
+    case 'ENABLE_NODE':
+      return handleEnableNode(state, command.granularType);
+    case 'DISABLE_NODE':
+      return handleDisableNode(state, command.granularType);
+    case 'FALLBACK_PERFORMER_REMIX':
+      return handleFallbackPerformerRemix(state, command.instant);
 
     // Manual end (V3.4)
     case 'END_SHOW':
@@ -1372,9 +1407,6 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No finale config found in show config' }];
   }
 
-  const audienceCount = countConnectedUsers(state);
-  const maxQ = calculateMaxQuestionsPerPerson(v34Config.vote.targetPoolSize, audienceCount);
-
   // Build chapter → songIndex mapping from attempt configs
   const chapterSongIndex = new Map<string, number>();
   for (let i = 0; i < state.config.attempts.length; i++) {
@@ -1388,8 +1420,6 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     phase: 'vote',
     vote: {
       questionsAnsweredByUser: new Map(),
-      maxQuestionsPerPerson: maxQ,
-      poolCapReached: false,
     },
     pool: {
       tokens: [],
@@ -1406,6 +1436,12 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     loopCount: 0,
     loopProgress: 0,
     npc: { currentMessage: null },
+    audienceOrbs: new Map(),
+    nodeTallies: new Map(),
+    orbDecayLoops: v34Config.remix.orbDecayLoops ?? 3,
+    instantCrossfade: v34Config.remix.instantCrossfade ?? true,
+    enabledNodes: new Set<string>(),
+    fallbackMode: false,
   };
 
   state.finaleState = finaleState;
@@ -1458,7 +1494,7 @@ function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorE
   }
 
   const answeredCount = finaleState.vote.questionsAnsweredByUser.get(userId) ?? 0;
-  const question = getNextQuestion(v34Config.vote, answeredCount, finaleState.vote.maxQuestionsPerPerson, userId);
+  const question = getNextQuestion(v34Config.vote, answeredCount, userId);
 
   if (!question) {
     return []; // No more questions for this user
@@ -1473,22 +1509,6 @@ function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorE
   }];
 }
 
-function handlePoolCapReached(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'finale_vote') {
-    return [{ type: 'ERROR', message: 'POOL_CAP_REACHED only valid during finale_vote' }];
-  }
-  const finaleState = state.finaleState as FinaleState;
-  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-
-  finaleState.vote.poolCapReached = true;
-  state.finaleState = finaleState;
-
-  return [{
-    type: 'POOL_CAP_REACHED',
-    finalPoolSize: finaleState.pool.tokens.length,
-  }];
-}
-
 function handleStartRemix(state: ShowState): ConductorEvent[] {
   if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
     return [{ type: 'ERROR', message: 'START_REMIX only valid from finale_vote or finale_remix' }];
@@ -1500,6 +1520,26 @@ function handleStartRemix(state: ShowState): ConductorEvent[] {
   // Transition to remix phase
   finaleState.phase = 'remix';
   state.phase = 'finale_remix';
+
+  // Initialize audience orbs from vote phase answers
+  const remixConfig = state.config.finale.remix;
+  if (remixConfig) {
+    finaleState.orbDecayLoops = remixConfig.orbDecayLoops ?? 3;
+    finaleState.instantCrossfade = remixConfig.instantCrossfade ?? true;
+  }
+  finaleState.audienceOrbs = new Map();
+  finaleState.nodeTallies = new Map();
+  finaleState.enabledNodes = new Set<string>();
+
+  // Create orbs for each user based on their vote answers (tokens they generated)
+  for (const [userId] of finaleState.vote.questionsAnsweredByUser) {
+    const userTokens = finaleState.pool.tokens.filter(t => t.ownerId === userId);
+    const chapterIds = userTokens.map(t => t.chapterId);
+    if (chapterIds.length > 0) {
+      finaleState.audienceOrbs.set(userId, createUserOrbs(userId, chapterIds));
+    }
+  }
+
   state.finaleState = finaleState;
 
   const pool: TokenPool = {
@@ -1578,6 +1618,20 @@ function handleLoopBoundary(state: ShowState): ConductorEvent[] {
   const result = remixProcessLoopBoundary(finaleState);
   state.finaleState = result.state;
 
+  // Process audience orb decay at loop boundary
+  const decayResult = audienceProcessDecay(result.state);
+  state.finaleState = decayResult.state;
+  result.events.push(...decayResult.events);
+
+  // Loop-quantized tally crossfades: check all nodes for dominant chapter changes
+  // (In instant mode, crossfades happen immediately on place/recall — not here)
+  const updatedFs = state.finaleState as FinaleState;
+  if (!updatedFs.instantCrossfade && updatedFs.nodeTallies.size > 0) {
+    const allNodes = Array.from(updatedFs.nodeTallies.keys());
+    const audioCues = emitTallyCrossfades(updatedFs, allNodes, false);
+    result.events.push(...audioCues);
+  }
+
   // If POOL_EMPTY was emitted, auto-transition to ended
   const poolEmpty = result.events.some(e => e.type === 'POOL_EMPTY');
   if (poolEmpty) {
@@ -1586,6 +1640,262 @@ function handleLoopBoundary(state: ShowState): ConductorEvent[] {
   }
 
   return result.events;
+}
+
+// ============================================================================
+// Audience Remix (Swarm Orbs)
+// ============================================================================
+
+/**
+ * Check if a node's dominant chapter changed and emit audio crossfade cues.
+ * Used after placeOrb/recallOrb in instant crossfade mode,
+ * and after processDecay at loop boundaries in loop-quantized mode.
+ *
+ * Updates the FinaleState.active map to track what's currently playing per node.
+ */
+function emitTallyCrossfades(
+  fs: FinaleState,
+  affectedNodes: string[],
+  instant: boolean,
+): ConductorEvent[] {
+  const events: ConductorEvent[] = [];
+
+  for (const granularType of affectedNodes) {
+    const tally = fs.nodeTallies.get(granularType);
+    if (!tally) continue;
+
+    const effectiveChapter = getEffectiveChapter(tally);
+    const currentActive = fs.active.get(granularType);
+    const currentChapter = currentActive?.chapterId ?? null;
+
+    // No change — skip
+    if (effectiveChapter === currentChapter) continue;
+
+    if (effectiveChapter === null) {
+      // No dominant chapter — fade out
+      if (currentActive) {
+        events.push({
+          type: 'AUDIO_CUE',
+          cue: {
+            type: 'node_fade_out',
+            granularType,
+            trackIndices: currentActive.trackIndices,
+          },
+        });
+        events.push({ type: 'NODE_SILENT', granularType });
+        fs.active.delete(granularType);
+      }
+    } else {
+      // Resolve tracks for the new chapter
+      const songIndex = fs.chapterSongIndex.get(effectiveChapter) ?? 0;
+      const newTracks = resolveRemixTrack(fs.trackMap, granularType, songIndex);
+      if (newTracks.length === 0) continue;
+
+      if (currentActive) {
+        // Crossfade from old to new
+        events.push({
+          type: 'AUDIO_CUE',
+          cue: {
+            type: instant ? 'node_instant_crossfade' : 'node_crossfade',
+            granularType,
+            muteTracks: currentActive.trackIndices,
+            unmuteTracks: newTracks,
+          },
+        });
+      } else {
+        // First activation — unmute
+        events.push({
+          type: 'AUDIO_CUE',
+          cue: {
+            type: 'node_unmute',
+            granularType,
+            trackIndices: newTracks,
+          },
+        });
+      }
+
+      events.push({
+        type: 'TOKEN_ACTIVATED',
+        granularType,
+        chapterId: effectiveChapter,
+        tokenId: `tally-${granularType}-${fs.loopCount}`,
+        trackIndices: newTracks,
+      });
+
+      // Update active map
+      fs.active.set(granularType, {
+        tokenId: `tally-${granularType}-${fs.loopCount}`,
+        chapterId: effectiveChapter,
+        startedAtLoop: fs.loopCount,
+        trackIndices: newTracks,
+        persistent: true,
+      });
+    }
+  }
+
+  return events;
+}
+
+/**
+ * Collect all granular type node IDs that had their tally changed in a set of events.
+ */
+function extractAffectedNodes(events: ConductorEvent[]): string[] {
+  const nodes = new Set<string>();
+  for (const e of events) {
+    if (e.type === 'NODE_TALLY_CHANGED') {
+      nodes.add((e as { granularType: string }).granularType);
+    }
+  }
+  return Array.from(nodes);
+}
+
+function handlePlaceOrb(state: ShowState, userId: UserId, orbIndex: number, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'PLACE_ORB only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs || fs.fallbackMode) return [{ type: 'ERROR', message: 'Cannot place orbs in fallback mode' }];
+
+  const result = audiencePlaceOrb(fs, userId, orbIndex, granularType);
+  state.finaleState = result.state;
+
+  // In instant crossfade mode, check if dominant chapter changed and emit audio cues
+  if (result.state.instantCrossfade) {
+    const affected = extractAffectedNodes(result.events);
+    const audioCues = emitTallyCrossfades(result.state, affected, true);
+    result.events.push(...audioCues);
+  }
+
+  return result.events;
+}
+
+function handleRecallOrb(state: ShowState, userId: UserId, orbIndex: number): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'RECALL_ORB only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs || fs.fallbackMode) return [{ type: 'ERROR', message: 'Cannot recall orbs in fallback mode' }];
+
+  const result = audienceRecallOrb(fs, userId, orbIndex);
+  state.finaleState = result.state;
+
+  // In instant crossfade mode, check if dominant chapter changed and emit audio cues
+  if (result.state.instantCrossfade) {
+    const affected = extractAffectedNodes(result.events);
+    const audioCues = emitTallyCrossfades(result.state, affected, true);
+    result.events.push(...audioCues);
+  }
+
+  return result.events;
+}
+
+function handleSetDecayRate(state: ShowState, loops: number): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'SET_DECAY_RATE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceSetDecayRate(fs, loops);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleSetCrossfadeMode(state: ShowState, instant: boolean): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'SET_CROSSFADE_MODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceSetCrossfadeMode(fs, instant);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleScatterNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'SCATTER_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceScatterNode(fs, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleScatterAll(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'SCATTER_ALL only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceScatterNode(fs, null);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleLockNode(state: ShowState, granularType: string, chapterId: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'LOCK_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceLockNode(fs, granularType, chapterId);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleUnlockNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'UNLOCK_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceUnlockNode(fs, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleEnableNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'ENABLE_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceEnableNode(fs, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleDisableNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'DISABLE_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceDisableNode(fs, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleFallbackPerformerRemix(state: ShowState, instant?: boolean): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'FALLBACK_PERFORMER_REMIX only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  fs.fallbackMode = true;
+  fs.audienceInteraction = instant !== false; // default true
+
+  return [{ type: 'FALLBACK_ACTIVATED', instant: instant !== false }];
 }
 
 function handleEndShow(state: ShowState): ConductorEvent[] {
@@ -1766,14 +2076,7 @@ function currentAttempt(state: ShowState): AttemptState | null {
   return state.attempts[state.currentAttemptIndex] ?? null;
 }
 
-/** Count connected users. */
-function countConnectedUsers(state: ShowState): number {
-  let count = 0;
-  for (const user of state.users.values()) {
-    if (user.connected) count++;
-  }
-  return count;
-}
+
 
 /** Get the TrackBundle for the given option on the current layer. */
 function getLayerTrackBundle(attempt: AttemptState, option: 'A' | 'B'): TrackBundle {

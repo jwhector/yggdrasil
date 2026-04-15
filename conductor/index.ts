@@ -31,7 +31,22 @@ export { getNpcMessage } from './npc';
 export { createTokenPool, consumeToken, returnToken, isPoolEmpty, getTotalRemaining } from './token-pool';
 
 // Export question engine functions (V3.4)
-export { getNextQuestion, calculateMaxQuestionsPerPerson, shouldCapPool, processEmotion } from './question-engine';
+export { getNextQuestion, processEmotion } from './question-engine';
 
 // Export remix engine functions (V3.4)
 export { queueToken, cancelQueue, advanceNode, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';
+
+// Export audience remix functions (V3.4 — Swarm Orbs)
+export {
+  createUserOrbs,
+  placeOrb,
+  recallOrb,
+  processDecay,
+  scatterNode,
+  lockNode,
+  unlockNode,
+  setDecayRate,
+  setCrossfadeMode,
+  getEffectiveChapter,
+  recomputeTallies,
+} from './audience-remix';

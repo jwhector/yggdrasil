@@ -121,7 +121,7 @@ export function MetricsPanel({ fullState, connectionState, reconnect }: MetricsP
             <StatCard
               label="Answered"
               value={String(finaleState.vote.questionsAnsweredByUser.size)}
-              color={finaleState.vote.poolCapReached ? '#4ade80' : undefined}
+              color={undefined}
             />
           )}
           {finaleState.phase === 'remix' && (

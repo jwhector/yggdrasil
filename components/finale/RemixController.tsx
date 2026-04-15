@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import type { ShowState, ConductorCommand, FinaleState, GranularType, ChapterConfig } from '@/conductor/types';
 import { useRemixQueue } from '@/hooks/useRemixQueue';
 import { useTokenPool, type PoolState } from '@/hooks/useTokenPool';
@@ -35,13 +35,103 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
     ? new Map(poolState.availableByChapter.map(e => [e.chapterId, e.count]))
     : finaleState.pool.availableByChapter;
 
-  const totalRemaining = poolState.totalRemaining > 0
-    ? poolState.totalRemaining
-    : finaleState.pool.totalRemaining;
+  // Vote progress — live from vote_progress socket event, fallback to state
+  const [voteProgress, setVoteProgress] = useState({
+    completedUsers: 0,
+    totalUsers: fullState.users.size,
+    totalOrbs: finaleState.pool.tokens.length,
+  });
+
+  useEffect(() => {
+    if (!socket) return;
+    const handler = (data: { completedUsers: number; totalUsers: number; totalOrbs: number }) => {
+      setVoteProgress(data);
+    };
+    socket.on('vote_progress', handler);
+    return () => { socket.off('vote_progress', handler); };
+  }, [socket]);
+
+  // Derive from state as fallback (for initial load before any vote_progress arrives)
+  const totalQuestions = fullState.config.finale?.vote?.questions?.length ?? 0;
+  const stateCompletedUsers = (() => {
+    let n = 0;
+    for (const [, count] of finaleState.vote.questionsAnsweredByUser) {
+      if (count >= totalQuestions) n++;
+    }
+    return n;
+  })();
+
+  const completedUsers = voteProgress.completedUsers || stateCompletedUsers;
+  const totalUsers = voteProgress.totalUsers || fullState.users.size;
+  const totalAnswered = voteProgress.totalOrbs || finaleState.pool.tokens.length;
+  const isVotePhase = fullState.phase === 'finale_vote';
 
   return (
     <section style={styles.section}>
-      <h2 style={styles.sectionTitle}>Token Remix</h2>
+      <h2 style={styles.sectionTitle}>
+        {isVotePhase ? 'Audience Voting' : 'Token Remix'}
+      </h2>
+
+      {/* Vote progress — visible during both phases */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        marginBottom: '12px',
+        padding: '8px 10px',
+        borderRadius: '6px',
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', marginBottom: '4px' }}>
+            Completed voting
+          </div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, color: completedUsers === totalUsers ? '#86efac' : '#e5e7eb' }}>
+            {completedUsers} / {totalUsers}
+            <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginLeft: '6px' }}>
+              ({totalUsers > 0 ? Math.round((completedUsers / totalUsers) * 100) : 0}%)
+            </span>
+          </div>
+          {/* Progress bar */}
+          <div style={{ width: '100%', height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.08)', marginTop: '4px' }}>
+            <div style={{
+              width: `${totalUsers > 0 ? (completedUsers / totalUsers) * 100 : 0}%`,
+              height: '100%',
+              borderRadius: 2,
+              background: completedUsers === totalUsers ? '#86efac' : '#60a5fa',
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Total orbs</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e5e7eb' }}>{totalAnswered}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Per person</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e5e7eb' }}>{totalQuestions}</div>
+        </div>
+      </div>
+
+      {/* Pool by chapter */}
+      <div style={styles.poolRow}>
+        <span style={styles.poolLabel}>Pool:</span>
+        {chapters.map(ch => {
+          const total = finaleState.pool.totalByChapter.get(ch.id) ?? 0;
+          return (
+            <span key={ch.id} style={{ ...styles.poolCount, color: ch.color }}>
+              {total}
+            </span>
+          );
+        })}
+        <span style={styles.poolTotal}>
+          Total: {totalAnswered}
+        </span>
+      </div>
+
+      {/* 6x3 grid — only during remix */}
+      {!isVotePhase && (<>
 
       {/* 6x3 grid */}
       <div style={styles.gridContainer}>
@@ -132,22 +222,6 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
         })}
       </div>
 
-      {/* Pool counters */}
-      <div style={styles.poolRow}>
-        <span style={styles.poolLabel}>Pool:</span>
-        {chapters.map(ch => {
-          const available = availableByChapter.get(ch.id) ?? 0;
-          return (
-            <span key={ch.id} style={{ ...styles.poolCount, color: ch.color }}>
-              {available}
-            </span>
-          );
-        })}
-        <span style={styles.poolTotal}>
-          Total: {totalRemaining}
-        </span>
-      </div>
-
       {/* Audience interaction toggle */}
       <div style={styles.toggleRow}>
         <button
@@ -181,6 +255,16 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
 
       {/* Inject tokens (testing) */}
       <InjectTokens chapters={chapters} sendCommand={sendCommand} />
+
+      {/* Swarm Orb Controls */}
+      <SwarmControls
+        finaleState={finaleState}
+        granularTypes={granularTypes}
+        chapters={chapters}
+        sendCommand={sendCommand}
+      />
+
+      </>)}
     </section>
   );
 }
@@ -230,6 +314,265 @@ function ActiveIndicator({
         <span style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.3)' }}>
           HOLD
         </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Swarm Orb Controls — decay, scatter, lock, crossfade mode, fallback
+// ---------------------------------------------------------------------------
+
+function SwarmControls({
+  finaleState,
+  granularTypes,
+  chapters,
+  sendCommand,
+}: {
+  finaleState: FinaleState;
+  granularTypes: GranularType[];
+  chapters: ChapterConfig[];
+  sendCommand: (cmd: ConductorCommand) => void;
+}) {
+  const [lockChapterIdx, setLockChapterIdx] = useState(0);
+  const selectedLockChapter = chapters[lockChapterIdx] ?? chapters[0];
+
+  return (
+    <div style={{ marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px' }}>
+      <h3 style={{ ...styles.sectionTitle, marginBottom: '8px' }}>Swarm Orbs</h3>
+
+      {/* Enable/disable nodes */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
+        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', width: '100%', marginBottom: '2px' }}>Enable Nodes:</span>
+        {granularTypes.map(gt => {
+          const isEnabled = finaleState.enabledNodes.has(gt.id);
+          return (
+            <button
+              key={gt.id}
+              onClick={() => {
+                if (isEnabled) {
+                  sendCommand({ type: 'DISABLE_NODE', granularType: gt.id });
+                } else {
+                  sendCommand({ type: 'ENABLE_NODE', granularType: gt.id });
+                }
+              }}
+              style={{
+                ...styles.tokenButton,
+                width: 'auto',
+                height: '30px',
+                padding: '0 10px',
+                fontSize: '0.6rem',
+                color: isEnabled ? '#86efac' : 'rgba(255,255,255,0.3)',
+                borderColor: isEnabled ? 'rgba(134, 239, 172, 0.4)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: isEnabled ? 'rgba(134, 239, 172, 0.1)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              {gt.symbol} {gt.label}
+            </button>
+          );
+        })}
+        {/* Seed node */}
+        {(() => {
+          const seedEnabled = finaleState.enabledNodes.has('seed');
+          return (
+            <button
+              onClick={() => {
+                if (seedEnabled) {
+                  sendCommand({ type: 'DISABLE_NODE', granularType: 'seed' });
+                } else {
+                  sendCommand({ type: 'ENABLE_NODE', granularType: 'seed' });
+                }
+              }}
+              style={{
+                ...styles.tokenButton,
+                width: 'auto',
+                height: '30px',
+                padding: '0 10px',
+                fontSize: '0.6rem',
+                color: seedEnabled ? '#86efac' : 'rgba(255,255,255,0.3)',
+                borderColor: seedEnabled ? 'rgba(134, 239, 172, 0.4)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: seedEnabled ? 'rgba(134, 239, 172, 0.1)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              ✦ HEART
+            </button>
+          );
+        })()}
+        <button
+          onClick={() => {
+            // Enable all nodes
+            for (const gt of granularTypes) {
+              if (!finaleState.enabledNodes.has(gt.id)) {
+                sendCommand({ type: 'ENABLE_NODE', granularType: gt.id });
+              }
+            }
+            if (!finaleState.enabledNodes.has('seed')) {
+              sendCommand({ type: 'ENABLE_NODE', granularType: 'seed' });
+            }
+          }}
+          style={{
+            ...styles.tokenButton,
+            width: 'auto',
+            height: '30px',
+            padding: '0 10px',
+            fontSize: '0.6rem',
+            color: 'rgba(255,255,255,0.5)',
+            borderColor: 'rgba(255,255,255,0.15)',
+          }}
+        >
+          Enable All
+        </button>
+      </div>
+
+      {/* Decay rate */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+        <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', width: 55, flexShrink: 0 }}>
+          Decay: {finaleState.orbDecayLoops === 0 ? 'OFF' : `${finaleState.orbDecayLoops}L`}
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={8}
+          value={finaleState.orbDecayLoops}
+          onChange={e => sendCommand({ type: 'SET_DECAY_RATE', loops: Number(e.target.value) })}
+          style={{ flex: 1, accentColor: '#86efac' }}
+        />
+      </div>
+
+      {/* Crossfade mode toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+        <button
+          onClick={() => sendCommand({ type: 'SET_CROSSFADE_MODE', instant: !finaleState.instantCrossfade })}
+          style={{
+            ...styles.toggleButton,
+            padding: '6px 12px',
+            minHeight: '32px',
+            fontSize: '0.7rem',
+            backgroundColor: finaleState.instantCrossfade
+              ? 'rgba(251, 191, 36, 0.15)'
+              : 'rgba(255,255,255,0.05)',
+            borderColor: finaleState.instantCrossfade
+              ? 'rgba(251, 191, 36, 0.5)'
+              : 'rgba(255,255,255,0.15)',
+            color: finaleState.instantCrossfade
+              ? '#fbbf24'
+              : 'rgba(255,255,255,0.5)',
+          }}
+        >
+          Crossfade: {finaleState.instantCrossfade ? 'INSTANT' : 'LOOP'}
+        </button>
+      </div>
+
+      {/* Scatter buttons */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
+        <button
+          onClick={() => sendCommand({ type: 'SCATTER_ALL' })}
+          style={{
+            ...styles.tokenButton,
+            width: 'auto',
+            height: '30px',
+            padding: '0 10px',
+            fontSize: '0.65rem',
+            color: '#f87171',
+            borderColor: 'rgba(248, 113, 113, 0.3)',
+          }}
+        >
+          Scatter All
+        </button>
+        {granularTypes.map(gt => (
+          <button
+            key={gt.id}
+            onClick={() => sendCommand({ type: 'SCATTER_NODE', granularType: gt.id })}
+            style={{
+              ...styles.tokenButton,
+              width: 'auto',
+              height: '30px',
+              padding: '0 8px',
+              fontSize: '0.6rem',
+              color: 'rgba(255,255,255,0.5)',
+              borderColor: 'rgba(255,255,255,0.1)',
+            }}
+          >
+            {gt.symbol} Scatter
+          </button>
+        ))}
+      </div>
+
+      {/* Lock/unlock per node */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', width: '100%' }}>Lock Node:</span>
+        <select
+          value={lockChapterIdx}
+          onChange={e => setLockChapterIdx(Number(e.target.value))}
+          style={{
+            padding: '3px 6px',
+            borderRadius: 4,
+            border: '1px solid rgba(255,255,255,0.15)',
+            background: 'rgba(255,255,255,0.06)',
+            color: '#e5e7eb',
+            fontSize: '0.7rem',
+          }}
+        >
+          {chapters.map((ch, i) => (
+            <option key={ch.id} value={i}>{ch.label}</option>
+          ))}
+        </select>
+        {granularTypes.map(gt => {
+          const tally = finaleState.nodeTallies.get(gt.id);
+          const isLocked = tally?.locked ?? false;
+          return (
+            <button
+              key={gt.id}
+              onClick={() => {
+                if (isLocked) {
+                  sendCommand({ type: 'UNLOCK_NODE', granularType: gt.id });
+                } else if (selectedLockChapter) {
+                  sendCommand({ type: 'LOCK_NODE', granularType: gt.id, chapterId: selectedLockChapter.id });
+                }
+              }}
+              style={{
+                ...styles.tokenButton,
+                width: 'auto',
+                height: '28px',
+                padding: '0 6px',
+                fontSize: '0.6rem',
+                color: isLocked ? '#fbbf24' : 'rgba(255,255,255,0.4)',
+                borderColor: isLocked ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: isLocked ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              {gt.symbol} {isLocked ? '🔓' : '🔒'}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Fallback button */}
+      {!finaleState.fallbackMode && (
+        <button
+          onClick={() => {
+            if (confirm('Switch to performer fallback mode? Audience phones will go dark.')) {
+              sendCommand({ type: 'FALLBACK_PERFORMER_REMIX' });
+            }
+          }}
+          style={{
+            ...styles.toggleButton,
+            padding: '6px 12px',
+            minHeight: '32px',
+            fontSize: '0.7rem',
+            color: '#f87171',
+            borderColor: 'rgba(248,113,113,0.3)',
+            backgroundColor: 'rgba(248,113,113,0.08)',
+            marginTop: '4px',
+          }}
+        >
+          Performer Fallback
+        </button>
+      )}
+      {finaleState.fallbackMode && (
+        <div style={{ fontSize: '0.65rem', color: '#f87171', marginTop: '4px' }}>
+          FALLBACK MODE ACTIVE — audience phones dark
+        </div>
       )}
     </div>
   );
