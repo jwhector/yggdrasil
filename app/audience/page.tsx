@@ -14,8 +14,9 @@ import { IntrusiveThoughts } from '@/components/song-building/IntrusiveThoughts'
 import { useAuditionProgress } from '@/hooks/useAuditionProgress';
 import { useIntrusiveThoughts } from '@/hooks/useIntrusiveThoughts';
 import { EmotionVote } from '@/components/finale/EmotionVote';
+import { AudienceRemix } from '@/components/finale/AudienceRemix';
 import { MedistationLobby } from '@/components/MedistationLobby';
-import type { AudienceAttemptView, AudienceVoteView, AuditionProgress as AuditionProgressData } from '@/conductor/types';
+import type { AudienceAttemptView, AudienceVoteView, AudienceRemixView, AuditionProgress as AuditionProgressData } from '@/conductor/types';
 import type { Socket } from 'socket.io-client';
 
 const SHOW_ID = 'default-show';
@@ -122,13 +123,19 @@ function AudienceContent() {
         );
       })()}
 
-      {phase === 'finale_remix' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
-          <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
-            LISTEN
-          </p>
-        </div>
-      )}
+      {phase === 'finale_remix' && state.myFinale && (state.myFinale as unknown as AudienceRemixView).finalePhase === 'remix' && (() => {
+        const remixView = state.myFinale as unknown as AudienceRemixView;
+        return (
+          <AudienceRemix
+            socket={socket}
+            orbs={remixView.orbs ?? []}
+            nodeTallies={remixView.nodeTallies ?? []}
+            chapters={remixView.chapters ?? state.config.chapters}
+            granularTypes={remixView.granularTypes ?? state.config.granularTypes}
+            fallbackMode={remixView.fallbackMode ?? false}
+          />
+        );
+      })()}
 
       {phase === 'ended' && (
         <p style={{ fontSize: '1.5rem', color: 'rgba(255,255,255,0.7)' }}>Thank you</p>

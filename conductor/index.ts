@@ -35,3 +35,18 @@ export { getNextQuestion, calculateMaxQuestionsPerPerson, shouldCapPool, process
 
 // Export remix engine functions (V3.4)
 export { queueToken, cancelQueue, advanceNode, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';
+
+// Export audience remix functions (V3.4 — Swarm Orbs)
+export {
+  createUserOrbs,
+  placeOrb,
+  recallOrb,
+  processDecay,
+  scatterNode,
+  lockNode,
+  unlockNode,
+  setDecayRate,
+  setCrossfadeMode,
+  getEffectiveChapter,
+  recomputeTallies,
+} from './audience-remix';

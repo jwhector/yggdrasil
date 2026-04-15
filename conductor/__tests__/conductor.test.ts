@@ -73,6 +73,10 @@ function createTestConfig(
       },
       remix: {
         audienceInteraction: false,
+        orbsPerPerson: 6,
+        orbDecayLoops: 3,
+        tallyBroadcastMs: 500,
+        instantCrossfade: false,
       },
     },
     granularTypes: [
@@ -1237,6 +1241,10 @@ describe('V3.4 Finale Phases', () => {
         },
         remix: {
           audienceInteraction: false,
+          orbsPerPerson: 6,
+          orbDecayLoops: 3,
+          tallyBroadcastMs: 500,
+          instantCrossfade: false,
         },
       },
     };

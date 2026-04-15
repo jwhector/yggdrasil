@@ -492,6 +492,17 @@ export type ConductorCommand =
   | { type: 'TOGGLE_AUDIENCE_INTERACTION' }
   | { type: 'LOOP_BOUNDARY' }
 
+  // Finale — Audience Remix (swarm orbs)
+  | { type: 'PLACE_ORB'; userId: UserId; orbIndex: number; granularType: string }
+  | { type: 'RECALL_ORB'; userId: UserId; orbIndex: number }
+  | { type: 'SET_DECAY_RATE'; loops: number }
+  | { type: 'SET_CROSSFADE_MODE'; instant: boolean }
+  | { type: 'SCATTER_NODE'; granularType: string }
+  | { type: 'SCATTER_ALL' }
+  | { type: 'LOCK_NODE'; granularType: string; chapterId: string }
+  | { type: 'UNLOCK_NODE'; granularType: string }
+  | { type: 'FALLBACK_PERFORMER_REMIX'; instant?: boolean }
+
   // Manual end (V3.4)
   | { type: 'END_SHOW' }
 
@@ -551,6 +562,18 @@ export type ConductorEvent =
   | { type: 'NODE_SILENT'; granularType: string }
   | { type: 'NODE_ADVANCED'; granularType: string }
   | { type: 'POOL_EMPTY' }
+
+  // Finale — Audience Remix events
+  | { type: 'ORB_PLACED'; userId: UserId; orbIndex: number; granularType: string; chapterId: string }
+  | { type: 'ORB_RECALLED'; userId: UserId; orbIndex: number; granularType: string; chapterId: string }
+  | { type: 'ORB_DECAYED'; userId: UserId; orbIndex: number; granularType: string }
+  | { type: 'NODE_TALLY_CHANGED'; granularType: string; dominantChapter: string | null; votes: Array<{ chapterId: string; count: number }> }
+  | { type: 'NODE_LOCKED'; granularType: string; chapterId: string }
+  | { type: 'NODE_UNLOCKED'; granularType: string }
+  | { type: 'NODES_SCATTERED'; granularType: string | null; affectedUsers: UserId[] }
+  | { type: 'DECAY_RATE_CHANGED'; loops: number }
+  | { type: 'CROSSFADE_MODE_CHANGED'; instant: boolean }
+  | { type: 'FALLBACK_ACTIVATED'; instant: boolean }
 
   // Audio
   | { type: 'AUDIO_CUE'; cue: AudioCue }
@@ -858,6 +881,13 @@ export interface FinaleState {
   loopProgress: number;  // 0.0–1.0, for display
 
   npc: { currentMessage: string | null };
+
+  // Audience remix (swarm orbs)
+  audienceOrbs: Map<UserId, UserRemixState>;  // Per-user orb state
+  nodeTallies: Map<string, NodeVoteTally>;    // Per-node aggregate tally
+  orbDecayLoops: number;                       // Current decay rate (live-adjustable)
+  instantCrossfade: boolean;                   // Current crossfade mode (live-adjustable)
+  fallbackMode: boolean;                       // True when performer has taken over via fallback
 }
 
 // ============================================================================
@@ -889,6 +919,10 @@ export interface VotePhaseConfig {
 /** Remix phase configuration. */
 export interface RemixConfig {
   audienceInteraction: boolean;  // Default mode: false (standard loop-quantized behavior)
+  orbsPerPerson: number;         // Number of orbs per audience member (default: 6)
+  orbDecayLoops: number;         // Loops before placed orbs decay back to hand (0 = no decay, default: 3)
+  tallyBroadcastMs: number;      // Tally broadcast interval in ms (default: 500)
+  instantCrossfade: boolean;     // True = crossfade on tally change, false = at loop boundary (default: false)
 }
 
 /** Finale configuration (V3.4). */
@@ -899,6 +933,33 @@ export interface FinaleConfig {
   npcMessages: NpcMessageConfig[];
   vote: VotePhaseConfig;
   remix: RemixConfig;
+}
+
+// ============================================================================
+// V3.4 Audience Remix — Orb Types
+// ============================================================================
+
+/** A personal orb owned by an audience member, generated from their vote phase answers. */
+export interface AudienceOrb {
+  index: number;              // 0-5 (position in the user's orb array)
+  chapterId: string;          // Chapter from their vote answer
+  placedOnNode: string | null; // granularType if placed, null if in hand
+  placedAtLoop: number;       // Loop count when placed (for decay calculation), 0 if in hand
+}
+
+/** Per-user remix state tracked server-side. */
+export interface UserRemixState {
+  userId: UserId;
+  orbs: AudienceOrb[];       // Always length = orbsPerPerson (e.g., 6)
+}
+
+/** Aggregate vote tally for a single node, derived from all audience orbs. */
+export interface NodeVoteTally {
+  granularType: string;
+  votes: Map<string, number>;     // chapterId → count of orbs placed here
+  dominantChapter: string | null;  // Highest count wins (tie = incumbent stays), null if no orbs
+  locked: boolean;                 // If true, performer has locked this node
+  lockedChapter: string | null;    // The chapter it's locked to (null if unlocked)
 }
 
 // ============================================================================
@@ -942,11 +1003,23 @@ export interface AudienceVoteView {
 
 /**
  * Finale view sent to audience clients during finale_remix (V3.4).
- * Phones are down — no interactive UI needed.
+ * In audience swarm mode: personalized orb state + node tallies.
+ * In fallback mode: phones down (no interactive UI).
  */
 export interface AudienceRemixView {
   finalePhase: 'remix';
   npcMessage: string | null;
+  fallbackMode: boolean;           // True = phones down (performer took over)
+  orbs: AudienceOrb[];             // This user's 6 orbs (empty in fallback mode)
+  nodeTallies: Array<{             // Aggregate tally per node (for radial visualization)
+    granularType: string;
+    votes: Array<{ chapterId: string; count: number }>;
+    dominantChapter: string | null;
+    locked: boolean;
+    lockedChapter: string | null;
+  }>;
+  chapters: ChapterConfig[];       // For color resolution
+  granularTypes: GranularType[];   // For node labels
 }
 
 /**
@@ -981,4 +1054,13 @@ export interface ProjectorFinaleView {
   audienceInteraction: boolean;
   // NPC
   npcMessage: string | null;
+  // Audience remix tally (for radial arc visualization)
+  nodeTallies: Array<{
+    granularType: string;
+    votes: Array<{ chapterId: string; count: number }>;
+    dominantChapter: string | null;
+    locked: boolean;
+    lockedChapter: string | null;
+  }>;
+  fallbackMode: boolean;
 }

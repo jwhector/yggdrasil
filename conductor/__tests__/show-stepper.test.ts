@@ -60,7 +60,7 @@ function createTestConfig(): ShowConfig {
         questionDelayMs: 3000,
         revealPoolOnProjector: true,
       },
-      remix: { audienceInteraction: false },
+      remix: { audienceInteraction: false, orbsPerPerson: 6, orbDecayLoops: 3, tallyBroadcastMs: 500, instantCrossfade: false },
     },
     granularTypes: [
       { id: 'bass', label: 'Bass', color: '#000', symbol: '■' },

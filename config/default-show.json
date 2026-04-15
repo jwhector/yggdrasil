@@ -524,7 +524,11 @@
       "alarmColor": "#ff0000"
     },
     "remix": {
-      "audienceInteraction": false
+      "audienceInteraction": true,
+      "orbsPerPerson": 6,
+      "orbDecayLoops": 3,
+      "tallyBroadcastMs": 500,
+      "instantCrossfade": false
     }
   },
   "timing": {

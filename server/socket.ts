@@ -167,12 +167,37 @@ export function setupSocketHandlers(
   }, POOL_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
+  // Node tally broadcast (~2 Hz during finale_remix with audience orbs)
+  // ============================================================================
+
+  const tallyBroadcastInterval = setInterval(() => {
+    const state = getState();
+    if (state.phase !== 'finale_remix') return;
+
+    const fs = state.finaleState as FinaleState | null;
+    if (!fs || fs.fallbackMode) return;
+    if (fs.nodeTallies.size === 0) return;
+
+    const tallies = Array.from(fs.nodeTallies.entries()).map(([granularType, tally]) => ({
+      granularType,
+      dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,
+      locked: tally.locked,
+      votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+    }));
+
+    io.to('projector').emit('node_tally', { tallies });
+    io.to('controller').emit('node_tally', { tallies });
+    io.to('audience').emit('node_tally', { tallies });
+  }, POOL_STATE_BROADCAST_INTERVAL_MS);
+
+  // ============================================================================
   // Cleanup
   // ============================================================================
 
   process.on('SIGINT', () => {
     clearInterval(heartbeatInterval);
     clearInterval(poolStateBroadcastInterval);
+    clearInterval(tallyBroadcastInterval);
   });
 
   // ============================================================================
@@ -421,6 +446,59 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
+    // place_orb — audience places an orb on a remix node
+    //
+    // Payload: { orbIndex: number; granularType: string }
+    // userId taken from socket session (not payload) for security.
+    // ------------------------------------------------------------------
+    socket.on('place_orb', async (data: { orbIndex: number; granularType: string }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] place_orb rejected: no userId on socket');
+        return;
+      }
+
+      const state = getState();
+      if (state.phase !== 'finale_remix') return;
+
+      const events = processCommand(state, {
+        type: 'PLACE_ORB',
+        userId,
+        orbIndex: data.orbIndex,
+        granularType: data.granularType,
+      });
+
+      setState(state, events);
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
+    // recall_orb — audience recalls an orb back to hand
+    //
+    // Payload: { orbIndex: number }
+    // userId taken from socket session (not payload) for security.
+    // ------------------------------------------------------------------
+    socket.on('recall_orb', async (data: { orbIndex: number }) => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) {
+        console.warn('[Socket] recall_orb rejected: no userId on socket');
+        return;
+      }
+
+      const state = getState();
+      if (state.phase !== 'finale_remix') return;
+
+      const events = processCommand(state, {
+        type: 'RECALL_ORB',
+        userId,
+        orbIndex: data.orbIndex,
+      });
+
+      setState(state, events);
+      await broadcastEvents(io, events, state);
+    });
+
+    // ------------------------------------------------------------------
     // dismiss_thought — audience member swipes away an intrusive thought
     // ------------------------------------------------------------------
     socket.on('dismiss_thought', (data: { thoughtId: string; direction: 'left' | 'right' }) => {
@@ -645,10 +723,16 @@ export async function broadcastEvents(
         io.to('audience').emit('phones_down');
         break;
 
-      case 'REMIX_STARTED':
-        // Phones go dark when remix begins
-        io.to('audience').emit('phones_down');
+      case 'REMIX_STARTED': {
+        // In audience swarm mode, audience keeps their phones for orb placement.
+        // In performer-only mode, phones go dark.
+        const fs = state.finaleState as FinaleState | null;
+        const hasAudienceOrbs = fs && fs.audienceOrbs.size > 0;
+        if (!hasAudienceOrbs) {
+          io.to('audience').emit('phones_down');
+        }
         break;
+      }
 
       case 'TOKEN_ACTIVATED': {
         const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
@@ -677,6 +761,38 @@ export async function broadcastEvents(
           chapterId: null,
           status: 'silent',
         });
+        break;
+      }
+
+      case 'ORB_DECAYED': {
+        // Notify the specific audience member that their orb decayed
+        const od = event as { type: 'ORB_DECAYED'; userId: UserId; orbIndex: number; granularType: string };
+        const audienceSocksForDecay = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForDecay) {
+          if ((s as any).userId === od.userId) {
+            s.emit('orb_decayed', { orbIndex: od.orbIndex, granularType: od.granularType });
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'NODES_SCATTERED': {
+        // Notify affected audience members that their orbs were scattered
+        const ns2 = event as { type: 'NODES_SCATTERED'; granularType: string | null; affectedUsers: UserId[] };
+        const audienceSocksForScatter = await io.in('audience').fetchSockets();
+        for (const s of audienceSocksForScatter) {
+          const uid = (s as any).userId as UserId | undefined;
+          if (uid && ns2.affectedUsers.includes(uid)) {
+            s.emit('scatter', { granularType: ns2.granularType });
+          }
+        }
+        break;
+      }
+
+      case 'FALLBACK_ACTIVATED': {
+        // Performer took over — send phones_down to audience
+        io.to('audience').emit('phones_down');
         break;
       }
 
@@ -764,6 +880,15 @@ export function filterStateForClient(
           loopProgress: finaleFs.loopProgress,
           audienceInteraction: finaleFs.audienceInteraction,
           npcMessage: finaleFs.npc.currentMessage,
+          fallbackMode: finaleFs.fallbackMode,
+          nodeTallies: Array.from(finaleFs.nodeTallies.entries()).map(([granularType, tally]) => ({
+            granularType,
+            dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,
+            locked: tally.locked,
+            votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+          })),
+          orbDecayLoops: finaleFs.orbDecayLoops,
+          instantCrossfade: finaleFs.instantCrossfade,
         };
       }
 
@@ -831,9 +956,24 @@ export function filterStateForClient(
             shuffleQuestions: voteConfig?.shuffleQuestions ?? false,
           };
         } else if (state.phase === 'finale_remix') {
+          const userOrbs = fs.audienceOrbs.get(userId);
           myFinale = {
             finalePhase: 'remix',
             npcMessage: fs.npc.currentMessage,
+            fallbackMode: fs.fallbackMode,
+            orbs: userOrbs?.orbs ?? [],
+            nodeTallies: Array.from(fs.nodeTallies.entries()).map(([granularType, tally]) => ({
+              granularType,
+              votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
+              dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,
+              locked: tally.locked,
+              lockedChapter: tally.lockedChapter,
+            })),
+            chapters: state.config.chapters ?? [],
+            granularTypes: state.config.granularTypes ?? [],
+            orbDecayLoops: fs.orbDecayLoops,
+            instantCrossfade: fs.instantCrossfade,
+            loopCount: fs.loopCount,
           };
         }
       }

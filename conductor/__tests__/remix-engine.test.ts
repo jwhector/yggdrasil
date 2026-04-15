@@ -72,6 +72,11 @@ function makeRemixState(overrides?: Partial<FinaleState>): FinaleState {
     loopCount: 0,
     loopProgress: 0,
     npc: { currentMessage: null },
+    audienceOrbs: new Map(),
+    nodeTallies: new Map(),
+    orbDecayLoops: 3,
+    instantCrossfade: false,
+    fallbackMode: false,
     ...overrides,
   };
 }

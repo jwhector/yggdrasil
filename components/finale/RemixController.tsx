@@ -181,6 +181,14 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
 
       {/* Inject tokens (testing) */}
       <InjectTokens chapters={chapters} sendCommand={sendCommand} />
+
+      {/* Swarm Orb Controls */}
+      <SwarmControls
+        finaleState={finaleState}
+        granularTypes={granularTypes}
+        chapters={chapters}
+        sendCommand={sendCommand}
+      />
     </section>
   );
 }
@@ -230,6 +238,182 @@ function ActiveIndicator({
         <span style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.3)' }}>
           HOLD
         </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Swarm Orb Controls — decay, scatter, lock, crossfade mode, fallback
+// ---------------------------------------------------------------------------
+
+function SwarmControls({
+  finaleState,
+  granularTypes,
+  chapters,
+  sendCommand,
+}: {
+  finaleState: FinaleState;
+  granularTypes: GranularType[];
+  chapters: ChapterConfig[];
+  sendCommand: (cmd: ConductorCommand) => void;
+}) {
+  const [lockChapterIdx, setLockChapterIdx] = useState(0);
+  const selectedLockChapter = chapters[lockChapterIdx] ?? chapters[0];
+
+  return (
+    <div style={{ marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px' }}>
+      <h3 style={{ ...styles.sectionTitle, marginBottom: '8px' }}>Swarm Orbs</h3>
+
+      {/* Decay rate */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+        <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', width: 55, flexShrink: 0 }}>
+          Decay: {finaleState.orbDecayLoops === 0 ? 'OFF' : `${finaleState.orbDecayLoops}L`}
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={8}
+          value={finaleState.orbDecayLoops}
+          onChange={e => sendCommand({ type: 'SET_DECAY_RATE', loops: Number(e.target.value) })}
+          style={{ flex: 1, accentColor: '#86efac' }}
+        />
+      </div>
+
+      {/* Crossfade mode toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+        <button
+          onClick={() => sendCommand({ type: 'SET_CROSSFADE_MODE', instant: !finaleState.instantCrossfade })}
+          style={{
+            ...styles.toggleButton,
+            padding: '6px 12px',
+            minHeight: '32px',
+            fontSize: '0.7rem',
+            backgroundColor: finaleState.instantCrossfade
+              ? 'rgba(251, 191, 36, 0.15)'
+              : 'rgba(255,255,255,0.05)',
+            borderColor: finaleState.instantCrossfade
+              ? 'rgba(251, 191, 36, 0.5)'
+              : 'rgba(255,255,255,0.15)',
+            color: finaleState.instantCrossfade
+              ? '#fbbf24'
+              : 'rgba(255,255,255,0.5)',
+          }}
+        >
+          Crossfade: {finaleState.instantCrossfade ? 'INSTANT' : 'LOOP'}
+        </button>
+      </div>
+
+      {/* Scatter buttons */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
+        <button
+          onClick={() => sendCommand({ type: 'SCATTER_ALL' })}
+          style={{
+            ...styles.tokenButton,
+            width: 'auto',
+            height: '30px',
+            padding: '0 10px',
+            fontSize: '0.65rem',
+            color: '#f87171',
+            borderColor: 'rgba(248, 113, 113, 0.3)',
+          }}
+        >
+          Scatter All
+        </button>
+        {granularTypes.map(gt => (
+          <button
+            key={gt.id}
+            onClick={() => sendCommand({ type: 'SCATTER_NODE', granularType: gt.id })}
+            style={{
+              ...styles.tokenButton,
+              width: 'auto',
+              height: '30px',
+              padding: '0 8px',
+              fontSize: '0.6rem',
+              color: 'rgba(255,255,255,0.5)',
+              borderColor: 'rgba(255,255,255,0.1)',
+            }}
+          >
+            {gt.symbol} Scatter
+          </button>
+        ))}
+      </div>
+
+      {/* Lock/unlock per node */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', width: '100%' }}>Lock Node:</span>
+        <select
+          value={lockChapterIdx}
+          onChange={e => setLockChapterIdx(Number(e.target.value))}
+          style={{
+            padding: '3px 6px',
+            borderRadius: 4,
+            border: '1px solid rgba(255,255,255,0.15)',
+            background: 'rgba(255,255,255,0.06)',
+            color: '#e5e7eb',
+            fontSize: '0.7rem',
+          }}
+        >
+          {chapters.map((ch, i) => (
+            <option key={ch.id} value={i}>{ch.label}</option>
+          ))}
+        </select>
+        {granularTypes.map(gt => {
+          const tally = finaleState.nodeTallies.get(gt.id);
+          const isLocked = tally?.locked ?? false;
+          return (
+            <button
+              key={gt.id}
+              onClick={() => {
+                if (isLocked) {
+                  sendCommand({ type: 'UNLOCK_NODE', granularType: gt.id });
+                } else if (selectedLockChapter) {
+                  sendCommand({ type: 'LOCK_NODE', granularType: gt.id, chapterId: selectedLockChapter.id });
+                }
+              }}
+              style={{
+                ...styles.tokenButton,
+                width: 'auto',
+                height: '28px',
+                padding: '0 6px',
+                fontSize: '0.6rem',
+                color: isLocked ? '#fbbf24' : 'rgba(255,255,255,0.4)',
+                borderColor: isLocked ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: isLocked ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              {gt.symbol} {isLocked ? '🔓' : '🔒'}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Fallback button */}
+      {!finaleState.fallbackMode && (
+        <button
+          onClick={() => {
+            if (confirm('Switch to performer fallback mode? Audience phones will go dark.')) {
+              sendCommand({ type: 'FALLBACK_PERFORMER_REMIX' });
+            }
+          }}
+          style={{
+            ...styles.toggleButton,
+            padding: '6px 12px',
+            minHeight: '32px',
+            fontSize: '0.7rem',
+            color: '#f87171',
+            borderColor: 'rgba(248,113,113,0.3)',
+            backgroundColor: 'rgba(248,113,113,0.08)',
+            marginTop: '4px',
+          }}
+        >
+          Performer Fallback
+        </button>
+      )}
+      {finaleState.fallbackMode && (
+        <div style={{ fontSize: '0.65rem', color: '#f87171', marginTop: '4px' }}>
+          FALLBACK MODE ACTIVE — audience phones dark
+        </div>
       )}
     </div>
   );
