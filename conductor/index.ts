@@ -31,7 +31,7 @@ export { getNpcMessage } from './npc';
 export { createTokenPool, consumeToken, returnToken, isPoolEmpty, getTotalRemaining } from './token-pool';
 
 // Export question engine functions (V3.4)
-export { getNextQuestion, calculateMaxQuestionsPerPerson, shouldCapPool, processEmotion } from './question-engine';
+export { getNextQuestion, processEmotion } from './question-engine';
 
 // Export remix engine functions (V3.4)
 export { queueToken, cancelQueue, advanceNode, processLoopBoundary, toggleAudienceInteraction, resolveTrack as resolveRemixTrack } from './remix-engine';

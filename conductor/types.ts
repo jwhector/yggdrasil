@@ -848,8 +848,6 @@ export interface FinaleState {
   // Vote phase tracking
   vote: {
     questionsAnsweredByUser: Map<UserId, number>;  // How many questions each person has answered
-    maxQuestionsPerPerson: number;                  // Derived from targetPoolSize / audienceCount
-    poolCapReached: boolean;
   };
 
   // Token pool
@@ -992,11 +990,9 @@ export interface AudienceVoteView {
   finalePhase: 'vote';
   questions: QuestionConfig[];  // Full question bank — client iterates locally
   answeredCount: number;    // How many questions this user has already answered (for resume)
-  poolCapReached: boolean;  // True when phones should go dark
   chapters: ChapterConfig[];  // For rendering the 3 option cards (chapter identity)
   npcMessage: string | null;
   npcIntro: string[];       // NPC intro messages for client-side staging (vote_intro_1, vote_intro_2)
-  npcOutro: string | null;  // NPC outro message shown after first answer
   alarmColor: string;       // CSS color for alarm edge flash
   shuffleQuestions: boolean; // Whether to shuffle question order per user
 }
@@ -1034,7 +1030,6 @@ export interface ProjectorFinaleView {
     totalByChapter: Array<{ chapterId: string; count: number }>;
     totalRemaining: number;
     targetPoolSize: number;
-    poolCapReached: boolean;
   };
   // Active nodes (what's currently playing on each granular type)
   active: Array<{

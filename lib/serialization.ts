@@ -40,8 +40,6 @@ export interface SerializedFinaleState {
   phase: 'vote' | 'remix';
   vote: {
     questionsAnsweredByUser: [string, number][];
-    maxQuestionsPerPerson: number;
-    poolCapReached: boolean;
   };
   pool: {
     tokens: FinaleState['pool']['tokens'];
@@ -88,8 +86,6 @@ export function serializeFinaleState(fs: FinaleState): SerializedFinaleState {
     phase: fs.phase,
     vote: {
       questionsAnsweredByUser: Array.from(fs.vote.questionsAnsweredByUser.entries()),
-      maxQuestionsPerPerson: fs.vote.maxQuestionsPerPerson,
-      poolCapReached: fs.vote.poolCapReached,
     },
     pool: {
       tokens: fs.pool.tokens,
@@ -124,8 +120,6 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
     phase: data.phase,
     vote: {
       questionsAnsweredByUser: new Map(data.vote.questionsAnsweredByUser),
-      maxQuestionsPerPerson: data.vote.maxQuestionsPerPerson,
-      poolCapReached: data.vote.poolCapReached,
     },
     pool: {
       tokens: data.pool.tokens,

@@ -223,9 +223,6 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleSubmitEmotion(state, command.userId, command.chapterId, command.questionIndex);
     case 'REQUEST_NEXT_QUESTION':
       return handleRequestNextQuestion(state, command.userId);
-    case 'POOL_CAP_REACHED':
-      return handlePoolCapReached(state);
-
     // Finale — Remix phase (V3.4)
     case 'START_REMIX':
       return handleStartRemix(state);
@@ -1404,9 +1401,6 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No finale config found in show config' }];
   }
 
-  // Everyone answers orbsPerPerson questions (default 6) — no pool cap
-  const maxQ = v34Config.remix?.orbsPerPerson ?? 6;
-
   // Build chapter → songIndex mapping from attempt configs
   const chapterSongIndex = new Map<string, number>();
   for (let i = 0; i < state.config.attempts.length; i++) {
@@ -1420,8 +1414,6 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     phase: 'vote',
     vote: {
       questionsAnsweredByUser: new Map(),
-      maxQuestionsPerPerson: maxQ,
-      poolCapReached: false,
     },
     pool: {
       tokens: [],
@@ -1495,7 +1487,7 @@ function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorE
   }
 
   const answeredCount = finaleState.vote.questionsAnsweredByUser.get(userId) ?? 0;
-  const question = getNextQuestion(v34Config.vote, answeredCount, finaleState.vote.maxQuestionsPerPerson, userId);
+  const question = getNextQuestion(v34Config.vote, answeredCount, userId);
 
   if (!question) {
     return []; // No more questions for this user
@@ -1507,22 +1499,6 @@ function handleRequestNextQuestion(state: ShowState, userId: UserId): ConductorE
     questionIndex: answeredCount,
     questionText: question.text,
     answers: question.answers ?? null,
-  }];
-}
-
-function handlePoolCapReached(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'finale_vote') {
-    return [{ type: 'ERROR', message: 'POOL_CAP_REACHED only valid during finale_vote' }];
-  }
-  const finaleState = state.finaleState as FinaleState;
-  if (!finaleState) return [{ type: 'ERROR', message: 'Finale not initialized' }];
-
-  finaleState.vote.poolCapReached = true;
-  state.finaleState = finaleState;
-
-  return [{
-    type: 'POOL_CAP_REACHED',
-    finalPoolSize: finaleState.pool.tokens.length,
   }];
 }
 

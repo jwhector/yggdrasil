@@ -294,13 +294,10 @@ function AudienceContent() {
         const voteView = state.myFinale as unknown as AudienceVoteView;
         return (
           <EmotionVote
-            socket={socket}
             questions={voteView.questions ?? []}
             initialAnsweredCount={voteView.answeredCount}
-            poolCapReached={voteView.poolCapReached}
             chapters={voteView.chapters}
             npcIntro={voteView.npcIntro ?? []}
-            npcOutro={voteView.npcOutro ?? null}
             alarmColor={voteView.alarmColor ?? '#ff0000'}
             shuffleQuestions={voteView.shuffleQuestions ?? false}
             userId={state.userId}

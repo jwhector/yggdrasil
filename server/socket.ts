@@ -460,6 +460,21 @@ export function setupSocketHandlers(
           });
         }
       }
+
+      // Emit vote progress to controller for live completion tracking
+      const fs = state.finaleState as FinaleState | null;
+      if (fs) {
+        const totalQuestions = state.config.finale.vote?.questions?.length ?? 0;
+        let completedUsers = 0;
+        for (const [, count] of fs.vote.questionsAnsweredByUser) {
+          if (count >= totalQuestions) completedUsers++;
+        }
+        io.to('controller').emit('vote_progress', {
+          completedUsers,
+          totalUsers: state.users.size,
+          totalOrbs: fs.pool.tokens.length,
+        });
+      }
     });
 
     // ------------------------------------------------------------------
@@ -877,7 +892,6 @@ export function filterStateForClient(
             totalByChapter: Array.from(finaleFs.pool.totalByChapter.entries()).map(([chapterId, count]) => ({ chapterId, count })),
             totalRemaining: finaleFs.pool.totalRemaining,
             targetPoolSize: finaleFs.pool.targetPoolSize,
-            poolCapReached: finaleFs.vote.poolCapReached,
           },
           active: Array.from(finaleFs.active.entries()).map(([granularType, node]) => ({
             granularType,
@@ -962,11 +976,9 @@ export function filterStateForClient(
             finalePhase: 'vote',
             questions: voteConfig?.questions ?? [],
             answeredCount,
-            poolCapReached: fs.vote.poolCapReached,
             chapters: state.config.chapters ?? [],
             npcMessage: fs.npc.currentMessage,
             npcIntro,
-            npcOutro,
             alarmColor: voteConfig?.alarmColor ?? '#ff0000',
             shuffleQuestions: voteConfig?.shuffleQuestions ?? false,
           };

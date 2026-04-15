@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import type { ShowState, ConductorCommand, FinaleState, GranularType, ChapterConfig } from '@/conductor/types';
 import { useRemixQueue } from '@/hooks/useRemixQueue';
 import { useTokenPool, type PoolState } from '@/hooks/useTokenPool';
@@ -35,15 +35,35 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
     ? new Map(poolState.availableByChapter.map(e => [e.chapterId, e.count]))
     : finaleState.pool.availableByChapter;
 
-  // Vote progress — how many audience members have completed all 6 questions
-  const totalUsers = fullState.users.size;
-  const maxQ = finaleState.vote.maxQuestionsPerPerson;
-  const answeredByUser = finaleState.vote.questionsAnsweredByUser;
-  let completedUsers = 0;
-  for (const [, count] of answeredByUser) {
-    if (count >= maxQ) completedUsers++;
-  }
-  const totalAnswered = finaleState.pool.tokens.length;
+  // Vote progress — live from vote_progress socket event, fallback to state
+  const [voteProgress, setVoteProgress] = useState({
+    completedUsers: 0,
+    totalUsers: fullState.users.size,
+    totalOrbs: finaleState.pool.tokens.length,
+  });
+
+  useEffect(() => {
+    if (!socket) return;
+    const handler = (data: { completedUsers: number; totalUsers: number; totalOrbs: number }) => {
+      setVoteProgress(data);
+    };
+    socket.on('vote_progress', handler);
+    return () => { socket.off('vote_progress', handler); };
+  }, [socket]);
+
+  // Derive from state as fallback (for initial load before any vote_progress arrives)
+  const totalQuestions = fullState.config.finale?.vote?.questions?.length ?? 0;
+  const stateCompletedUsers = (() => {
+    let n = 0;
+    for (const [, count] of finaleState.vote.questionsAnsweredByUser) {
+      if (count >= totalQuestions) n++;
+    }
+    return n;
+  })();
+
+  const completedUsers = voteProgress.completedUsers || stateCompletedUsers;
+  const totalUsers = voteProgress.totalUsers || fullState.users.size;
+  const totalAnswered = voteProgress.totalOrbs || finaleState.pool.tokens.length;
   const isVotePhase = fullState.phase === 'finale_vote';
 
   return (
@@ -90,7 +110,7 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Per person</div>
-          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e5e7eb' }}>{maxQ}</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e5e7eb' }}>{totalQuestions}</div>
         </div>
       </div>
 

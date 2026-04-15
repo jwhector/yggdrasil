@@ -30,8 +30,6 @@ function makeFinaleState(overrides?: Partial<FinaleState>): FinaleState {
     phase: 'remix',
     vote: {
       questionsAnsweredByUser: new Map(),
-      maxQuestionsPerPerson: 6,
-      poolCapReached: true,
     },
     pool: {
       tokens: [],
