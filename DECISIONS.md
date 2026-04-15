@@ -162,6 +162,31 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Decision:** `finale_vote → finale_remix → ended`. Removed `finale_elegy`, `finale_assignment`, `finale_preview`, `finale_playback`.
 **Rationale:** The 4-phase V3.3 sequence had too many transitions and required complex state management (cell assignment, preview timers, playhead tracking, arc phases). Two phases are simpler to operate live and easier for the audience to follow.
 
+### R43: Audience swarm orbs replace shared token queuing (V3.4)
+**Date:** 2026-04-15
+**Decision:** Each audience member has 6 personal orbs (one per vote answer). They drag orbs onto pentagon nodes during remix. The dominant chapter per node determines audio. Performer has override controls (lock, scatter, decay, crossfade mode, fallback).
+**Rationale:** Director feedback that performer-only finale left audience idle. Personal orbs give ~40 people meaningful real-time interaction. Free stacking (all orbs on one node) allows expressive pile-ons.
+
+### R44: Orbs persist across vote → remix transition (V3.4)
+**Date:** 2026-04-15
+**Decision:** Orbs spawned during the vote phase (via OrbCard fly animation) float on screen and persist seamlessly into the remix phase. The FloatingOrbLayer lives at the page level, above both phase components. No visual discontinuity at the transition.
+**Rationale:** The orbs represent the audience's emotional choices. Having them appear and disappear between phases would break the narrative connection. Persistent orbs create a sense of ownership ("these are mine, I made them").
+
+### R45: Projector-style 3-layer glow for audience orbs (V3.4)
+**Date:** 2026-04-15
+**Decision:** Audience phone orbs use the same 3-layer radial gradient glow as the projector's TokenPool canvas dots (outer haze, mid glow, bright core), translated to CSS. DOM rendering (not canvas) since only 6 orbs need touch interaction.
+**Rationale:** Visual consistency between projector and phones. The glow style is distinctive and theatrical. DOM rendering is simpler for touch drag and sufficient for 6 elements.
+
+### R46: Polar tally wedges for node visualization (V3.4)
+**Date:** 2026-04-15
+**Decision:** Each node shows 3 fixed-angle 120-degree wedges (one per chapter) that extend radially outward proportional to vote count. The dominant chapter's wedge is brighter.
+**Rationale:** Fixed positions mean colors don't jump around as votes shift. Radial extension is intuitive ("bigger = more votes"). Works on both projector and small phone screens.
+
+### R47: Spring physics for orb home positions (V3.4)
+**Date:** 2026-04-15
+**Decision:** Unplaced orbs spring back to home positions in a scattered row with slight wobble, rather than free Brownian drift. Home positions use deterministic scatter (hash-based) for stability.
+**Rationale:** Free drift caused orbs to wander off-screen and was hard to track. Spring-back keeps orbs findable while the wobble keeps them feeling organic rather than rigid.
+
 ---
 
 ## Open Decisions
@@ -189,9 +214,11 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Notes:** Current spec defines layout requirements and data, not visual style. Theatrical, not analytical.
 **Blocked by:** Visual design collaboration
 
-### O7: ~~Finale freeze → performer takeover UX~~ → Superseded by V3.4 (performer controls remix directly)
+### O7: ~~Finale freeze → performer takeover UX~~ → Superseded by V3.4 (performer controls remix directly; fallback mode via R43)
 ### O9: ~~Crossfade duration at quilt column boundaries~~ → Superseded by V3.4 (loop-quantized crossfades, see R40)
-### O10: ~~Quilt visual design~~ → Superseded by V3.4 (pentagon visualization, see R41)
+### O10: ~~Quilt visual design~~ → Superseded by V3.4 (pentagon + polar tally wedges, see R41/R46)
+### O11: ~~How audience token queuing is presented on phones~~ → Resolved as R43 (personal orb drag-to-node)
+### O12: ~~Projector visual design for pentagon and token pool~~ → Resolved as R41/R45/R46
 
 ### O8: Ableton session template
 **Status:** Open

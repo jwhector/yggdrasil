@@ -1,16 +1,16 @@
 /**
  * useAudienceRemix Hook (V3.4 — Swarm Orbs)
  *
- * Manages audience-side orb state during finale_remix.
- * Subscribes to node_tally, orb_decayed, and scatter socket events.
- * Provides place/recall actions via socket emit.
+ * Manages tally state and socket event subscriptions during finale_remix.
+ * Orb visual state is managed separately by useFloatingOrbs.
+ * This hook handles: node_tally broadcasts, orb_decayed/scatter events,
+ * and place_orb/recall_orb socket emissions.
  */
 
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import type { AudienceOrb } from '@/conductor/types';
 
 export interface NodeTally {
   granularType: string;
@@ -20,28 +20,27 @@ export interface NodeTally {
 }
 
 export interface UseAudienceRemixReturn {
-  orbs: AudienceOrb[];
   tallies: NodeTally[];
-  placeOrb: (orbIndex: number, granularType: string) => void;
-  recallOrb: (orbIndex: number) => void;
+  emitPlaceOrb: (orbIndex: number, granularType: string) => void;
+  emitRecallOrb: (orbIndex: number) => void;
 }
 
 export function useAudienceRemix(
   socket: Socket | null,
-  initialOrbs: AudienceOrb[],
   initialTallies: NodeTally[],
+  onOrbDecayed?: (orbIndex: number) => void,
+  onScatter?: (granularType: string | null) => void,
 ): UseAudienceRemixReturn {
-  const [orbs, setOrbs] = useState<AudienceOrb[]>(initialOrbs);
   const [tallies, setTallies] = useState<NodeTally[]>(initialTallies);
 
-  // Sync from props when state_sync arrives with new data
-  const prevInitialRef = useRef(initialOrbs);
+  // Sync tallies from props when state_sync arrives
+  const prevInitialRef = useRef(initialTallies);
   useEffect(() => {
-    if (initialOrbs !== prevInitialRef.current) {
-      prevInitialRef.current = initialOrbs;
-      setOrbs(initialOrbs);
+    if (initialTallies !== prevInitialRef.current) {
+      prevInitialRef.current = initialTallies;
+      setTallies(initialTallies);
     }
-  }, [initialOrbs]);
+  }, [initialTallies]);
 
   // Socket event listeners
   useEffect(() => {
@@ -52,17 +51,12 @@ export function useAudienceRemix(
     };
 
     const handleDecayed = (data: { orbIndex: number }) => {
-      setOrbs(prev => prev.map((orb, i) =>
-        i === data.orbIndex ? { ...orb, placedOnNode: null, placedAtLoop: 0 } : orb
-      ));
-      // Haptic feedback
+      onOrbDecayed?.(data.orbIndex);
       if (navigator.vibrate) navigator.vibrate(50);
     };
 
-    const handleScatter = (_data: { granularType: string | null }) => {
-      // Server has already updated state; next state_sync will reconcile.
-      // Optimistically return all orbs to hand for immediate feedback.
-      setOrbs(prev => prev.map(orb => ({ ...orb, placedOnNode: null, placedAtLoop: 0 })));
+    const handleScatter = (data: { granularType: string | null }) => {
+      onScatter?.(data.granularType);
       if (navigator.vibrate) navigator.vibrate([30, 20, 30]);
     };
 
@@ -75,26 +69,18 @@ export function useAudienceRemix(
       socket.off('orb_decayed', handleDecayed);
       socket.off('scatter', handleScatter);
     };
-  }, [socket]);
+  }, [socket, onOrbDecayed, onScatter]);
 
-  const placeOrb = useCallback((orbIndex: number, granularType: string) => {
+  const emitPlaceOrb = useCallback((orbIndex: number, granularType: string) => {
     if (!socket) return;
-    // Optimistic update
-    setOrbs(prev => prev.map((orb, i) =>
-      i === orbIndex ? { ...orb, placedOnNode: granularType } : orb
-    ));
     socket.emit('place_orb', { orbIndex, granularType });
     if (navigator.vibrate) navigator.vibrate(15);
   }, [socket]);
 
-  const recallOrb = useCallback((orbIndex: number) => {
+  const emitRecallOrb = useCallback((orbIndex: number) => {
     if (!socket) return;
-    // Optimistic update
-    setOrbs(prev => prev.map((orb, i) =>
-      i === orbIndex ? { ...orb, placedOnNode: null, placedAtLoop: 0 } : orb
-    ));
     socket.emit('recall_orb', { orbIndex });
   }, [socket]);
 
-  return { orbs, tallies, placeOrb, recallOrb };
+  return { tallies, emitPlaceOrb, emitRecallOrb };
 }

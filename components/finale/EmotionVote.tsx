@@ -34,6 +34,7 @@ interface EmotionVoteProps {
   shuffleQuestions: boolean;
   userId: string;
   emit: (event: string, data: unknown) => void;
+  onOrbLanded?: (chapterId: string, position: { x: number; y: number }) => void;
 }
 
 // ============================================================================
@@ -95,6 +96,7 @@ export function EmotionVote({
   shuffleQuestions,
   userId,
   emit,
+  onOrbLanded,
 }: EmotionVoteProps) {
   const [stage, setStage] = useState<VoteStage>(poolCapReached ? 'phones_down' : 'intro');
   const [questionIndex, setQuestionIndex] = useState(initialAnsweredCount);
@@ -216,10 +218,17 @@ export function EmotionVote({
 
     const tappedQuestionIndex = questionIndex;
 
+    // Pre-compute landing position for the persistent orb
+    const landingX = window.innerWidth * (0.2 + Math.random() * 0.6);
+    const landingY = window.innerHeight * (0.08 + Math.random() * 0.17);
+
     setFlyChapterId(chapterId);
 
-    // After collapse + fly complete → advance question, emit to server
+    // After collapse + fly complete → spawn persistent orb, advance question, emit to server
     setTimeout(() => {
+      // Spawn the persistent floating orb at the landing position
+      onOrbLanded?.(chapterId, { x: landingX, y: landingY });
+
       emit('submit_emotion', {
         chapterId,
         questionIndex: tappedQuestionIndex,
@@ -237,7 +246,7 @@ export function EmotionVote({
         setStage('question');
       }
     }, TOTAL_FLY_MS);
-  }, [currentQuestion, stage, phonesDown, flyChapterId, emit, questionIndex, hasShownOutro]);
+  }, [currentQuestion, stage, phonesDown, flyChapterId, emit, questionIndex, hasShownOutro, onOrbLanded]);
 
   // ============================================================================
   // NPC outro stage (shown once after first answer)

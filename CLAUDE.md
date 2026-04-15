@@ -23,7 +23,7 @@ Yggdrasil is an interactive live performance system where ~40 audience members b
 
 **Song-building:** Each attempt has **3 bundled layer groups** (not 6 individual layers). Each group bundles multiple Ableton tracks (e.g., "The Foundation" = bass + drums + percussion). The audience makes 3 binary A/B choices per song — each choice is a big audible vibe shift, not a single instrument swap. Each layer has a **doubt threshold** — if the winning vote proportion falls below it, the song collapses. Thresholds: `[0.50, 0.66, 0.99]`. Each song opens with a **live seed** — a prerecorded loop the performer theatrically "plays" — that anchors the harmonic and rhythmic world. Songs that survive all 3 layers are narratively rejected by the performer (self-sabotage).
 
-**Finale (V3.4 "Token Pool"):** After the performer abandons the stage, the audience answers **emotional questions** on their phones (`finale_vote`). Each answer maps to a chapter and generates a **token** in a shared pool. When the pool is full, phones go dark and the performer takes over for `finale_remix` — arranging tokens on a **pentagon** of 5 granular types (bass, drums, pad, harmony, fx). Each node plays one active token at a time; queued tokens activate at loop boundaries with beat-locked crossfades. The performer sculpts the remix in real time, pulling from the audience's emotional choices. An optional `audienceInteraction` mode lets the audience also queue tokens with instant crossfades.
+**Finale (V3.4 "Swarm Orbs"):** After the performer abandons the stage, the audience answers **emotional questions** on their phones (`finale_vote`). Each answer generates a personal **orb** that flies up and floats on screen with projector-style glow rendering. Up to 6 orbs accumulate per person. In `finale_remix`, the audience **drags their orbs onto pentagon nodes** (bass, drums, pad, harmony, fx, seed) to collectively shape the music. Each node tallies all audience orbs by chapter — the dominant chapter plays. Tally changes trigger beat-locked crossfades at loop boundaries (or instantly if configured). The performer has override controls: lock nodes, scatter orbs, adjust decay, toggle crossfade mode, and fallback to performer-only mode. Orbs persist visually across the vote → remix transition with no discontinuity.
 
 **Core architecture:** Next.js + custom server + Socket.IO, Conductor pattern (pure state machine), SQLite persistence, OSC/Ableton bridge, client reconnection/recovery, full-state-sync WebSocket strategy.
 
@@ -71,6 +71,7 @@ yggdrasil/
 │   ├── threshold.ts             # Doubt threshold check
 │   ├── question-engine.ts       # Vote phase question delivery logic
 │   ├── remix-engine.ts          # Token pool management and remix state transitions
+│   ├── audience-remix.ts        # Audience orb placement/recall, tally, decay, scatter, lock/unlock
 │   ├── token-pool.ts            # Token generation from votes
 │   ├── fragments.ts             # Fragment generation (layer group → granular decomposition)
 │   ├── intrusive-thoughts.ts    # Pure thought assignment (shared pool → per-user distribution)
@@ -115,7 +116,10 @@ yggdrasil/
 │   │   └── UrgencyEffects.tsx   # Layer urgency visual effects
 │   ├── finale/
 │   │   ├── ProjectorFinale.tsx  # Projector pentagon + token pool visualization
-│   │   ├── RemixController.tsx  # Controller UI for remix phase
+│   │   ├── AudienceRemix.tsx    # Audience phone: SVG pentagon + tally wedges (exposes node hit-testing via ref)
+│   │   ├── EmotionVote.tsx      # Audience phone: vote phase question cards + fly animation → spawns FloatingOrbs
+│   │   ├── FloatingOrb.tsx      # Single orb DOM element with 3-layer CSS radial gradient glow
+│   │   ├── RemixController.tsx  # Controller UI: token grid + SwarmControls (decay, scatter, lock, fallback)
 │   │   ├── NpcDisplay.tsx       # Terminal-style NPC text
 │   │   └── LoopIndicator.tsx    # Loop position progress bar
 │   └── controller/
@@ -127,6 +131,8 @@ yggdrasil/
 ├── hooks/
 │   ├── useSocket.ts
 │   ├── useShowState.ts
+│   ├── useFloatingOrbs.ts       # Audience: orb accumulation + spring physics across vote/remix phases
+│   ├── useAudienceRemix.ts      # Audience: tally subscription + orb decay/scatter events + socket emission
 │   ├── useRemixState.ts          # Remix state management (pool_state, queue, active nodes)
 │   ├── useAuditionProgress.ts   # High-frequency audition progress (~4 Hz)
 │   ├── useAudioPreview.ts       # In-browser audio preview playback
@@ -223,4 +229,4 @@ lobby → opener → attempt_story → attempt_build → attempt_resolve (if com
                  finale_vote → finale_remix → ended
 ```
 
-Finale phases: `finale_vote` (audience answers emotional questions), `finale_remix` (performer arranges tokens)
+Finale phases: `finale_vote` (audience answers emotional questions → personal orbs fly up and float), `finale_remix` (audience drags orbs onto pentagon nodes → dominant chapter per node drives audio crossfades; performer has override controls)
