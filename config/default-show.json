@@ -518,7 +518,7 @@
         }
       ],
       "shuffleQuestions": true,
-      "targetPoolSize": 120,
+      "targetPoolSize": 300,
       "questionDelayMs": 3000,
       "revealPoolOnProjector": true,
       "alarmColor": "#ff0000"

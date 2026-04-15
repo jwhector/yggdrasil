@@ -442,7 +442,24 @@ export function setupSocketHandlers(
       persistence.saveState(state);
       persistence.saveFinaleVote(state.id, userId, data.chapterId, data.questionIndex);
 
-      await broadcastEvents(io, events, state);
+      // Lightweight emit — skip full state_sync broadcast (pool counts reach
+      // projector/controller via the 2Hz pool_state interval instead).
+      // Only emit targeted events to the submitting user + projector.
+      for (const event of events) {
+        if (event.type === 'EMOTION_RECEIVED') {
+          const er = event as { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number };
+          socket.emit('emotion_confirmed', { chapterId: er.chapterId, questionIndex: er.questionIndex });
+          io.to('projector').emit('token_fly', { chapterId: er.chapterId });
+        } else if (event.type === 'NEXT_QUESTION') {
+          const nq = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: Array<{ chapterId: string; label: string }> | null };
+          socket.emit('question', {
+            questionIndex: nq.questionIndex,
+            text: nq.questionText,
+            answers: nq.answers ?? null,
+            chapters: state.config.chapters ?? [],
+          });
+        }
+      }
     });
 
     // ------------------------------------------------------------------
@@ -469,7 +486,8 @@ export function setupSocketHandlers(
       });
 
       setState(state, events);
-      await broadcastEvents(io, events, state);
+      // Lightweight — skip full state_sync. Tallies reach all clients via 2Hz node_tally.
+      // AUDIO_CUE events are processed by the setState hook (audio router).
     });
 
     // ------------------------------------------------------------------
@@ -495,7 +513,7 @@ export function setupSocketHandlers(
       });
 
       setState(state, events);
-      await broadcastEvents(io, events, state);
+      // Lightweight — skip full state_sync. Tallies reach all clients via 2Hz node_tally.
     });
 
     // ------------------------------------------------------------------
@@ -718,10 +736,7 @@ export async function broadcastEvents(
         break;
       }
 
-      case 'POOL_CAP_REACHED':
-        // Phones go dark when pool cap is reached
-        io.to('audience').emit('phones_down');
-        break;
+      // POOL_CAP_REACHED removed — everyone answers orbsPerPerson questions, no cap
 
       case 'REMIX_STARTED': {
         // In audience swarm mode, audience keeps their phones for orb placement.

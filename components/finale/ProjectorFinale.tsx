@@ -105,29 +105,51 @@ export function ProjectorFinale({
     };
   }, []);
 
-  // Listen for token_fly events from audience votes
+  // Listen for token_fly events from audience votes — throttled to avoid DOM explosion
+  // Batch fly-ins arriving within 200ms into a single animation
+  const flyThrottleRef = useRef<{ pending: string[]; timer: ReturnType<typeof setTimeout> | null }>({ pending: [], timer: null });
+
   useEffect(() => {
     if (!socket) return;
 
-    const handleTokenFly = (data: { chapterId: string }) => {
-      // Pick a random landing position in the upper 60% of the screen
+    const flushPending = () => {
+      const batch = flyThrottleRef.current.pending;
+      flyThrottleRef.current.pending = [];
+      flyThrottleRef.current.timer = null;
+
+      if (batch.length === 0) return;
+
+      // Show one fly animation per batch (use the first chapter, visual represents all)
+      const chapterId = batch[0];
       const targetX = Math.random() * size.width * 0.7 + size.width * 0.15;
       const targetY = Math.random() * size.height * 0.5 + size.height * 0.05;
       const id = `fly-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-      // Queue the landing position so reconciliation spawns the dot there
-      tokenPoolRef.current?.queueLandingPosition(data.chapterId, targetX, targetY);
+      // Queue landing positions for all in batch (pool reconciliation spawns the dots)
+      for (const ch of batch) {
+        const lx = Math.random() * size.width * 0.7 + size.width * 0.15;
+        const ly = Math.random() * size.height * 0.5 + size.height * 0.05;
+        tokenPoolRef.current?.queueLandingPosition(ch, lx, ly);
+      }
 
-      setFlyingOrbs(prev => [...prev, { id, chapterId: data.chapterId, targetX, targetY }]);
-
-      // Remove the fly-in orb after animation completes (pool_state reconciliation handles the dot)
+      setFlyingOrbs(prev => [...prev, { id, chapterId, targetX, targetY }]);
       setTimeout(() => {
         setFlyingOrbs(prev => prev.filter(o => o.id !== id));
       }, 800);
     };
 
+    const handleTokenFly = (data: { chapterId: string }) => {
+      flyThrottleRef.current.pending.push(data.chapterId);
+      if (!flyThrottleRef.current.timer) {
+        flyThrottleRef.current.timer = setTimeout(flushPending, 200);
+      }
+    };
+
     socket.on('token_fly', handleTokenFly);
-    return () => { socket.off('token_fly', handleTokenFly); };
+    return () => {
+      socket.off('token_fly', handleTokenFly);
+      if (flyThrottleRef.current.timer) clearTimeout(flyThrottleRef.current.timer);
+    };
   }, [socket, size.width, size.height]);
 
   // Use pool_state (high-frequency) if available, fall back to state_sync data

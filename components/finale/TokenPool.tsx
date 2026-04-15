@@ -60,6 +60,7 @@ const DOT_RADIUS = 6;
 const DRIFT_SPEED = 0.15;
 const DAMPING = 0.98;
 const BLOOM_DURATION = 0.5;  // Seconds for bloom-in animation
+const MAX_VISIBLE_DOTS = 150; // Cap rendered dots for performance headroom
 const TOUCH_TARGET_RADIUS = 22;  // ~44pt touch target
 
 export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function TokenPool({
@@ -103,15 +104,20 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
     const existing = dotsRef.current;
     const newDots: Dot[] = [];
 
+    // Cap total dots for performance — distribute proportionally across chapters
+    const totalAvailable = availableByChapter.reduce((s, e) => s + e.count, 0);
+    const dotScale = totalAvailable > MAX_VISIBLE_DOTS ? MAX_VISIBLE_DOTS / totalAvailable : 1;
+
     for (const { chapterId, count } of availableByChapter) {
       const color = chapterColors.current.get(chapterId) ?? { r: 128, g: 128, b: 128 };
+      const cappedCount = Math.round(count * dotScale);
 
       // Count existing dots for this chapter
       const existingForChapter = existing.filter(d => d.chapterId === chapterId);
-      const needed = count - existingForChapter.length;
+      const needed = cappedCount - existingForChapter.length;
 
-      // Keep existing dots (up to count)
-      for (let i = 0; i < Math.min(existingForChapter.length, count); i++) {
+      // Keep existing dots (up to capped count)
+      for (let i = 0; i < Math.min(existingForChapter.length, cappedCount); i++) {
         newDots.push(existingForChapter[i]);
       }
 

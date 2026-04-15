@@ -132,18 +132,6 @@ export function processEmotion(
     poolSize: updatedTokens.length,
   });
 
-  // Check pool cap
-  if (shouldCapPool(updatedTokens.length, state.pool.targetPoolSize) && !state.vote.poolCapReached) {
-    updatedState.vote = {
-      ...updatedState.vote,
-      poolCapReached: true,
-    };
-    events.push({
-      type: 'POOL_CAP_REACHED',
-      finalPoolSize: updatedTokens.length,
-    });
-  }
-
   return { state: updatedState, events };
 }
 

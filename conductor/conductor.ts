@@ -46,7 +46,6 @@ import { calculateConsensus, calculateVoteResult } from './voting';
 import { checkThreshold } from './threshold';
 import {
   getNextQuestion,
-  calculateMaxQuestionsPerPerson,
   processEmotion,
 } from './question-engine';
 import {
@@ -1405,11 +1404,8 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     return [{ type: 'ERROR', message: 'No finale config found in show config' }];
   }
 
-  const audienceCount = countConnectedUsers(state);
-  const poolMaxQ = calculateMaxQuestionsPerPerson(v34Config.vote.targetPoolSize, audienceCount);
-  // Cap at orbsPerPerson (default 6) — each answer becomes one orb in the remix phase
-  const orbCap = v34Config.remix?.orbsPerPerson ?? 6;
-  const maxQ = Math.min(poolMaxQ, orbCap);
+  // Everyone answers orbsPerPerson questions (default 6) — no pool cap
+  const maxQ = v34Config.remix?.orbsPerPerson ?? 6;
 
   // Build chapter → songIndex mapping from attempt configs
   const chapterSongIndex = new Map<string, number>();
@@ -2072,14 +2068,7 @@ function currentAttempt(state: ShowState): AttemptState | null {
   return state.attempts[state.currentAttemptIndex] ?? null;
 }
 
-/** Count connected users. */
-function countConnectedUsers(state: ShowState): number {
-  let count = 0;
-  for (const user of state.users.values()) {
-    if (user.connected) count++;
-  }
-  return count;
-}
+
 
 /** Get the TrackBundle for the given option on the current layer. */
 function getLayerTrackBundle(attempt: AttemptState, option: 'A' | 'B'): TrackBundle {

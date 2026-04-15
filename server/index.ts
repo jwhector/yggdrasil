@@ -318,7 +318,42 @@ async function main() {
       }
     }
 
-    await broadcastEvents(io, events, state);
+    // LOOP_BOUNDARY: skip full state_sync — only emit targeted events.
+    // AUDIO_CUE events are handled by the setState hook (audio router).
+    // Tallies reach clients via 2Hz node_tally broadcast.
+    // Only do full broadcast if events include phase changes (SHOW_PHASE_CHANGED, POOL_EMPTY).
+    if (command.type === 'LOOP_BOUNDARY') {
+      const needsFullBroadcast = events.some(e =>
+        e.type === 'SHOW_PHASE_CHANGED' || e.type === 'POOL_EMPTY'
+      );
+      if (needsFullBroadcast) {
+        await broadcastEvents(io, events, state);
+      } else {
+        // Emit only targeted events that aren't covered by interval broadcasts
+        for (const event of events) {
+          if (event.type === 'ORB_DECAYED') {
+            const od = event as { type: 'ORB_DECAYED'; userId: string; orbIndex: number; granularType: string };
+            const audienceSocks = await io.in('audience').fetchSockets();
+            for (const s of audienceSocks) {
+              if ((s as any).userId === od.userId) {
+                s.emit('orb_decayed', { orbIndex: od.orbIndex, granularType: od.granularType });
+                break;
+              }
+            }
+          } else if (event.type === 'TOKEN_ACTIVATED') {
+            const ta = event as { type: 'TOKEN_ACTIVATED'; granularType: string; chapterId: string; tokenId: string; trackIndices: number[] };
+            io.to('projector').emit('node_update', { granularType: ta.granularType, chapterId: ta.chapterId, status: 'active' });
+            io.to('controller').emit('node_update', { granularType: ta.granularType, chapterId: ta.chapterId, status: 'active' });
+          } else if (event.type === 'NODE_SILENT') {
+            const ns = event as { type: 'NODE_SILENT'; granularType: string };
+            io.to('projector').emit('node_update', { granularType: ns.granularType, chapterId: null, status: 'silent' });
+            io.to('controller').emit('node_update', { granularType: ns.granularType, chapterId: null, status: 'silent' });
+          }
+        }
+      }
+    } else {
+      await broadcastEvents(io, events, state);
+    }
 
     if (command.type === 'ADVANCE_FROM_VERDICT') {
       clearThoughtsOnAdvance(io);

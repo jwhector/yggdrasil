@@ -219,7 +219,7 @@ describe('question-engine: processEmotion', () => {
     expect(state.vote.questionsAnsweredByUser.get('user-b')).toBe(1);
   });
 
-  test('accepts answers that arrive after cap (grace period)', () => {
+  test('accepts answers beyond targetPoolSize (no cap)', () => {
     const state = makeFinaleState({
       pool: {
         tokens: Array.from({ length: 120 }, (_, i) => ({
@@ -236,42 +236,11 @@ describe('question-engine: processEmotion', () => {
       },
     });
 
-    // This answer arrives when pool is already at cap
+    // Answer arrives when pool is at targetPoolSize — should still be accepted (no cap)
     const result = processEmotion(state, 'user-late', 'chapter_1', 0);
-
-    // Should still be accepted
     expect(result.state.pool.tokens).toHaveLength(121);
     expect(result.state.pool.availableByChapter.get('chapter_1')).toBe(1);
-
-    // Pool cap event should fire
-    const capEvent = result.events.find(e => e.type === 'POOL_CAP_REACHED');
-    expect(capEvent).toBeDefined();
-  });
-
-  test('does not emit POOL_CAP_REACHED if already capped', () => {
-    const state = makeFinaleState({
-      vote: {
-        questionsAnsweredByUser: new Map(),
-        maxQuestionsPerPerson: 3,
-        poolCapReached: true, // Already capped
-      },
-      pool: {
-        tokens: Array.from({ length: 121 }, (_, i) => ({
-          id: `token-${i}`,
-          ownerId: `user-${i}`,
-          chapterId: 'chapter_0',
-          questionIndex: 0,
-          status: 'available' as const,
-        })),
-        availableByChapter: new Map([['chapter_0', 121]]),
-        totalByChapter: new Map([['chapter_0', 121]]),
-        totalRemaining: 121,
-        targetPoolSize: 120,
-      },
-    });
-
-    const result = processEmotion(state, 'user-extra', 'chapter_0', 0);
-    const capEvents = result.events.filter(e => e.type === 'POOL_CAP_REACHED');
-    expect(capEvents).toHaveLength(0);
+    // No POOL_CAP_REACHED event — cap removed in swarm orbs model
+    expect(result.events.every(e => e.type !== 'POOL_CAP_REACHED')).toBe(true);
   });
 });
