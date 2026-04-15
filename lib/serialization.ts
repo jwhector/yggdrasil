@@ -58,6 +58,7 @@ export interface SerializedFinaleState {
   npc: { currentMessage: string | null };
   audienceOrbs: [string, UserRemixState][];
   nodeTallies: [string, { granularType: string; votes: [string, number][]; dominantChapter: string | null; locked: boolean; lockedChapter: string | null }][];
+  enabledNodes: string[];
   orbDecayLoops: number;
   instantCrossfade: boolean;
   fallbackMode: boolean;
@@ -109,6 +110,7 @@ export function serializeFinaleState(fs: FinaleState): SerializedFinaleState {
       ...tally,
       votes: Array.from(tally.votes.entries()),
     }]),
+    enabledNodes: Array.from(fs.enabledNodes ?? []),
     orbDecayLoops: fs.orbDecayLoops ?? 3,
     instantCrossfade: fs.instantCrossfade ?? false,
     fallbackMode: fs.fallbackMode ?? false,
@@ -145,6 +147,7 @@ export function deserializeFinaleState(data: SerializedFinaleState): FinaleState
         votes: new Map(tally.votes),
       }] as [string, NodeVoteTally]),
     ),
+    enabledNodes: new Set(data.enabledNodes ?? []),
     orbDecayLoops: data.orbDecayLoops ?? 3,
     instantCrossfade: data.instantCrossfade ?? false,
     fallbackMode: data.fallbackMode ?? false,

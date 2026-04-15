@@ -512,7 +512,7 @@
       "orbsPerPerson": 6,
       "orbDecayLoops": 3,
       "tallyBroadcastMs": 500,
-      "instantCrossfade": false
+      "instantCrossfade": true
     }
   },
   "timing": {

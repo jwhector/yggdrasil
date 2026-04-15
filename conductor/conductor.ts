@@ -67,6 +67,8 @@ import {
   unlockNode as audienceUnlockNode,
   setDecayRate as audienceSetDecayRate,
   setCrossfadeMode as audienceSetCrossfadeMode,
+  enableNode as audienceEnableNode,
+  disableNode as audienceDisableNode,
   getEffectiveChapter,
 } from './audience-remix';
 
@@ -254,6 +256,10 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleLockNode(state, command.granularType, command.chapterId);
     case 'UNLOCK_NODE':
       return handleUnlockNode(state, command.granularType);
+    case 'ENABLE_NODE':
+      return handleEnableNode(state, command.granularType);
+    case 'DISABLE_NODE':
+      return handleDisableNode(state, command.granularType);
     case 'FALLBACK_PERFORMER_REMIX':
       return handleFallbackPerformerRemix(state, command.instant);
 
@@ -1433,7 +1439,8 @@ function handleSetupFinaleV34(state: ShowState): ConductorEvent[] {
     audienceOrbs: new Map(),
     nodeTallies: new Map(),
     orbDecayLoops: v34Config.remix.orbDecayLoops ?? 3,
-    instantCrossfade: v34Config.remix.instantCrossfade ?? false,
+    instantCrossfade: v34Config.remix.instantCrossfade ?? true,
+    enabledNodes: new Set<string>(),
     fallbackMode: false,
   };
 
@@ -1518,10 +1525,11 @@ function handleStartRemix(state: ShowState): ConductorEvent[] {
   const remixConfig = state.config.finale.remix;
   if (remixConfig) {
     finaleState.orbDecayLoops = remixConfig.orbDecayLoops ?? 3;
-    finaleState.instantCrossfade = false;
+    finaleState.instantCrossfade = remixConfig.instantCrossfade ?? true;
   }
   finaleState.audienceOrbs = new Map();
   finaleState.nodeTallies = new Map();
+  finaleState.enabledNodes = new Set<string>();
 
   // Create orbs for each user based on their vote answers (tokens they generated)
   for (const [userId] of finaleState.vote.questionsAnsweredByUser) {
@@ -1849,6 +1857,30 @@ function handleUnlockNode(state: ShowState, granularType: string): ConductorEven
   if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
 
   const result = audienceUnlockNode(fs, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleEnableNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'ENABLE_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceEnableNode(fs, granularType);
+  state.finaleState = result.state;
+  return result.events;
+}
+
+function handleDisableNode(state: ShowState, granularType: string): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'DISABLE_NODE only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const result = audienceDisableNode(fs, granularType);
   state.finaleState = result.state;
   return result.events;
 }

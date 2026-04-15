@@ -21,6 +21,7 @@ export interface NodeTally {
 
 export interface UseAudienceRemixReturn {
   tallies: NodeTally[];
+  enabledNodes: string[];
   emitPlaceOrb: (orbIndex: number, granularType: string) => void;
   emitRecallOrb: (orbIndex: number) => void;
 }
@@ -28,26 +29,34 @@ export interface UseAudienceRemixReturn {
 export function useAudienceRemix(
   socket: Socket | null,
   initialTallies: NodeTally[],
+  initialEnabledNodes: string[],
   onOrbDecayed?: (orbIndex: number) => void,
   onScatter?: (granularType: string | null) => void,
 ): UseAudienceRemixReturn {
   const [tallies, setTallies] = useState<NodeTally[]>(initialTallies);
+  const [enabledNodes, setEnabledNodes] = useState<string[]>(initialEnabledNodes);
 
-  // Sync tallies from props when state_sync arrives
+  // Sync tallies and enabledNodes from props when state_sync arrives
   const prevInitialRef = useRef(initialTallies);
+  const prevEnabledRef = useRef(initialEnabledNodes);
   useEffect(() => {
     if (initialTallies !== prevInitialRef.current) {
       prevInitialRef.current = initialTallies;
       setTallies(initialTallies);
     }
-  }, [initialTallies]);
+    if (initialEnabledNodes !== prevEnabledRef.current) {
+      prevEnabledRef.current = initialEnabledNodes;
+      setEnabledNodes(initialEnabledNodes);
+    }
+  }, [initialTallies, initialEnabledNodes]);
 
   // Socket event listeners
   useEffect(() => {
     if (!socket) return;
 
-    const handleTally = (data: { tallies: NodeTally[] }) => {
+    const handleTally = (data: { tallies: NodeTally[]; enabledNodes?: string[] }) => {
       setTallies(data.tallies);
+      if (data.enabledNodes) setEnabledNodes(data.enabledNodes);
     };
 
     const handleDecayed = (data: { orbIndex: number }) => {
@@ -82,5 +91,5 @@ export function useAudienceRemix(
     socket.emit('recall_orb', { orbIndex });
   }, [socket]);
 
-  return { tallies, emitPlaceOrb, emitRecallOrb };
+  return { tallies, enabledNodes, emitPlaceOrb, emitRecallOrb };
 }

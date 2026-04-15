@@ -101,6 +101,7 @@ function AudienceContent() {
   const remix = useAudienceRemix(
     socket,
     remixView?.nodeTallies ?? [],
+    remixView?.enabledNodes ?? [],
     handleOrbDecayed,
     handleScatter,
   );
@@ -315,6 +316,7 @@ function AudienceContent() {
           granularTypes={remixView.granularTypes ?? state.config.granularTypes}
           fallbackMode={remixView.fallbackMode ?? false}
           hoverNode={hoverNode}
+          enabledNodes={remix.enabledNodes}
           onResetOrbs={() => {
             // Emit recall for each placed orb to the server
             for (const orb of floatingOrbs.orbs) {

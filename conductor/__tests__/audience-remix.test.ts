@@ -16,6 +16,8 @@ import {
   unlockNode,
   setDecayRate,
   setCrossfadeMode,
+  enableNode,
+  disableNode,
   getEffectiveChapter,
   recomputeTallies,
 } from '../audience-remix';
@@ -50,6 +52,7 @@ function makeFinaleState(overrides?: Partial<FinaleState>): FinaleState {
     nodeTallies: new Map(),
     orbDecayLoops: 3,
     instantCrossfade: false,
+    enabledNodes: new Set(['bass', 'drums', 'pad', 'harmony', 'fx', 'seed']),
     fallbackMode: false,
     ...overrides,
   };
@@ -420,5 +423,82 @@ describe('audience-remix: recomputeTallies', () => {
     const recomputed = recomputeTallies(state, ['bass']);
     expect(recomputed.get('bass')!.locked).toBe(true);
     expect(recomputed.get('bass')!.lockedChapter).toBe('love');
+  });
+});
+
+// ============================================================================
+// enableNode / disableNode
+// ============================================================================
+
+describe('audience-remix: enableNode / disableNode', () => {
+  test('enableNode adds granularType to enabledNodes set', () => {
+    const state = makeFinaleState({ enabledNodes: new Set() });
+    const result = enableNode(state, 'bass');
+    expect(result.state.enabledNodes.has('bass')).toBe(true);
+    expect(result.events).toEqual([{ type: 'NODE_ENABLED', granularType: 'bass' }]);
+  });
+
+  test('enableNode is idempotent — no event if already enabled', () => {
+    const state = makeFinaleState({ enabledNodes: new Set(['bass']) });
+    const result = enableNode(state, 'bass');
+    expect(result.events).toHaveLength(0);
+    expect(result.state).toBe(state); // Same reference = no change
+  });
+
+  test('disableNode removes granularType from enabledNodes set', () => {
+    const state = makeFinaleState({ enabledNodes: new Set(['bass', 'drums']) });
+    const result = disableNode(state, 'bass');
+    expect(result.state.enabledNodes.has('bass')).toBe(false);
+    expect(result.state.enabledNodes.has('drums')).toBe(true);
+    expect(result.events.some(e => e.type === 'NODE_DISABLED')).toBe(true);
+  });
+
+  test('disableNode is idempotent — no event if already disabled', () => {
+    const state = makeFinaleState({ enabledNodes: new Set() });
+    const result = disableNode(state, 'bass');
+    expect(result.events).toHaveLength(0);
+    expect(result.state).toBe(state);
+  });
+
+  test('disableNode scatters orbs off the disabled node', () => {
+    let state = makeFinaleState({ enabledNodes: new Set(['bass', 'drums']) });
+    state = stateWithUser(state, 'user-1', ['ambition', 'love']);
+    state = placeOrb(state, 'user-1', 0, 'bass').state;
+    state = placeOrb(state, 'user-1', 1, 'drums').state;
+
+    // Disable bass — orb 0 should be scattered
+    const result = disableNode(state, 'bass');
+    const orb0 = result.state.audienceOrbs.get('user-1')!.orbs[0];
+    expect(orb0.placedOnNode).toBeNull();
+
+    // Orb on drums should be unaffected
+    const orb1 = result.state.audienceOrbs.get('user-1')!.orbs[1];
+    expect(orb1.placedOnNode).toBe('drums');
+
+    // Should have scatter + tally + disable events
+    expect(result.events.some(e => e.type === 'NODES_SCATTERED')).toBe(true);
+    expect(result.events.some(e => e.type === 'NODE_DISABLED')).toBe(true);
+  });
+
+  test('placeOrb rejects placement on disabled node', () => {
+    let state = makeFinaleState({ enabledNodes: new Set(['drums']) }); // bass NOT enabled
+    state = stateWithUser(state, 'user-1', ['ambition']);
+
+    const result = placeOrb(state, 'user-1', 0, 'bass');
+    expect(result.events).toHaveLength(0);
+
+    const orb = result.state.audienceOrbs.get('user-1')!.orbs[0];
+    expect(orb.placedOnNode).toBeNull();
+  });
+
+  test('placeOrb succeeds on enabled node', () => {
+    let state = makeFinaleState({ enabledNodes: new Set(['bass']) });
+    state = stateWithUser(state, 'user-1', ['ambition']);
+
+    const result = placeOrb(state, 'user-1', 0, 'bass');
+    expect(result.events.some(e => e.type === 'ORB_PLACED')).toBe(true);
+
+    const orb = result.state.audienceOrbs.get('user-1')!.orbs[0];
+    expect(orb.placedOnNode).toBe('bass');
   });
 });

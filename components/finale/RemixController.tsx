@@ -341,6 +341,89 @@ function SwarmControls({
     <div style={{ marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px' }}>
       <h3 style={{ ...styles.sectionTitle, marginBottom: '8px' }}>Swarm Orbs</h3>
 
+      {/* Enable/disable nodes */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
+        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', width: '100%', marginBottom: '2px' }}>Enable Nodes:</span>
+        {granularTypes.map(gt => {
+          const isEnabled = finaleState.enabledNodes.has(gt.id);
+          return (
+            <button
+              key={gt.id}
+              onClick={() => {
+                if (isEnabled) {
+                  sendCommand({ type: 'DISABLE_NODE', granularType: gt.id });
+                } else {
+                  sendCommand({ type: 'ENABLE_NODE', granularType: gt.id });
+                }
+              }}
+              style={{
+                ...styles.tokenButton,
+                width: 'auto',
+                height: '30px',
+                padding: '0 10px',
+                fontSize: '0.6rem',
+                color: isEnabled ? '#86efac' : 'rgba(255,255,255,0.3)',
+                borderColor: isEnabled ? 'rgba(134, 239, 172, 0.4)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: isEnabled ? 'rgba(134, 239, 172, 0.1)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              {gt.symbol} {gt.label}
+            </button>
+          );
+        })}
+        {/* Seed node */}
+        {(() => {
+          const seedEnabled = finaleState.enabledNodes.has('seed');
+          return (
+            <button
+              onClick={() => {
+                if (seedEnabled) {
+                  sendCommand({ type: 'DISABLE_NODE', granularType: 'seed' });
+                } else {
+                  sendCommand({ type: 'ENABLE_NODE', granularType: 'seed' });
+                }
+              }}
+              style={{
+                ...styles.tokenButton,
+                width: 'auto',
+                height: '30px',
+                padding: '0 10px',
+                fontSize: '0.6rem',
+                color: seedEnabled ? '#86efac' : 'rgba(255,255,255,0.3)',
+                borderColor: seedEnabled ? 'rgba(134, 239, 172, 0.4)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: seedEnabled ? 'rgba(134, 239, 172, 0.1)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              ✦ HEART
+            </button>
+          );
+        })()}
+        <button
+          onClick={() => {
+            // Enable all nodes
+            for (const gt of granularTypes) {
+              if (!finaleState.enabledNodes.has(gt.id)) {
+                sendCommand({ type: 'ENABLE_NODE', granularType: gt.id });
+              }
+            }
+            if (!finaleState.enabledNodes.has('seed')) {
+              sendCommand({ type: 'ENABLE_NODE', granularType: 'seed' });
+            }
+          }}
+          style={{
+            ...styles.tokenButton,
+            width: 'auto',
+            height: '30px',
+            padding: '0 10px',
+            fontSize: '0.6rem',
+            color: 'rgba(255,255,255,0.5)',
+            borderColor: 'rgba(255,255,255,0.15)',
+          }}
+        >
+          Enable All
+        </button>
+      </div>
+
       {/* Decay rate */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
         <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', width: 55, flexShrink: 0 }}>

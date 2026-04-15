@@ -65,6 +65,9 @@ export function placeOrb(
   const orb = userState.orbs[orbIndex];
   if (!orb) return { state, events };
 
+  // Reject placement on disabled nodes
+  if (!state.enabledNodes.has(granularType)) return { state, events };
+
   const previousNode = orb.placedOnNode;
 
   // Update orb
@@ -336,6 +339,49 @@ export function setCrossfadeMode(
   return {
     state: { ...state, instantCrossfade: instant },
     events: [{ type: 'CROSSFADE_MODE_CHANGED', instant }],
+  };
+}
+
+// ============================================================================
+// Enable / Disable Nodes
+// ============================================================================
+
+/**
+ * Enable a node for audience orb placement.
+ */
+export function enableNode(
+  state: FinaleState,
+  granularType: string,
+): { state: FinaleState; events: ConductorEvent[] } {
+  if (state.enabledNodes.has(granularType)) return { state, events: [] };
+
+  const updatedEnabled = new Set(state.enabledNodes);
+  updatedEnabled.add(granularType);
+
+  return {
+    state: { ...state, enabledNodes: updatedEnabled },
+    events: [{ type: 'NODE_ENABLED', granularType }],
+  };
+}
+
+/**
+ * Disable a node. Any orbs currently on the node are scattered back to hands.
+ */
+export function disableNode(
+  state: FinaleState,
+  granularType: string,
+): { state: FinaleState; events: ConductorEvent[] } {
+  if (!state.enabledNodes.has(granularType)) return { state, events: [] };
+
+  // Scatter orbs off this node first
+  const scatterResult = scatterNode(state, granularType);
+
+  const updatedEnabled = new Set(scatterResult.state.enabledNodes);
+  updatedEnabled.delete(granularType);
+
+  return {
+    state: { ...scatterResult.state, enabledNodes: updatedEnabled },
+    events: [...scatterResult.events, { type: 'NODE_DISABLED', granularType }],
   };
 }
 

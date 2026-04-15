@@ -501,6 +501,8 @@ export type ConductorCommand =
   | { type: 'SCATTER_ALL' }
   | { type: 'LOCK_NODE'; granularType: string; chapterId: string }
   | { type: 'UNLOCK_NODE'; granularType: string }
+  | { type: 'ENABLE_NODE'; granularType: string }
+  | { type: 'DISABLE_NODE'; granularType: string }
   | { type: 'FALLBACK_PERFORMER_REMIX'; instant?: boolean }
 
   // Manual end (V3.4)
@@ -571,6 +573,8 @@ export type ConductorEvent =
   | { type: 'NODE_LOCKED'; granularType: string; chapterId: string }
   | { type: 'NODE_UNLOCKED'; granularType: string }
   | { type: 'NODES_SCATTERED'; granularType: string | null; affectedUsers: UserId[] }
+  | { type: 'NODE_ENABLED'; granularType: string }
+  | { type: 'NODE_DISABLED'; granularType: string }
   | { type: 'DECAY_RATE_CHANGED'; loops: number }
   | { type: 'CROSSFADE_MODE_CHANGED'; instant: boolean }
   | { type: 'FALLBACK_ACTIVATED'; instant: boolean }
@@ -885,6 +889,7 @@ export interface FinaleState {
   nodeTallies: Map<string, NodeVoteTally>;    // Per-node aggregate tally
   orbDecayLoops: number;                       // Current decay rate (live-adjustable)
   instantCrossfade: boolean;                   // Current crossfade mode (live-adjustable)
+  enabledNodes: Set<string>;                   // Granular types currently accepting orbs (empty = all disabled)
   fallbackMode: boolean;                       // True when performer has taken over via fallback
 }
 
@@ -920,7 +925,7 @@ export interface RemixConfig {
   orbsPerPerson: number;         // Number of orbs per audience member (default: 6)
   orbDecayLoops: number;         // Loops before placed orbs decay back to hand (0 = no decay, default: 3)
   tallyBroadcastMs: number;      // Tally broadcast interval in ms (default: 500)
-  instantCrossfade: boolean;     // True = crossfade on tally change, false = at loop boundary (default: false)
+  instantCrossfade: boolean;     // True = crossfade on tally change, false = at loop boundary (default: true)
 }
 
 /** Finale configuration (V3.4). */
@@ -1016,6 +1021,7 @@ export interface AudienceRemixView {
   }>;
   chapters: ChapterConfig[];       // For color resolution
   granularTypes: GranularType[];   // For node labels
+  enabledNodes: string[];          // Which nodes are currently accepting orbs
 }
 
 /**

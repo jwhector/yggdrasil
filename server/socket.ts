@@ -185,9 +185,11 @@ export function setupSocketHandlers(
       votes: Array.from(tally.votes.entries()).map(([chapterId, count]) => ({ chapterId, count })),
     }));
 
-    io.to('projector').emit('node_tally', { tallies });
-    io.to('controller').emit('node_tally', { tallies });
-    io.to('audience').emit('node_tally', { tallies });
+    const enabledNodes = Array.from(fs.enabledNodes);
+
+    io.to('projector').emit('node_tally', { tallies, enabledNodes });
+    io.to('controller').emit('node_tally', { tallies, enabledNodes });
+    io.to('audience').emit('node_tally', { tallies, enabledNodes });
   }, POOL_STATE_BROADCAST_INTERVAL_MS);
 
   // ============================================================================
@@ -998,6 +1000,7 @@ export function filterStateForClient(
             })),
             chapters: state.config.chapters ?? [],
             granularTypes: state.config.granularTypes ?? [],
+            enabledNodes: Array.from(fs.enabledNodes),
             orbDecayLoops: fs.orbDecayLoops,
             instantCrossfade: fs.instantCrossfade,
             loopCount: fs.loopCount,

@@ -27,6 +27,7 @@ export interface AudienceRemixProps {
   granularTypes: GranularType[];
   fallbackMode: boolean;
   hoverNode: string | null;  // Which node is being hovered during drag
+  enabledNodes: string[];    // Which nodes are currently accepting orbs
   onResetOrbs?: () => void;  // Return all orbs to floating positions
 }
 
@@ -134,7 +135,7 @@ function computeHeight(w: number): number {
 // ============================================================================
 
 export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>(
-  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, onResetOrbs }, ref) {
+  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, enabledNodes, onResetOrbs }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -161,6 +162,8 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
       { id: 'seed', x: layout.centerX, y: layout.centerY, label: 'HEART', symbol: '\u2726', color: '#e5e5e5' },
     ];
 
+    const enabledSet = new Set(enabledNodes);
+
     // Expose node hit-testing to parent
     useImperativeHandle(ref, () => ({
       findNode(viewportX: number, viewportY: number): string | null {
@@ -169,6 +172,7 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
         const localX = viewportX - rect.left;
         const localY = viewportY - rect.top;
         for (const node of allNodePositions) {
+          if (!enabledSet.has(node.id)) continue; // Skip disabled nodes
           const dx = localX - node.x;
           const dy = localY - node.y;
           if (Math.sqrt(dx * dx + dy * dy) < layout.snapRadius) {
@@ -184,7 +188,7 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
         if (!node) return null;
         return { x: rect.left + node.x, y: rect.top + node.y };
       },
-    }), [allNodePositions, layout.snapRadius]);
+    }), [allNodePositions, layout.snapRadius, enabledSet]);
 
     if (fallbackMode) {
       return (
@@ -225,21 +229,29 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
               style={{ position: 'absolute', top: 0, left: 0 }}
             >
               {/* Radial connectors */}
-              {nodePositions.map(node => (
-                <line
-                  key={`line-${node.id}`}
-                  x1={layout.centerX}
-                  y1={layout.centerY}
-                  x2={node.x}
-                  y2={node.y}
-                  stroke="rgba(255,255,255,0.06)"
-                  strokeWidth={1}
-                />
-              ))}
+              {nodePositions.map(node => {
+                const isEnabled = enabledSet.has(node.id);
+                return (
+                  <line
+                    key={`line-${node.id}`}
+                    x1={layout.centerX}
+                    y1={layout.centerY}
+                    x2={node.x}
+                    y2={node.y}
+                    stroke="rgba(255,255,255,0.06)"
+                    strokeWidth={1}
+                    style={{
+                      opacity: isEnabled ? 1 : 0,
+                      transition: 'opacity 0.6s ease-out',
+                    }}
+                  />
+                );
+              })}
 
               {/* Node circles */}
               {allNodePositions.map(node => {
-                const isHover = hoverNode === node.id;
+                const isEnabled = enabledSet.has(node.id);
+                const isHover = isEnabled && hoverNode === node.id;
                 const tally = tallies.find(t => t.granularType === node.id);
                 const hasTally = tally && tally.votes.length > 0;
                 const r = node.id === 'seed' ? layout.seedRadius : layout.nodeRadius;
@@ -250,7 +262,13 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
                 const activeColor = dominantChapter?.color ?? null;
 
                 return (
-                  <g key={node.id}>
+                  <g
+                    key={node.id}
+                    style={{
+                      opacity: isEnabled ? 1 : 0,
+                      transition: 'opacity 0.6s ease-out',
+                    }}
+                  >
                     {hasTally && (
                       <TallyArcs
                         tally={tally!}

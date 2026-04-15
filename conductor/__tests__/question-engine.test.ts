@@ -57,6 +57,7 @@ function makeFinaleState(overrides?: Partial<FinaleState>): FinaleState {
     nodeTallies: new Map(),
     orbDecayLoops: 3,
     instantCrossfade: false,
+    enabledNodes: new Set<string>(),
     fallbackMode: false,
     ...overrides,
   };
