@@ -332,6 +332,16 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
 // This creates a radar/spider chart effect: "bigger = more votes."
 // ============================================================================
 
+/** Parse hex to r,g,b. */
+function hexRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.substring(0, 2), 16) || 0,
+    g: parseInt(h.substring(2, 4), 16) || 0,
+    b: parseInt(h.substring(4, 6), 16) || 0,
+  };
+}
+
 function TallyArcs({
   tally,
   cx,
@@ -356,6 +366,34 @@ function TallyArcs({
 
   return (
     <g>
+      {/* One radial gradient per chapter — fades from inner edge outward */}
+      <defs>
+        <filter id="tallyGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" />
+        </filter>
+        {chapters.map((chapter, i) => {
+          const { r, g, b } = hexRgb(chapter.color);
+          const isDominant = tally.dominantChapter === chapter.id;
+          const innerAlpha = isDominant ? 0.45 : 0.2;
+          const outerAlpha = isDominant ? 0.05 : 0.02;
+          const gradId = `tally-${cx.toFixed(0)}-${cy.toFixed(0)}-${i}`;
+
+          return (
+            <radialGradient
+              key={gradId}
+              id={gradId}
+              cx={cx}
+              cy={cy}
+              r={radius + maxExtend}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset={`${(radius / (radius + maxExtend)) * 100}%`} stopColor={`rgba(${r},${g},${b},${innerAlpha})`} />
+              <stop offset="100%" stopColor={`rgba(${r},${g},${b},${outerAlpha})`} />
+            </radialGradient>
+          );
+        })}
+      </defs>
+
       {chapters.map((chapter, i) => {
         const vote = tally.votes.find(v => v.chapterId === chapter.id);
         const count = vote?.count ?? 0;
@@ -363,6 +401,8 @@ function TallyArcs({
 
         const fraction = count / maxCount;
         const outerRadius = radius + maxExtend * fraction;
+        const isDominant = tally.dominantChapter === chapter.id;
+        const gradId = `tally-${cx.toFixed(0)}-${cy.toFixed(0)}-${i}`;
 
         const wedgeStart = -Math.PI / 2 + i * WEDGE_SWEEP + GAP / 2;
         const wedgeEnd = wedgeStart + WEDGE_SWEEP - GAP;
@@ -372,7 +412,8 @@ function TallyArcs({
         const outerStart = { x: cx + Math.cos(wedgeStart) * outerRadius, y: cy + Math.sin(wedgeStart) * outerRadius };
         const outerEnd = { x: cx + Math.cos(wedgeEnd) * outerRadius, y: cy + Math.sin(wedgeEnd) * outerRadius };
 
-        const d = [
+        // Wedge fill shape
+        const fillPath = [
           `M ${innerStart.x} ${innerStart.y}`,
           `A ${radius} ${radius} 0 0 1 ${innerEnd.x} ${innerEnd.y}`,
           `L ${outerEnd.x} ${outerEnd.y}`,
@@ -380,18 +421,52 @@ function TallyArcs({
           'Z',
         ].join(' ');
 
-        const isDominant = tally.dominantChapter === chapter.id;
+        // Side edges only (the two radial lines)
+        const edgePath = [
+          `M ${innerStart.x} ${innerStart.y} L ${outerStart.x} ${outerStart.y}`,
+          `M ${innerEnd.x} ${innerEnd.y} L ${outerEnd.x} ${outerEnd.y}`,
+        ].join(' ');
+
+        // Outer arc only (the curved edge at the outerRadius)
+        const outerArcPath = `M ${outerStart.x} ${outerStart.y} A ${outerRadius} ${outerRadius} 0 0 1 ${outerEnd.x} ${outerEnd.y}`;
 
         return (
-          <path
-            key={chapter.id}
-            d={d}
-            fill={chapter.color}
-            fillOpacity={isDominant ? 0.35 : 0.15}
-            stroke={chapter.color}
-            strokeWidth={isDominant ? 1.5 : 0.5}
-            strokeOpacity={isDominant ? 0.8 : 0.4}
-          />
+          <g key={chapter.id}>
+            {/* Soft glowing fill — gradient fades outward */}
+            <path
+              d={fillPath}
+              fill={`url(#${gradId})`}
+              stroke="none"
+            />
+            {/* Glowing outer arc — blurred for soft neon effect */}
+            <path
+              d={outerArcPath}
+              fill="none"
+              stroke={chapter.color}
+              strokeWidth={isDominant ? 3 : 2}
+              strokeOpacity={isDominant ? 0.5 : 0.25}
+              strokeLinecap="round"
+              filter="url(#tallyGlow)"
+            />
+            {/* Sharp outer arc on top for definition */}
+            <path
+              d={outerArcPath}
+              fill="none"
+              stroke={chapter.color}
+              strokeWidth={isDominant ? 1.2 : 0.7}
+              strokeOpacity={isDominant ? 0.8 : 0.4}
+              strokeLinecap="round"
+            />
+            {/* Crisp side edges for legibility */}
+            <path
+              d={edgePath}
+              fill="none"
+              stroke={chapter.color}
+              strokeWidth={isDominant ? 1.2 : 0.6}
+              strokeOpacity={isDominant ? 0.7 : 0.3}
+              strokeLinecap="round"
+            />
+          </g>
         );
       })}
     </g>

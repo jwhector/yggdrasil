@@ -161,17 +161,27 @@ function createClient(index: number): ClientState {
       log(`Phase transition: ${prevPhase} → ${client.phase}`);
     }
 
-    // V3.4: first question arrives embedded in state_sync myFinale
+    // V3.4: detect finale_vote and bootstrap first question from the questions array
     if (client.phase === 'finale_vote' && data.myFinale && !client.phonesDark) {
       const voteView = data.myFinale as {
         finalePhase: string;
-        currentQuestion: { questionIndex: number; text: string } | null;
+        questions: { text: string }[];
+        answeredCount: number;
         poolCapReached: boolean;
       };
       if (voteView.poolCapReached) {
         client.phonesDark = true;
-      } else if (voteView.currentQuestion && !client.pendingQuestion) {
-        answerQuestion(client, index, voteView.currentQuestion);
+      } else if (
+        voteView.questions &&
+        voteView.answeredCount === client.questionsAnswered &&
+        client.questionsAnswered < voteView.questions.length &&
+        !client.pendingQuestion
+      ) {
+        // Counts match and we're not already answering — bootstrap next question
+        const nextQ = voteView.questions[voteView.answeredCount];
+        if (nextQ) {
+          answerQuestion(client, index, { questionIndex: voteView.answeredCount, text: nextQ.text });
+        }
       }
     }
 
