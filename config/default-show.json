@@ -479,25 +479,17 @@
         {
           "text": "What is the sound of forgiveness?",
           "answers": [
-            { "chapterId": "ambition", "label": "A deep breath before starting again" },
+            { "chapterId": "ambition", "label": "The sound of a new beginning" },
             { "chapterId": "love", "label": "A voice saying 'I'm still here'" },
             { "chapterId": "acceptance", "label": "Silence, finally at peace" }
           ]
         },
         {
-          "text": "Which part of us needs nurturing most?",
+          "text": "Which part of us is in most need of nurturing?",
           "answers": [
             { "chapterId": "ambition", "label": "The inner child" },
             { "chapterId": "love", "label": "The caregiver" },
-            { "chapterId": "acceptance", "label": "The lonely spirit" }
-          ]
-        },
-        {
-          "text": "?",
-          "answers": [
-            { "chapterId": "ambition", "label": "" },
-            { "chapterId": "love", "label": "" },
-            { "chapterId": "acceptance", "label": "" }
+            { "chapterId": "acceptance", "label": "The seeking soul" }
           ]
         },
         {
@@ -506,14 +498,6 @@
             { "chapterId": "ambition", "label": "A legacy" },
             { "chapterId": "love", "label": "A community" },
             { "chapterId": "acceptance", "label": "A life of peace" }
-          ]
-        },
-        {
-          "text": "What does he hear when no one is listening?",
-          "answers": [
-            { "chapterId": "ambition", "label": "A drumbeat pushing forward" },
-            { "chapterId": "love", "label": "An echo of every goodbye" },
-            { "chapterId": "acceptance", "label": "His own voice, finally honest" }
           ]
         }
       ],

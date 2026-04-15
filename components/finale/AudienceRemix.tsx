@@ -395,7 +395,7 @@ function TallyArcs({
   if (!hasVotes) return null;
 
   const WEDGE_SWEEP = (2 * Math.PI) / 3;
-  const GAP = 0.06;
+  const GAP = .03;
 
   return (
     <g>
@@ -470,6 +470,8 @@ function TallyArcs({
               d={fillPath}
               fill={`url(#${gradId})`}
               stroke="none"
+              style={{ transition: 'fill-opacity 0.5s ease-out' }}
+              fillOpacity={isDominant ? 1 : 0.7}
             />
             {/* Glowing outer arc — blurred for soft neon effect */}
             <path
@@ -477,9 +479,10 @@ function TallyArcs({
               fill="none"
               stroke={chapter.color}
               strokeWidth={isDominant ? 3 : 2}
-              strokeOpacity={isDominant ? 0.5 : 0.25}
               strokeLinecap="round"
               filter="url(#tallyGlow)"
+              style={{ transition: 'stroke-opacity 0.5s ease-out, stroke-width 0.4s ease-out' }}
+              strokeOpacity={isDominant ? 0.5 : 0.25}
             />
             {/* Sharp outer arc on top for definition */}
             <path
@@ -487,8 +490,9 @@ function TallyArcs({
               fill="none"
               stroke={chapter.color}
               strokeWidth={isDominant ? 1.2 : 0.7}
-              strokeOpacity={isDominant ? 0.8 : 0.4}
               strokeLinecap="round"
+              style={{ transition: 'stroke-opacity 0.5s ease-out, stroke-width 0.4s ease-out' }}
+              strokeOpacity={isDominant ? 0.8 : 0.4}
             />
             {/* Crisp side edges for legibility */}
             <path
@@ -496,8 +500,9 @@ function TallyArcs({
               fill="none"
               stroke={chapter.color}
               strokeWidth={isDominant ? 1.2 : 0.6}
-              strokeOpacity={isDominant ? 0.7 : 0.3}
               strokeLinecap="round"
+              style={{ transition: 'stroke-opacity 0.5s ease-out, stroke-width 0.4s ease-out' }}
+              strokeOpacity={isDominant ? 0.7 : 0.3}
             />
           </g>
         );

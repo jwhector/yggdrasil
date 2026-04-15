@@ -35,13 +35,83 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
     ? new Map(poolState.availableByChapter.map(e => [e.chapterId, e.count]))
     : finaleState.pool.availableByChapter;
 
-  const totalRemaining = poolState.totalRemaining > 0
-    ? poolState.totalRemaining
-    : finaleState.pool.totalRemaining;
+  // Vote progress — how many audience members have completed all 6 questions
+  const totalUsers = fullState.users.size;
+  const maxQ = finaleState.vote.maxQuestionsPerPerson;
+  const answeredByUser = finaleState.vote.questionsAnsweredByUser;
+  let completedUsers = 0;
+  for (const [, count] of answeredByUser) {
+    if (count >= maxQ) completedUsers++;
+  }
+  const totalAnswered = finaleState.pool.tokens.length;
+  const isVotePhase = fullState.phase === 'finale_vote';
 
   return (
     <section style={styles.section}>
-      <h2 style={styles.sectionTitle}>Token Remix</h2>
+      <h2 style={styles.sectionTitle}>
+        {isVotePhase ? 'Audience Voting' : 'Token Remix'}
+      </h2>
+
+      {/* Vote progress — visible during both phases */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        marginBottom: '12px',
+        padding: '8px 10px',
+        borderRadius: '6px',
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', marginBottom: '4px' }}>
+            Completed voting
+          </div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, color: completedUsers === totalUsers ? '#86efac' : '#e5e7eb' }}>
+            {completedUsers} / {totalUsers}
+            <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginLeft: '6px' }}>
+              ({totalUsers > 0 ? Math.round((completedUsers / totalUsers) * 100) : 0}%)
+            </span>
+          </div>
+          {/* Progress bar */}
+          <div style={{ width: '100%', height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.08)', marginTop: '4px' }}>
+            <div style={{
+              width: `${totalUsers > 0 ? (completedUsers / totalUsers) * 100 : 0}%`,
+              height: '100%',
+              borderRadius: 2,
+              background: completedUsers === totalUsers ? '#86efac' : '#60a5fa',
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Total orbs</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e5e7eb' }}>{totalAnswered}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Per person</div>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e5e7eb' }}>{maxQ}</div>
+        </div>
+      </div>
+
+      {/* Pool by chapter */}
+      <div style={styles.poolRow}>
+        <span style={styles.poolLabel}>Pool:</span>
+        {chapters.map(ch => {
+          const total = finaleState.pool.totalByChapter.get(ch.id) ?? 0;
+          return (
+            <span key={ch.id} style={{ ...styles.poolCount, color: ch.color }}>
+              {total}
+            </span>
+          );
+        })}
+        <span style={styles.poolTotal}>
+          Total: {totalAnswered}
+        </span>
+      </div>
+
+      {/* 6x3 grid — only during remix */}
+      {!isVotePhase && (<>
 
       {/* 6x3 grid */}
       <div style={styles.gridContainer}>
@@ -132,22 +202,6 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
         })}
       </div>
 
-      {/* Pool counters */}
-      <div style={styles.poolRow}>
-        <span style={styles.poolLabel}>Pool:</span>
-        {chapters.map(ch => {
-          const available = availableByChapter.get(ch.id) ?? 0;
-          return (
-            <span key={ch.id} style={{ ...styles.poolCount, color: ch.color }}>
-              {available}
-            </span>
-          );
-        })}
-        <span style={styles.poolTotal}>
-          Total: {totalRemaining}
-        </span>
-      </div>
-
       {/* Audience interaction toggle */}
       <div style={styles.toggleRow}>
         <button
@@ -189,6 +243,8 @@ export function RemixController({ fullState, sendCommand, socket }: RemixControl
         chapters={chapters}
         sendCommand={sendCommand}
       />
+
+      </>)}
     </section>
   );
 }

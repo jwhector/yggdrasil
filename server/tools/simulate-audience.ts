@@ -162,16 +162,14 @@ function createClient(index: number): ClientState {
     }
 
     // V3.4: detect finale_vote and bootstrap first question from the questions array
+    // No pool cap — everyone answers orbsPerPerson (6) questions
     if (client.phase === 'finale_vote' && data.myFinale && !client.phonesDark) {
       const voteView = data.myFinale as {
         finalePhase: string;
         questions: { text: string }[];
         answeredCount: number;
-        poolCapReached: boolean;
       };
-      if (voteView.poolCapReached) {
-        client.phonesDark = true;
-      } else if (
+      if (
         voteView.questions &&
         voteView.answeredCount === client.questionsAnswered &&
         client.questionsAnswered < voteView.questions.length &&
