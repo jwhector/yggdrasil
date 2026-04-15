@@ -43,7 +43,11 @@ export default function ProjectorPage() {
     case 'opener': {
       const slides = state.config.openerSlides;
       if (slides?.length && state.openerSlideState !== undefined) {
-        content = <OpenerSlides slides={slides} position={state.openerSlideState} />;
+        content = <OpenerSlides
+          slides={slides}
+          position={state.openerSlideState}
+          onMediaReady={() => socket?.emit('command', { type: 'SLIDE_MEDIA_READY' })}
+        />;
       } else {
         content = <ProjectorDark />;
       }

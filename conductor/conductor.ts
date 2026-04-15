@@ -144,6 +144,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
       return handleJumpToPhase(state, command.phase, command.attemptIndex);
     case 'ADVANCE_SLIDE':
       return handleAdvanceSlide(state);
+    case 'SLIDE_MEDIA_READY':
+      return handleSlideMediaReady(state);
     case 'PAUSE':
       return handlePause(state);
     case 'RESUME':
@@ -294,6 +296,7 @@ function handleAdvanceSlide(state: ShowState): ConductorEvent[] {
   }
 
   const cur = state.openerSlideState;
+  const prevPointIndex = cur?.pointIndex ?? null;
 
   if (cur === null) {
     // Blank → show first slide title
@@ -314,10 +317,49 @@ function handleAdvanceSlide(state: ShowState): ConductorEvent[] {
     }
   }
 
-  return [
+  const events: ConductorEvent[] = [];
+  const newPos = state.openerSlideState;
+  const newPointIndex = newPos?.pointIndex ?? null;
+
+  // Stop any previous slide media on slide change or blank
+  if (newPointIndex !== prevPointIndex) {
+    events.push({ type: 'AUDIO_CUE', cue: { type: 'slide_media_stop' } });
+  }
+
+  // Note: slide_media_start is NOT emitted here. The projector sends SLIDE_MEDIA_READY
+  // once the browser video is loaded and playing, which then triggers the Ableton audio.
+
+  events.push(
     { type: 'OPENER_SLIDE_CHANGED', position: state.openerSlideState },
     { type: 'STATE_UPDATED', version: state.version },
-  ];
+  );
+  return events;
+}
+
+function handleSlideMediaReady(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'opener') {
+    return [{ type: 'ERROR', message: 'SLIDE_MEDIA_READY only valid during opener phase' }];
+  }
+
+  const slides = state.config.openerSlides;
+  const pos = state.openerSlideState;
+  if (!slides || !pos) {
+    return [{ type: 'ERROR', message: 'No active slide' }];
+  }
+
+  const slide = slides[pos.pointIndex];
+  if (!slide?.media?.trackIndices?.length) {
+    return [{ type: 'ERROR', message: 'Current slide has no Ableton-backed media' }];
+  }
+
+  return [{
+    type: 'AUDIO_CUE',
+    cue: {
+      type: 'slide_media_start',
+      trackIndices: slide.media.trackIndices,
+      durationBeats: slide.media.durationBeats ?? state.config.timing.loopBoundaryBeats ?? 32,
+    },
+  }];
 }
 
 function handleAdvancePhase(state: ShowState): ConductorEvent[] {

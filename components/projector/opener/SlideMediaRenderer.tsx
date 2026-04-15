@@ -7,16 +7,17 @@ import { SlideAudio } from './SlideAudio';
 
 interface SlideMediaRendererProps {
   media: SlideMedia;
+  onMediaReady?: () => void;
 }
 
-export function SlideMediaRenderer({ media }: SlideMediaRendererProps) {
+export function SlideMediaRenderer({ media, onMediaReady }: SlideMediaRendererProps) {
   switch (media.type) {
     case 'image':
       return <SlideImage media={media} />;
     case 'video':
-      return <SlideVideo media={media} />;
+      return <SlideVideo media={media} onMediaReady={onMediaReady} />;
     case 'audio':
-      return <SlideAudio media={media} />;
+      return <SlideAudio media={media} onMediaReady={onMediaReady} />;
     default:
       return null;
   }

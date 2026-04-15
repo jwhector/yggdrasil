@@ -322,6 +322,8 @@ export interface SlideMedia {
   autoplay?: boolean;   // Video/audio — default true
   loop?: boolean;       // Video/audio — default false
   muted?: boolean;      // Video — default true (projector uses separate audio)
+  trackIndices?: number[];  // Ableton track indices for audio playback (audio routed through Ableton, not browser)
+  durationBeats?: number;   // How many beats the clip runs (defaults to loopBoundaryBeats if omitted)
 }
 
 export interface SlideSubPoint {
@@ -425,7 +427,11 @@ export type AudioCue =
   /** Duck master gain (performer speaking between auditions) */
   | { type: 'master_duck' }
   /** Unduck master gain (audition starting or leaving attempt_build) */
-  | { type: 'master_unduck' };
+  | { type: 'master_unduck' }
+  /** Opener slide media: one-shot playback (fade in, play one loop, fade out, stop) */
+  | { type: 'slide_media_start'; trackIndices: number[]; durationBeats: number }
+  /** Opener slide media: cancel any in-progress slide playback */
+  | { type: 'slide_media_stop' };
 
 // ============================================================================
 // Conductor Commands (Input)
@@ -436,6 +442,7 @@ export type ConductorCommand =
   | { type: 'ADVANCE_PHASE' }
   | { type: 'JUMP_TO_PHASE'; phase: ShowPhase; attemptIndex?: number }
   | { type: 'ADVANCE_SLIDE' }
+  | { type: 'SLIDE_MEDIA_READY' }  // Projector signals browser media is playing → trigger Ableton audio
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
 

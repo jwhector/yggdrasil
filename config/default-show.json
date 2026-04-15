@@ -563,7 +563,9 @@
       "point": "A musical about QAnon conspiracy theories",
       "media": {
         "type": "video",
-        "src": "/opener-media/anons.mov"
+        "src": "/opener-media/anons.mov",
+        "trackIndices": [79],
+        "durationBeats": 56
       },
       "subPoints": [
         { "label": "Duration:", "value": "4 months" },
@@ -572,6 +574,10 @@
     },
     {
       "point": "Engineer at a startup a friend of ours created",
+      "media": {
+        "type": "image",
+        "src": "/opener-media/dan.HEIC"
+      },
       "subPoints": [
         { "label": "Duration:", "value": "7 months" },
         { "label": "Abandoned because:", "value": "we felt a higher \"spiritual\" calling" }
@@ -603,7 +609,7 @@
     }
   ],
   "lobby": {
-    "waitingMessage": "The show will begin shortly.",
+    "waitingMessage": "",
     "onboarding": {
       "buttonLabel": "WHERE AM I?",
       "sections": [
