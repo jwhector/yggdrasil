@@ -169,6 +169,12 @@ interface AudioRouterState {
   baseTempo: number;
   /** Track indices identified as foldable (group tracks) during discovery — never muted */
   foldableTracks: Set<number>;
+  /** In-progress opener slide media playback state */
+  slideMediaState: {
+    activeTrackIndices: number[];
+    fadeIds: string[];
+    stopCallbackId: string | null;
+  } | null;
 }
 
 // ============================================================================
@@ -206,6 +212,7 @@ export function createAudioRouter(
     fragmentTrackIndices: new Set(),
     baseTempo: NOMINAL_TEMPO_BPM,
     foldableTracks: new Set(),
+    slideMediaState: null,
   };
 
   // Last-seen gain config, updated at the top of handleStateChange
@@ -919,6 +926,120 @@ export function createAudioRouter(
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Opener Slide Media: One-Shot Playback
+  // --------------------------------------------------------------------------
+
+  function handleSlideMediaStart(cue: Extract<AudioCue, { type: 'slide_media_start' }>): void {
+    // Cancel any in-progress slide playback
+    if (routerState.slideMediaState) {
+      handleSlideMediaStop();
+    }
+
+    // Disable master loop so transport runs past loopBoundaryBeats
+    oscBridge.send('/live/song/set/loop', 0);
+
+    ensureTransportStarted();
+
+    const durationBeats = cue.durationBeats;
+    const fadeInBeats = currentGainConfig.entrySwellBeats ?? 4;
+    const fadeOutBeats = currentGainConfig.exitFadeBeats ?? 8;
+    const currentBeat = timingEngine?.getCurrentBeat() ?? 0;
+    const startBeat = currentBeat + 1;
+
+    const fadeIds: string[] = [];
+
+    // Unmute and fade in each track
+    for (const idx of cue.trackIndices) {
+      unmuteTrack(idx);
+      setGain(idx, currentGainConfig.entryGain ?? 0.25);
+      const fadeId = fadeGain(idx, 1.0, fadeInBeats, startBeat);
+      fadeIds.push(fadeId);
+    }
+
+    // Schedule fade-out before clip ends
+    const fadeOutStartBeat = startBeat + durationBeats - fadeOutBeats;
+    const fadeOutId = `slide-media-fadeout-${routerState.fadeCounter}`;
+    if (timingEngine) {
+      timingEngine.scheduleAtBeat(fadeOutId, fadeOutStartBeat, () => {
+        for (const idx of cue.trackIndices) {
+          fadeGain(idx, 0, fadeOutBeats);
+        }
+      });
+    }
+
+    // Schedule transport stop, mute, and re-enable master loop after clip completes
+    const stopBeat = startBeat + durationBeats;
+    const stopId = `slide-media-stop-${routerState.fadeCounter}`;
+    if (timingEngine) {
+      timingEngine.scheduleAtBeat(stopId, stopBeat, () => {
+        for (const idx of cue.trackIndices) {
+          muteTrack(idx);
+        }
+        stopPlayback();
+        oscBridge.send('/live/song/set/loop', 1);
+        routerState.slideMediaState = null;
+      });
+    } else {
+      // No timing engine: snap gains then immediately mute (test mode)
+      for (const idx of cue.trackIndices) {
+        setGain(idx, 1.0);
+      }
+    }
+
+    routerState.slideMediaState = {
+      activeTrackIndices: [...cue.trackIndices],
+      fadeIds,
+      stopCallbackId: stopId,
+    };
+
+    console.log(`[AudioRouter] slide_media_start: tracks ${cue.trackIndices.join(',')} — one-shot ${durationBeats} beats (master loop disabled)`);
+  }
+
+  function handleSlideMediaStop(): void {
+    const sms = routerState.slideMediaState;
+    if (!sms) return;
+
+    // Cancel scheduled fade-out and stop callbacks
+    if (timingEngine) {
+      for (const fadeId of sms.fadeIds) {
+        timingEngine.cancelCallbacks(fadeId);
+      }
+      timingEngine.cancelCallbacks('slide-media-fadeout');
+      if (sms.stopCallbackId) {
+        timingEngine.cancelCallbacks(sms.stopCallbackId);
+      }
+    }
+
+    // Immediate fade out
+    const fadeOutBeats = currentGainConfig.exitFadeBeats ?? 8;
+    for (const idx of sms.activeTrackIndices) {
+      fadeGain(idx, 0, fadeOutBeats);
+    }
+
+    // Schedule mute + stop + re-enable master loop after fade completes
+    if (timingEngine) {
+      const currentBeat = timingEngine.getCurrentBeat();
+      const muteAtBeat = currentBeat + fadeOutBeats + 1;
+      timingEngine.scheduleAtBeat(`slide-media-cleanup-${routerState.fadeCounter}`, muteAtBeat, () => {
+        for (const idx of sms.activeTrackIndices) {
+          muteTrack(idx);
+        }
+        stopPlayback();
+        oscBridge.send('/live/song/set/loop', 1);
+      });
+    } else {
+      for (const idx of sms.activeTrackIndices) {
+        setGain(idx, 0);
+        muteTrack(idx);
+      }
+      oscBridge.send('/live/song/set/loop', 1);
+    }
+
+    routerState.slideMediaState = null;
+    console.log('[AudioRouter] slide_media_stop: cancelled in-progress slide playback (master loop re-enabled)');
+  }
+
   // V3.4: Duck/unduck master Utility gain for performer speech during song building
   function handleMasterDuck(): void {
     fadeGain('master', currentGainConfig.masterDuckGain ?? 0.3, currentGainConfig.masterDuckBeats ?? 2);
@@ -1152,6 +1273,12 @@ export function createAudioRouter(
             break;
           case 'master_unduck':
             handleMasterUnduck();
+            break;
+          case 'slide_media_start':
+            handleSlideMediaStart(cue);
+            break;
+          case 'slide_media_stop':
+            handleSlideMediaStop();
             break;
         }
       }

@@ -179,10 +179,6 @@ export function PentagonRemix({
         ctx.stroke();
       }
 
-      // Global loop ring (interpolated for smooth 60fps)
-      const smoothLoop = getInterpolatedLoopPosition(loopProgress);
-      drawLoopRing(ctx, layout.centerX, layout.centerY, layout.orbitRadius, layout.nodeRadius, smoothLoop);
-
       // Draw nodes
       for (const nodeDef of PENTAGON_NODES) {
         const pos = layout.positions[nodeDef.id];

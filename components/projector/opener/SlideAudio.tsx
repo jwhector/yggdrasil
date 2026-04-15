@@ -5,12 +5,22 @@ import type { SlideMedia } from '@/conductor/types';
 
 interface SlideAudioProps {
   media: SlideMedia;
+  onMediaReady?: () => void;
 }
 
-export function SlideAudio({ media }: SlideAudioProps) {
+export function SlideAudio({ media, onMediaReady }: SlideAudioProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const abletonHandled = !!media.trackIndices?.length;
+
+  // For Ableton-backed audio, signal ready immediately (no browser media to wait for)
+  useEffect(() => {
+    if (abletonHandled && onMediaReady) {
+      onMediaReady();
+    }
+  }, [abletonHandled, onMediaReady]);
 
   useEffect(() => {
+    if (abletonHandled) return; // Audio routed through Ableton, not browser
     const el = audioRef.current;
     if (!el) return;
     el.load();
@@ -21,7 +31,7 @@ export function SlideAudio({ media }: SlideAudioProps) {
       el.pause();
       el.currentTime = 0;
     };
-  }, [media.src, media.autoplay]);
+  }, [media.src, media.autoplay, abletonHandled]);
 
   return (
     <div style={styles.container}>
@@ -29,11 +39,13 @@ export function SlideAudio({ media }: SlideAudioProps) {
         <span style={styles.pulse} />
         <span style={styles.label}>Playing audio</span>
       </div>
-      <audio
-        ref={audioRef}
-        src={media.src}
-        loop={media.loop ?? false}
-      />
+      {!abletonHandled && (
+        <audio
+          ref={audioRef}
+          src={media.src}
+          loop={media.loop ?? false}
+        />
+      )}
       <style>{keyframes}</style>
     </div>
   );

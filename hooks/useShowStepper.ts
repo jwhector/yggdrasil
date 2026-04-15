@@ -178,7 +178,7 @@ export function useShowStepper(
   // Reset when entering opener phase
   const phase = fullState?.phase ?? null;
   useEffect(() => {
-    if (phase === 'opener') {
+    if (phase !== 'opener') {
       hasOpenerStarted.current = false;
     }
   }, [phase]);

@@ -40,6 +40,15 @@ export function ProjectorFinale({
   // Flying orbs state
   const [flyingOrbs, setFlyingOrbs] = useState<Array<{ id: string; chapterId: string; targetX: number; targetY: number }>>([]);
 
+  // Drag trail — tracked in parent so it survives DragDot unmount
+  const activeTrailRef = useRef<Array<{ x: number; y: number }>>([]);
+  const [decayingTrails, setDecayingTrails] = useState<Array<{
+    id: string;
+    points: Array<{ x: number; y: number }>;
+    chapterId: string;
+    createdAt: number;
+  }>>([]);
+
   // High-frequency pool state from dedicated socket event
   const poolState = useTokenPool(socket);
 
@@ -144,6 +153,20 @@ export function ProjectorFinale({
   const handleDrop = useCallback(() => {
     if (!drag.isDragging) return;
     const chapterId = drag.dragChapterId;
+    const trail = activeTrailRef.current;
+
+    // Snapshot trail for decay animation before clearing
+    if (trail.length > 1 && chapterId) {
+      const id = `trail-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setDecayingTrails(prev => [...prev, {
+        id,
+        points: [...trail],
+        chapterId,
+        createdAt: performance.now(),
+      }]);
+    }
+    activeTrailRef.current = [];
+
     const target = drag.endDrag();
     if (target && chapterId && socket) {
       // Only allow drop if this granularType+chapter combo has valid tracks
@@ -165,56 +188,66 @@ export function ProjectorFinale({
     drag.moveDrag(touch.clientX, touch.clientY);
   }, [drag]);
 
-  const handleTouchEnd = useCallback(() => handleDrop(), [handleDrop]);
-
   // Mouse handlers (desktop testing)
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!drag.isDragging) return;
     drag.moveDrag(e.clientX, e.clientY);
   }, [drag]);
 
-  const handleMouseUp = useCallback(() => handleDrop(), [handleDrop]);
+  // Node tap — requires down AND up on the same node.
+  // On down, record the hit node. On up, confirm the same node is still under the pointer.
+  // If a drag starts in between, the down target is cleared.
+  const touchHandledRef = useRef(false);
+  const nodeDownTargetRef = useRef<string | null>(null);
 
-  // Track whether a drag just ended (to suppress click after drop)
-  const wasDraggingRef = useRef(false);
-
-  // Node tap — advance node when clicking/tapping a pentagon node (not during drag)
-  const handleNodeTap = useCallback((clientX: number, clientY: number) => {
-    if (!interactionEnabled || !socket) return;
+  const hitTestNode = useCallback((clientX: number, clientY: number): string | null => {
     const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    const target = drag.findTarget(x, y);
-    if (target) {
-      socket.emit('command', { type: 'ADVANCE_NODE', granularType: target });
-    }
-  }, [drag, interactionEnabled, socket]);
+    if (!rect) return null;
+    return drag.findTarget(clientX - rect.left, clientY - rect.top);
+  }, [drag]);
 
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    // Suppress click that fires after a drag-and-drop
-    if (wasDraggingRef.current) {
-      wasDraggingRef.current = false;
+  const handleNodeDown = useCallback((clientX: number, clientY: number) => {
+    if (drag.isDragging || !interactionEnabled) return;
+    nodeDownTargetRef.current = hitTestNode(clientX, clientY);
+  }, [drag.isDragging, interactionEnabled, hitTestNode]);
+
+  const handleNodeUp = useCallback((clientX: number, clientY: number) => {
+    const downTarget = nodeDownTargetRef.current;
+    nodeDownTargetRef.current = null;
+    if (!downTarget || drag.isDragging || !interactionEnabled || !socket) return;
+    const upTarget = hitTestNode(clientX, clientY);
+    if (upTarget === downTarget) {
+      socket.emit('command', { type: 'ADVANCE_NODE', granularType: downTarget });
+    }
+  }, [drag.isDragging, interactionEnabled, socket, hitTestNode]);
+
+  const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
+    if (touchHandledRef.current) {
+      touchHandledRef.current = false;
       return;
     }
-    handleNodeTap(e.clientX, e.clientY);
-  }, [handleNodeTap]);
+    handleNodeDown(e.clientX, e.clientY);
+  }, [handleNodeDown]);
 
-  const handleTouchEndForTap = useCallback((e: React.TouchEvent) => {
-    if (drag.isDragging) {
-      wasDraggingRef.current = true;
-      handleDrop();
-    } else if (e.changedTouches.length > 0) {
-      const touch = e.changedTouches[0];
-      handleNodeTap(touch.clientX, touch.clientY);
-    }
-  }, [drag.isDragging, handleDrop, handleNodeTap]);
-
-  // Also mark drag end for mouse
-  const handleMouseUpWithFlag = useCallback(() => {
-    if (drag.isDragging) wasDraggingRef.current = true;
+  const handleContainerMouseUp = useCallback((e: React.MouseEvent) => {
     handleDrop();
-  }, [drag.isDragging, handleDrop]);
+    handleNodeUp(e.clientX, e.clientY);
+  }, [handleDrop, handleNodeUp]);
+
+  const handleContainerTouchStart = useCallback((e: React.TouchEvent) => {
+    touchHandledRef.current = true;
+    if (e.touches.length > 0) {
+      handleNodeDown(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, [handleNodeDown]);
+
+  const handleContainerTouchEnd = useCallback((e: React.TouchEvent) => {
+    handleDrop();
+    if (e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      handleNodeUp(touch.clientX, touch.clientY);
+    }
+  }, [handleDrop, handleNodeUp]);
 
   // Collision zones — keep dots away from pentagon nodes during remix
   const collisionZones: CollisionZone[] = useMemo(() => {
@@ -241,11 +274,12 @@ export function ProjectorFinale({
         overflow: 'hidden',
         touchAction: 'none',
       }}
+      onTouchStart={handleContainerTouchStart}
       onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEndForTap}
+      onTouchEnd={handleContainerTouchEnd}
+      onMouseDown={handleContainerMouseDown}
       onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUpWithFlag}
-      onClick={handleClick}
+      onMouseUp={handleContainerMouseUp}
     >
       {size.width > 0 && size.height > 0 && (
         <>
@@ -287,8 +321,22 @@ export function ProjectorFinale({
           chapterId={drag.dragChapterId}
           chapters={chapters}
           containerRef={containerRef}
+          trailRef={activeTrailRef}
         />
       )}
+
+      {/* Decaying trails from completed drags */}
+      {decayingTrails.map(trail => (
+        <DecayingTrail
+          key={trail.id}
+          points={trail.points}
+          chapterId={trail.chapterId}
+          createdAt={trail.createdAt}
+          chapters={chapters}
+          containerRef={containerRef}
+          onComplete={() => setDecayingTrails(prev => prev.filter(t => t.id !== trail.id))}
+        />
+      ))}
 
       {/* Pool counter — per-chapter remaining tokens */}
       <div style={{
@@ -323,33 +371,82 @@ export function ProjectorFinale({
             key={orb.id}
             style={{
               position: 'absolute',
-              left: orb.targetX - 6,
+              left: orb.targetX,
               top: size.height + 20,
-              width: 12,
-              height: 12,
-              borderRadius: '50%',
-              backgroundColor: color,
-              boxShadow: `0 0 24px ${color}88`,
+              width: 0,
+              height: 0,
               animation: 'tokenFlyIn 0.8s ease-out forwards',
-              '--fly-target-x': `${orb.targetX - 6}px`,
-              '--fly-target-y': `${orb.targetY - 6}px`,
+              '--fly-target-y': `${orb.targetY}px`,
+              '--fly-start-y': `${size.height + 20}px`,
               pointerEvents: 'none',
               zIndex: 50,
             } as React.CSSProperties}
-          />
+          >
+            {/* Outer haze */}
+            <div style={{
+              position: 'absolute',
+              width: 60,
+              height: 60,
+              marginLeft: -30,
+              marginTop: -30,
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${color}20 0%, ${color}08 40%, transparent 70%)`,
+              animation: 'tokenFlyHaze 0.8s ease-out forwards',
+            }} />
+            {/* Mid glow */}
+            <div style={{
+              position: 'absolute',
+              width: 30,
+              height: 30,
+              marginLeft: -15,
+              marginTop: -15,
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${color}55 0%, ${color}18 50%, transparent 100%)`,
+              animation: 'tokenFlyGlow 0.8s ease-out forwards',
+            }} />
+            {/* Core */}
+            <div style={{
+              position: 'absolute',
+              width: 14,
+              height: 14,
+              marginLeft: -7,
+              marginTop: -7,
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${color}ee 0%, ${color}99 40%, transparent 100%)`,
+              animation: 'tokenFlyCore 0.8s ease-out forwards',
+            }} />
+          </div>
         );
       })}
       {flyingOrbs.length > 0 && (
         <style>{`
           @keyframes tokenFlyIn {
             0% {
-              transform: translateY(0) scale(1.5);
-              opacity: 1;
+              transform: translateY(0) scale(1.8);
+              filter: blur(12px);
+              -webkit-filter: blur(12px);
+            }
+            60% {
+              filter: blur(4px);
+              -webkit-filter: blur(4px);
             }
             100% {
-              transform: translateY(calc(var(--fly-target-y) - ${size.height + 20}px)) scale(0.8);
-              opacity: 0.3;
+              transform: translateY(calc(var(--fly-target-y) - var(--fly-start-y))) scale(1);
+              filter: blur(0px);
+              -webkit-filter: blur(0px);
             }
+          }
+          @keyframes tokenFlyHaze {
+            0% { opacity: 0.3; transform: scale(2); }
+            100% { opacity: 0.6; transform: scale(1); }
+          }
+          @keyframes tokenFlyGlow {
+            0% { opacity: 0.2; transform: scale(1.8); }
+            100% { opacity: 0.8; transform: scale(1); }
+          }
+          @keyframes tokenFlyCore {
+            0% { opacity: 0.4; transform: scale(1.5); }
+            100% { opacity: 1; transform: scale(1); }
           }
         `}</style>
       )}
@@ -361,8 +458,12 @@ export function ProjectorFinale({
 }
 
 // ---------------------------------------------------------------------------
-// Drag dot indicator (follows finger during touch drag)
+// Drag dot with trail effect
 // ---------------------------------------------------------------------------
+
+const TRAIL_MAX_POINTS = 24;
+const TRAIL_POINT_INTERVAL = 16; // ms between recorded points
+const TRAIL_DECAY_MS = 1000; // how long decaying trails last
 
 function DragDot({
   x,
@@ -370,39 +471,189 @@ function DragDot({
   chapterId,
   chapters,
   containerRef,
+  trailRef,
 }: {
   x: number;
   y: number;
   chapterId: string;
   chapters: ChapterConfig[];
   containerRef: React.RefObject<HTMLDivElement | null>;
+  trailRef: React.MutableRefObject<Array<{ x: number; y: number }>>;
 }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const lastPointTimeRef = useRef(0);
+  const animRef = useRef(0);
+
   const chapter = chapters.find(c => c.id === chapterId);
   const color = chapter?.color ?? '#888';
+  const rgbColor = hexToRgb(color);
 
-  // Convert client coords to container-relative
   const rect = containerRef.current?.getBoundingClientRect();
   const relX = rect ? x - rect.left : x;
   const relY = rect ? y - rect.top : y;
 
+  // Record trail points at a throttled rate into the parent's ref
+  const now = performance.now();
+  if (now - lastPointTimeRef.current > TRAIL_POINT_INTERVAL) {
+    lastPointTimeRef.current = now;
+    trailRef.current.push({ x: relX, y: relY });
+    if (trailRef.current.length > TRAIL_MAX_POINTS) {
+      trailRef.current.shift();
+    }
+  }
+
+  // Render trail + head on canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const parentW = containerRef.current?.clientWidth ?? 0;
+    const parentH = containerRef.current?.clientHeight ?? 0;
+    if (parentW === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = parentW * dpr;
+    canvas.height = parentH * dpr;
+    canvas.style.width = `${parentW}px`;
+    canvas.style.height = `${parentH}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+
+    const draw = () => {
+      ctx.clearRect(0, 0, parentW, parentH);
+      drawTrailPoints(ctx, trailRef.current, rgbColor, 1);
+
+      // Draw glow around head
+      ctx.beginPath();
+      ctx.arc(relX, relY, 20, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rgbColor.r},${rgbColor.g},${rgbColor.b},0.1)`;
+      ctx.fill();
+
+      // Draw head dot
+      ctx.beginPath();
+      ctx.arc(relX, relY, 14, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rgbColor.r},${rgbColor.g},${rgbColor.b},0.8)`;
+      ctx.fill();
+
+      animRef.current = requestAnimationFrame(draw);
+    };
+
+    animRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animRef.current);
+  });
+
   return (
-    <div
+    <canvas
+      ref={canvasRef}
       style={{
         position: 'absolute',
-        left: relX - 14,
-        top: relY - 14,
-        width: 28,
-        height: 28,
-        borderRadius: '50%',
-        backgroundColor: color,
-        opacity: 0.8,
+        top: 0,
+        left: 0,
         pointerEvents: 'none',
-        boxShadow: `0 0 20px ${color}66`,
-        transition: 'none',
         zIndex: 100,
       }}
     />
   );
+}
+
+// ---------------------------------------------------------------------------
+// Decaying trail — persists after drop, fades out over TRAIL_DECAY_MS
+// ---------------------------------------------------------------------------
+
+function DecayingTrail({
+  points,
+  chapterId,
+  createdAt,
+  chapters,
+  containerRef,
+  onComplete,
+}: {
+  points: Array<{ x: number; y: number }>;
+  chapterId: string;
+  createdAt: number;
+  chapters: ChapterConfig[];
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onComplete: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef = useRef(0);
+
+  const chapter = chapters.find(c => c.id === chapterId);
+  const color = chapter?.color ?? '#888';
+  const rgbColor = hexToRgb(color);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const parentW = containerRef.current?.clientWidth ?? 0;
+    const parentH = containerRef.current?.clientHeight ?? 0;
+    if (parentW === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = parentW * dpr;
+    canvas.height = parentH * dpr;
+    canvas.style.width = `${parentW}px`;
+    canvas.style.height = `${parentH}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+
+    const draw = () => {
+      const elapsed = performance.now() - createdAt;
+      const fade = 1 - Math.min(1, elapsed / TRAIL_DECAY_MS);
+
+      if (fade <= 0) {
+        onComplete();
+        return;
+      }
+
+      ctx.clearRect(0, 0, parentW, parentH);
+      drawTrailPoints(ctx, points, rgbColor, fade);
+      animRef.current = requestAnimationFrame(draw);
+    };
+
+    animRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [points, rgbColor, createdAt, containerRef, onComplete]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        pointerEvents: 'none',
+        zIndex: 99,
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared trail drawing
+// ---------------------------------------------------------------------------
+
+function drawTrailPoints(
+  ctx: CanvasRenderingContext2D,
+  trail: Array<{ x: number; y: number }>,
+  color: { r: number; g: number; b: number },
+  globalFade: number,
+): void {
+  for (let i = 0; i < trail.length; i++) {
+    const t = i / trail.length; // 0 = oldest, 1 = newest
+    const alpha = t * 0.4 * globalFade;
+    const r = 4 + t * 6;
+
+    ctx.beginPath();
+    ctx.arc(trail[i].x, trail[i].y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+    ctx.fill();
+  }
 }
 
 // ---------------------------------------------------------------------------

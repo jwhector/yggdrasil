@@ -8,6 +8,7 @@ import { useMediaPreloader } from './opener/useMediaPreloader';
 interface OpenerSlidesProps {
   slides: OpenerSlide[];
   position: OpenerSlidePosition | null;
+  onMediaReady?: () => void;
 }
 
 /** Derive visibility flags from the linear stepIndex. */
@@ -35,7 +36,7 @@ function isVisualMedia(media: SlideMedia): boolean {
   return media.type === 'image' || media.type === 'video';
 }
 
-export function OpenerSlides({ slides, position }: OpenerSlidesProps) {
+export function OpenerSlides({ slides, position, onMediaReady }: OpenerSlidesProps) {
   const [fadeKey, setFadeKey] = useState(0);
   const prevPointRef = useRef<number | null>(null);
 
@@ -111,7 +112,7 @@ export function OpenerSlides({ slides, position }: OpenerSlidesProps) {
         {hasVisualMedia && (
           <div style={styles.rightColumn}>
             <div style={{ animation: 'openerFadeIn 0.5s ease-out both' }}>
-              <SlideMediaRenderer media={slide.media!} />
+              <SlideMediaRenderer media={slide.media!} onMediaReady={onMediaReady} />
             </div>
           </div>
         )}
@@ -120,7 +121,7 @@ export function OpenerSlides({ slides, position }: OpenerSlidesProps) {
       {/* Audio media — non-visual, rendered outside columns */}
       {showMedia && slide.media && !isVisualMedia(slide.media) && (
         <div style={{ animation: 'openerFadeIn 0.4s ease-out both' }}>
-          <SlideMediaRenderer media={slide.media} />
+          <SlideMediaRenderer media={slide.media} onMediaReady={onMediaReady} />
         </div>
       )}
 

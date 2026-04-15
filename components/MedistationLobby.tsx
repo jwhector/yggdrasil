@@ -9,6 +9,7 @@ interface Props {
 }
 
 export function MedistationLobby({ onboardingConfig }: Props) {
+  const [fontsReady, setFontsReady] = useState(false);
   const [view, setView] = useState<'animation' | 'exiting' | 'onboarding'>('animation');
   const stageRef = useRef<HTMLDivElement>(null);
   const staircaseRef = useRef<HTMLDivElement>(null);
@@ -250,8 +251,14 @@ export function MedistationLobby({ onboardingConfig }: Props) {
   }, [alignStaircase, onboardingConfig]);
 
   useEffect(() => {
-    const timer = setTimeout(runAnimation, 100);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    document.fonts.ready.then(() => {
+      if (!cancelled) {
+        setFontsReady(true);
+        runAnimation();
+      }
+    });
+    return () => { cancelled = true; };
   }, [runAnimation]);
 
   const handleWhereClick = () => {
@@ -273,6 +280,7 @@ export function MedistationLobby({ onboardingConfig }: Props) {
         className="ms-stage"
         ref={stageRef}
         style={{
+          visibility: fontsReady ? 'visible' : 'hidden',
           opacity: view === 'exiting' ? 0 : view === 'onboarding' ? 0 : 1,
           transform: view === 'exiting' ? 'translateY(-15px)' : 'translateY(0)',
           transition: 'opacity 0.5s ease, transform 0.5s ease',
@@ -321,8 +329,6 @@ export function MedistationLobby({ onboardingConfig }: Props) {
 }
 
 const styles = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Anybody:wght@300;400&display=swap');
-
   .ms-stage {
     position: relative;
     display: flex;
