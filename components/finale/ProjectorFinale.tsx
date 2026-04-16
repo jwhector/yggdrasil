@@ -18,6 +18,13 @@ import { TokenPool, type CollisionZone, type TokenPoolHandle } from './TokenPool
 import { PentagonRemix } from './PentagonRemix';
 import { computeLayout, PENTAGON_NODES, hexToRgb } from '@/components/projector/renderers/shared';
 
+interface NodeTallyData {
+  granularType: string;
+  votes: Array<{ chapterId: string; count: number }>;
+  dominantChapter: string | null;
+  locked: boolean;
+}
+
 interface ProjectorFinaleProps {
   socket: Socket | null;
   phase: ShowPhase;
@@ -36,6 +43,9 @@ export function ProjectorFinale({
   const containerRef = useRef<HTMLDivElement>(null);
   const tokenPoolRef = useRef<TokenPoolHandle>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+
+  // Node tally state from high-frequency socket event
+  const [nodeTallies, setNodeTallies] = useState<NodeTallyData[]>([]);
 
   // Flying orbs state
   const [flyingOrbs, setFlyingOrbs] = useState<Array<{ id: string; chapterId: string; targetX: number; targetY: number }>>([]);
@@ -104,6 +114,16 @@ export function ProjectorFinale({
       wakeLock?.release();
     };
   }, []);
+
+  // Subscribe to node_tally for orbit dot assignments
+  useEffect(() => {
+    if (!socket) return;
+    const handleTally = (data: { tallies: NodeTallyData[] }) => {
+      setNodeTallies(data.tallies);
+    };
+    socket.on('node_tally', handleTally);
+    return () => { socket.off('node_tally', handleTally); };
+  }, [socket]);
 
   // Listen for token_fly events from audience votes — throttled to avoid DOM explosion
   // Batch fly-ins arriving within 200ms into a single animation
@@ -271,19 +291,35 @@ export function ProjectorFinale({
     }
   }, [handleDrop, handleNodeUp]);
 
+  // Layout metrics for collision zones + orbit positions
+  const layoutMetrics = useMemo(() => {
+    if (size.width === 0) return null;
+    return computeLayout(size.width, size.height);
+  }, [size.width, size.height]);
+
   // Collision zones — keep dots away from pentagon nodes during remix
   const collisionZones: CollisionZone[] = useMemo(() => {
-    if (!isRemix || size.width === 0) return [];
-    const layout = computeLayout(size.width, size.height);
-    const buffer = layout.nodeRadius * 2.5;
+    if (!isRemix || !layoutMetrics) return [];
+    const buffer = layoutMetrics.nodeRadius * 2.5;
     const zones: CollisionZone[] = PENTAGON_NODES.map(n => ({
-      x: layout.positions[n.id].x,
-      y: layout.positions[n.id].y,
+      x: layoutMetrics.positions[n.id].x,
+      y: layoutMetrics.positions[n.id].y,
       radius: buffer,
     }));
-    zones.push({ x: layout.centerX, y: layout.centerY, radius: layout.seedRadius * 2 });
+    zones.push({ x: layoutMetrics.centerX, y: layoutMetrics.centerY, radius: layoutMetrics.seedRadius * 2 });
     return zones;
-  }, [isRemix, size.width, size.height]);
+  }, [isRemix, layoutMetrics]);
+
+  // Node positions + radius for orbit dots (includes seed at center)
+  const nodePositions = useMemo(() => {
+    if (!layoutMetrics) return undefined;
+    return {
+      ...layoutMetrics.positions,
+      seed: { x: layoutMetrics.centerX, y: layoutMetrics.centerY },
+    };
+  }, [layoutMetrics]);
+
+  const nodeRadiusForOrbit = layoutMetrics?.nodeRadius;
 
   return (
     <div
@@ -315,6 +351,9 @@ export function ProjectorFinale({
             interactionEnabled={interactionEnabled}
             collisionZones={collisionZones}
             onDotDragStart={handleDotDragStart}
+            nodeTallies={isRemix ? nodeTallies : undefined}
+            nodePositions={isRemix ? nodePositions : undefined}
+            nodeRadius={nodeRadiusForOrbit}
           />
 
           {/* Pentagon nodes — only during remix */}
@@ -331,6 +370,7 @@ export function ProjectorFinale({
             validNodes={finaleView.validNodes}
             audienceInteraction={finaleView.audienceInteraction}
             onDropZonesComputed={drag.setDropZones}
+            nodeTallies={nodeTallies}
           />}
         </>
       )}
