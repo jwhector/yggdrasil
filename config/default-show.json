@@ -540,7 +540,7 @@
       "point": "Bachelor of Science in Chemistry",
       "media": {
         "type": "image",
-        "src": "/opener-media/chemistry.jpg"
+        "src": "/opener-media/chemistry.JPG"
       },
       "subPoints": [
         { "label": "Duration:", "value": "1 year, 7 months" },
