@@ -46,6 +46,8 @@ export interface UseFloatingOrbsReturn {
   animateRecallOrb: (orbId: string) => void;
   /** Recall all placed orbs with animated spring return (used for "Reset intentions" button). */
   resetAllOrbs: () => void;
+  /** Clear all orbs — used on show reset or phase transition out of finale. */
+  clearOrbs: () => void;
   reconcileWithServer: (serverOrbs: AudienceOrb[]) => void;
   setPlacedPosition: (orbId: string, x: number, y: number) => void;
   /** Set the ID of the orb currently being dragged — skips spring physics for it. */
@@ -224,6 +226,12 @@ export function useFloatingOrbs(): UseFloatingOrbsReturn {
     }
   }, []);
 
+  const clearOrbs = useCallback(() => {
+    orbsRef.current = [];
+    nextIdRef.current = 0;
+    setRenderTick(t => t + 1);
+  }, []);
+
   const animateRecallOrb = useCallback((orbId: string) => {
     const orb = orbsRef.current.find(o => o.id === orbId);
     if (orb) {
@@ -303,5 +311,5 @@ export function useFloatingOrbs(): UseFloatingOrbsReturn {
   void renderTick;
   const orbs = orbsRef.current;
 
-  return { orbs, addOrb, placeOrb, recallOrb, animateRecallOrb, resetAllOrbs, reconcileWithServer, setPlacedPosition, setDragging };
+  return { orbs, addOrb, placeOrb, recallOrb, animateRecallOrb, resetAllOrbs, clearOrbs, reconcileWithServer, setPlacedPosition, setDragging };
 }

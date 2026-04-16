@@ -79,6 +79,28 @@ function AudienceContent() {
     ? state.myFinale as unknown as AudienceRemixView
     : null;
 
+  // Clear orbs when leaving finale phases (show reset, ended, etc.)
+  const prevPhaseRef = useRef(phase);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+
+    const wasFinale = prev === 'finale_vote' || prev === 'finale_remix';
+    const isFinale = phase === 'finale_vote' || phase === 'finale_remix';
+
+    // Entering vote phase fresh — clear any stale orbs from a previous run
+    if (phase === 'finale_vote' && prev !== 'finale_vote') {
+      floatingOrbs.clearOrbs();
+      reconciled.current = false;
+    }
+
+    // Left finale entirely — clear orbs
+    if (wasFinale && !isFinale) {
+      floatingOrbs.clearOrbs();
+      reconciled.current = false;
+    }
+  }, [phase, floatingOrbs]);
+
   useEffect(() => {
     if (remixView && !reconciled.current) {
       reconciled.current = true;

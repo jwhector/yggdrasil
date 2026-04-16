@@ -7,8 +7,8 @@
       "chapter": "ambition",
       "title": "Song 1",
       "thresholds": [
+        0.33,
         0.5,
-        0.66,
         0.99
       ],
       "tempos": [
@@ -144,8 +144,8 @@
       "chapter": "love",
       "title": "Song 2",
       "thresholds": [
+        0.33,
         0.5,
-        0.66,
         0.99
       ],
       "tempos": [
@@ -274,8 +274,8 @@
       "chapter": "acceptance",
       "title": "Song 3",
       "thresholds": [
+        0.33,
         0.5,
-        0.66,
         0.99
       ],
       "tempos": [
@@ -551,7 +551,7 @@
       "point": "A musical about QAnon conspiracy theories",
       "media": {
         "type": "video",
-        "src": "/opener-media/anons.mov",
+        "src": "/opener-media/anons.mp4",
         "trackIndices": [79],
         "durationBeats": 56
       },
@@ -564,7 +564,7 @@
       "point": "Engineer at a startup a friend of ours created",
       "media": {
         "type": "image",
-        "src": "/opener-media/dan.HEIC"
+        "src": "/opener-media/dan.jpg"
       },
       "subPoints": [
         { "label": "Duration:", "value": "7 months" },

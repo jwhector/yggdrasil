@@ -219,6 +219,7 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
           style={{
             position: 'relative',
             width: '100%',
+            maxWidth: 420,
             height: size.height || 'auto',
           }}
         >
