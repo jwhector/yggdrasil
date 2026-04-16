@@ -67,9 +67,9 @@ interface Dot {
   opacity: number;
   // Orbit state — null when floating freely
   orbitNode: string | null;
-  orbitAngle: number;        // current smoothed arc position (lerps toward target)
-  targetOrbitAngle: number;  // target arc position (set by reassignment)
-  orbitRadius: number;       // distance from node center
+  orbitAngle: number;        // fixed arc position for this slot
+  orbitRadius: number;       // distance from node center (includes ring offset)
+  orbitSlot: number;         // LIFO slot index (higher = placed later = removed first)
   transitionT: number;       // 0→1 lerp progress (float↔orbit)
 }
 
@@ -77,12 +77,36 @@ const DOT_RADIUS = 6;
 const DRIFT_SPEED = 0.15;
 const DAMPING = 0.98;
 const BLOOM_DURATION = 0.5;  // Seconds for bloom-in animation
-const MAX_VISIBLE_DOTS = 150; // Cap rendered dots for performance headroom
+const MAX_VISIBLE_DOTS = 300; // Cap rendered dots for performance headroom
 const TOUCH_TARGET_RADIUS = 22;  // ~44pt touch target
-const ORBIT_TRANSITION_SPEED = 0.1; // 0→1 in ~0.4s
-const ORBIT_BASE_SPEED = 0.6; // radians/sec shared rotation speed
-const ORBIT_RADIUS_VARIANCE = 0; // +/- pixels variance per dot
-const ORBIT_ANGLE_LERP_SPEED = 12; // how fast orbitAngle catches up to target (per sec)
+const ORBIT_TRANSITION_SPEED = 0.1; // 0→1 slow float toward orbit slot
+const ORBIT_BASE_SPEED = 0.4; // radians/sec shared rotation speed
+const SLOTS_PER_RING = 9;     // dots per orbit ring before stacking
+const RING_SPACING = 14;      // px between concentric orbit rings
+
+/**
+ * Bisection fill order — positions as fractions of the arc [0,1].
+ * Center first, then edges, then midpoints of largest gaps.
+ * This gives an intuitive "tally" visual where dots appear center-out.
+ */
+const SLOT_POSITIONS: number[] = (() => {
+  const positions: number[] = [0.5, 0.0, 1.0];
+  let sorted = [0.0, 0.5, 1.0];
+  while (positions.length < SLOTS_PER_RING) {
+    const midpoints: number[] = [];
+    for (let i = 0; i < sorted.length - 1; i++) {
+      midpoints.push((sorted[i] + sorted[i + 1]) / 2);
+    }
+    // Add midpoints sorted by distance from center (fills outward)
+    midpoints.sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5));
+    for (const m of midpoints) {
+      if (positions.length >= SLOTS_PER_RING) break;
+      positions.push(m);
+    }
+    sorted = [...new Set([...sorted, ...midpoints])].sort((a, b) => a - b);
+  }
+  return positions;
+})();
 
 export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function TokenPool({
   availableByChapter,
@@ -185,8 +209,8 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
             opacity: 1,
             orbitNode: null,
             orbitAngle: Math.random() * Math.PI * 2,
-            targetOrbitAngle: Math.random() * Math.PI * 2,
-            orbitRadius: nodeRadius * 1.7 + (Math.random() - 0.5) * ORBIT_RADIUS_VARIANCE,
+            orbitRadius: nodeRadius * 1.7,
+            orbitSlot: -1,
             transitionT: 0,
           });
         }
@@ -202,12 +226,17 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
   nodeTalliesRef.current = nodeTallies;
   nodePositionsRef.current = nodePositions;
 
-  // Tally-driven orbit reassignment — runs when tallies change
-  // Dots are arranged in stacked arc sectors: each chapter gets a contiguous
-  // angular slice proportional to its vote count, like a circular stacked bar chart.
+  // Tally-driven orbit reassignment with deterministic slot fill.
+  // Each chapter gets a fixed 120° arc sector. Within each sector, dots fill
+  // slots in bisection order (center, edges, midpoints). When a ring is full,
+  // a new concentric ring stacks outside. Removal is LIFO (highest slot first)
+  // so existing dots never move when others are added or removed.
   useEffect(() => {
     if (!nodeTallies || !nodePositions) return;
     const dots = dotsRef.current;
+    const chapterOrder = chapters.map(c => c.id);
+    const SECTOR_SIZE = (Math.PI * 2) / chapterOrder.length;
+    const baseOrbitR = nodeRadius * 1.7;
 
     // Build desired orbit counts: { "bass:ambition": 3, ... }
     const desired = new Map<string, number>();
@@ -230,90 +259,67 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
       scaledDesired.set(key, Math.round(count * orbitScale));
     }
 
-    // Count current orbiting dots per key
-    const currentOrbiting = new Map<string, number>();
+    // Collect current orbiting dots per key, sorted by slot (highest first for LIFO removal)
+    const orbitingByKey = new Map<string, Dot[]>();
     for (const dot of dots) {
       if (dot.orbitNode) {
         const key = `${dot.orbitNode}:${dot.chapterId}`;
-        currentOrbiting.set(key, (currentOrbiting.get(key) ?? 0) + 1);
+        let arr = orbitingByKey.get(key);
+        if (!arr) { arr = []; orbitingByKey.set(key, arr); }
+        arr.push(dot);
       }
     }
+    for (const arr of orbitingByKey.values()) {
+      arr.sort((a, b) => b.orbitSlot - a.orbitSlot); // highest slot first
+    }
 
-    // Release excess orbiting dots — scatter away from nodes
-    for (const [key, current] of currentOrbiting) {
+    // Release excess dots — LIFO: remove highest-slot dots first, scatter away
+    for (const [key, arr] of orbitingByKey) {
       const want = scaledDesired.get(key) ?? 0;
-      if (current > want) {
-        let toRelease = current - want;
-        for (const dot of dots) {
-          if (toRelease <= 0) break;
-          if (dot.orbitNode && `${dot.orbitNode}:${dot.chapterId}` === key) {
-            const nodePos = nodePositions[dot.orbitNode];
-            const dx = dot.x - nodePos.x;
-            const dy = dot.y - nodePos.y;
-            const spread = (Math.random() - 0.5) * 1.2;
-            const baseAngle = Math.atan2(dy, dx) + spread;
-            const speed = 2.5 + Math.random() * 1.5;
-            dot.orbitNode = null;
-            dot.transitionT = 0;
-            dot.vx = Math.cos(baseAngle) * speed;
-            dot.vy = Math.sin(baseAngle) * speed;
-            toRelease--;
-          }
-        }
+      while (arr.length > want) {
+        const dot = arr.shift()!; // highest slot
+        const nodePos = nodePositions[dot.orbitNode!];
+        const dx = dot.x - nodePos.x;
+        const dy = dot.y - nodePos.y;
+        const spread = (Math.random() - 0.5) * 1.2;
+        const baseAngle = Math.atan2(dy, dx) + spread;
+        const speed = 2.5 + Math.random() * 1.5;
+        dot.orbitNode = null;
+        dot.orbitSlot = -1;
+        dot.transitionT = 0;
+        dot.vx = Math.cos(baseAngle) * speed;
+        dot.vy = Math.sin(baseAngle) * speed;
       }
     }
 
     // Assign floating dots to orbit where more are needed
     for (const [key, want] of scaledDesired) {
-      const current = currentOrbiting.get(key) ?? 0;
-      if (want > current) {
+      const arr = orbitingByKey.get(key) ?? [];
+      if (arr.length < want) {
         const [granularType, chapterId] = key.split(':');
-        let toAssign = want - current;
+        let toAssign = want - arr.length;
         for (const dot of dots) {
           if (toAssign <= 0) break;
           if (dot.orbitNode === null && dot.chapterId === chapterId) {
+            const newSlot = arr.length; // next slot in LIFO stack
             dot.orbitNode = granularType;
+            dot.orbitSlot = newSlot;
             dot.transitionT = 0;
-            dot.orbitRadius = nodeRadius * 1.7 + (Math.random() - 0.5) * ORBIT_RADIUS_VARIANCE;
+
+            // Compute fixed slot position
+            const ci = chapterOrder.indexOf(chapterId);
+            const ring = Math.floor(newSlot / SLOTS_PER_RING);
+            const indexInRing = newSlot % SLOTS_PER_RING;
+            const sectorPad = 0.12;
+            const sectorStart = ci * SECTOR_SIZE + sectorPad;
+            const usable = SECTOR_SIZE - sectorPad * 2;
+            const frac = SLOT_POSITIONS[indexInRing];
+
+            dot.orbitAngle = sectorStart + frac * usable;
+            dot.orbitRadius = baseOrbitR + ring * RING_SPACING;
+            arr.push(dot);
             toAssign--;
           }
-        }
-      }
-    }
-
-    // Compute arc positions per node — each chapter gets a fixed 120° sector.
-    // Dots within each sector distribute themselves evenly.
-    const byNode = new Map<string, Dot[]>();
-    for (const dot of dots) {
-      if (dot.orbitNode) {
-        let arr = byNode.get(dot.orbitNode);
-        if (!arr) { arr = []; byNode.set(dot.orbitNode, arr); }
-        arr.push(dot);
-      }
-    }
-
-    const chapterOrder = chapters.map(c => c.id);
-    const SECTOR_SIZE = (Math.PI * 2) / chapterOrder.length; // 120° per chapter
-
-    for (const [, nodeDots] of byNode) {
-      // Compute minimum angular spacing based on dot size and orbit radius
-      // so neighboring dots (including across sector boundaries) don't overlap
-      const avgOrbitR = nodeDots.reduce((s, d) => s + d.orbitRadius, 0) / nodeDots.length || 1;
-      const dotAngularSize = (DOT_RADIUS * 2.5) / avgOrbitR; // angular width of one dot with spacing
-      const sectorPad = Math.max(dotAngularSize, 0.12); // at least one dot-width gap at boundaries
-
-      for (let ci = 0; ci < chapterOrder.length; ci++) {
-        const ch = chapterOrder[ci];
-        const chDots = nodeDots.filter(d => d.chapterId === ch);
-        if (chDots.length === 0) continue;
-
-        const sectorStart = ci * SECTOR_SIZE + sectorPad;
-        const sectorEnd = (ci + 1) * SECTOR_SIZE - sectorPad;
-        const usable = sectorEnd - sectorStart;
-
-        for (let i = 0; i < chDots.length; i++) {
-          const t = chDots.length === 1 ? 0.5 : i / (chDots.length - 1);
-          chDots[i].targetOrbitAngle = sectorStart + t * usable;
         }
       }
     }
@@ -354,14 +360,7 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
         }
 
         if (dot.orbitNode && positions && positions[dot.orbitNode]) {
-          // Smoothly lerp orbitAngle toward target (shortest path around the circle)
-          let angleDiff = dot.targetOrbitAngle - dot.orbitAngle;
-          // Normalize to [-PI, PI] for shortest-path interpolation
-          while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-          while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-          dot.orbitAngle += angleDiff * Math.min(1, dt * ORBIT_ANGLE_LERP_SPEED);
-
-          // Orbiting dot — arc position + shared slow rotation
+          // Orbiting dot — fixed slot angle + shared slow rotation
           const nodePos = positions[dot.orbitNode];
           const rotationOffset = now / 1000 * ORBIT_BASE_SPEED;
           const angle = dot.orbitAngle + rotationOffset;
@@ -370,10 +369,9 @@ export const TokenPool = forwardRef<TokenPoolHandle, TokenPoolProps>(function To
           const targetY = nodePos.y + Math.sin(angle) * dot.orbitRadius;
 
           if (dot.transitionT < 1) {
-            // Lerp toward orbit path
-            const t = easeOut(dot.transitionT);
-            dot.x += (targetX - dot.x) * t * 0.15;
-            dot.y += (targetY - dot.y) * t * 0.15;
+            // Smooth exponential approach — no final snap
+            dot.x += (targetX - dot.x) * 0.04;
+            dot.y += (targetY - dot.y) * 0.04;
           } else {
             dot.x = targetX;
             dot.y = targetY;
