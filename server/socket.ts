@@ -59,6 +59,16 @@ const POOL_STATE_BROADCAST_INTERVAL_MS = 500;   // ~2 Hz during finale_vote and 
 /** Active thoughts for the current reveal. Cleared on layer/attempt change. */
 let activeThoughts: AssignedThought[] = [];
 
+// ============================================================================
+// Collective scatter vote — server-side state
+// ============================================================================
+
+/** Audience members who have voted to scatter this cycle. Cleared on scatter or phase exit. */
+const scatterVotes = new Set<UserId>();
+
+/** Fraction of connected audience needed to trigger scatter. */
+const SCATTER_VOTE_THRESHOLD = 0.5;
+
 /**
  * Clear all intrusive thoughts and notify clients.
  * Called from both the socket command handler and the timing engine path.
@@ -521,6 +531,45 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
+    // vote_scatter — audience votes to collectively scatter all orbs
+    //
+    // No payload. userId taken from socket session.
+    // When enough audience members vote, SCATTER_ALL fires automatically.
+    // ------------------------------------------------------------------
+    socket.on('vote_scatter', async () => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
+
+      const state = getState();
+      if (state.phase !== 'finale_remix') return;
+
+      // Already voted this cycle
+      if (scatterVotes.has(userId)) return;
+      scatterVotes.add(userId);
+
+      const audienceSockets = await io.in('audience').fetchSockets();
+      const connectedCount = audienceSockets.filter(s => (s as any).userId).length;
+      const threshold = Math.max(2, Math.ceil(connectedCount * SCATTER_VOTE_THRESHOLD));
+      const count = scatterVotes.size;
+
+      console.log(`[Scatter Vote] ${userId} voted (${count}/${threshold})`);
+
+      if (count >= threshold) {
+        // Threshold met — fire scatter and reset
+        scatterVotes.clear();
+        const events = processCommand(state, { type: 'SCATTER_ALL' });
+        setState(state, events);
+        await broadcastEvents(io, events, state);
+
+        // Broadcast reset count to all audience
+        io.to('audience').emit('scatter_vote_count', { count: 0, threshold });
+      } else {
+        // Broadcast updated count to all audience
+        io.to('audience').emit('scatter_vote_count', { count, threshold });
+      }
+    });
+
+    // ------------------------------------------------------------------
     // command — controller sends a ConductorCommand directly
     // ------------------------------------------------------------------
     socket.on('command', async (command: ConductorCommand) => {
@@ -787,6 +836,9 @@ export async function broadcastEvents(
             s.emit('scatter', { granularType: ns2.granularType });
           }
         }
+        // Reset collective scatter votes (whether triggered by audience vote or controller)
+        scatterVotes.clear();
+        io.to('audience').emit('scatter_vote_count', { count: 0, threshold: 0 });
         break;
       }
 

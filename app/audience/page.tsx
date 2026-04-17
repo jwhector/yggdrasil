@@ -339,6 +339,10 @@ function AudienceContent() {
           fallbackMode={remixView.fallbackMode ?? false}
           hoverNode={hoverNode}
           enabledNodes={remix.enabledNodes}
+          scatterVoteCount={remix.scatterVoteCount}
+          scatterVoteThreshold={remix.scatterVoteThreshold}
+          hasVotedScatter={remix.hasVotedScatter}
+          onScatterVote={remix.emitScatterVote}
           onResetOrbs={() => {
             // Emit recall for each placed orb to the server
             for (const orb of floatingOrbs.orbs) {

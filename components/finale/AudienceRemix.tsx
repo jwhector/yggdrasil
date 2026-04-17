@@ -29,6 +29,11 @@ export interface AudienceRemixProps {
   hoverNode: string | null;  // Which node is being hovered during drag
   enabledNodes: string[];    // Which nodes are currently accepting orbs
   onResetOrbs?: () => void;  // Return all orbs to floating positions
+  // Collective scatter vote
+  scatterVoteCount: number;
+  scatterVoteThreshold: number;
+  hasVotedScatter: boolean;
+  onScatterVote?: () => void;
 }
 
 /** Exposed to parent for drag hit-testing. */
@@ -135,7 +140,7 @@ function computeHeight(w: number): number {
 // ============================================================================
 
 export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>(
-  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, enabledNodes, onResetOrbs }, ref) {
+  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, enabledNodes, onResetOrbs, scatterVoteCount, scatterVoteThreshold, hasVotedScatter, onScatterVote }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -419,6 +424,16 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
             </>
           );
         })()}
+
+        {onScatterVote && (
+          <ScatterVoteButton
+            count={scatterVoteCount}
+            threshold={scatterVoteThreshold}
+            hasVoted={hasVotedScatter}
+            onVote={onScatterVote}
+            chapters={chapters}
+          />
+        )}
       </div>
     );
   }
@@ -575,5 +590,83 @@ function TallyArcs({
         );
       })}
     </g>
+  );
+}
+
+// ============================================================================
+// Scatter Vote Button — collective vote to scatter all orbs
+//
+// Shows a fill bar that grows as more audience members vote.
+// Disabled after voting until the cycle resets (scatter fires or count resets).
+// ============================================================================
+
+function ScatterVoteButton({
+  count,
+  threshold,
+  hasVoted,
+  onVote,
+  chapters,
+}: {
+  count: number;
+  threshold: number;
+  hasVoted: boolean;
+  onVote: () => void;
+  chapters: ChapterConfig[];
+}) {
+  const fill = threshold > 0 ? Math.min(count / threshold, 1) : 0;
+  const c0 = chapters[0]?.color ?? '#e63946';
+  const c1 = chapters[1]?.color ?? '#f4a261';
+  const c2 = chapters[2]?.color ?? '#457b9d';
+
+  return (
+    <button
+      onClick={hasVoted ? undefined : onVote}
+      disabled={hasVoted}
+      style={{
+        position: 'fixed',
+        top: 16,
+        left: 16,
+        zIndex: 70,
+        overflow: 'hidden',
+        padding: '8px 18px',
+        borderRadius: '8px',
+        border: `1px solid ${hasVoted ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.15)'}`,
+        background: 'rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        fontSize: '0.72rem',
+        fontWeight: 500,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase' as const,
+        color: hasVoted ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)',
+        cursor: hasVoted ? 'default' : 'pointer',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation' as const,
+        outline: 'none',
+        transition: 'color 0.3s ease, border-color 0.3s ease',
+      }}
+    >
+      {/* Fill bar — gradient using chapter colors */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: `${fill * 100}%`,
+          background: `linear-gradient(90deg, ${c0}44, ${c1}44, ${c2}44)`,
+          transition: 'width 0.4s ease-out',
+          pointerEvents: 'none',
+        }}
+      />
+      <span style={{ position: 'relative', zIndex: 1 }}>
+        {hasVoted
+          ? `Voted ${count}/${threshold}`
+          : count > 0
+            ? `Scatter ${count}/${threshold}`
+            : 'Scatter all'
+        }
+      </span>
+    </button>
   );
 }

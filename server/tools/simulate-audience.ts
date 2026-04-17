@@ -39,6 +39,7 @@ const ORB_PLACE_STAGGER_MS = 1500;        // Delay between placing successive or
 const ORB_REPLACE_MIN_MS = 1000;         // Min time before moving an orb
 const ORB_REPLACE_MAX_MS = 20000;         // Max time before moving an orb
 const ORB_REPLACE_CHANCE = 1;           // Probability of moving (vs doing nothing) per tick
+const SCATTER_VOTE_CHANCE = 0.15;      // Probability of voting to scatter per replace tick
 
 const CHAPTERS = ['ambition', 'love', 'acceptance'];
 const GRANULAR_TYPES = ['bass', 'drums', 'pad', 'harmony', 'fx', 'seed'];
@@ -109,6 +110,7 @@ interface ClientState {
   orbs: OrbState[];
   orbsPlaced: boolean;               // True once initial placement is done
   replaceTimer: ReturnType<typeof setTimeout> | null;
+  hasVotedScatter: boolean;          // True after voting to scatter this cycle
 }
 
 const clients: ClientState[] = [];
@@ -247,6 +249,7 @@ function createClient(index: number): ClientState {
     orbs: [],
     orbsPlaced: false,
     replaceTimer: null,
+    hasVotedScatter: false,
   };
 
   // ------------------------------------------------------------------
@@ -403,7 +406,17 @@ function createClient(index: number): ClientState {
       log(`Client ${index}: orbs scattered, re-placing...`);
     }
     client.orbsPlaced = false;
+    client.hasVotedScatter = false;
     simulateInitialPlacement(client, index);
+  });
+
+  socket.on('scatter_vote_count', (data: { count: number; threshold: number }) => {
+    if (data.count === 0) {
+      client.hasVotedScatter = false;
+    }
+    if (index < 3) {
+      log(`Client ${index}: scatter vote ${data.count}/${data.threshold}`);
+    }
   });
 
   // ------------------------------------------------------------------
@@ -504,6 +517,15 @@ function startReplaceLoop(client: ClientState, index: number) {
           const otherNodes = GRANULAR_TYPES.filter(n => n !== orb.placedOnNode);
           const newNode = otherNodes[Math.floor(Math.random() * otherNodes.length)];
           placeOrbOnNode(client, index, orb.index, newNode);
+        }
+      }
+
+      // Occasionally vote to scatter
+      if (!client.hasVotedScatter && Math.random() < SCATTER_VOTE_CHANCE) {
+        client.hasVotedScatter = true;
+        client.socket.emit('vote_scatter');
+        if (index < 3) {
+          log(`Client ${index}: voted to scatter`);
         }
       }
 
