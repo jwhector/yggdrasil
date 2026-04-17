@@ -519,6 +519,10 @@
       "orbDecayLoops": 3,
       "tallyBroadcastMs": 500,
       "instantCrossfade": true
+    },
+    "epilogue": {
+      "trackIndices": [],
+      "fadeInBeats": 8
     }
   },
   "timing": {
@@ -538,7 +542,8 @@
       "stepsPerBeat": 3,
       "masterDuckGain": 0.6,
       "masterDuckBeats": 4,
-      "masterUnduckBeats": 4
+      "masterUnduckBeats": 4,
+      "masterFadeOutBeats": 16
     }
   },
   "openerSlides": [

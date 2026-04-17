@@ -83,6 +83,7 @@ function createTestConfig(): ShowConfig {
         masterDuckGain: 0.6,
         masterDuckBeats: 4,
         masterUnduckBeats: 4,
+        masterFadeOutBeats: 16,
       },
     },
     lobby: { waitingMessage: 'Welcome' },
@@ -240,33 +241,16 @@ describe('deriveNextStep', () => {
     expect(step.command).toEqual({ type: 'START_REMIX' });
   });
 
-  test('finale_remix → sequential node enable steps', () => {
+  test('finale_remix → sequential node enable steps then End Show', () => {
     const state = createTestState();
-    // Advance through all 3 attempts to reach finale
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // lobby → opener
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // opener → attempt_story
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
-    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
-    // Collapse all 3 attempts quickly (layer 0 threshold 0.50 always passes with 1 voter)
-    for (let a = 0; a < 3; a++) {
-      processCommand(state, { type: 'START_AUDITION' });
-      processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
-      processCommand(state, { type: 'CLOSE_VOTING' });
-      processCommand(state, { type: 'REVEAL_STAKES' });
-      processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
-      processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
-      if (a < 2) {
-        // advance through story phases between attempts
-        processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_resolve/build → attempt_story
-        processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
-      }
-    }
-    // Should now be in finale territory — advance to finale_remix
-    processCommand(state, { type: 'ADVANCE_PHASE' }); // → finale_vote
-    processCommand(state, { type: 'START_REMIX' });    // → finale_remix
+    // Jump directly to finale_remix (sets up finale state automatically via finale_vote)
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'finale_vote' });
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'finale_remix' });
     expect(state.phase).toBe('finale_remix');
+    expect(state.finaleState).not.toBeNull();
+    expect(state.finaleState!.enabledNodes.size).toBe(0);
 
-    // Nodes should be enabled in order: pad, fx, seed, harmony, bass, drums
+    // Nodes should be enabled in order: pad, fx, seed(melody), harmony, bass, drums
     const expectedOrder = [
       { id: 'pad', label: 'Enable Pad' },
       { id: 'fx', label: 'Enable FX' },
@@ -287,6 +271,18 @@ describe('deriveNextStep', () => {
     const finalStep = deriveNextStep(state, false);
     expect(finalStep.command).toEqual({ type: 'END_SHOW' });
     expect(finalStep.label).toBe('End Show');
+  });
+
+  test('epilogue → End Show', () => {
+    const state = createTestState();
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'finale_vote' });
+    processCommand(state, { type: 'JUMP_TO_PHASE', phase: 'finale_remix' });
+    processCommand(state, { type: 'END_SHOW' }); // → epilogue
+    expect(state.phase).toBe('epilogue');
+
+    const s = deriveNextStep(state, false);
+    expect(s.command).toEqual({ type: 'END_SHOW' });
+    expect(s.label).toBe('End Show');
   });
 
   test('ended → blocked', () => {

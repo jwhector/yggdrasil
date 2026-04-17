@@ -23,6 +23,7 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_resolve: 'Resolve',
   finale_vote: 'Finale — Vote',
   finale_remix: 'Finale — Remix',
+  epilogue: 'Epilogue',
   ended: 'Ended',
 };
 
@@ -34,6 +35,7 @@ const PHASE_COLORS: Record<ShowPhase, string> = {
   attempt_resolve: '#92400e',
   finale_vote: '#0d9488',
   finale_remix: '#7c3aed',
+  epilogue: '#6b21a8',
   ended: '#374151',
 };
 

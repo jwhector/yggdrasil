@@ -73,6 +73,8 @@ interface PentagonRemixProps {
   onDropZonesComputed?: (zones: DropZone[]) => void;
   /** High-frequency tally data — overrides node color when audience interaction is active. */
   nodeTallies?: NodeTallyData[];
+  /** Which nodes are currently enabled (accepting orbs). Disabled nodes fade out. */
+  enabledNodes?: string[];
 }
 
 const SEED_ID = 'seed';
@@ -91,10 +93,18 @@ export function PentagonRemix({
   audienceInteraction,
   onDropZonesComputed,
   nodeTallies,
+  enabledNodes,
 }: PentagonRemixProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const startTimeRef = useRef(performance.now());
+
+  // Per-node opacity for smooth fade in/out based on enabledNodes
+  const nodeOpacityRef = useRef<Map<string, number>>(new Map());
+  const enabledSetRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    enabledSetRef.current = new Set(enabledNodes ?? []);
+  }, [enabledNodes]);
 
   // Build chapter color map
   const chapterColorMap = useMemo(() => {
@@ -188,11 +198,26 @@ export function PentagonRemix({
       const t = (performance.now() - startTimeRef.current) / 1000;
       ctx.clearRect(0, 0, width, height);
 
-      // Draw radial lines (dim connectors)
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      // Lerp per-node opacity toward target (enabled=1, disabled=0)
+      const OPACITY_LERP = 0.03;
+      const enabledSet = enabledSetRef.current;
+      const allNodes = [...PENTAGON_NODES.map(n => n.id), SEED_ID];
+      for (const id of allNodes) {
+        const current = nodeOpacityRef.current.get(id) ?? 1;
+        // If enabledNodes is empty, no nodes have been enabled yet — hide all
+        // If enabledNodes has entries, show only those in the set
+        const target = enabledSet.size === 0 ? 0 : enabledSet.has(id) ? 1 : 0;
+        const next = current + (target - current) * OPACITY_LERP;
+        nodeOpacityRef.current.set(id, next);
+      }
+
+      // Draw radial lines (dim connectors) — fade with node opacity
       ctx.lineWidth = 1;
       for (const node of PENTAGON_NODES) {
+        const opacity = nodeOpacityRef.current.get(node.id) ?? 1;
+        if (opacity < 0.01) continue;
         const pos = layout.positions[node.id];
+        ctx.strokeStyle = `rgba(255,255,255,${0.06 * opacity})`;
         ctx.beginPath();
         ctx.moveTo(layout.centerX, layout.centerY);
         ctx.lineTo(pos.x, pos.y);
@@ -215,8 +240,11 @@ export function PentagonRemix({
         return activeMap.get(nodeId);
       };
 
-      // Draw nodes
+      // Draw nodes — fade with enabled state
       for (const nodeDef of PENTAGON_NODES) {
+        const opacity = nodeOpacityRef.current.get(nodeDef.id) ?? 1;
+        if (opacity < 0.01) continue;
+        ctx.globalAlpha = opacity;
         const pos = layout.positions[nodeDef.id];
         const active = getEffectiveActive(nodeDef.id);
         const queueDepth = queueMap.get(nodeDef.id) ?? 0;
@@ -226,17 +254,23 @@ export function PentagonRemix({
         const nextChapter = nextChapterMap.get(nodeDef.id) ?? null;
 
         drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        ctx.globalAlpha = 1;
       }
 
-      // Draw seed node (center)
+      // Draw seed node (center) — fade with enabled state
       {
-        const active = getEffectiveActive(SEED_ID);
-        const queueDepth = queueMap.get(SEED_ID) ?? 0;
-        const isHovered = hoverTarget === SEED_ID;
-        const dragValidity = validForDrag === null ? 'none' as const
-          : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
-        const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
-        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        const opacity = nodeOpacityRef.current.get(SEED_ID) ?? 1;
+        if (opacity >= 0.01) {
+          ctx.globalAlpha = opacity;
+          const active = getEffectiveActive(SEED_ID);
+          const queueDepth = queueMap.get(SEED_ID) ?? 0;
+          const isHovered = hoverTarget === SEED_ID;
+          const dragValidity = validForDrag === null ? 'none' as const
+            : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
+          const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
+          drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Audience interaction indicator

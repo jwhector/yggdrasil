@@ -882,6 +882,7 @@ export function filterStateForClient(
           audienceInteraction: finaleFs.audienceInteraction,
           npcMessage: finaleFs.npc.currentMessage,
           fallbackMode: finaleFs.fallbackMode,
+          enabledNodes: Array.from(finaleFs.enabledNodes),
           nodeTallies: Array.from(finaleFs.nodeTallies.entries()).map(([granularType, tally]) => ({
             granularType,
             dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,

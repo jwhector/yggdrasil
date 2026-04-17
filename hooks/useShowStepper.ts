@@ -125,6 +125,9 @@ export function deriveNextStep(
       return step('END_SHOW', 'End Show');
     }
 
+    case 'epilogue':
+      return step('END_SHOW', 'End Show');
+
     case 'ended':
       return blocked('Show ended');
 

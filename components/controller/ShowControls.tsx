@@ -29,6 +29,7 @@ const PHASE_LABELS: Record<ShowPhase, string> = {
   attempt_resolve: 'Resolve (attempt_resolve)',
   finale_vote: 'Finale — Vote',
   finale_remix: 'Finale — Remix',
+  epilogue: 'Epilogue',
   ended: 'Ended',
 };
 

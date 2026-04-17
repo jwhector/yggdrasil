@@ -72,6 +72,7 @@ const DEFAULT_GAIN_CONFIG: GainConfig = {
   masterDuckGain: 0.3,
   masterDuckBeats: 2,
   masterUnduckBeats: 1,
+  masterFadeOutBeats: 16,
 };
 
 const COLLAPSE_TEMPO_RAMP_DURATION_MS = 2000;
@@ -1049,6 +1050,18 @@ export function createAudioRouter(
     fadeGain('master', 1.0, currentGainConfig.masterUnduckBeats ?? 1);
   }
 
+  function handleMasterFadeOut(): void {
+    fadeGain('master', 0, currentGainConfig.masterFadeOutBeats ?? 16);
+  }
+
+  function handleEpilogueMusicStart(cue: Extract<AudioCue, { type: 'epilogue_music_start' }>): void {
+    for (const idx of cue.trackIndices) {
+      unmuteTrack(idx);
+      setGain(idx, 0);
+      fadeGain(idx, 1.0, cue.fadeInBeats);
+    }
+  }
+
   function handleTransport(cue: Extract<AudioCue, { type: 'transport' }>): void {
     if (cue.action === 'play') {
       oscBridge.send('/live/song/start_playing');
@@ -1273,6 +1286,12 @@ export function createAudioRouter(
             break;
           case 'master_unduck':
             handleMasterUnduck();
+            break;
+          case 'master_fade_out':
+            handleMasterFadeOut();
+            break;
+          case 'epilogue_music_start':
+            handleEpilogueMusicStart(cue);
             break;
           case 'slide_media_start':
             handleSlideMediaStart(cue);

@@ -46,6 +46,7 @@ export function ProjectorFinale({
 
   // Node tally state from high-frequency socket event
   const [nodeTallies, setNodeTallies] = useState<NodeTallyData[]>([]);
+  const [enabledNodes, setEnabledNodes] = useState<string[]>(finaleView.enabledNodes ?? []);
 
   // Flying orbs state
   const [flyingOrbs, setFlyingOrbs] = useState<Array<{ id: string; chapterId: string; targetX: number; targetY: number }>>([]);
@@ -118,8 +119,9 @@ export function ProjectorFinale({
   // Subscribe to node_tally for orbit dot assignments
   useEffect(() => {
     if (!socket) return;
-    const handleTally = (data: { tallies: NodeTallyData[] }) => {
+    const handleTally = (data: { tallies: NodeTallyData[]; enabledNodes?: string[] }) => {
       setNodeTallies(data.tallies);
+      if (data.enabledNodes) setEnabledNodes(data.enabledNodes);
     };
     socket.on('node_tally', handleTally);
     return () => { socket.off('node_tally', handleTally); };
@@ -297,18 +299,19 @@ export function ProjectorFinale({
     return computeLayout(size.width, size.height);
   }, [size.width, size.height]);
 
-  // Collision zone — single large circle around the entire pentagon skeleton
-  // so floating dots stay well outside the orbit area during remix
+  // Collision zone — single large circle around the entire pentagon skeleton.
+  // Active during both finale_vote and finale_remix so dots are already
+  // clear of the center area before the skeleton appears.
+  const isFinale = phase === 'finale_vote' || phase === 'finale_remix';
   const collisionZones: CollisionZone[] = useMemo(() => {
-    if (!isRemix || !layoutMetrics) return [];
-    // orbitRadius covers node centers; add node radius + orbit ring distance + buffer
+    if (!isFinale || !layoutMetrics) return [];
     const skeletonRadius = layoutMetrics.orbitRadius + layoutMetrics.nodeRadius * 3.5;
     return [{
       x: layoutMetrics.centerX,
       y: layoutMetrics.centerY,
       radius: skeletonRadius,
     }];
-  }, [isRemix, layoutMetrics]);
+  }, [isFinale, layoutMetrics]);
 
   // Node positions + radius for orbit dots (includes seed at center)
   const nodePositions = useMemo(() => {
@@ -371,6 +374,7 @@ export function ProjectorFinale({
             audienceInteraction={finaleView.audienceInteraction}
             onDropZonesComputed={drag.setDropZones}
             nodeTallies={nodeTallies}
+            enabledNodes={enabledNodes}
           />}
         </>
       )}

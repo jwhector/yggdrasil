@@ -91,6 +91,7 @@ export const DEFAULT_GAIN_CONFIG = {
   masterDuckGain: 0.3,
   masterDuckBeats: 2,
   masterUnduckBeats: 1,
+  masterFadeOutBeats: 16,
 } as const;
 
 /**
@@ -317,6 +318,7 @@ const PHASE_SEQUENCE: ShowPhase[] = [
   'attempt_resolve',     // attempt 2
   'finale_vote',         // V3.4
   'finale_remix',        // V3.4
+  'epilogue',
   'ended',
 ];
 
@@ -437,7 +439,8 @@ function findPhaseSequenceIndex(phase: ShowPhase, attemptIndex: number): number 
     case 'attempt_resolve': return 4 + attemptIndex * 3;
     case 'finale_vote': return 11;
     case 'finale_remix': return 12;
-    case 'ended': return 13;
+    case 'epilogue': return 13;
+    case 'ended': return 14;
     default: return -1;
   }
 }
@@ -1632,11 +1635,12 @@ function handleLoopBoundary(state: ShowState): ConductorEvent[] {
     result.events.push(...audioCues);
   }
 
-  // If POOL_EMPTY was emitted, auto-transition to ended
+  // If POOL_EMPTY was emitted, auto-transition to epilogue (with master fade-out)
   const poolEmpty = result.events.some(e => e.type === 'POOL_EMPTY');
   if (poolEmpty) {
-    state.phase = 'ended';
-    result.events.push({ type: 'SHOW_PHASE_CHANGED', phase: 'ended', attemptIndex: state.currentAttemptIndex });
+    state.phase = 'epilogue';
+    result.events.push({ type: 'AUDIO_CUE', cue: { type: 'master_fade_out' } });
+    result.events.push({ type: 'SHOW_PHASE_CHANGED', phase: 'epilogue', attemptIndex: state.currentAttemptIndex });
   }
 
   return result.events;
@@ -1899,12 +1903,36 @@ function handleFallbackPerformerRemix(state: ShowState, instant?: boolean): Cond
 }
 
 function handleEndShow(state: ShowState): ConductorEvent[] {
-  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
-    return [{ type: 'ERROR', message: 'END_SHOW only valid during finale phases' }];
+  // Context-sensitive: finale → epilogue (master fades out, monologue), epilogue → ended (exit music)
+  if (state.phase === 'epilogue') {
+    state.phase = 'ended';
+    const events: ConductorEvent[] = [
+      { type: 'AUDIO_CUE', cue: { type: 'panic' } },
+      { type: 'AUDIO_CUE', cue: { type: 'master_unduck' } },
+    ];
+
+    // Start exit music if configured
+    const epilogueConfig = state.config.finale.epilogue;
+    if (epilogueConfig?.trackIndices?.length) {
+      events.push({
+        type: 'AUDIO_CUE',
+        cue: { type: 'epilogue_music_start', trackIndices: epilogueConfig.trackIndices, fadeInBeats: epilogueConfig.fadeInBeats },
+      });
+    }
+
+    events.push({ type: 'SHOW_PHASE_CHANGED', phase: 'ended', attemptIndex: state.currentAttemptIndex });
+    return events;
   }
 
-  state.phase = 'ended';
-  return [{ type: 'SHOW_PHASE_CHANGED', phase: 'ended', attemptIndex: state.currentAttemptIndex }];
+  if (state.phase !== 'finale_vote' && state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'END_SHOW only valid during finale or epilogue phases' }];
+  }
+
+  state.phase = 'epilogue';
+  return [
+    { type: 'AUDIO_CUE', cue: { type: 'master_fade_out' } },
+    { type: 'SHOW_PHASE_CHANGED', phase: 'epilogue', attemptIndex: state.currentAttemptIndex },
+  ];
 }
 
 function handleInjectTokens(state: ShowState, chapterId: string, count: number): ConductorEvent[] {
