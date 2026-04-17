@@ -347,10 +347,11 @@ export function getSlideMaxStep(slide: OpenerSlide): number {
   return steps;
 }
 
-/** Intrusive thoughts config — deterministic list shown to all users on collapse. */
+/** Intrusive thoughts config — random sample shown to each user on collapse. */
 export interface IntrusiveThoughtsConfig {
   chapter: Chapter;
-  thoughts: string[];                   // Everyone gets all of them
+  thoughts: string[];                   // Pool to sample from
+  count: number;                        // How many each user sees
 }
 
 /** A single thought assigned to a specific user by the server. */
