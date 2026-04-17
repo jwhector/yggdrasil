@@ -16,7 +16,7 @@ import { useTokenPool } from '@/hooks/useTokenPool';
 import { useDragToken } from '@/hooks/useDragToken';
 import { TokenPool, type CollisionZone, type TokenPoolHandle } from './TokenPool';
 import { PentagonRemix } from './PentagonRemix';
-import { computeLayout, PENTAGON_NODES, hexToRgb } from '@/components/projector/renderers/shared';
+import { computeLayout, hexToRgb } from '@/components/projector/renderers/shared';
 
 interface NodeTallyData {
   granularType: string;
@@ -297,17 +297,17 @@ export function ProjectorFinale({
     return computeLayout(size.width, size.height);
   }, [size.width, size.height]);
 
-  // Collision zones — keep dots away from pentagon nodes during remix
+  // Collision zone — single large circle around the entire pentagon skeleton
+  // so floating dots stay well outside the orbit area during remix
   const collisionZones: CollisionZone[] = useMemo(() => {
     if (!isRemix || !layoutMetrics) return [];
-    const buffer = layoutMetrics.nodeRadius * 2.5;
-    const zones: CollisionZone[] = PENTAGON_NODES.map(n => ({
-      x: layoutMetrics.positions[n.id].x,
-      y: layoutMetrics.positions[n.id].y,
-      radius: buffer,
-    }));
-    zones.push({ x: layoutMetrics.centerX, y: layoutMetrics.centerY, radius: layoutMetrics.seedRadius * 2 });
-    return zones;
+    // orbitRadius covers node centers; add node radius + orbit ring distance + buffer
+    const skeletonRadius = layoutMetrics.orbitRadius + layoutMetrics.nodeRadius * 3.5;
+    return [{
+      x: layoutMetrics.centerX,
+      y: layoutMetrics.centerY,
+      radius: skeletonRadius,
+    }];
   }, [isRemix, layoutMetrics]);
 
   // Node positions + radius for orbit dots (includes seed at center)

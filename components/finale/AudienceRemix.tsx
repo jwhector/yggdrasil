@@ -337,27 +337,39 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
           )}
         </div>
 
-        <p style={{
-          color: 'rgba(255,255,255,0.15)',
-          fontSize: '0.7rem',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
+        <div style={{
           marginTop: '16px',
           textAlign: 'center',
+          maxWidth: 280,
         }}>
-          YOUR ORBS SHAPE THE MUSIC
-        </p>
+          <p style={{
+            color: 'rgba(255,255,255,0.85)',
+            fontSize: '1rem',
+            lineHeight: 1.6,
+            margin: '0 0 6px 0',
+          }}>
+            Drag as many of your intentions into the sigil as you&apos;d like.
+          </p>
+          <p style={{
+            color: 'rgba(255,255,255,0.75)',
+            fontSize: '0.7rem',
+            letterSpacing: '0.08em',
+            margin: 0,
+          }}>
+            Each node shapes a different part of the music. See what you can manifest.
+          </p>
+        </div>
 
         {onResetOrbs && (
           <button
             onClick={onResetOrbs}
             style={{
-              marginTop: '12px',
+              marginTop: '24px',
               padding: '8px 20px',
               borderRadius: '6px',
               border: '1px solid rgba(255,255,255,0.12)',
               background: 'rgba(255,255,255,0.04)',
-              color: 'rgba(255,255,255,0.3)',
+              color: 'rgba(255,255,255,0.8)',
               fontSize: '0.65rem',
               fontWeight: 500,
               letterSpacing: '0.1em',

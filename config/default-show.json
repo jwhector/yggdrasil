@@ -29,9 +29,9 @@
       "defaultWinners": ["B", "B", "A"],
       "liveSeed": {
         "trackIndices": [
-          6
+          1
         ],
-        "armTrackIndices": [70],
+        "armTrackIndices": [46],
         "label": "The seed"
       },
       "layers": [
@@ -45,13 +45,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  49
+                  30
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  28
+                  14, 15
                 ]
               }
             ]
@@ -61,13 +61,13 @@
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  29
+                  16
                 ]
               },
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  51
+                  31
                 ]
               }
             ]
@@ -83,13 +83,13 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  21
+                  5
                 ]
               },
               {
                 "granularType": "pad",
                 "trackIndices": [
-                  44
+                  23
                 ]
               }
             ]
@@ -99,13 +99,13 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  22
+                  6
                 ]
               },
               {
                 "granularType": "pad",
                 "trackIndices": [
-                  44
+                  24
                 ]
               }
             ]
@@ -121,8 +121,8 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  60,
-                  61
+                  37,
+                  38
                 ]
               }
             ]
@@ -132,7 +132,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  62
+                  39
                 ]
               }
             ]
@@ -166,9 +166,9 @@
       "defaultWinners": ["A", "A", "A"],
       "liveSeed": {
         "trackIndices": [
-          10
+          2
         ],
-        "armTrackIndices": [71],
+        "armTrackIndices": [47],
         "label": "The seed"
       },
       "layers": [
@@ -182,7 +182,13 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  18, 19
+                  7, 8
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  25, 26
                 ]
               }
             ]
@@ -192,13 +198,13 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  20
+                  9
                 ]
               },
               {
                 "granularType": "pad",
                 "trackIndices": [
-                  42, 43
+                  25, 26
                 ]
               }
             ]
@@ -214,13 +220,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  47
+                  32
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  31, 32
+                  17
                 ]
               }
             ]
@@ -230,13 +236,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  53
+                  33
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  36
+                  18, 19
                 ]
               }
             ]
@@ -252,7 +258,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  63
+                  40
                 ]
               }
             ]
@@ -262,7 +268,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  66
+                  41
                 ]
               }
             ]
@@ -284,22 +290,22 @@
         120
       ],
       "auditionBars": [
-        4,
+        8,
         4,
         4
       ],
       "auditionCycles": [
-        2,
+        1,
         2,
         2
       ],
       "defaultWinners": ["A", "A", "A"],
       "liveSeed": {
         "trackIndices": [
-          16
+          3
         ],
-        "armTrackIndices": [72, 73],
-        "armMuteExceptions": [73],
+        "armTrackIndices": [],
+        "armMuteExceptions": [],
         "label": "The seed"
       },
       "layers": [
@@ -313,13 +319,13 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  33
+                  42, 43
                 ]
               },
               {
                 "granularType": "pad",
                 "trackIndices": [
-                  45
+                  27
                 ]
               }
             ]
@@ -329,13 +335,13 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  34
+                  44
                 ]
               },
               {
                 "granularType": "pad",
                 "trackIndices": [
-                  45
+                  28
                 ]
               }
             ]
@@ -351,7 +357,7 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  23
+                  10
                 ]
               }
             ]
@@ -361,7 +367,7 @@
               {
                 "granularType": "harmony",
                 "trackIndices": [
-                  24
+                  11, 12
                 ]
               }
             ]
@@ -377,13 +383,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  55
+                  34
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  30
+                  20
                 ]
               }
             ]
@@ -393,13 +399,13 @@
               {
                 "granularType": "bass",
                 "trackIndices": [
-                  52
+                  35
                 ]
               },
               {
                 "granularType": "drums",
                 "trackIndices": [
-                  30
+                  21
                 ]
               }
             ]
@@ -410,7 +416,7 @@
   ],
   "finale": {
     "bothOptionsSurvive": false,
-    "soundscapeTrackIndices": [74, 75],
+    "soundscapeTrackIndices": [51, 52],
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
       {
@@ -552,7 +558,7 @@
       "media": {
         "type": "video",
         "src": "/opener-media/anons.mp4",
-        "trackIndices": [79],
+        "trackIndices": [53],
         "durationBeats": 56
       },
       "subPoints": [
