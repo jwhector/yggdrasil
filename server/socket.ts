@@ -60,28 +60,15 @@ const POOL_STATE_BROADCAST_INTERVAL_MS = 500;   // ~2 Hz during finale_vote and 
 let activeThoughts: AssignedThought[] = [];
 
 /**
- * Fling all remaining intrusive thoughts off-screen and clear state.
+ * Clear all intrusive thoughts and notify clients.
  * Called from both the socket command handler and the timing engine path.
  */
 export function clearThoughtsOnAdvance(io: SocketIOServer): void {
   if (activeThoughts.length === 0) return;
 
-  for (const t of activeThoughts) {
-    if (!t.dismissed) {
-      t.dismissed = true;
-      t.dismissDirection = Math.random() > 0.5 ? 'right' : 'left';
-      io.to('projector').emit('thought_dismissed', {
-        thoughtId: t.id,
-        direction: t.dismissDirection,
-      });
-    }
-  }
-
-  setTimeout(() => {
-    activeThoughts = [];
-    io.to('projector').emit('thoughts_clear');
-    io.to('audience').emit('thoughts_clear');
-  }, 500);
+  activeThoughts = [];
+  io.to('projector').emit('thoughts_clear');
+  io.to('audience').emit('thoughts_clear');
 }
 
 // ============================================================================
@@ -308,7 +295,7 @@ export function setupSocketHandlers(
         // Send active thoughts to projector on connect
         if (data.mode === 'projector' && activeThoughts.length > 0) {
           socket.emit('thoughts_state', {
-            thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
+            thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text })),
           });
         }
       }
@@ -349,7 +336,7 @@ export function setupSocketHandlers(
       // Resend any active intrusive thoughts for this user
       if (activeThoughts.length > 0) {
         const myThoughts = activeThoughts
-          .filter(t => t.userId === data.userId && !t.dismissed)
+          .filter(t => t.userId === data.userId)
           .map(t => ({ id: t.id, text: t.text }));
         if (myThoughts.length > 0) {
           socket.emit('thoughts_assigned', { thoughts: myThoughts });
@@ -534,23 +521,6 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // dismiss_thought — audience member swipes away an intrusive thought
-    // ------------------------------------------------------------------
-    socket.on('dismiss_thought', (data: { thoughtId: string; direction: 'left' | 'right' }) => {
-      const thought = activeThoughts.find(t => t.id === data.thoughtId);
-      if (!thought || thought.dismissed) return;
-
-      thought.dismissed = true;
-      thought.dismissDirection = data.direction;
-
-      // Notify projector of the dismissal (lightweight delta, not full state)
-      io.to('projector').emit('thought_dismissed', {
-        thoughtId: data.thoughtId,
-        direction: data.direction,
-      });
-    });
-
-    // ------------------------------------------------------------------
     // command — controller sends a ConductorCommand directly
     // ------------------------------------------------------------------
     socket.on('command', async (command: ConductorCommand) => {
@@ -684,8 +654,8 @@ export async function broadcastEvents(
         io.to('projector').emit('npc_message', { message: event.message });
         break;
 
-      case 'REVEAL_STAKES_SHOWN': {
-        // Distribute intrusive thoughts to audience + projector
+      case 'ATTEMPT_COLLAPSED': {
+        // Distribute intrusive thoughts to audience + projector after collapse
         const attempt = state.attempts[event.attemptIndex];
         if (!attempt) break;
         const thoughtsConfig = findThoughtsConfig(state.config.intrusiveThoughts, attempt.chapter);
@@ -698,8 +668,8 @@ export async function broadcastEvents(
           if (uid) connectedUserIds.push(uid);
         }
 
-        activeThoughts = assignThoughts(thoughtsConfig, event.layerIndex, connectedUserIds, event.attemptIndex);
-        console.log(`[Thoughts] Assigned ${activeThoughts.length} thoughts to ${connectedUserIds.length} users (layer ${event.layerIndex})`);
+        activeThoughts = assignThoughts(thoughtsConfig, connectedUserIds, event.attemptIndex);
+        console.log(`[Thoughts] Assigned ${activeThoughts.length} thoughts to ${connectedUserIds.length} users`);
 
         // Send each audience member their thoughts
         for (const s of audienceSocks) {
@@ -715,7 +685,7 @@ export async function broadcastEvents(
 
         // Send full list to projector
         io.to('projector').emit('thoughts_state', {
-          thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
+          thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text })),
         });
         break;
       }

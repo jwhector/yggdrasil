@@ -112,8 +112,18 @@ export function deriveNextStep(
     case 'finale_vote':
       return step('START_REMIX', 'Start Remix');
 
-    case 'finale_remix':
+    case 'finale_remix': {
+      // Sequentially enable nodes before offering End Show
+      const nextNode = getNextNodeToEnable(state);
+      if (nextNode) {
+        return {
+          command: { type: 'ENABLE_NODE', granularType: nextNode.id } as ConductorCommand,
+          label: `Enable ${nextNode.label}`,
+          blocked: false,
+        };
+      }
       return step('END_SHOW', 'End Show');
+    }
 
     case 'ended':
       return blocked('Show ended');
@@ -130,7 +140,7 @@ export function deriveNextStep(
 /** Minimal state shape accepted by derivePhoneCue (works with both ShowState and ProjectorClientState). */
 interface PhoneCueState {
   phase: ShowPhase;
-  attempts: Pick<AttemptState, 'currentLayerPhase' | 'status'>[];
+  attempts: Pick<AttemptState, 'currentLayerPhase' | 'status' | 'currentVoteResult'>[];
   currentAttemptIndex: number;
 }
 
@@ -152,7 +162,9 @@ export function derivePhoneCue(state: PhoneCueState): PhoneCue {
         return 'up';
       case 'locked_in':
       case 'collapsed':
-        return 'down';
+        // Delay "phones down" until verdict animation completes —
+        // currentVoteResult is cleared by ADVANCE_FROM_VERDICT
+        return attempt.currentVoteResult ? 'up' : 'down';
       default:
         return null;
     }
@@ -229,4 +241,24 @@ function blocked(reason: string): StepperStep {
     blocked: true,
     blockReason: reason,
   };
+}
+
+/** Ordered node enable sequence for the remix stepper. */
+const REMIX_NODE_ORDER: { id: string; label: string }[] = [
+  { id: 'pad', label: 'Pad' },
+  { id: 'fx', label: 'FX' },
+  { id: 'seed', label: 'Melody' },
+  { id: 'harmony', label: 'Harmony' },
+  { id: 'bass', label: 'Bass' },
+  { id: 'drums', label: 'Drums' },
+];
+
+/** Return the next node to enable, or null if all are enabled. */
+function getNextNodeToEnable(state: ShowState): { id: string; label: string } | null {
+  const enabled = state.finaleState?.enabledNodes;
+  if (!enabled) return REMIX_NODE_ORDER[0];
+  for (const node of REMIX_NODE_ORDER) {
+    if (!enabled.has(node.id)) return node;
+  }
+  return null;
 }

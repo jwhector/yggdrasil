@@ -24,8 +24,6 @@ const SETTLE_THRESHOLD = 1.5;     // velocity below which particle is "settled"
 const SETTLE_FLOOR_MARGIN = 2;    // px proximity to floor to consider settled
 const COLLISION_OVERLAP = 0.25;   // fraction of combined radii that can overlap (0 = no overlap, 1 = full)
 const SPAWN_STAGGER_MS = 40;      // ms between each particle spawn
-const FLING_SPEED = 1400;         // px/s for dismissed particles
-const FLING_VY = -150;            // slight upward arc on fling
 
 // Sizing — oval bubbles (radiusX > radiusY)
 const MIN_RADIUS_X = 30;         // minimum horizontal radius
@@ -39,7 +37,6 @@ const FONT = `${FONT_SIZE}px monospace`;
 const MEMBRANE_SEGMENTS = 24;     // path segments per bubble (lower than skeleton's 48)
 const MEMBRANE_NOISE_SETTLED = 0.06;  // subtle breathing when at rest
 const MEMBRANE_NOISE_AIRBORNE = 0.12; // more wobble while falling
-const MEMBRANE_NOISE_FLUNG = 0.20;    // stretchy distortion during fling
 const MEMBRANE_SPEED_SETTLED = 0.6;   // slow breathing
 const MEMBRANE_SPEED_AIRBORNE = 1.4;  // faster wobble
 
@@ -54,7 +51,6 @@ const BUBBLE_COLOR: RGB = { r: 180, g: 50, b: 50 };   // dark red membrane
 const BUBBLE_FILL_ALPHA = 0.12;
 const BUBBLE_STROKE_ALPHA = 0.35;
 const TEXT_COLOR = 'rgba(255, 170, 170, 0.65)';
-const TEXT_COLOR_FLUNG = 'rgba(255, 170, 170, 0.3)';
 
 // ============================================================================
 // Types
@@ -70,7 +66,6 @@ interface Particle {
   radiusX: number;
   radiusY: number;
   settled: boolean;
-  flung: boolean;
   opacity: number;
   seed: number;        // unique noise seed for membrane variation
   age: number;         // seconds since spawn (for animation phase)
@@ -99,15 +94,6 @@ export function initThoughts(thoughts: { id: string; text: string }[]): void {
   const newThoughts = thoughts.filter(t => !existingIds.has(t.id));
   spawnQueue = [...spawnQueue, ...newThoughts.map(t => ({ id: t.id, text: t.text }))];
   spawnTimer = 0;
-}
-
-export function dismissThought(id: string, direction: 'left' | 'right'): void {
-  const p = particles.find(p => p.id === id);
-  if (!p || p.flung) return;
-  p.flung = true;
-  p.settled = false;
-  p.vx = direction === 'right' ? FLING_SPEED : -FLING_SPEED;
-  p.vy = FLING_VY;
 }
 
 export function clearThoughts(): void {
@@ -142,17 +128,6 @@ export function updatePhysics(dt: number, cw: number, ch: number): void {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.age += dt;
-
-    if (p.flung) {
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += GRAVITY_BASE * 0.5 * dt;
-      p.opacity -= dt * 2.0;
-      if (p.opacity <= 0 || p.x < -p.radiusX * 4 || p.x > canvasW + p.radiusX * 4) {
-        particles.splice(i, 1);
-      }
-      continue;
-    }
 
     if (p.settled) continue;
 
@@ -200,13 +175,8 @@ export function updatePhysics(dt: number, cw: number, ch: number): void {
   // Oval collision uses average radius for distance checks
   for (let i = 0; i < particles.length; i++) {
     const a = particles[i];
-    if (a.flung) continue;
-
     for (let j = i + 1; j < particles.length; j++) {
-      const b = particles[j];
-      if (b.flung) continue;
-
-      resolveOvalCollision(a, b);
+      resolveOvalCollision(a, particles[j]);
     }
   }
 }
@@ -232,10 +202,7 @@ export function renderParticles(ctx: CanvasRenderingContext2D): void {
 
     let noiseIntensity: number;
     let timeScale: number;
-    if (p.flung) {
-      noiseIntensity = MEMBRANE_NOISE_FLUNG;
-      timeScale = MEMBRANE_SPEED_AIRBORNE * 2;
-    } else if (p.settled) {
+    if (p.settled) {
       noiseIntensity = MEMBRANE_NOISE_SETTLED;
       timeScale = MEMBRANE_SPEED_SETTLED;
     } else {
@@ -247,7 +214,7 @@ export function renderParticles(ctx: CanvasRenderingContext2D): void {
     drawThoughtMembrane(ctx, p.x, p.y, p.radiusX, p.radiusY, noiseIntensity, globalTime * timeScale, p.seed, p.tailSide);
 
     // Text centered inside
-    ctx.fillStyle = p.flung ? TEXT_COLOR_FLUNG : TEXT_COLOR;
+    ctx.fillStyle = TEXT_COLOR;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(p.text, p.x, p.y + 1);
@@ -345,7 +312,6 @@ function createParticle(id: string, text: string): Particle {
     radiusX: estRadiusX,
     radiusY: RADIUS_Y,
     settled: false,
-    flung: false,
     opacity: 1,
     seed: Math.random() * 100,
     age: 0,

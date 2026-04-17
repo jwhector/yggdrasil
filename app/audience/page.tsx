@@ -439,19 +439,17 @@ function BuildView({
   const isAuditioning = currentLayerPhase === 'auditioning';
   const hasVoted = myVote !== null;
 
-  // Server-driven intrusive thoughts
+  // Server-driven intrusive thoughts (shown after collapse only)
   const intrusiveThoughts = useIntrusiveThoughts(socket, undefined, currentLayerPhase);
-  const thoughtsBlocking = intrusiveThoughts.hasThoughts;
 
   const layerKey = `${attemptIndex}-${currentLayerIndex}`;
 
   // Build reveal result from vote data.
-  // Only show after the conductor advances past revealing (locked_in / collapsed),
-  // AND after the user has dismissed intrusive thoughts.
+  // Only show after the conductor advances past revealing (locked_in / collapsed).
   let revealResult: RevealResult | null = null;
   const hasVoteData = currentAttempt.currentVoteResult && currentAttempt.lastThresholdCheck;
   const verdictPhase = currentLayerPhase === 'locked_in' || currentLayerPhase === 'collapsed';
-  if (verdictPhase && hasVoteData && !thoughtsBlocking) {
+  if (verdictPhase && hasVoteData) {
     const vr = currentAttempt.currentVoteResult!;
     revealResult = {
       winner: vr.winner,
@@ -460,8 +458,6 @@ function BuildView({
       passed: currentAttempt.lastThresholdCheck!.passed,
     };
   }
-
-  const isDimmed = thoughtsBlocking;
 
   return (
     <div
@@ -484,8 +480,7 @@ function BuildView({
         style={{
           marginTop: isLocked ? 'calc(50vh - 140px)' : '0px',
           transform: isLocked ? 'scale(1.25)' : 'scale(1)',
-          transition: 'margin-top 0.6s ease, transform 0.6s ease, opacity 0.4s ease',
-          opacity: isDimmed ? 0.3 : 1,
+          transition: 'margin-top 0.6s ease, transform 0.6s ease',
           transformOrigin: 'center top',
         }}
       >
@@ -519,19 +514,18 @@ function BuildView({
           <OptionCards
             layerConfig={currentAttempt.currentLayerConfig}
             myVote={myVote}
-            disabled={!isAuditioning || thoughtsBlocking}
+            disabled={!isAuditioning}
             onVote={onVote}
             currentAuditionOption={currentAttempt.currentAuditionOption}
             chapter={chapter}
             revealResult={revealResult}
-            dimmed={isDimmed}
             auditionProgress={auditionProgress}
           />
         )}
 
         {/* Audition depleting bars (only during auditioning, before vote) */}
         {isAuditioning && auditionProgress && (
-          <div style={{ width: '100%', opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+          <div style={{ width: '100%' }}>
             <AuditionBars
               progress={auditionProgress}
               chapter={chapter}
@@ -548,8 +542,6 @@ function BuildView({
               fontSize: '0.7rem',
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
-              opacity: isDimmed ? 0.3 : 1,
-              transition: 'opacity 0.4s ease',
             }}
           >
             TAP TO VOTE
@@ -563,8 +555,6 @@ function BuildView({
               fontSize: '0.7rem',
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
-              opacity: isDimmed ? 0.3 : 1,
-              transition: 'opacity 0.4s ease',
             }}
           >
             VOTE LOCKED
@@ -573,7 +563,7 @@ function BuildView({
       </div>
 
       {/* Layer dots — always visible */}
-      <div style={{ opacity: isDimmed ? 0.3 : 1, transition: 'opacity 0.4s ease' }}>
+      <div>
         <LayerDots
           layerCount={currentAttempt.layerCount}
           currentLayerIndex={currentLayerIndex}
@@ -587,7 +577,6 @@ function BuildView({
         key={layerKey}
         thoughts={intrusiveThoughts.thoughts}
         active={intrusiveThoughts.hasThoughts}
-        onDismiss={intrusiveThoughts.dismissThought}
         chapter={chapter}
       />
     </div>

@@ -346,11 +346,10 @@ export function getSlideMaxStep(slide: OpenerSlide): number {
   return steps;
 }
 
-/** Intrusive thoughts config — shared pool distributed by the server. */
+/** Intrusive thoughts config — deterministic list shown to all users on collapse. */
 export interface IntrusiveThoughtsConfig {
   chapter: Chapter;
-  thoughtsPerPerson: number[];          // Per-layer count [1, 3, 5]
-  pool: string[][];                     // [layerIndex][poolIndex] — shared pool per layer
+  thoughts: string[];                   // Everyone gets all of them
 }
 
 /** A single thought assigned to a specific user by the server. */
@@ -358,8 +357,6 @@ export interface AssignedThought {
   id: string;                           // Unique: "{attemptIndex}-{layerIndex}-{userId}-{i}"
   text: string;
   userId: UserId;
-  dismissed: boolean;
-  dismissDirection?: 'left' | 'right';
 }
 
 // Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.

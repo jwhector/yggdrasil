@@ -240,11 +240,53 @@ describe('deriveNextStep', () => {
     expect(step.command).toEqual({ type: 'START_REMIX' });
   });
 
-  test('finale_remix → End Show', () => {
+  test('finale_remix → sequential node enable steps', () => {
     const state = createTestState();
-    state.phase = 'finale_remix';
-    const step = deriveNextStep(state, false);
-    expect(step.command).toEqual({ type: 'END_SHOW' });
+    // Advance through all 3 attempts to reach finale
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // lobby → opener
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // opener → attempt_story
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
+    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
+    // Collapse all 3 attempts quickly (layer 0 threshold 0.50 always passes with 1 voter)
+    for (let a = 0; a < 3; a++) {
+      processCommand(state, { type: 'START_AUDITION' });
+      processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+      processCommand(state, { type: 'CLOSE_VOTING' });
+      processCommand(state, { type: 'REVEAL_STAKES' });
+      processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+      processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
+      if (a < 2) {
+        // advance through story phases between attempts
+        processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_resolve/build → attempt_story
+        processCommand(state, { type: 'ADVANCE_PHASE' }); // attempt_story → attempt_build
+      }
+    }
+    // Should now be in finale territory — advance to finale_remix
+    processCommand(state, { type: 'ADVANCE_PHASE' }); // → finale_vote
+    processCommand(state, { type: 'START_REMIX' });    // → finale_remix
+    expect(state.phase).toBe('finale_remix');
+
+    // Nodes should be enabled in order: pad, fx, seed, harmony, bass, drums
+    const expectedOrder = [
+      { id: 'pad', label: 'Enable Pad' },
+      { id: 'fx', label: 'Enable FX' },
+      { id: 'seed', label: 'Enable Melody' },
+      { id: 'harmony', label: 'Enable Harmony' },
+      { id: 'bass', label: 'Enable Bass' },
+      { id: 'drums', label: 'Enable Drums' },
+    ];
+
+    for (const { id, label } of expectedOrder) {
+      const s = deriveNextStep(state, false);
+      expect(s.label).toBe(label);
+      expect(s.command).toEqual({ type: 'ENABLE_NODE', granularType: id });
+      processCommand(state, { type: 'ENABLE_NODE', granularType: id });
+    }
+
+    // All nodes enabled — now should offer End Show
+    const finalStep = deriveNextStep(state, false);
+    expect(finalStep.command).toEqual({ type: 'END_SHOW' });
+    expect(finalStep.label).toBe('End Show');
   });
 
   test('ended → blocked', () => {
@@ -286,7 +328,7 @@ describe('derivePhoneCue', () => {
     expect(derivePhoneCue(state)).toBe('up');
   });
 
-  test('attempt_build, locked_in → down', () => {
+  test('attempt_build, locked_in during verdict → up (deferred phone-down)', () => {
     const state = createTestState();
     advanceToBuild(state);
     processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
@@ -296,7 +338,22 @@ describe('derivePhoneCue', () => {
     processCommand(state, { type: 'REVEAL_STAKES' });
     processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
     expect(state.attempts[0].currentLayerPhase).toBe('locked_in');
-    expect(derivePhoneCue(state)).toBe('down');
+    // Verdict animation still playing — phone cue stays 'up'
+    expect(derivePhoneCue(state)).toBe('up');
+  });
+
+  test('attempt_build, after verdict advances to next layer → ready', () => {
+    const state = createTestState();
+    advanceToBuild(state);
+    processCommand(state, { type: 'USER_CONNECT', userId: 'u1' });
+    processCommand(state, { type: 'START_AUDITION' });
+    processCommand(state, { type: 'SUBMIT_VOTE', userId: 'u1', choice: 'A' });
+    processCommand(state, { type: 'CLOSE_VOTING' });
+    processCommand(state, { type: 'REVEAL_STAKES' });
+    processCommand(state, { type: 'ADVANCE_FROM_REVEAL' });
+    processCommand(state, { type: 'ADVANCE_FROM_VERDICT' });
+    // Verdict cleared, next layer starts — phone cue is 'ready' again
+    expect(derivePhoneCue(state)).toBe('ready');
   });
 
   test('finale_vote → up', () => {
