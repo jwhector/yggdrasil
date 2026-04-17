@@ -38,8 +38,8 @@
         {
           "index": 0,
           "group": "bones",
-          "labelA": "Rooted",
-          "labelB": "Drifting",
+          "labelA": "Underground, And Impactful",
+          "labelB": "Visible, And Adored",
           "optionA": {
             "tracks": [
               {
@@ -76,8 +76,8 @@
         {
           "index": 1,
           "group": "flesh",
-          "labelA": "Tender",
-          "labelB": "Electric",
+          "labelA": "Pomp and Circumstance",
+          "labelB": "Pep in the Step",
           "optionA": {
             "tracks": [
               {
@@ -114,7 +114,7 @@
         {
           "index": 2,
           "group": "spark",
-          "labelA": "Winning",
+          "labelA": "Player One",
           "labelB": "Blasting Off",
           "optionA": {
             "tracks": [
@@ -132,7 +132,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  39, 41
+                  39, 40
                 ]
               }
             ]
@@ -175,8 +175,8 @@
         {
           "index": 0,
           "group": "flesh",
-          "labelA": "Stringing a Life Together",
-          "labelB": "Bouncing With Excitement",
+          "labelA": "A Life Strung With Love",
+          "labelB": "A Life Bouncing With Joy",
           "optionA": {
             "tracks": [
               {
@@ -213,8 +213,8 @@
         {
           "index": 1,
           "group": "bones",
-          "labelA": "Rooted",
-          "labelB": "Drifting",
+          "labelA": "Never Lonely",
+          "labelB": "Always Loved",
           "optionA": {
             "tracks": [
               {
@@ -290,13 +290,13 @@
         120
       ],
       "auditionBars": [
-        8,
         4,
+        8,
         4
       ],
       "auditionCycles": [
-        1,
         2,
+        1,
         2
       ],
       "defaultWinners": ["A", "A", "A"],
@@ -312,8 +312,8 @@
         {
           "index": 0,
           "group": "flesh",
-          "labelA": "Silenced",
-          "labelB": "Screaming",
+          "labelA": "Accept Mediocrity",
+          "labelB": "Surrender to Inadequacy",
           "optionA": {
             "tracks": [
               {
@@ -376,8 +376,8 @@
         {
           "index": 2,
           "group": "bones",
-          "labelA": "Sealed",
-          "labelB": "Spiraling",
+          "labelA": "...",
+          "labelB": "...",
           "optionA": {
             "tracks": [
               {
@@ -527,7 +527,7 @@
   },
   "timing": {
     "loopBoundaryBeats": 32,
-    "revealSequenceDurationMs": 10000,
+    "revealSequenceDurationMs": 15000,
     "rejectionEffectDurationMs": 5000,
     "gain": {
       "entryGain": 0.25,
