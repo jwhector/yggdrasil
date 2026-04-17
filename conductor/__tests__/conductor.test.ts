@@ -1335,11 +1335,12 @@ describe('V3.4 Finale Phases', () => {
     const events = processCommand(state, { type: 'END_SHOW' }); // → ended
     expect(state.phase).toBe('ended');
 
-    // Should panic (silence remix tracks), unduck master, start exit music
+    // Panic already fired at end of fade-out (audio router scheduled).
+    // Epilogue→ended should restart transport, unduck master, start exit music.
     const cueTypes = events
       .filter(e => e.type === 'AUDIO_CUE')
       .map(e => (e as any).cue.type);
-    expect(cueTypes).toContain('panic');
+    expect(cueTypes).toContain('transport');
     expect(cueTypes).toContain('master_unduck');
     expect(cueTypes).toContain('epilogue_music_start');
 

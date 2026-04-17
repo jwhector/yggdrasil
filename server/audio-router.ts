@@ -1051,7 +1051,18 @@ export function createAudioRouter(
   }
 
   function handleMasterFadeOut(): void {
-    fadeGain('master', 0, currentGainConfig.masterFadeOutBeats ?? 16);
+    const beats = currentGainConfig.masterFadeOutBeats ?? 16;
+    fadeGain('master', 0, beats);
+
+    // After fade completes, panic to silence/mute all tracks and stop transport
+    if (timingEngine) {
+      const panicBeat = timingEngine.getCurrentBeat() + beats + 2; // +2: 1 for fadeGain offset + 1 margin
+      timingEngine.scheduleAtBeat('epilogue-panic', panicBeat, () => {
+        console.log('[AudioRouter] Epilogue fade complete — panic');
+        silenceAllTracks();
+        stopPlayback();
+      });
+    }
   }
 
   function handleEpilogueMusicStart(cue: Extract<AudioCue, { type: 'epilogue_music_start' }>): void {

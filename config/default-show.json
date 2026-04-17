@@ -521,7 +521,7 @@
       "instantCrossfade": true
     },
     "epilogue": {
-      "trackIndices": [],
+      "trackIndices": [2, 16, 6, 31, 42, 7, 8],
       "fadeInBeats": 8
     }
   },
@@ -595,6 +595,10 @@
     },
     {
       "point": "An addiction to video games and all kinds of mindless scrolling",
+      "media": {
+        "type": "image",
+        "src": "/opener-media/ow.png"
+      },
       "subPoints": [
         { "label": "Duration:", "value": "ongoing" }
       ]

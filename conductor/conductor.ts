@@ -1906,12 +1906,13 @@ function handleEndShow(state: ShowState): ConductorEvent[] {
   // Context-sensitive: finale → epilogue (master fades out, monologue), epilogue → ended (exit music)
   if (state.phase === 'epilogue') {
     state.phase = 'ended';
+    // Panic already fired at end of master fade-out (scheduled by audio router).
+    // Restart transport + restore master, then fade in exit music if configured.
     const events: ConductorEvent[] = [
-      { type: 'AUDIO_CUE', cue: { type: 'panic' } },
+      { type: 'AUDIO_CUE', cue: { type: 'transport', action: 'play' } },
       { type: 'AUDIO_CUE', cue: { type: 'master_unduck' } },
     ];
 
-    // Start exit music if configured
     const epilogueConfig = state.config.finale.epilogue;
     if (epilogueConfig?.trackIndices?.length) {
       events.push({
