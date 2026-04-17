@@ -370,21 +370,7 @@ export function setupSocketHandlers(
         return;
       }
 
-      console.log(`[Socket] Vote from ${userId}: ${data.choice}`);
-
       const state = getState();
-
-      // Reject if user already voted this layer (enforce blind vote / no-change)
-      // const attempt = state.attempts[state.currentAttemptIndex];
-      // const alreadyVoted = attempt?.votes.some(
-      //   v => v.userId === userId &&
-      //        v.attemptIndex === state.currentAttemptIndex &&
-      //        v.layerIndex === attempt.currentLayerIndex
-      // );
-      // if (alreadyVoted) {
-      //   console.warn(`[Socket] Vote rejected: ${userId} already voted this layer`);
-      //   return;
-      // }
 
       const events = processCommand(state, {
         type: 'SUBMIT_VOTE',
@@ -406,7 +392,12 @@ export function setupSocketHandlers(
         persistence.saveLayerVote(vote, state.id);
       }
 
-      await broadcastEvents(io, events, state);
+      // Lightweight — skip full state_sync broadcast to all audience.
+      // SUBMIT_VOTE only records the vote; layer resolution happens on CLOSE_VOTING
+      // (fired by timing engine). Only the voting user needs their myVote update.
+      // Controller gets full state for live vote distribution display.
+      socket.emit('state_sync', filterStateForClient(state, 'audience', userId));
+      io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
     });
 
     // ------------------------------------------------------------------
