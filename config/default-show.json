@@ -31,7 +31,7 @@
         "trackIndices": [
           1
         ],
-        "armTrackIndices": [46],
+        "armTrackIndices": [47],
         "label": "The seed"
       },
       "layers": [
@@ -114,8 +114,8 @@
         {
           "index": 2,
           "group": "spark",
-          "labelA": "YOU WIN!",
-          "labelB": "REV IT UP!",
+          "labelA": "Winning",
+          "labelB": "Blasting Off",
           "optionA": {
             "tracks": [
               {
@@ -132,7 +132,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  39
+                  39, 41
                 ]
               }
             ]
@@ -168,15 +168,15 @@
         "trackIndices": [
           2
         ],
-        "armTrackIndices": [47],
+        "armTrackIndices": [48],
         "label": "The seed"
       },
       "layers": [
         {
           "index": 0,
           "group": "flesh",
-          "labelA": "Warm",
-          "labelB": "Cool",
+          "labelA": "Stringing a Life Together",
+          "labelB": "Bouncing With Excitement",
           "optionA": {
             "tracks": [
               {
@@ -251,14 +251,14 @@
         {
           "index": 2,
           "group": "spark",
-          "labelA": "Bright. Sharp.",
-          "labelB": "Dark. Soft.",
+          "labelA": "A Cherished Companion",
+          "labelB": "Unlimited Potential",
           "optionA": {
             "tracks": [
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  40
+                  41
                 ]
               }
             ]
@@ -268,7 +268,7 @@
               {
                 "granularType": "fx",
                 "trackIndices": [
-                  41
+                  42
                 ]
               }
             ]
@@ -311,44 +311,6 @@
       "layers": [
         {
           "index": 0,
-          "group": "spark",
-          "labelA": "Numb",
-          "labelB": "Buzzing",
-          "optionA": {
-            "tracks": [
-              {
-                "granularType": "fx",
-                "trackIndices": [
-                  42, 43
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  27
-                ]
-              }
-            ]
-          },
-          "optionB": {
-            "tracks": [
-              {
-                "granularType": "fx",
-                "trackIndices": [
-                  44
-                ]
-              },
-              {
-                "granularType": "pad",
-                "trackIndices": [
-                  28
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "index": 1,
           "group": "flesh",
           "labelA": "Silenced",
           "labelB": "Screaming",
@@ -368,6 +330,44 @@
                 "granularType": "harmony",
                 "trackIndices": [
                   11, 12
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "index": 1,
+          "group": "spark",
+          "labelA": "Numb",
+          "labelB": "Buzzing",
+          "optionA": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndices": [
+                  43, 44
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  27
+                ]
+              }
+            ]
+          },
+          "optionB": {
+            "tracks": [
+              {
+                "granularType": "fx",
+                "trackIndices": [
+                  45
+                ]
+              },
+              {
+                "granularType": "pad",
+                "trackIndices": [
+                  28
                 ]
               }
             ]
@@ -416,7 +416,7 @@
   ],
   "finale": {
     "bothOptionsSurvive": false,
-    "soundscapeTrackIndices": [51, 52],
+    "soundscapeTrackIndices": [52, 53],
     "audioPreviewPath": "/audio/previews",
     "npcMessages": [
       {
@@ -521,7 +521,7 @@
       "instantCrossfade": true
     },
     "epilogue": {
-      "trackIndices": [2, 16, 6, 31, 42, 7, 8],
+      "trackIndices": [2, 16, 6, 31, 43, 7, 8],
       "fadeInBeats": 8
     }
   },
@@ -563,7 +563,7 @@
       "media": {
         "type": "video",
         "src": "/opener-media/anons.mp4",
-        "trackIndices": [53],
+        "trackIndices": [54],
         "durationBeats": 56
       },
       "subPoints": [
@@ -734,14 +734,17 @@
   "intrusiveThoughts": [
     {
       "chapter": "ambition",
+      "count": 5,
       "thoughts": ["It'll only work once", "What happens when you stop?", "This is a mistake", "Past your prime", "Embarrassing...", "Fragile...", "It's already falling apart", "You peaked years ago", "Not good enough", "Still not enough", "Nobody's listening", "They're just being polite", "Stop while you're ahead", "You're boring them", "They want you to fail", "This is embarrassing", "You sound desperate", "The silence says everything", "Read the room", "They're laughing at you", "Cringe", "Do less", "Way too much", "Tone it down", "Spare us", "You'll never finish anything", "It was better in your head", "Walk away now", "This was always going to fail", "You don't have it", "Talent isn't real", "Give up gracefully", "Save some dignity", "Another abandoned project", "Classic you", "History repeating", "What's the point?", "Nobody cares", "Forget it", "Move on"]
     },
     {
       "chapter": "love",
+      "count": 5,
       "thoughts": ["You don't deserve this", "They'll leave eventually", "Don't get attached", "Walls up", "Keep your distance", "It never lasts", "You know how this ends", "Protect yourself", "Don't be naive", "Hearts are fragile", "Too vulnerable", "Close the door", "Stay guarded", "You're too much", "You're not enough", "They're pretending", "It's pity", "You're affectionless", "Faking it", "Burden.", "You're missing out", "Don't get comfortable", "Enjoy it while it lasts", "Clock's ticking...", "You've ruined it", "You'll ruin it", "Run.", "Detach.", "Better alone", "Safer alone", "You always do this", "Predictable.", "Watch yourself", "You can't help it", "Unlovable"]
     },
     {
       "chapter": "acceptance",
+      "count": 5,
       "thoughts": ["Why bother?", "It won't matter", "Failure.", "Pitiful.", "Save your energy", "Nobody notices", "Easy way out", "Waste of space", "Work harder", "Waste of time.", "Disappear.", "Melt into the background", "Fuck-up.", "Leave.", "Fade out", "Dissolve", "Go transparent", "Be nothing", "You were never going to finish", "Fearful and sad", "Silence is easier", "Void is comfortable", "Emptiness has no expectations", "Already gone", "Checked out long ago", "The absence of trying", "Blissful apathy", "Sweet surrender", "White flag", "Done", "Gone", "Blank"]
     }
   ],

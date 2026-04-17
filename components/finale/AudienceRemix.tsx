@@ -663,8 +663,8 @@ function ScatterVoteButton({
         {hasVoted
           ? `Voted ${count}/${threshold}`
           : count > 0
-            ? `Scatter ${count}/${threshold}`
-            : 'Scatter all'
+            ? `Scatterbrain ! ${count}/${threshold}`
+            : 'Scatterbrain !'
         }
       </span>
     </button>

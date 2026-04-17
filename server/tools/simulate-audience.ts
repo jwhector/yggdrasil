@@ -39,7 +39,7 @@ const ORB_PLACE_STAGGER_MS = 1500;        // Delay between placing successive or
 const ORB_REPLACE_MIN_MS = 1000;         // Min time before moving an orb
 const ORB_REPLACE_MAX_MS = 20000;         // Max time before moving an orb
 const ORB_REPLACE_CHANCE = 1;           // Probability of moving (vs doing nothing) per tick
-const SCATTER_VOTE_CHANCE = 0.15;      // Probability of voting to scatter per replace tick
+const SCATTER_VOTE_CHANCE = 0.01;      // Probability of voting to scatter per replace tick
 
 const CHAPTERS = ['ambition', 'love', 'acceptance'];
 const GRANULAR_TYPES = ['bass', 'drums', 'pad', 'harmony', 'fx', 'seed'];
