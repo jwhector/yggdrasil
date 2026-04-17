@@ -241,6 +241,7 @@ export type ShowPhase =
   | 'attempt_resolve'         // Song complete; waiting for performer to trigger rejection
   | 'finale_vote'             // Audience emotional vote — phones active, tokens generated
   | 'finale_remix'            // Performer builds song from token pool — phones down
+  | 'epilogue'                // Master faded out; performer monologue → walk-out music
   | 'ended';                  // Show complete
 
 // ============================================================================
@@ -346,11 +347,10 @@ export function getSlideMaxStep(slide: OpenerSlide): number {
   return steps;
 }
 
-/** Intrusive thoughts config — shared pool distributed by the server. */
+/** Intrusive thoughts config — deterministic list shown to all users on collapse. */
 export interface IntrusiveThoughtsConfig {
   chapter: Chapter;
-  thoughtsPerPerson: number[];          // Per-layer count [1, 3, 5]
-  pool: string[][];                     // [layerIndex][poolIndex] — shared pool per layer
+  thoughts: string[];                   // Everyone gets all of them
 }
 
 /** A single thought assigned to a specific user by the server. */
@@ -358,8 +358,6 @@ export interface AssignedThought {
   id: string;                           // Unique: "{attemptIndex}-{layerIndex}-{userId}-{i}"
   text: string;
   userId: UserId;
-  dismissed: boolean;
-  dismissDirection?: 'left' | 'right';
 }
 
 // Old FinaleConfig removed in V3.2. ShowConfig.finale now uses V32FinaleConfig.
@@ -385,6 +383,7 @@ export interface GainConfig {
   masterDuckGain: number;       // Ducked master gain level during speech (default 0.3)
   masterDuckBeats: number;      // Beats to ramp master to ducked level (default 2)
   masterUnduckBeats: number;    // Beats to ramp master back to unity (default 1)
+  masterFadeOutBeats: number;   // Beats to fade master to zero at show end (default 16)
 }
 
 export interface TimingConfig {
@@ -428,6 +427,10 @@ export type AudioCue =
   | { type: 'master_duck' }
   /** Unduck master gain (audition starting or leaving attempt_build) */
   | { type: 'master_unduck' }
+  /** Fade master to silence for closing monologue */
+  | { type: 'master_fade_out' }
+  /** Unmute and fade in epilogue walk-out music tracks */
+  | { type: 'epilogue_music_start'; trackIndices: number[]; fadeInBeats: number }
   /** Opener slide media: one-shot playback (fade in, play one loop, fade out, stop) */
   | { type: 'slide_media_start'; trackIndices: number[]; durationBeats: number }
   /** Opener slide media: cancel any in-progress slide playback */
@@ -936,6 +939,7 @@ export interface FinaleConfig {
   npcMessages: NpcMessageConfig[];
   vote: VotePhaseConfig;
   remix: RemixConfig;
+  epilogue?: { trackIndices: number[]; fadeInBeats: number };
 }
 
 // ============================================================================
@@ -1064,4 +1068,5 @@ export interface ProjectorFinaleView {
     lockedChapter: string | null;
   }>;
   fallbackMode: boolean;
+  enabledNodes: string[];
 }

@@ -15,10 +15,8 @@ import type { ChapterConfig, GranularType } from '@/conductor/types';
 import {
   PENTAGON_NODES,
   computeLayout,
-  drawMembrane,
   hexToRgb,
   rgb,
-  smoothNoise,
 } from '@/components/projector/renderers/shared';
 import type { RGB } from '@/components/projector/renderers/shared';
 import type { DropZone } from '@/hooks/useDragToken';
@@ -39,6 +37,13 @@ interface QueueDepthView {
 interface ValidNode {
   granularType: string;
   chapterId: string;
+}
+
+interface NodeTallyData {
+  granularType: string;
+  votes: Array<{ chapterId: string; count: number }>;
+  dominantChapter: string | null;
+  locked: boolean;
 }
 
 interface PentagonRemixProps {
@@ -66,6 +71,10 @@ interface PentagonRemixProps {
   audienceInteraction: boolean;
   /** Callback to register drop zones for drag hit testing. */
   onDropZonesComputed?: (zones: DropZone[]) => void;
+  /** High-frequency tally data — overrides node color when audience interaction is active. */
+  nodeTallies?: NodeTallyData[];
+  /** Which nodes are currently enabled (accepting orbs). Disabled nodes fade out. */
+  enabledNodes?: string[];
 }
 
 const SEED_ID = 'seed';
@@ -83,10 +92,19 @@ export function PentagonRemix({
   validNodes,
   audienceInteraction,
   onDropZonesComputed,
+  nodeTallies,
+  enabledNodes,
 }: PentagonRemixProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const startTimeRef = useRef(performance.now());
+
+  // Per-node opacity for smooth fade in/out based on enabledNodes
+  const nodeOpacityRef = useRef<Map<string, number>>(new Map());
+  const enabledSetRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    enabledSetRef.current = new Set(enabledNodes ?? []);
+  }, [enabledNodes]);
 
   // Build chapter color map
   const chapterColorMap = useMemo(() => {
@@ -121,6 +139,18 @@ export function PentagonRemix({
     }
     return map;
   }, [queueDepths]);
+
+  // Tally-driven dominant chapter per node — overrides activeMap when audience interaction is on
+  const tallyDominantMap = useMemo(() => {
+    if (!audienceInteraction || !nodeTallies) return null;
+    const map = new Map<string, string>();
+    for (const nt of nodeTallies) {
+      if (nt.dominantChapter) {
+        map.set(nt.granularType, nt.dominantChapter);
+      }
+    }
+    return map;
+  }, [audienceInteraction, nodeTallies]);
 
   // Build set of granular types that are valid for the currently-dragged chapter
   const validForDrag = useMemo(() => {
@@ -168,21 +198,55 @@ export function PentagonRemix({
       const t = (performance.now() - startTimeRef.current) / 1000;
       ctx.clearRect(0, 0, width, height);
 
-      // Draw radial lines (dim connectors)
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      // Lerp per-node opacity toward target (enabled=1, disabled=0)
+      const OPACITY_LERP = 0.03;
+      const enabledSet = enabledSetRef.current;
+      const allNodes = [...PENTAGON_NODES.map(n => n.id), SEED_ID];
+      for (const id of allNodes) {
+        const current = nodeOpacityRef.current.get(id) ?? 1;
+        // If enabledNodes is empty, no nodes have been enabled yet — hide all
+        // If enabledNodes has entries, show only those in the set
+        const target = enabledSet.size === 0 ? 0 : enabledSet.has(id) ? 1 : 0;
+        const next = current + (target - current) * OPACITY_LERP;
+        nodeOpacityRef.current.set(id, next);
+      }
+
+      // Draw radial lines (dim connectors) — fade with node opacity
       ctx.lineWidth = 1;
       for (const node of PENTAGON_NODES) {
+        const opacity = nodeOpacityRef.current.get(node.id) ?? 1;
+        if (opacity < 0.01) continue;
         const pos = layout.positions[node.id];
+        ctx.strokeStyle = `rgba(255,255,255,${0.06 * opacity})`;
         ctx.beginPath();
         ctx.moveTo(layout.centerX, layout.centerY);
         ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
       }
 
-      // Draw nodes
+      // Resolve effective active state for a node — tally dominant overrides activeMap
+      const getEffectiveActive = (nodeId: string) => {
+        const tallyChapter = tallyDominantMap?.get(nodeId);
+        if (tallyChapter) {
+          // Use tally dominant as the displayed chapter, preserving other active fields
+          const existing = activeMap.get(nodeId);
+          return {
+            chapterId: tallyChapter,
+            persistent: existing?.persistent ?? false,
+            trackIndices: existing?.trackIndices ?? [],
+            granularType: existing?.granularType ?? nodeId,
+          };
+        }
+        return activeMap.get(nodeId);
+      };
+
+      // Draw nodes — fade with enabled state
       for (const nodeDef of PENTAGON_NODES) {
+        const opacity = nodeOpacityRef.current.get(nodeDef.id) ?? 1;
+        if (opacity < 0.01) continue;
+        ctx.globalAlpha = opacity;
         const pos = layout.positions[nodeDef.id];
-        const active = activeMap.get(nodeDef.id);
+        const active = getEffectiveActive(nodeDef.id);
         const queueDepth = queueMap.get(nodeDef.id) ?? 0;
         const isHovered = hoverTarget === nodeDef.id;
         const dragValidity = validForDrag === null ? 'none' as const
@@ -190,17 +254,23 @@ export function PentagonRemix({
         const nextChapter = nextChapterMap.get(nodeDef.id) ?? null;
 
         drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        ctx.globalAlpha = 1;
       }
 
-      // Draw seed node (center)
+      // Draw seed node (center) — fade with enabled state
       {
-        const active = activeMap.get(SEED_ID);
-        const queueDepth = queueMap.get(SEED_ID) ?? 0;
-        const isHovered = hoverTarget === SEED_ID;
-        const dragValidity = validForDrag === null ? 'none' as const
-          : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
-        const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
-        drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        const opacity = nodeOpacityRef.current.get(SEED_ID) ?? 1;
+        if (opacity >= 0.01) {
+          ctx.globalAlpha = opacity;
+          const active = getEffectiveActive(SEED_ID);
+          const queueDepth = queueMap.get(SEED_ID) ?? 0;
+          const isHovered = hoverTarget === SEED_ID;
+          const dragValidity = validForDrag === null ? 'none' as const
+            : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
+          const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
+          drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Audience interaction indicator
@@ -216,7 +286,7 @@ export function PentagonRemix({
 
     animRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animRef.current);
-  }, [width, height, activeMap, queueMap, nextChapterMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed]);
+  }, [width, height, activeMap, queueMap, nextChapterMap, loopProgress, hoverTarget, validForDrag, chapterColorMap, audienceInteraction, onDropZonesComputed, tallyDominantMap]);
 
   return (
     <canvas
@@ -290,14 +360,18 @@ function drawRemixNode(
 
   if (active) {
     const activeColor = chapterColors.get(active.chapterId) ?? emptyColor;
-    const queuedColor = nextQueuedChapterId
-      ? chapterColors.get(nextQueuedChapterId) ?? undefined
-      : undefined;
-    const seed = hashSeed(nodeDef.id);
 
-    // Active membrane — fill and stroke can independently show queued vs active color
+    // Soft radial halo around active node
+    const haloR = radius * 2;
     const pulseAlpha = 0.7 + 0.3 * Math.sin(t * 2.5);
-    drawMembrane(ctx, x, y, radius * 1.5, activeColor, pulseAlpha, 0.12, 0, t, seed, activeColor, queuedColor);
+    const halo = ctx.createRadialGradient(x, y, radius * 0.8, x, y, haloR);
+    halo.addColorStop(0, rgb(activeColor, pulseAlpha * 0.15));
+    halo.addColorStop(0.6, rgb(activeColor, pulseAlpha * 0.05));
+    halo.addColorStop(1, rgb(activeColor, 0));
+    ctx.beginPath();
+    ctx.arc(x, y, haloR, 0, Math.PI * 2);
+    ctx.fillStyle = halo;
+    ctx.fill();
 
     // Filled core
     ctx.beginPath();
@@ -314,11 +388,17 @@ function drawRemixNode(
       ctx.stroke();
     }
   } else if (nextQueuedChapterId) {
-    // Silent node with queued token — stroke-only membrane in queued color
+    // Silent node with queued token — dim halo in queued color
     const qColor = chapterColors.get(nextQueuedChapterId) ?? emptyColor;
-    const seed = hashSeed(nodeDef.id);
+    const haloR = radius * 1.8;
     const pulseAlpha = 0.4 + 0.2 * Math.sin(t * 2);
-    drawMembrane(ctx, x, y, radius * 1.5, emptyColor, pulseAlpha, 0.08, 0, t, seed, emptyColor, qColor);
+    const halo = ctx.createRadialGradient(x, y, radius * 0.8, x, y, haloR);
+    halo.addColorStop(0, rgb(qColor, pulseAlpha * 0.08));
+    halo.addColorStop(1, rgb(qColor, 0));
+    ctx.beginPath();
+    ctx.arc(x, y, haloR, 0, Math.PI * 2);
+    ctx.fillStyle = halo;
+    ctx.fill();
 
     // Dim core
     ctx.beginPath();
@@ -372,14 +452,6 @@ function drawRemixNode(
     ctx.textBaseline = 'middle';
     ctx.fillText(`${queueDepth}`, badgeX, badgeY);
   }
-}
-
-function hashSeed(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) {
-    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
-  }
-  return h;
 }
 
 // ---------------------------------------------------------------------------

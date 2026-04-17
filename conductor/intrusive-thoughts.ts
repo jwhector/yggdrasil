@@ -1,39 +1,32 @@
 /**
  * Intrusive Thoughts — Pure assignment logic
  *
- * Distributes thoughts from a shared pool to individual users.
- * No I/O — pure function called by the server when reveal starts.
+ * Assigns the full thought list to every user on collapse.
+ * No I/O — pure function called by the server when a song collapses.
  */
 
 import type { IntrusiveThoughtsConfig, AssignedThought, UserId, Chapter } from './types';
 
 /**
- * Assign thoughts to users for a specific layer.
+ * Assign thoughts to users on collapse.
  *
- * Draws `thoughtsPerPerson[layerIndex]` random strings from `pool[layerIndex]`
- * for each user. Duplicates across users are expected (shared pool, random draw).
+ * Every user gets the full `config.thoughts` list — deterministic, no sampling.
  */
 export function assignThoughts(
   config: IntrusiveThoughtsConfig,
-  layerIndex: number,
   userIds: UserId[],
   attemptIndex: number,
 ): AssignedThought[] {
-  const pool = config.pool[layerIndex];
-  if (!pool || pool.length === 0) return [];
+  if (config.thoughts.length === 0) return [];
 
-  const count = config.thoughtsPerPerson[layerIndex] ?? 1;
   const thoughts: AssignedThought[] = [];
 
   for (const userId of userIds) {
-    // Draw random thoughts from pool (with replacement across users)
-    const drawn = sampleWithoutReplacement(pool, count);
-    for (let i = 0; i < drawn.length; i++) {
+    for (let i = 0; i < config.thoughts.length; i++) {
       thoughts.push({
-        id: `${attemptIndex}-${layerIndex}-${userId}-${i}`,
-        text: drawn[i],
+        id: `${attemptIndex}-${userId}-${i}`,
+        text: config.thoughts[i],
         userId,
-        dismissed: false,
       });
     }
   }
@@ -49,15 +42,4 @@ export function findThoughtsConfig(
   chapter: Chapter,
 ): IntrusiveThoughtsConfig | undefined {
   return configs?.find(c => c.chapter === chapter);
-}
-
-/** Sample n unique items from an array (Fisher-Yates partial shuffle). */
-function sampleWithoutReplacement<T>(arr: T[], n: number): T[] {
-  const copy = [...arr];
-  const count = Math.min(n, copy.length);
-  for (let i = 0; i < count; i++) {
-    const j = i + Math.floor(Math.random() * (copy.length - i));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy.slice(0, count);
 }

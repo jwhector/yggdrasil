@@ -22,7 +22,7 @@ const CUE_CONFIG: Record<NonNullable<PhoneCueType>, { src: string; color: string
   down:  { src: '/no-phone.svg', color: '#f87171' },
 };
 
-const SPLASH_MS = 1500;
+const SPLASH_MS = 5000;
 const FADE_MS = 500;
 
 type Phase = 'hidden' | 'splash' | 'corner' | 'fading-out';

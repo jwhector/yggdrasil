@@ -59,29 +59,26 @@ const POOL_STATE_BROADCAST_INTERVAL_MS = 500;   // ~2 Hz during finale_vote and 
 /** Active thoughts for the current reveal. Cleared on layer/attempt change. */
 let activeThoughts: AssignedThought[] = [];
 
+// ============================================================================
+// Collective scatter vote — server-side state
+// ============================================================================
+
+/** Audience members who have voted to scatter this cycle. Cleared on scatter or phase exit. */
+const scatterVotes = new Set<UserId>();
+
+/** Fraction of connected audience needed to trigger scatter. */
+const SCATTER_VOTE_THRESHOLD = 0.5;
+
 /**
- * Fling all remaining intrusive thoughts off-screen and clear state.
+ * Clear all intrusive thoughts and notify clients.
  * Called from both the socket command handler and the timing engine path.
  */
 export function clearThoughtsOnAdvance(io: SocketIOServer): void {
   if (activeThoughts.length === 0) return;
 
-  for (const t of activeThoughts) {
-    if (!t.dismissed) {
-      t.dismissed = true;
-      t.dismissDirection = Math.random() > 0.5 ? 'right' : 'left';
-      io.to('projector').emit('thought_dismissed', {
-        thoughtId: t.id,
-        direction: t.dismissDirection,
-      });
-    }
-  }
-
-  setTimeout(() => {
-    activeThoughts = [];
-    io.to('projector').emit('thoughts_clear');
-    io.to('audience').emit('thoughts_clear');
-  }, 500);
+  activeThoughts = [];
+  io.to('projector').emit('thoughts_clear');
+  io.to('audience').emit('thoughts_clear');
 }
 
 // ============================================================================
@@ -308,7 +305,7 @@ export function setupSocketHandlers(
         // Send active thoughts to projector on connect
         if (data.mode === 'projector' && activeThoughts.length > 0) {
           socket.emit('thoughts_state', {
-            thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
+            thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text })),
           });
         }
       }
@@ -349,7 +346,7 @@ export function setupSocketHandlers(
       // Resend any active intrusive thoughts for this user
       if (activeThoughts.length > 0) {
         const myThoughts = activeThoughts
-          .filter(t => t.userId === data.userId && !t.dismissed)
+          .filter(t => t.userId === data.userId)
           .map(t => ({ id: t.id, text: t.text }));
         if (myThoughts.length > 0) {
           socket.emit('thoughts_assigned', { thoughts: myThoughts });
@@ -534,20 +531,42 @@ export function setupSocketHandlers(
     });
 
     // ------------------------------------------------------------------
-    // dismiss_thought — audience member swipes away an intrusive thought
+    // vote_scatter — audience votes to collectively scatter all orbs
+    //
+    // No payload. userId taken from socket session.
+    // When enough audience members vote, SCATTER_ALL fires automatically.
     // ------------------------------------------------------------------
-    socket.on('dismiss_thought', (data: { thoughtId: string; direction: 'left' | 'right' }) => {
-      const thought = activeThoughts.find(t => t.id === data.thoughtId);
-      if (!thought || thought.dismissed) return;
+    socket.on('vote_scatter', async () => {
+      const userId = (socket as any).userId as UserId;
+      if (!userId) return;
 
-      thought.dismissed = true;
-      thought.dismissDirection = data.direction;
+      const state = getState();
+      if (state.phase !== 'finale_remix') return;
 
-      // Notify projector of the dismissal (lightweight delta, not full state)
-      io.to('projector').emit('thought_dismissed', {
-        thoughtId: data.thoughtId,
-        direction: data.direction,
-      });
+      // Already voted this cycle
+      if (scatterVotes.has(userId)) return;
+      scatterVotes.add(userId);
+
+      const audienceSockets = await io.in('audience').fetchSockets();
+      const connectedCount = audienceSockets.filter(s => (s as any).userId).length;
+      const threshold = Math.max(2, Math.ceil(connectedCount * SCATTER_VOTE_THRESHOLD));
+      const count = scatterVotes.size;
+
+      console.log(`[Scatter Vote] ${userId} voted (${count}/${threshold})`);
+
+      if (count >= threshold) {
+        // Threshold met — fire scatter and reset
+        scatterVotes.clear();
+        const events = processCommand(state, { type: 'SCATTER_ALL' });
+        setState(state, events);
+        await broadcastEvents(io, events, state);
+
+        // Broadcast reset count to all audience
+        io.to('audience').emit('scatter_vote_count', { count: 0, threshold });
+      } else {
+        // Broadcast updated count to all audience
+        io.to('audience').emit('scatter_vote_count', { count, threshold });
+      }
     });
 
     // ------------------------------------------------------------------
@@ -659,8 +678,11 @@ export async function broadcastEvents(
   // Projector gets public state (no per-user details)
   io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
 
-  // Each audience member gets their personalized view
+  // Fetch audience sockets once — reused for state_sync and all event handlers below.
+  // Safe because no sockets can join/leave mid-function (single-threaded event loop).
   const audienceSockets = await io.in('audience').fetchSockets();
+
+  // Each audience member gets their personalized view
   for (const socket of audienceSockets) {
     const userId = (socket as any).userId as UserId | undefined;
     if (!userId) continue;
@@ -684,25 +706,24 @@ export async function broadcastEvents(
         io.to('projector').emit('npc_message', { message: event.message });
         break;
 
-      case 'REVEAL_STAKES_SHOWN': {
-        // Distribute intrusive thoughts to audience + projector
+      case 'ATTEMPT_COLLAPSED': {
+        // Distribute intrusive thoughts to audience + projector after collapse
         const attempt = state.attempts[event.attemptIndex];
         if (!attempt) break;
         const thoughtsConfig = findThoughtsConfig(state.config.intrusiveThoughts, attempt.chapter);
         if (!thoughtsConfig) break;
 
         const connectedUserIds: UserId[] = [];
-        const audienceSocks = await io.in('audience').fetchSockets();
-        for (const s of audienceSocks) {
+        for (const s of audienceSockets) {
           const uid = (s as any).userId as UserId | undefined;
           if (uid) connectedUserIds.push(uid);
         }
 
-        activeThoughts = assignThoughts(thoughtsConfig, event.layerIndex, connectedUserIds, event.attemptIndex);
-        console.log(`[Thoughts] Assigned ${activeThoughts.length} thoughts to ${connectedUserIds.length} users (layer ${event.layerIndex})`);
+        activeThoughts = assignThoughts(thoughtsConfig, connectedUserIds, event.attemptIndex);
+        console.log(`[Thoughts] Assigned ${activeThoughts.length} thoughts to ${connectedUserIds.length} users`);
 
         // Send each audience member their thoughts
-        for (const s of audienceSocks) {
+        for (const s of audienceSockets) {
           const uid = (s as any).userId as UserId | undefined;
           if (!uid) continue;
           const myThoughts = activeThoughts
@@ -715,7 +736,7 @@ export async function broadcastEvents(
 
         // Send full list to projector
         io.to('projector').emit('thoughts_state', {
-          thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text, dismissed: t.dismissed })),
+          thoughts: activeThoughts.map(t => ({ id: t.id, text: t.text })),
         });
         break;
       }
@@ -723,8 +744,7 @@ export async function broadcastEvents(
       case 'NEXT_QUESTION': {
         // Send next question directly to the specific audience member
         const nextQ = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: Array<{ chapterId: string; label: string }> | null };
-        const audienceSocksForQ = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForQ) {
+        for (const s of audienceSockets) {
           if ((s as any).userId === nextQ.userId) {
             s.emit('question', {
               questionIndex: nextQ.questionIndex,
@@ -741,8 +761,7 @@ export async function broadcastEvents(
       case 'EMOTION_RECEIVED': {
         // Confirm the vote to the specific audience member
         const er = event as { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number };
-        const audienceSocksForEr = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForEr) {
+        for (const s of audienceSockets) {
           if ((s as any).userId === er.userId) {
             s.emit('emotion_confirmed', { chapterId: er.chapterId, questionIndex: er.questionIndex });
             break;
@@ -799,8 +818,7 @@ export async function broadcastEvents(
       case 'ORB_DECAYED': {
         // Notify the specific audience member that their orb decayed
         const od = event as { type: 'ORB_DECAYED'; userId: UserId; orbIndex: number; granularType: string };
-        const audienceSocksForDecay = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForDecay) {
+        for (const s of audienceSockets) {
           if ((s as any).userId === od.userId) {
             s.emit('orb_decayed', { orbIndex: od.orbIndex, granularType: od.granularType });
             break;
@@ -812,13 +830,15 @@ export async function broadcastEvents(
       case 'NODES_SCATTERED': {
         // Notify affected audience members that their orbs were scattered
         const ns2 = event as { type: 'NODES_SCATTERED'; granularType: string | null; affectedUsers: UserId[] };
-        const audienceSocksForScatter = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForScatter) {
+        for (const s of audienceSockets) {
           const uid = (s as any).userId as UserId | undefined;
           if (uid && ns2.affectedUsers.includes(uid)) {
             s.emit('scatter', { granularType: ns2.granularType });
           }
         }
+        // Reset collective scatter votes (whether triggered by audience vote or controller)
+        scatterVotes.clear();
+        io.to('audience').emit('scatter_vote_count', { count: 0, threshold: 0 });
         break;
       }
 
@@ -830,12 +850,11 @@ export async function broadcastEvents(
 
       case 'VOTE_STARTED': {
         // Send initial questions to all connected audience members
-        const audienceSocksForVote = await io.in('audience').fetchSockets();
         const voteConfig = state.config.finale.vote;
         if (voteConfig && voteConfig.questions.length > 0) {
           const firstQ = voteConfig.questions[0];
           if (firstQ) {
-            for (const s of audienceSocksForVote) {
+            for (const s of audienceSockets) {
               s.emit('question', {
                 questionIndex: 0,
                 text: firstQ.text,
@@ -912,6 +931,7 @@ export function filterStateForClient(
           audienceInteraction: finaleFs.audienceInteraction,
           npcMessage: finaleFs.npc.currentMessage,
           fallbackMode: finaleFs.fallbackMode,
+          enabledNodes: Array.from(finaleFs.enabledNodes),
           nodeTallies: Array.from(finaleFs.nodeTallies.entries()).map(([granularType, tally]) => ({
             granularType,
             dominantChapter: tally.locked && tally.lockedChapter ? tally.lockedChapter : tally.dominantChapter,

@@ -1,13 +1,13 @@
 /**
  * useIntrusiveThoughts Hook
  *
- * Subscribes to server-assigned intrusive thoughts during reveal phases.
- * Provides the current thought list and a dismiss function that notifies the server.
+ * Subscribes to server-assigned intrusive thoughts after collapse.
+ * Thoughts display until the server clears them on phase advance.
  */
 
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 
 interface AssignedThought {
@@ -17,8 +17,6 @@ interface AssignedThought {
 
 interface UseIntrusiveThoughtsResult {
   thoughts: AssignedThought[];
-  dismissThought: (id: string, direction: 'left' | 'right') => void;
-  allDismissed: boolean;
   hasThoughts: boolean;
 }
 
@@ -28,7 +26,6 @@ export function useIntrusiveThoughts(
   layerPhase: string | undefined,
 ): UseIntrusiveThoughtsResult {
   const [thoughts, setThoughts] = useState<AssignedThought[]>([]);
-  const hadThoughtsRef = useRef(false);
 
   // Listen for server-assigned thoughts
   useEffect(() => {
@@ -36,12 +33,10 @@ export function useIntrusiveThoughts(
 
     const handleAssigned = (data: { thoughts: AssignedThought[] }) => {
       setThoughts(data.thoughts);
-      hadThoughtsRef.current = true;
     };
 
     const handleClear = () => {
       setThoughts([]);
-      hadThoughtsRef.current = false;
     };
 
     socket.on('thoughts_assigned', handleAssigned);
@@ -57,22 +52,11 @@ export function useIntrusiveThoughts(
   useEffect(() => {
     if (layerPhase === 'auditioning' || layerPhase === 'locked') {
       setThoughts([]);
-      hadThoughtsRef.current = false;
     }
   }, [layerPhase]);
 
-  // Dismiss a thought: remove locally + notify server
-  const dismissThought = useCallback((id: string, direction: 'left' | 'right') => {
-    setThoughts(prev => prev.filter(t => t.id !== id));
-    socket?.emit('dismiss_thought', { thoughtId: id, direction });
-  }, [socket]);
-
-  const allDismissed = hadThoughtsRef.current && thoughts.length === 0;
-
   return {
     thoughts,
-    dismissThought,
-    allDismissed,
     hasThoughts: thoughts.length > 0,
   };
 }

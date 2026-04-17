@@ -29,6 +29,11 @@ export interface AudienceRemixProps {
   hoverNode: string | null;  // Which node is being hovered during drag
   enabledNodes: string[];    // Which nodes are currently accepting orbs
   onResetOrbs?: () => void;  // Return all orbs to floating positions
+  // Collective scatter vote
+  scatterVoteCount: number;
+  scatterVoteThreshold: number;
+  hasVotedScatter: boolean;
+  onScatterVote?: () => void;
 }
 
 /** Exposed to parent for drag hit-testing. */
@@ -135,7 +140,7 @@ function computeHeight(w: number): number {
 // ============================================================================
 
 export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>(
-  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, enabledNodes, onResetOrbs }, ref) {
+  function AudienceRemix({ tallies, chapters, fallbackMode, hoverNode, enabledNodes, onResetOrbs, scatterVoteCount, scatterVoteThreshold, hasVotedScatter, onScatterVote }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -211,6 +216,10 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
           justifyContent: 'center',
           width: '100%',
           minHeight: '100vh',
+          // Orb row sits at ~12vh + glow extent. Pad top to clear it,
+          // pad bottom less so the pentagon centers in the remaining space.
+          paddingTop: 'calc(12vh + 50px)',
+          paddingBottom: 20,
           boxSizing: 'border-box',
         }}
       >
@@ -337,39 +346,93 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
           )}
         </div>
 
-        <p style={{
-          color: 'rgba(255,255,255,0.15)',
-          fontSize: '0.7rem',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
+        <div style={{
           marginTop: '16px',
           textAlign: 'center',
+          maxWidth: 280,
         }}>
-          YOUR ORBS SHAPE THE MUSIC
-        </p>
+          <p style={{
+            color: 'rgba(255,255,255,0.85)',
+            fontSize: '1rem',
+            lineHeight: 1.6,
+            margin: '0 0 6px 0',
+          }}>
+            Drag as many of your intentions into the sigil as you&apos;d like.
+          </p>
+          <p style={{
+            color: 'rgba(255,255,255,0.75)',
+            fontSize: '0.7rem',
+            letterSpacing: '0.08em',
+            margin: 0,
+          }}>
+            Each node shapes a different part of the music. See what you can manifest.
+          </p>
+        </div>
 
-        {onResetOrbs && (
-          <button
-            onClick={onResetOrbs}
-            style={{
-              marginTop: '12px',
-              padding: '8px 20px',
-              borderRadius: '6px',
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.04)',
-              color: 'rgba(255,255,255,0.3)',
-              fontSize: '0.65rem',
-              fontWeight: 500,
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              cursor: 'pointer',
-              WebkitTapHighlightColor: 'transparent',
-              touchAction: 'manipulation',
-              outline: 'none',
-            }}
-          >
-            Reset intentions
-          </button>
+        {onResetOrbs && (() => {
+          const c0 = chapters[0]?.color ?? '#e63946';
+          const c1 = chapters[1]?.color ?? '#f4a261';
+          const c2 = chapters[2]?.color ?? '#457b9d';
+          const animName = 'recallGlow';
+          return (
+            <>
+              <style>{`
+                @keyframes ${animName} {
+                  0%, 100% {
+                    color: ${c0};
+                    box-shadow: 0 0 12px ${c0}44, 0 0 4px ${c0}22;
+                    border-color: ${c0}44;
+                  }
+                  33% {
+                    color: ${c1};
+                    box-shadow: 0 0 12px ${c1}44, 0 0 4px ${c1}22;
+                    border-color: ${c1}44;
+                  }
+                  66% {
+                    color: ${c2};
+                    box-shadow: 0 0 12px ${c2}44, 0 0 4px ${c2}22;
+                    border-color: ${c2}44;
+                  }
+                }
+              `}</style>
+              <button
+                onClick={onResetOrbs}
+                style={{
+                  position: 'fixed',
+                  top: 16,
+                  right: 16,
+                  zIndex: 70,
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  background: 'rgba(0,0,0,0.5)',
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  fontSize: '0.72rem',
+                  fontWeight: 500,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation',
+                  outline: 'none',
+                  animation: `${animName} 6s ease-in-out infinite`,
+                }}
+              >
+                Recall intentions
+              </button>
+            </>
+          );
+        })()}
+
+        {onScatterVote && (
+          <ScatterVoteButton
+            count={scatterVoteCount}
+            threshold={scatterVoteThreshold}
+            hasVoted={hasVotedScatter}
+            onVote={onScatterVote}
+            chapters={chapters}
+          />
         )}
       </div>
     );
@@ -527,5 +590,83 @@ function TallyArcs({
         );
       })}
     </g>
+  );
+}
+
+// ============================================================================
+// Scatter Vote Button — collective vote to scatter all orbs
+//
+// Shows a fill bar that grows as more audience members vote.
+// Disabled after voting until the cycle resets (scatter fires or count resets).
+// ============================================================================
+
+function ScatterVoteButton({
+  count,
+  threshold,
+  hasVoted,
+  onVote,
+  chapters,
+}: {
+  count: number;
+  threshold: number;
+  hasVoted: boolean;
+  onVote: () => void;
+  chapters: ChapterConfig[];
+}) {
+  const fill = threshold > 0 ? Math.min(count / threshold, 1) : 0;
+  const c0 = chapters[0]?.color ?? '#e63946';
+  const c1 = chapters[1]?.color ?? '#f4a261';
+  const c2 = chapters[2]?.color ?? '#457b9d';
+
+  return (
+    <button
+      onClick={hasVoted ? undefined : onVote}
+      disabled={hasVoted}
+      style={{
+        position: 'fixed',
+        top: 16,
+        left: 16,
+        zIndex: 70,
+        overflow: 'hidden',
+        padding: '8px 18px',
+        borderRadius: '8px',
+        border: `1px solid ${hasVoted ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.15)'}`,
+        background: 'rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        fontSize: '0.72rem',
+        fontWeight: 500,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase' as const,
+        color: hasVoted ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)',
+        cursor: hasVoted ? 'default' : 'pointer',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation' as const,
+        outline: 'none',
+        transition: 'color 0.3s ease, border-color 0.3s ease',
+      }}
+    >
+      {/* Fill bar — gradient using chapter colors */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: `${fill * 100}%`,
+          background: `linear-gradient(90deg, ${c0}44, ${c1}44, ${c2}44)`,
+          transition: 'width 0.4s ease-out',
+          pointerEvents: 'none',
+        }}
+      />
+      <span style={{ position: 'relative', zIndex: 1 }}>
+        {hasVoted
+          ? `Voted ${count}/${threshold}`
+          : count > 0
+            ? `Scatter ${count}/${threshold}`
+            : 'Scatter all'
+        }
+      </span>
+    </button>
   );
 }

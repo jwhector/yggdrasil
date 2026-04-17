@@ -119,6 +119,10 @@ Each fragment clip must be exported as a standalone audio file for in-browser pr
 - `node_fade_out`: fades out and mutes a cleared node's tracks when a node is deactivated
 - Track resolution: `trackMap[granularType][songIndex] → trackIndices` (config-driven lookup, same as song-building but resolved per-node rather than per-layer-group)
 
+**Epilogue & Exit Music:**
+- `master_fade_out`: fades master gain to 0 over `masterFadeOutBeats` (default 16). Audio router schedules a deferred panic after fade completes (silences all tracks, stops transport).
+- `epilogue_music_start`: on transition from epilogue to ended — restarts transport, restores master to unity (`master_unduck`), then unmutes and fades in configured exit music tracks over `fadeInBeats`. Config: `finale.epilogue.trackIndices` + `finale.epilogue.fadeInBeats`.
+
 ### OSC Protocol
 
 Uses the **AbletonOSC** plugin (by ideoforms). All addresses follow the `/live/*` namespace.

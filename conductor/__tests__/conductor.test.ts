@@ -171,7 +171,7 @@ describe('Show Phase Transitions', () => {
     const state = createTestState();
     const phases: string[] = [state.phase];
 
-    for (let i = 0; i < 13; i++) {
+    for (let i = 0; i < 14; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
       phases.push(state.phase);
     }
@@ -190,6 +190,7 @@ describe('Show Phase Transitions', () => {
       'attempt_resolve',     // attempt 2
       'finale_vote',
       'finale_remix',
+      'epilogue',
       'ended',
     ]);
   });
@@ -222,7 +223,7 @@ describe('Show Phase Transitions', () => {
 
   test('ADVANCE_PHASE returns error when already at ended', () => {
     const state = createTestState();
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 19; i++) {
       processCommand(state, { type: 'ADVANCE_PHASE' });
     }
     expect(state.phase).toBe('ended');
@@ -1305,17 +1306,45 @@ describe('V3.4 Finale Phases', () => {
     expect(remixStarted).toBeDefined();
   });
 
-  test('finale_remix transitions to ended on END_SHOW', () => {
+  test('finale_remix transitions to epilogue on END_SHOW', () => {
     const state = createV34TestState();
     advanceToFinaleVote(state);
     processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
     processCommand(state, { type: 'START_REMIX' });
 
     const events = processCommand(state, { type: 'END_SHOW' });
-    expect(state.phase).toBe('ended');
+    expect(state.phase).toBe('epilogue');
 
     const phaseChanged = events.find(e => e.type === 'SHOW_PHASE_CHANGED');
     expect(phaseChanged).toBeDefined();
+    expect((phaseChanged as any).phase).toBe('epilogue');
+
+    // Should emit master_fade_out audio cue
+    const audioCue = events.find(e => e.type === 'AUDIO_CUE' && (e as any).cue.type === 'master_fade_out');
+    expect(audioCue).toBeDefined();
+  });
+
+  test('epilogue transitions to ended with exit music on second END_SHOW', () => {
+    const state = createV34TestState();
+    state.config.finale.epilogue = { trackIndices: [53, 54], fadeInBeats: 8 };
+    advanceToFinaleVote(state);
+    processCommand(state, { type: 'SUBMIT_EMOTION', userId: 'u1', chapterId: 'chapter_0', questionIndex: 0 });
+    processCommand(state, { type: 'START_REMIX' });
+    processCommand(state, { type: 'END_SHOW' }); // → epilogue
+
+    const events = processCommand(state, { type: 'END_SHOW' }); // → ended
+    expect(state.phase).toBe('ended');
+
+    // Panic already fired at end of fade-out (audio router scheduled).
+    // Epilogue→ended should restart transport, unduck master, start exit music.
+    const cueTypes = events
+      .filter(e => e.type === 'AUDIO_CUE')
+      .map(e => (e as any).cue.type);
+    expect(cueTypes).toContain('transport');
+    expect(cueTypes).toContain('master_unduck');
+    expect(cueTypes).toContain('epilogue_music_start');
+
+    const phaseChanged = events.find(e => e.type === 'SHOW_PHASE_CHANGED');
     expect((phaseChanged as any).phase).toBe('ended');
   });
 
@@ -1355,7 +1384,7 @@ describe('V3.4 Finale Phases', () => {
     expect((activated as any).granularType).toBe('bass');
   });
 
-  test('finale_remix transitions to ended when pool is empty', () => {
+  test('finale_remix transitions to epilogue when pool is empty', () => {
     const state = createV34TestState();
     advanceToFinaleVote(state);
 
@@ -1371,7 +1400,7 @@ describe('V3.4 Finale Phases', () => {
     const events = processCommand(state, { type: 'LOOP_BOUNDARY' });
 
     expect(events.some(e => e.type === 'POOL_EMPTY')).toBe(true);
-    expect(state.phase).toBe('ended');
+    expect(state.phase).toBe('epilogue');
   });
 });
 

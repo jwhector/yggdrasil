@@ -7,9 +7,10 @@
 
 ## Overview
 
-The finale has two sub-phases:
+The finale has three sub-phases:
 1. **Vote** — audience answers emotional questions on their phones; each answer generates a personal **orb** that flies up and floats on screen
 2. **Remix** — the audience drags their orbs onto pentagon nodes to collectively shape the music; the performer has override controls
+3. **Epilogue** — master audio fades to silence for performer's closing monologue; exit music fades in on transition to `ended`
 
 ## Core Concept: Personal Orbs
 
@@ -129,6 +130,39 @@ The `RemixController` component includes a `SwarmControls` section:
 - **Lock/unlock per node** with chapter selector — `LOCK_NODE` / `UNLOCK_NODE` commands
 - **Performer fallback button** with confirmation — `FALLBACK_PERFORMER_REMIX` command
 - Plus the existing token grid, audience interaction toggle, inject tokens (testing)
+
+## Phase 3: Epilogue (`epilogue`)
+
+Entered when the performer presses "End Show" during `finale_remix` (or automatically on `POOL_EMPTY`).
+
+### Audio Behavior
+
+1. **Master fade-out:** `master_fade_out` AudioCue triggers a gain fade from current level to 0 over `masterFadeOutBeats` (default 16 beats, ~8s at 120 BPM).
+2. **Deferred panic:** The audio router schedules a panic callback after the fade completes — silences all tracks and stops the Ableton transport. This runs automatically; no performer action needed.
+3. **Performer monologue:** The performer speaks over silence while audience phones are dark.
+
+### Transition to `ended`
+
+When the performer presses "End Show" again (from `epilogue`):
+1. Transport restarts (`play`)
+2. Master gain restores to unity (`master_unduck`)
+3. If `finale.epilogue.trackIndices` is configured, those tracks unmute and fade in over `fadeInBeats`
+4. Audience phones show "Thank you"
+
+### Config
+
+```typescript
+// In FinaleConfig:
+epilogue?: {
+  trackIndices: number[];   // Ableton track indices for walk-out/exit music
+  fadeInBeats: number;      // Beats to fade in exit tracks (default 8)
+}
+
+// In GainConfig:
+masterFadeOutBeats: number; // Beats to fade master to zero (default 16)
+```
+
+If `epilogue.trackIndices` is empty or absent, no exit music plays — the transition to `ended` just restores master and restarts transport.
 
 ## State
 

@@ -4,7 +4,7 @@
  * Manages tally state and socket event subscriptions during finale_remix.
  * Orb visual state is managed separately by useFloatingOrbs.
  * This hook handles: node_tally broadcasts, orb_decayed/scatter events,
- * and place_orb/recall_orb socket emissions.
+ * place_orb/recall_orb socket emissions, and collective scatter voting.
  */
 
 'use client';
@@ -24,6 +24,11 @@ export interface UseAudienceRemixReturn {
   enabledNodes: string[];
   emitPlaceOrb: (orbIndex: number, granularType: string) => void;
   emitRecallOrb: (orbIndex: number) => void;
+  // Collective scatter vote
+  scatterVoteCount: number;
+  scatterVoteThreshold: number;
+  hasVotedScatter: boolean;
+  emitScatterVote: () => void;
 }
 
 export function useAudienceRemix(
@@ -35,6 +40,11 @@ export function useAudienceRemix(
 ): UseAudienceRemixReturn {
   const [tallies, setTallies] = useState<NodeTally[]>(initialTallies);
   const [enabledNodes, setEnabledNodes] = useState<string[]>(initialEnabledNodes);
+
+  // Collective scatter vote state
+  const [scatterVoteCount, setScatterVoteCount] = useState(0);
+  const [scatterVoteThreshold, setScatterVoteThreshold] = useState(0);
+  const [hasVotedScatter, setHasVotedScatter] = useState(false);
 
   // Sync tallies and enabledNodes from props when state_sync arrives
   const prevInitialRef = useRef(initialTallies);
@@ -67,16 +77,29 @@ export function useAudienceRemix(
     const handleScatter = (data: { granularType: string | null }) => {
       onScatter?.(data.granularType);
       if (navigator.vibrate) navigator.vibrate([30, 20, 30]);
+      // Reset local scatter vote — new cycle begins
+      setHasVotedScatter(false);
+    };
+
+    const handleScatterVoteCount = (data: { count: number; threshold: number }) => {
+      setScatterVoteCount(data.count);
+      setScatterVoteThreshold(data.threshold);
+      // If count reset to 0, clear local vote flag (new cycle)
+      if (data.count === 0) {
+        setHasVotedScatter(false);
+      }
     };
 
     socket.on('node_tally', handleTally);
     socket.on('orb_decayed', handleDecayed);
     socket.on('scatter', handleScatter);
+    socket.on('scatter_vote_count', handleScatterVoteCount);
 
     return () => {
       socket.off('node_tally', handleTally);
       socket.off('orb_decayed', handleDecayed);
       socket.off('scatter', handleScatter);
+      socket.off('scatter_vote_count', handleScatterVoteCount);
     };
   }, [socket, onOrbDecayed, onScatter]);
 
@@ -91,5 +114,16 @@ export function useAudienceRemix(
     socket.emit('recall_orb', { orbIndex });
   }, [socket]);
 
-  return { tallies, enabledNodes, emitPlaceOrb, emitRecallOrb };
+  const emitScatterVote = useCallback(() => {
+    if (!socket || hasVotedScatter) return;
+    socket.emit('vote_scatter');
+    setHasVotedScatter(true);
+    if (navigator.vibrate) navigator.vibrate([20, 10, 20]);
+  }, [socket, hasVotedScatter]);
+
+  return {
+    tallies, enabledNodes,
+    emitPlaceOrb, emitRecallOrb,
+    scatterVoteCount, scatterVoteThreshold, hasVotedScatter, emitScatterVote,
+  };
 }

@@ -18,8 +18,8 @@ dotenvConfig({ path: resolve(process.cwd(), '.env') });
 
 import { createServer } from 'http';
 import { parse } from 'url';
-import { readFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, mkdirSync, createReadStream, statSync } from 'fs';
+import { join, extname } from 'path';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import type { ShowState, ShowConfig, ConductorEvent, ConductorCommand, FinaleState } from '../conductor/types';
@@ -159,9 +159,65 @@ async function main() {
 
   await app.prepare();
 
+  // MIME types for static file serving
+  const MIME_TYPES: Record<string, string> = {
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+  };
+
+  /**
+   * Serve files from public/ directly, bypassing Next.js dev pipeline.
+   * Large binary files (video, audio) routed through Next.js dev mode can
+   * corrupt its compilation cache and cause /_next/static 404s.
+   * Returns true if the request was handled.
+   */
+  function tryServePublicFile(req: typeof import('http').IncomingMessage.prototype, res: typeof import('http').ServerResponse.prototype): boolean {
+    const pathname = parse(req.url!, false).pathname;
+    if (!pathname || pathname.startsWith('/_next/')) return false;
+
+    const ext = extname(pathname).toLowerCase();
+    if (!MIME_TYPES[ext]) return false;
+
+    const filePath = join(process.cwd(), 'public', pathname);
+    try {
+      const stat = statSync(filePath);
+      if (!stat.isFile()) return false;
+
+      const range = req.headers.range;
+      if (range) {
+        // Support Range requests for video seeking
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': end - start + 1,
+          'Content-Type': MIME_TYPES[ext],
+        });
+        createReadStream(filePath, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Type': MIME_TYPES[ext],
+          'Content-Length': stat.size,
+          'Cache-Control': 'public, max-age=3600',
+        });
+        createReadStream(filePath).pipe(res);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // Create HTTP server
   const server = createServer(async (req, res) => {
     try {
+      // Serve media/image files directly — bypass Next.js dev pipeline
+      if (tryServePublicFile(req, res)) return;
+
       const parsedUrl = parse(req.url!, true);
       await handle(req, res, parsedUrl);
     } catch (err) {

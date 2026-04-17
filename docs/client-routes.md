@@ -40,6 +40,10 @@
 - When audience interaction is enabled: UI shows current node state and allows participation
 - When audience interaction is disabled: "listen" state (phones down)
 
+**Epilogue (`epilogue`):** Dark screen (no content). Phones are fully off during the performer's closing monologue.
+
+**Ended (`ended`):** "Thank you" message.
+
 ### `/projector` — Public Display
 
 **Story phases:** Dark or minimal atmospheric display.
@@ -68,6 +72,8 @@ See `PROJECTOR-VISUAL-SPEC.md` for the full design spec.
 - Active nodes show current song assignment with chapter colors
 - Crossfade transitions animate when nodes change songs
 - Pool dots and node states update in real time as performer controls the remix
+
+**Epilogue (`epilogue`) / Ended (`ended`):** `ProjectorDark` — black screen.
 
 ### `/controller` — Performer/Operator Interface
 
