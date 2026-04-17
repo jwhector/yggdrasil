@@ -187,6 +187,11 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Decision:** Unplaced orbs spring back to home positions in a scattered row with slight wobble, rather than free Brownian drift. Home positions use deterministic scatter (hash-based) for stability.
 **Rationale:** Free drift caused orbs to wander off-screen and was hard to track. Spring-back keeps orbs findable while the wobble keeps them feeling organic rather than rigid.
 
+### R48: Epilogue as distinct ShowPhase
+**Date:** 2026-04-16
+**Decision:** Added `epilogue` as a separate ShowPhase between `finale_remix` and `ended`, rather than adding sub-state logic to `ended`. END_SHOW is context-sensitive: from finale it enters epilogue (master fades out), from epilogue it enters ended (exit music starts).
+**Rationale:** The system is built around explicit phase switches — stepper, projector, audience rendering, and serialization all branch on phase. A sub-state of `ended` would fight the grain. The audio router schedules a deferred panic after the master fade completes (rather than emitting panic at the epilogue→ended transition) to avoid a race condition with Ableton's transport stop/restart.
+
 ---
 
 ## Open Decisions

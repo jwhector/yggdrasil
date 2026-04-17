@@ -226,7 +226,7 @@ These do NOT go through state_sync (too slow/heavy):
 lobby → opener → attempt_story → attempt_build → attempt_resolve (if completed) →
                                        ↓ (if collapsed)
                  ... (3 attempts) ...
-                 finale_vote → finale_remix → ended
+                 finale_vote → finale_remix → epilogue → ended
 ```
 
-Finale phases: `finale_vote` (audience answers emotional questions → personal orbs fly up and float), `finale_remix` (audience drags orbs onto pentagon nodes → dominant chapter per node drives audio crossfades; performer has override controls)
+Finale phases: `finale_vote` (audience answers emotional questions → personal orbs fly up and float), `finale_remix` (audience drags orbs onto pentagon nodes → dominant chapter per node drives audio crossfades; performer has override controls), `epilogue` (master fades out for closing monologue; phones dark), `ended` (exit music fades in; phones show "Thank you")

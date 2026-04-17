@@ -43,6 +43,7 @@ type ShowPhase =
   | 'attempt_resolve'
   | 'finale_vote'
   | 'finale_remix'
+  | 'epilogue'
   | 'ended';
 
 interface AttemptState {
@@ -146,6 +147,10 @@ interface FinaleConfig {
   npcMessages: NpcMessageConfig[];         // Event-driven NPC messages (event key -> text)
   vote: VotePhaseConfig;                   // V3.4: vote phase configuration
   remix: RemixConfig;                      // V3.4: remix phase configuration
+  epilogue?: {                             // Exit music config (optional)
+    trackIndices: number[];                // Ableton track indices for walk-out music
+    fadeInBeats: number;                   // Beats to fade in exit tracks (default: 8)
+  };
 }
 
 interface VotePhaseConfig {
@@ -188,6 +193,10 @@ interface GainConfig {
   crossfadeBeats: number;        // Beats for node crossfade (default: 1)
   unityGainValue: number;
   stepsPerBeat: number;
+  masterDuckGain: number;        // Ducked master gain during speech (default: 0.3)
+  masterDuckBeats: number;       // Beats to ramp master to ducked level (default: 2)
+  masterUnduckBeats: number;     // Beats to ramp master back to unity (default: 1)
+  masterFadeOutBeats: number;    // Beats to fade master to zero at show end (default: 16)
 }
 
 // Used for elegy wreckage display.
@@ -418,7 +427,11 @@ type AudioCue =
   | { type: 'transport'; action: 'play' | 'stop' }
   | { type: 'panic' }
   | { type: 'master_panic' }
-  | { type: 'reset_utilities' };
+  | { type: 'reset_utilities' }
+  | { type: 'master_duck' }
+  | { type: 'master_unduck' }
+  | { type: 'master_fade_out' }
+  | { type: 'epilogue_music_start'; trackIndices: number[]; fadeInBeats: number };
 
 interface VoteResult {
   winner: 'A' | 'B';

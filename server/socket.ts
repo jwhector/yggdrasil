@@ -629,8 +629,11 @@ export async function broadcastEvents(
   // Projector gets public state (no per-user details)
   io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
 
-  // Each audience member gets their personalized view
+  // Fetch audience sockets once — reused for state_sync and all event handlers below.
+  // Safe because no sockets can join/leave mid-function (single-threaded event loop).
   const audienceSockets = await io.in('audience').fetchSockets();
+
+  // Each audience member gets their personalized view
   for (const socket of audienceSockets) {
     const userId = (socket as any).userId as UserId | undefined;
     if (!userId) continue;
@@ -662,8 +665,7 @@ export async function broadcastEvents(
         if (!thoughtsConfig) break;
 
         const connectedUserIds: UserId[] = [];
-        const audienceSocks = await io.in('audience').fetchSockets();
-        for (const s of audienceSocks) {
+        for (const s of audienceSockets) {
           const uid = (s as any).userId as UserId | undefined;
           if (uid) connectedUserIds.push(uid);
         }
@@ -672,7 +674,7 @@ export async function broadcastEvents(
         console.log(`[Thoughts] Assigned ${activeThoughts.length} thoughts to ${connectedUserIds.length} users`);
 
         // Send each audience member their thoughts
-        for (const s of audienceSocks) {
+        for (const s of audienceSockets) {
           const uid = (s as any).userId as UserId | undefined;
           if (!uid) continue;
           const myThoughts = activeThoughts
@@ -693,8 +695,7 @@ export async function broadcastEvents(
       case 'NEXT_QUESTION': {
         // Send next question directly to the specific audience member
         const nextQ = event as { type: 'NEXT_QUESTION'; userId: UserId; questionIndex: number; questionText: string; answers?: Array<{ chapterId: string; label: string }> | null };
-        const audienceSocksForQ = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForQ) {
+        for (const s of audienceSockets) {
           if ((s as any).userId === nextQ.userId) {
             s.emit('question', {
               questionIndex: nextQ.questionIndex,
@@ -711,8 +712,7 @@ export async function broadcastEvents(
       case 'EMOTION_RECEIVED': {
         // Confirm the vote to the specific audience member
         const er = event as { type: 'EMOTION_RECEIVED'; userId: UserId; chapterId: string; questionIndex: number };
-        const audienceSocksForEr = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForEr) {
+        for (const s of audienceSockets) {
           if ((s as any).userId === er.userId) {
             s.emit('emotion_confirmed', { chapterId: er.chapterId, questionIndex: er.questionIndex });
             break;
@@ -769,8 +769,7 @@ export async function broadcastEvents(
       case 'ORB_DECAYED': {
         // Notify the specific audience member that their orb decayed
         const od = event as { type: 'ORB_DECAYED'; userId: UserId; orbIndex: number; granularType: string };
-        const audienceSocksForDecay = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForDecay) {
+        for (const s of audienceSockets) {
           if ((s as any).userId === od.userId) {
             s.emit('orb_decayed', { orbIndex: od.orbIndex, granularType: od.granularType });
             break;
@@ -782,8 +781,7 @@ export async function broadcastEvents(
       case 'NODES_SCATTERED': {
         // Notify affected audience members that their orbs were scattered
         const ns2 = event as { type: 'NODES_SCATTERED'; granularType: string | null; affectedUsers: UserId[] };
-        const audienceSocksForScatter = await io.in('audience').fetchSockets();
-        for (const s of audienceSocksForScatter) {
+        for (const s of audienceSockets) {
           const uid = (s as any).userId as UserId | undefined;
           if (uid && ns2.affectedUsers.includes(uid)) {
             s.emit('scatter', { granularType: ns2.granularType });
@@ -800,12 +798,11 @@ export async function broadcastEvents(
 
       case 'VOTE_STARTED': {
         // Send initial questions to all connected audience members
-        const audienceSocksForVote = await io.in('audience').fetchSockets();
         const voteConfig = state.config.finale.vote;
         if (voteConfig && voteConfig.questions.length > 0) {
           const firstQ = voteConfig.questions[0];
           if (firstQ) {
-            for (const s of audienceSocksForVote) {
+            for (const s of audienceSockets) {
               s.emit('question', {
                 questionIndex: 0,
                 text: firstQ.text,

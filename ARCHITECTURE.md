@@ -116,7 +116,7 @@ lobby → opener → attempt_story → attempt_build → attempt_resolve (if com
                                        ↓ (if collapsed)
                  attempt_story → attempt_build → attempt_resolve (if completed) →
                                        ↓ (if collapsed)
-                 finale_vote → finale_remix → ended
+                 finale_vote → finale_remix → epilogue → ended
 ```
 
 ### Phase Details
@@ -130,7 +130,8 @@ type ShowPhase =
   | 'attempt_resolve'          // Song completed; performer rejects it (phones dim/watch)
   | 'finale_vote'              // Audience answers emotional questions; votes generate tokens
   | 'finale_remix'             // Performer arranges tokens on pentagon; remix plays with crossfades
-  | 'ended';
+  | 'epilogue'                 // Master faded out; performer closing monologue (phones dark)
+  | 'ended';                   // Exit music playing; audience dismissed
 ```
 
 **Note:** `attempt_story`, `attempt_build`, and `attempt_resolve` are parameterized by `currentAttemptIndex` (0, 1, 2). `attempt_resolve` is only entered when a song completes (all 3 layers pass their thresholds). Collapsed songs skip `attempt_resolve`.
@@ -148,7 +149,8 @@ type ShowPhase =
 | `attempt_resolve` | `attempt_story` | Manual | Performer triggers rejection + advance; increments attempt index |
 | `attempt_resolve` (attempt 2) | `finale_vote` | Manual | After Song 3 rejection |
 | `finale_vote` | `finale_remix` | **Auto** or Manual | When all questions answered or timer expires |
-| `finale_remix` | `ended` | Manual | |
+| `finale_remix` | `epilogue` | Manual (END_SHOW) or **Auto** (POOL_EMPTY) | Master fades out; deferred panic silences tracks after fade |
+| `epilogue` | `ended` | Manual (END_SHOW) | Restarts transport, restores master, fades in exit music if configured |
 
 ---
 

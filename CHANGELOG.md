@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 2026-04-16 — Epilogue Phase, Stepper Enhancements, PhoneCue Fix
+
+### Epilogue phase
+New `epilogue` ShowPhase between `finale_remix` and `ended`. Provides a graceful show ending:
+- **END_SHOW from remix → epilogue:** Master audio fades to silence over configurable beats (`masterFadeOutBeats`, default 16). Audio router schedules deferred panic after fade completes (silences tracks, stops transport). Audience phones go fully dark. Performer delivers closing monologue.
+- **END_SHOW from epilogue → ended:** Restarts transport, restores master, fades in configurable exit music tracks. Audience phones show "Thank you".
+- New config: `finale.epilogue: { trackIndices: number[], fadeInBeats: number }` for walk-out music tracks.
+- New AudioCues: `master_fade_out`, `epilogue_music_start`.
+- New `masterFadeOutBeats` field in `GainConfig`.
+
+### Show stepper: sequential node enable in finale_remix
+During `finale_remix`, the stepper now walks through enabling nodes one at a time before offering "End Show": Pad → FX → Melody → Harmony → Bass → Drums. Manually enabled nodes are skipped.
+
+### PhoneCue: deferred phone-down during verdict
+Fixed overlap where the red "phones down" cue splashed during the reveal animation. The cue now stays `'up'` while `currentVoteResult` is set (verdict animation playing), transitioning to `'down'` only after `ADVANCE_FROM_VERDICT` clears it.
+
+### Files changed
+- `conductor/types.ts` — ShowPhase (`epilogue`), GainConfig (`masterFadeOutBeats`), FinaleConfig (`epilogue`), AudioCue (`master_fade_out`, `epilogue_music_start`)
+- `conductor/conductor.ts` — PHASE_SEQUENCE, findPhaseSequenceIndex, handleEndShow (context-sensitive: finale→epilogue→ended), POOL_EMPTY auto-transition to epilogue
+- `server/audio-router.ts` — handleMasterFadeOut (with deferred panic), handleEpilogueMusicStart, DEFAULT_GAIN_CONFIG
+- `hooks/useShowStepper.ts` — Epilogue stepper case, remix node enable sequence, deferred phone-down via `currentVoteResult`
+- `config/default-show.json` — `finale.epilogue`, `timing.gain.masterFadeOutBeats`
+- `app/audience/page.tsx` — Epilogue renders dark, ended renders "Thank you"
+- `lib/serialization.ts` — No new fields (epilogue is stateless)
+- `components/controller/MetricsPanel.tsx`, `ShowControls.tsx` — Epilogue in phase label/color records
+
 ## 2026-04-15 — V3.4 Audience Swarm Remix ("Swarm Orbs")
 
 Audience-interactive finale remix: personal orbs generated during voting persist into remix phase, where audience drags them onto pentagon nodes to collectively shape the music.
