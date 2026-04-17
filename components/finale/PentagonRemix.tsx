@@ -101,6 +101,8 @@ export function PentagonRemix({
 
   // Per-node opacity for smooth fade in/out based on enabledNodes
   const nodeOpacityRef = useRef<Map<string, number>>(new Map());
+  // Per-node interpolated color for smooth chapter transitions
+  const nodeColorRef = useRef<Map<string, RGB>>(new Map());
   const enabledSetRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     enabledSetRef.current = new Set(enabledNodes ?? []);
@@ -224,6 +226,18 @@ export function PentagonRemix({
         ctx.stroke();
       }
 
+      // Lerp per-node color toward target chapter color
+      const COLOR_LERP = 0.04;
+      const emptyColor: RGB = { r: 50, g: 50, b: 45 };
+      const lerpNodeColor = (nodeId: string, targetColor: RGB) => {
+        const current = nodeColorRef.current.get(nodeId) ?? { ...targetColor };
+        current.r += (targetColor.r - current.r) * COLOR_LERP;
+        current.g += (targetColor.g - current.g) * COLOR_LERP;
+        current.b += (targetColor.b - current.b) * COLOR_LERP;
+        nodeColorRef.current.set(nodeId, current);
+        return current;
+      };
+
       // Resolve effective active state for a node — tally dominant overrides activeMap
       const getEffectiveActive = (nodeId: string) => {
         const tallyChapter = tallyDominantMap?.get(nodeId);
@@ -240,7 +254,7 @@ export function PentagonRemix({
         return activeMap.get(nodeId);
       };
 
-      // Draw nodes — fade with enabled state
+      // Draw nodes — fade with enabled state, interpolate color
       for (const nodeDef of PENTAGON_NODES) {
         const opacity = nodeOpacityRef.current.get(nodeDef.id) ?? 1;
         if (opacity < 0.01) continue;
@@ -252,12 +266,14 @@ export function PentagonRemix({
         const dragValidity = validForDrag === null ? 'none' as const
           : validForDrag.has(nodeDef.id) ? 'valid' as const : 'invalid' as const;
         const nextChapter = nextChapterMap.get(nodeDef.id) ?? null;
+        const targetColor = active ? (chapterColorMap.get(active.chapterId) ?? emptyColor) : emptyColor;
+        const interpolatedColor = lerpNodeColor(nodeDef.id, targetColor);
 
-        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+        drawRemixNode(ctx, pos.x, pos.y, layout.nodeRadius, nodeDef, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t, interpolatedColor);
         ctx.globalAlpha = 1;
       }
 
-      // Draw seed node (center) — fade with enabled state
+      // Draw seed node (center) — fade with enabled state, interpolate color
       {
         const opacity = nodeOpacityRef.current.get(SEED_ID) ?? 1;
         if (opacity >= 0.01) {
@@ -268,7 +284,9 @@ export function PentagonRemix({
           const dragValidity = validForDrag === null ? 'none' as const
             : validForDrag.has(SEED_ID) ? 'valid' as const : 'invalid' as const;
           const nextChapter = nextChapterMap.get(SEED_ID) ?? null;
-          drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t);
+          const targetColor = active ? (chapterColorMap.get(active.chapterId) ?? emptyColor) : emptyColor;
+          const interpolatedColor = lerpNodeColor(SEED_ID, targetColor);
+          drawRemixNode(ctx, layout.centerX, layout.centerY, layout.seedRadius, { id: SEED_ID, symbol: '\u25CE', label: 'SEED' }, active, queueDepth, isHovered, dragValidity, nextChapter, chapterColorMap, t, interpolatedColor);
           ctx.globalAlpha = 1;
         }
       }
@@ -320,6 +338,7 @@ function drawRemixNode(
   nextQueuedChapterId: string | null,
   chapterColors: Map<string, RGB>,
   t: number,
+  colorOverride?: RGB,
 ): void {
   const emptyColor: RGB = { r: 50, g: 50, b: 45 };
   const isDimmed = dragValidity === 'invalid';
@@ -359,7 +378,7 @@ function drawRemixNode(
   if (isDimmed) ctx.globalAlpha = 0.25;
 
   if (active) {
-    const activeColor = chapterColors.get(active.chapterId) ?? emptyColor;
+    const activeColor = colorOverride ?? chapterColors.get(active.chapterId) ?? emptyColor;
 
     // Soft radial halo around active node
     const haloR = radius * 2;

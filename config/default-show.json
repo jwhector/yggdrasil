@@ -213,8 +213,8 @@
         {
           "index": 1,
           "group": "bones",
-          "labelA": "Never Lonely",
-          "labelB": "Always Loved",
+          "labelA": "Always Loved",
+          "labelB": "Never Lonely",
           "optionA": {
             "tracks": [
               {
@@ -429,7 +429,7 @@
       },
       {
         "event": "vote_intro_2",
-        "text": "Answer honestly. It's the only way to bring him back."
+        "text": "But there are still fragments left... Maybe there's something left to salvage."
       },
       {
         "event": "vote_start",
@@ -683,7 +683,7 @@
     },
     {
       "id": "pad",
-      "label": "Pad",
+      "label": "Atmosphere",
       "color": "#7b2d8b",
       "symbol": "\u25c6"
     },
