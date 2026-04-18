@@ -8,10 +8,20 @@
 ## WebSocket Protocol
 
 ### State Sync Strategy
-Full state syncs on every mutation:
-- **Controller**: Full serialized state (all Maps converted to arrays)
-- **Projector**: Public filtered state (pool counts, active nodes, queue depths, loop state -- no individual user data)
-- **Audience**: Personalized state (own vote question, answer count, pool cap status during finale_vote; phones-down during finale_remix)
+Filtered state syncs, scoped by recipient need:
+- **Controller**: Full serialized state (all Maps converted to arrays) — receives on every mutation
+- **Projector**: Public filtered state (pool counts, active nodes, queue depths, loop state -- no individual user data) — receives on every mutation
+- **Audience**: Personalized state (own vote question, answer count, pool cap status during finale_vote; phones-down during finale_remix) — receives only when audience-visible state changes
+
+**Scoped broadcast rules (server/socket.ts):**
+- `join` / `reconnect` / `disconnect`: Only projector+controller get `state_sync` (user count update). The joining user gets their own targeted sync. Other audience members are NOT notified — prevents cascade re-renders from connection churn.
+- Audio-only commands (`AUDIO_TRANSPORT`, `MASTER_DUCK`, etc.): Only projector+controller. Audience has no audio-visible state.
+- `SEND_NPC_MESSAGE`: Only projector+controller via `state_sync`. Audience receives NPC text via dedicated `npc_message` socket event.
+- `ADVANCE_SLIDE` / `SLIDE_MEDIA_READY`: Only projector+controller. Audience phones are dark during opener.
+- Phase changes, layer resolves, and other audience-affecting commands: Full broadcast to all clients.
+
+**Client-side deduplication (hooks/useShowState.ts):**
+- Incoming `state_sync` with version ≤ client's current version is dropped, preventing unnecessary React re-renders from duplicate broadcasts.
 
 ### Client -> Server Events
 

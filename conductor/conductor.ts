@@ -275,6 +275,8 @@ export function processCommand(state: ShowState, command: ConductorCommand): Con
     // Failsafe
     case 'GENERATE_VALID_FINALE':
       return handleGenerateValidFinale(state);
+    case 'GENERATE_ORBS':
+      return handleGenerateOrbs(state);
 
     // Recovery
     case 'EXPORT_STATE':
@@ -2012,6 +2014,58 @@ function handleGenerateValidFinale(state: ShowState): ConductorEvent[] {
   events.push(...handleSetupFinaleV34(state));
 
   return events;
+}
+
+/**
+ * Emergency: generate orbs for all connected users who don't already have them.
+ * Assigns chapters in a cycling pattern (ch0, ch1, ch2, ch0, ch1, ch2) for balance.
+ * Also creates corresponding tokens in the pool.
+ */
+function handleGenerateOrbs(state: ShowState): ConductorEvent[] {
+  if (state.phase !== 'finale_remix') {
+    return [{ type: 'ERROR', message: 'GENERATE_ORBS only valid during finale_remix' }];
+  }
+  const fs = state.finaleState as FinaleState;
+  if (!fs) return [{ type: 'ERROR', message: 'Finale not initialized' }];
+
+  const chapters = state.config.chapters ?? [];
+  if (chapters.length === 0) return [{ type: 'ERROR', message: 'No chapters configured' }];
+
+  const orbCount = state.config.finale.remix?.orbsPerPerson ?? 6;
+  let generated = 0;
+
+  for (const [userId, user] of state.users) {
+    if (!user.connected) continue;
+    if (fs.audienceOrbs.has(userId)) continue; // Already has orbs
+
+    // Cycle chapters evenly
+    const chapterIds = Array.from({ length: orbCount }, (_, i) => chapters[i % chapters.length].id);
+
+    // Create tokens in the pool
+    for (const chapterId of chapterIds) {
+      const tokenId = `gen-${userId}-${fs.pool.tokens.length}`;
+      fs.pool.tokens.push({
+        id: tokenId,
+        ownerId: userId,
+        chapterId,
+        questionIndex: -1,
+        status: 'available',
+      });
+      fs.pool.availableByChapter.set(chapterId, (fs.pool.availableByChapter.get(chapterId) ?? 0) + 1);
+      fs.pool.totalByChapter.set(chapterId, (fs.pool.totalByChapter.get(chapterId) ?? 0) + 1);
+      fs.pool.totalRemaining++;
+    }
+
+    // Track as "answered" for vote progress
+    fs.vote.questionsAnsweredByUser.set(userId, orbCount);
+
+    // Create orbs
+    fs.audienceOrbs.set(userId, createUserOrbs(userId, chapterIds));
+    generated++;
+  }
+
+  console.log(`[Conductor] GENERATE_ORBS: created orbs for ${generated} users`);
+  return [{ type: 'STATE_UPDATED', version: state.version }];
 }
 
 /**

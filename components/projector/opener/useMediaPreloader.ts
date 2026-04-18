@@ -1,9 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { OpenerSlide } from '@/conductor/types';
 
 /** Preload all media assets from opener slides on mount. */
 export function useMediaPreloader(slides: OpenerSlide[]): void {
+  const loadedRef = useRef(false);
+
   useEffect(() => {
+    if (loadedRef.current || slides.length === 0) return;
+    loadedRef.current = true;
+
     const srcs = new Set<string>();
 
     for (const slide of slides) {

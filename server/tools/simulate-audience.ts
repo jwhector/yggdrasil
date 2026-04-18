@@ -14,18 +14,34 @@
  * - Prints aggregate stats
  *
  * Usage:
- *   npx tsx server/tools/simulate-audience.ts [count] [url]
+ *   npx tsx server/tools/simulate-audience.ts [count] [url] [--churn[=rate]]
  *
  * Examples:
  *   npx tsx server/tools/simulate-audience.ts          # 40 clients, localhost:3000
  *   npx tsx server/tools/simulate-audience.ts 60       # 60 clients
  *   npx tsx server/tools/simulate-audience.ts 40 http://192.168.1.5:3000
+ *   npx tsx server/tools/simulate-audience.ts 40 --churn        # churn at default rate (0.1 = ~10% of clients cycle per interval)
+ *   npx tsx server/tools/simulate-audience.ts 40 --churn=0.3    # aggressive churn (30%)
  */
 
 import { io, Socket } from 'socket.io-client';
 
-const CLIENT_COUNT = parseInt(process.argv[2] || '40', 10);
-const SERVER_URL = process.argv[3] || 'http://localhost:3000';
+// ============================================================================
+// CLI arg parsing
+// ============================================================================
+
+const positionalArgs = process.argv.slice(2).filter(a => !a.startsWith('--'));
+const CLIENT_COUNT = parseInt(positionalArgs[0] || '40', 10);
+const SERVER_URL = positionalArgs[1] || 'http://localhost:3000';
+
+// --churn[=rate]  Simulate connection churn (WiFi flakiness).
+// Rate is the fraction of clients that disconnect per churn interval (default 0.1).
+const churnArg = process.argv.find(a => a.startsWith('--churn'));
+const CHURN_ENABLED = !!churnArg;
+const CHURN_RATE = churnArg?.includes('=') ? parseFloat(churnArg.split('=')[1]) : 0.1;
+const CHURN_INTERVAL_MS = 3000;       // How often the churn loop runs
+const CHURN_RECONNECT_MIN_MS = 500;   // Min delay before reconnecting a churned client
+const CHURN_RECONNECT_MAX_MS = 4000;  // Max delay (simulates real WiFi recovery variance)
 
 // V3.4 vote timing — simulates human reading + deciding time
 const VOTE_MIN_DELAY_MS = 2000;      // Fastest answer (intro confirm + read + tap)
@@ -125,6 +141,9 @@ let stats = {
   orbsPlaced: 0,
   orbsRecalled: 0,
   orbsMoved: 0,
+  // Churn stats
+  churnDisconnects: 0,
+  churnReconnects: 0,
 };
 
 function log(msg: string) {
@@ -537,6 +556,47 @@ function startReplaceLoop(client: ClientState, index: number) {
 }
 
 // ============================================================================
+// Connection Churn Simulation
+// ============================================================================
+
+/**
+ * Simulates real-world WiFi flakiness: randomly disconnects a fraction of
+ * connected clients, then reconnects them after a variable delay.
+ * This exercises the join/reconnect server path under load — the exact
+ * scenario that caused broadcast storms in production.
+ */
+function startChurnLoop() {
+  log(`Churn enabled: ~${(CHURN_RATE * 100).toFixed(0)}% of clients cycle every ${CHURN_INTERVAL_MS / 1000}s`);
+
+  setInterval(() => {
+    const connectedClients = clients.filter(c => c.connected);
+    const churnCount = Math.max(1, Math.round(connectedClients.length * CHURN_RATE));
+    const targets = shuffleArray(connectedClients).slice(0, churnCount);
+
+    for (const client of targets) {
+      client.socket.disconnect();
+      stats.churnDisconnects++;
+
+      const reconnectDelay = randomDelay(CHURN_RECONNECT_MIN_MS, CHURN_RECONNECT_MAX_MS);
+      setTimeout(() => {
+        client.socket.connect();
+        stats.churnReconnects++;
+      }, reconnectDelay);
+    }
+  }, CHURN_INTERVAL_MS);
+}
+
+/** Fisher-Yates shuffle (non-mutating). */
+function shuffleArray<T>(arr: T[]): T[] {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -547,6 +607,12 @@ for (let i = 0; i < CLIENT_COUNT; i++) {
   clients.push(client);
   // Stagger connections slightly to avoid thundering herd
   setTimeout(() => client.socket.connect(), i * 50);
+}
+
+// Start churn loop if enabled
+if (CHURN_ENABLED) {
+  // Wait for initial connections before starting churn
+  setTimeout(() => startChurnLoop(), CLIENT_COUNT * 50 + 2000);
 }
 
 // Print stats periodically
@@ -560,7 +626,10 @@ setInterval(() => {
   const orbLine = stats.orbsPlaced > 0
     ? `, orbs: ${stats.orbsPlaced} placed, ${stats.orbsMoved} moved, ${stats.orbsRecalled} recalled`
     : '';
-  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}${orbLine}`);
+  const churnLine = stats.churnDisconnects > 0
+    ? `, churn: ${stats.churnDisconnects} disconnects, ${stats.churnReconnects} reconnects`
+    : '';
+  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}${orbLine}${churnLine}`);
 }, 5000);
 
 // Graceful shutdown

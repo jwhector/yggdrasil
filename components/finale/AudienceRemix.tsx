@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useState, useEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import type { ChapterConfig, GranularType } from '@/conductor/types';
 import type { NodeTally } from '@/hooks/useAudienceRemix';
 import { getLayerIdentity } from '@/lib/identity';
@@ -168,6 +168,20 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
     ];
 
     const enabledSet = new Set(enabledNodes);
+
+    // Stable keyframes for recall button glow — avoids regenerating <style> on every render
+    const recallKeyframes = useMemo(() => {
+      const c0 = chapters[0]?.color ?? '#e63946';
+      const c1 = chapters[1]?.color ?? '#f4a261';
+      const c2 = chapters[2]?.color ?? '#457b9d';
+      return `
+        @keyframes recallGlow {
+          0%, 100% { color: ${c0}; box-shadow: 0 0 12px ${c0}44, 0 0 4px ${c0}22; border-color: ${c0}44; }
+          33% { color: ${c1}; box-shadow: 0 0 12px ${c1}44, 0 0 4px ${c1}22; border-color: ${c1}44; }
+          66% { color: ${c2}; box-shadow: 0 0 12px ${c2}44, 0 0 4px ${c2}22; border-color: ${c2}44; }
+        }
+      `;
+    }, [chapters]);
 
     // Expose node hit-testing to parent
     useImperativeHandle(ref, () => ({
@@ -369,61 +383,37 @@ export const AudienceRemix = forwardRef<AudienceRemixHandle, AudienceRemixProps>
           </p>
         </div>
 
-        {onResetOrbs && (() => {
-          const c0 = chapters[0]?.color ?? '#e63946';
-          const c1 = chapters[1]?.color ?? '#f4a261';
-          const c2 = chapters[2]?.color ?? '#457b9d';
-          const animName = 'recallGlow';
-          return (
-            <>
-              <style>{`
-                @keyframes ${animName} {
-                  0%, 100% {
-                    color: ${c0};
-                    box-shadow: 0 0 12px ${c0}44, 0 0 4px ${c0}22;
-                    border-color: ${c0}44;
-                  }
-                  33% {
-                    color: ${c1};
-                    box-shadow: 0 0 12px ${c1}44, 0 0 4px ${c1}22;
-                    border-color: ${c1}44;
-                  }
-                  66% {
-                    color: ${c2};
-                    box-shadow: 0 0 12px ${c2}44, 0 0 4px ${c2}22;
-                    border-color: ${c2}44;
-                  }
-                }
-              `}</style>
-              <button
-                onClick={onResetOrbs}
-                style={{
-                  position: 'fixed',
-                  top: 16,
-                  right: 16,
-                  zIndex: 70,
-                  padding: '8px 18px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  background: 'rgba(0,0,0,0.5)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  fontSize: '0.72rem',
-                  fontWeight: 500,
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                  WebkitTapHighlightColor: 'transparent',
-                  touchAction: 'manipulation',
-                  outline: 'none',
-                  animation: `${animName} 6s ease-in-out infinite`,
-                }}
-              >
-                Recall intentions
-              </button>
-            </>
-          );
-        })()}
+        {onResetOrbs && (
+          <>
+            <style>{recallKeyframes}</style>
+            <button
+              onClick={onResetOrbs}
+              style={{
+                position: 'fixed',
+                top: 16,
+                right: 16,
+                zIndex: 70,
+                padding: '8px 18px',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                fontSize: '0.72rem',
+                fontWeight: 500,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation',
+                outline: 'none',
+                animation: 'recallGlow 6s ease-in-out infinite',
+              }}
+            >
+              Recall intentions
+            </button>
+          </>
+        )}
 
         {onScatterVote && (
           <ScatterVoteButton

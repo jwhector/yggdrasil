@@ -179,6 +179,13 @@ OSC_ENABLED=false npm run dev
 
 # Network access (for testing on phones)
 npm run dev:network
+
+# Simulate 40 audience members
+npx tsx server/tools/simulate-audience.ts
+
+# Simulate with connection churn (WiFi flakiness stress test)
+npx tsx server/tools/simulate-audience.ts 40 --churn        # 10% churn rate
+npx tsx server/tools/simulate-audience.ts 40 --churn=0.3    # aggressive 30% churn
 ```
 
 ---
@@ -197,8 +204,18 @@ npm run dev:network
 1. Define event name and payload shape
 2. Add socket listener in `server/socket.ts`
 3. Map to a `ConductorCommand` and call `conductor.processCommand()`
-4. Conductor emits events → server broadcasts state_sync
+4. Conductor emits events → server broadcasts state_sync (scoped — see below)
 5. Client receives updated state via `useShowState` hook
+
+### Broadcast scoping (IMPORTANT)
+**Default to targeted emits, not `broadcastEvents`.** Full `broadcastEvents` sends `state_sync` to all ~40 audience members, and `filterStateForClient` creates new object/array references every call — triggering React re-renders that restart animations and effects.
+
+- **Connection events** (join/reconnect/disconnect): Only emit to projector+controller. The connecting user gets their own targeted sync.
+- **Audio-only commands** (AUDIO_TRANSPORT, MASTER_DUCK, etc.): Only projector+controller. Add to `SKIP_AUDIENCE_BROADCAST` set in the `command` handler.
+- **Commands with dedicated socket events** (SEND_NPC_MESSAGE → `npc_message`): Skip audience `state_sync`, relay the dedicated event instead.
+- **Phase changes and audience-affecting mutations**: Use full `broadcastEvents`.
+
+**Component stability rule:** Config props that don't change during a phase (questions, chapters, npcIntro, onboardingConfig, slides) must be captured in `useRef` on mount. Never use them as `useEffect` dependencies directly — `state_sync` delivers new array/object references even when values haven't changed. See `EmotionVote.tsx` and `MedistationLobby.tsx` for the pattern.
 
 ### High-frequency data (pool state, audition progress, metering)
 These do NOT go through state_sync (too slow/heavy):

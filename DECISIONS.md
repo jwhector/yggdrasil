@@ -192,6 +192,16 @@ When resolving a decision, move it from Open to Resolved with the date and reaso
 **Decision:** Added `epilogue` as a separate ShowPhase between `finale_remix` and `ended`, rather than adding sub-state logic to `ended`. END_SHOW is context-sensitive: from finale it enters epilogue (master fades out), from epilogue it enters ended (exit music starts).
 **Rationale:** The system is built around explicit phase switches — stepper, projector, audience rendering, and serialization all branch on phase. A sub-state of `ended` would fight the grain. The audio router schedules a deferred panic after the master fade completes (rather than emitting panic at the epilogue→ended transition) to avoid a race condition with Ableton's transport stop/restart.
 
+### R49: Scoped broadcasts — default to targeted emits
+**Date:** 2026-04-17
+**Decision:** Socket handlers default to targeted `state_sync` emits (projector+controller only), not full `broadcastEvents` to all audience members. Full broadcast is reserved for phase changes and audience-affecting mutations. Audio-only commands, NPC messages (which have dedicated socket events), slide commands, and connection events all skip audience broadcast. Client-side version dedup in `useShowState` drops duplicate versions. Config props in components are captured via `useRef` on mount.
+**Rationale:** With ~40 phones on flaky WiFi, frequent join/reconnect events triggered `broadcastEvents` → `filterStateForClient` creates new object/array references → React cascade re-renders → animations/typewriters restart. The system's hot path during a live show is reconnections, not commands. Discovered during live performance 2026-04-17.
+
+### R50: Opener slide media audio uses setTimeout, not beat scheduling
+**Date:** 2026-04-17
+**Decision:** Opener slide media playback (fade-out and stop) uses `setTimeout` with `durationBeats * msPerBeat` instead of `timingEngine.scheduleAtBeat()`.
+**Rationale:** The timing engine's `rawToMonotonic` beat counter accumulates offsets from previous phases. For one-shot slide media playback (not loop-quantized), plain millisecond timers are simpler and more reliable. The initial fade-in still uses `fadeGain` (starts immediately from current beat — no long-term scheduling). Discovered when slide audio stopped prematurely during live performance.
+
 ---
 
 ## Open Decisions

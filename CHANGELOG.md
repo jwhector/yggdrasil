@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## 2026-04-17 — Broadcast Storm Fix, Opener Media Conversion, Slide Audio Timing
+
+### Broadcast storm fix
+Audience clients were re-rendering constantly during lobby, opener, and finale_vote phases. Root cause: `broadcastEvents()` sent full `state_sync` to ALL clients on every join/reconnect/disconnect/command, and `filterStateForClient()` creates new object/array references every call. With ~40 phones on flaky WiFi, frequent reconnections triggered cascade re-renders — restarting lobby animations, NPC typewriter effects, and media preloading.
+
+**Server-side (server/socket.ts):**
+- `join`, `reconnect`, `handleUserDisconnect` now emit `state_sync` only to projector+controller (not all audience). The joining/leaving user gets their own targeted sync.
+- `command` handler skips audience broadcast for audio-only and non-audience commands (AUDIO_TRANSPORT, MASTER_DUCK/UNDUCK, SEND_NPC_MESSAGE, ADVANCE_SLIDE, SLIDE_MEDIA_READY, etc.). NPC messages still reach audience via dedicated `npc_message` socket event.
+
+**Client-side (hooks/useShowState.ts):**
+- Version-based deduplication: incoming `state_sync` with version ≤ current is dropped, preventing unnecessary re-renders from duplicate broadcasts.
+
+**Component-level stabilization:**
+- `EmotionVote.tsx` — `questions`, `npcIntro`, `chapters` captured in refs on mount (static config, must not cause effect restarts)
+- `MedistationLobby.tsx` — `onboardingConfig` captured in ref, removed from `runAnimation`/`showFinalState` callback deps (was causing animation replay on every state_sync)
+- `useMediaPreloader.ts` — `loadedRef` guard prevents redundant Image/fetch on re-render
+- `AudienceRemix.tsx` — Recall button CSS keyframes extracted from IIFE into `useMemo`
+
+### Audience simulator: connection churn
+Added `--churn[=rate]` flag to `server/tools/simulate-audience.ts`. Simulates WiFi flakiness by randomly disconnecting and reconnecting a fraction of clients every 3 seconds. Usage: `npx tsx server/tools/simulate-audience.ts 40 --churn=0.1`
+
+### Opener media format conversion
+Converted media files to web-compatible formats for Railway (Linux) deployment:
+- `dan.HEIC` → `dan.jpg` (HEIC not supported by browsers)
+- `anons.mov` → `anons.mp4` with H.264/AAC + `faststart` (MOV inconsistent browser support)
+- `chemistry.JPG` → `chemistry.jpg` (case-sensitive Linux filesystem)
+
+### Slide media audio timing
+Opener slide audio (Ableton track playback during video slides) was stopping prematurely. Root cause: fade-out and stop were scheduled via `timingEngine.scheduleAtBeat()`, which depends on `rawToMonotonic` beat counting — vulnerable to accumulated offsets from previous phases. Fix: replaced with plain `setTimeout` using milliseconds calculated from `durationBeats * msPerBeat`. Initial fade-in still uses `fadeGain` (starts immediately, no long-term scheduling).
+
+### Files changed
+- `server/socket.ts` — Scoped broadcasts for join/reconnect/disconnect/command
+- `hooks/useShowState.ts` — Version-based dedup
+- `components/finale/EmotionVote.tsx` — Config ref stabilization
+- `components/MedistationLobby.tsx` — Animation callback ref stabilization
+- `components/projector/opener/useMediaPreloader.ts` — loadedRef guard
+- `components/finale/AudienceRemix.tsx` — useMemo for keyframes
+- `server/audio-router.ts` — setTimeout-based slide media timing
+- `server/tools/simulate-audience.ts` — --churn flag
+- `config/default-show.json` — Updated media paths
+- `public/opener-media/` — Converted media files
+
 ## 2026-04-16 — Epilogue Phase, Stepper Enhancements, PhoneCue Fix
 
 ### Epilogue phase
