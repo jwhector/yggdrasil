@@ -174,7 +174,7 @@ interface AudioRouterState {
   slideMediaState: {
     activeTrackIndices: number[];
     fadeIds: string[];
-    stopCallbackId: string | null;
+    timers: NodeJS.Timeout[];
   } | null;
 }
 
@@ -945,97 +945,73 @@ export function createAudioRouter(
     const durationBeats = cue.durationBeats;
     const fadeInBeats = currentGainConfig.entrySwellBeats ?? 4;
     const fadeOutBeats = currentGainConfig.exitFadeBeats ?? 8;
-    const currentBeat = timingEngine?.getCurrentBeat() ?? 0;
-    const startBeat = currentBeat + 1;
+    const msPerBeat = timingEngine?.getBeatDurationMs() ?? 500;
 
+    const timers: NodeJS.Timeout[] = [];
     const fadeIds: string[] = [];
 
-    // Unmute and fade in each track
+    // Unmute and fade in each track (uses fadeGain which starts from current beat — fine for immediate fades)
     for (const idx of cue.trackIndices) {
       unmuteTrack(idx);
       setGain(idx, currentGainConfig.entryGain ?? 0.25);
-      const fadeId = fadeGain(idx, 1.0, fadeInBeats, startBeat);
+      const fadeId = fadeGain(idx, 1.0, fadeInBeats);
       fadeIds.push(fadeId);
     }
 
-    // Schedule fade-out before clip ends
-    const fadeOutStartBeat = startBeat + durationBeats - fadeOutBeats;
-    const fadeOutId = `slide-media-fadeout-${routerState.fadeCounter}`;
-    if (timingEngine) {
-      timingEngine.scheduleAtBeat(fadeOutId, fadeOutStartBeat, () => {
-        for (const idx of cue.trackIndices) {
-          fadeGain(idx, 0, fadeOutBeats);
-        }
-      });
-    }
+    // Schedule fade-out before clip ends — use setTimeout instead of beat callbacks
+    const fadeOutStartMs = (durationBeats - fadeOutBeats) * msPerBeat;
+    timers.push(setTimeout(() => {
+      for (const idx of cue.trackIndices) {
+        fadeGain(idx, 0, fadeOutBeats);
+      }
+    }, fadeOutStartMs));
 
     // Schedule transport stop, mute, and re-enable master loop after clip completes
-    const stopBeat = startBeat + durationBeats;
-    const stopId = `slide-media-stop-${routerState.fadeCounter}`;
-    if (timingEngine) {
-      timingEngine.scheduleAtBeat(stopId, stopBeat, () => {
-        for (const idx of cue.trackIndices) {
-          muteTrack(idx);
-        }
-        stopPlayback();
-        oscBridge.send('/live/song/set/loop', 1);
-        routerState.slideMediaState = null;
-      });
-    } else {
-      // No timing engine: snap gains then immediately mute (test mode)
+    const stopMs = durationBeats * msPerBeat;
+    timers.push(setTimeout(() => {
       for (const idx of cue.trackIndices) {
-        setGain(idx, 1.0);
+        muteTrack(idx);
       }
-    }
+      stopPlayback();
+      oscBridge.send('/live/song/set/loop', 1);
+      routerState.slideMediaState = null;
+    }, stopMs));
 
     routerState.slideMediaState = {
       activeTrackIndices: [...cue.trackIndices],
       fadeIds,
-      stopCallbackId: stopId,
+      timers,
     };
 
-    console.log(`[AudioRouter] slide_media_start: tracks ${cue.trackIndices.join(',')} — one-shot ${durationBeats} beats (master loop disabled)`);
+    console.log(`[AudioRouter] slide_media_start: tracks ${cue.trackIndices.join(',')} — one-shot ${durationBeats} beats / ${(stopMs / 1000).toFixed(1)}s (setTimeout, master loop disabled)`);
   }
 
   function handleSlideMediaStop(): void {
     const sms = routerState.slideMediaState;
     if (!sms) return;
 
-    // Cancel scheduled fade-out and stop callbacks
-    if (timingEngine) {
-      for (const fadeId of sms.fadeIds) {
-        timingEngine.cancelCallbacks(fadeId);
-      }
-      timingEngine.cancelCallbacks('slide-media-fadeout');
-      if (sms.stopCallbackId) {
-        timingEngine.cancelCallbacks(sms.stopCallbackId);
-      }
+    // Cancel scheduled timers and any in-flight fades
+    for (const timer of sms.timers) clearTimeout(timer);
+    for (const fadeId of sms.fadeIds) {
+      timingEngine?.cancelCallbacks(fadeId);
     }
 
     // Immediate fade out
     const fadeOutBeats = currentGainConfig.exitFadeBeats ?? 8;
+    const msPerBeat = timingEngine?.getBeatDurationMs() ?? 500;
     for (const idx of sms.activeTrackIndices) {
       fadeGain(idx, 0, fadeOutBeats);
     }
 
-    // Schedule mute + stop + re-enable master loop after fade completes
-    if (timingEngine) {
-      const currentBeat = timingEngine.getCurrentBeat();
-      const muteAtBeat = currentBeat + fadeOutBeats + 1;
-      timingEngine.scheduleAtBeat(`slide-media-cleanup-${routerState.fadeCounter}`, muteAtBeat, () => {
-        for (const idx of sms.activeTrackIndices) {
-          muteTrack(idx);
-        }
-        stopPlayback();
-        oscBridge.send('/live/song/set/loop', 1);
-      });
-    } else {
+    // Mute + stop + re-enable master loop after fade completes
+    const cleanupMs = fadeOutBeats * msPerBeat + 500;
+    setTimeout(() => {
       for (const idx of sms.activeTrackIndices) {
-        setGain(idx, 0);
         muteTrack(idx);
       }
+      stopPlayback();
       oscBridge.send('/live/song/set/loop', 1);
-    }
+    }, cleanupMs);
 
     routerState.slideMediaState = null;
     console.log('[AudioRouter] slide_media_stop: cancelled in-progress slide playback (master loop re-enabled)');
