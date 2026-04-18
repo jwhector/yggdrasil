@@ -376,8 +376,8 @@
         {
           "index": 2,
           "group": "bones",
-          "labelA": "...",
-          "labelB": "...",
+          "labelA": "Get out of your head...",
+          "labelB": "Snap out of it...",
           "optionA": {
             "tracks": [
               {
@@ -429,7 +429,7 @@
       },
       {
         "event": "vote_intro_2",
-        "text": "But there are still fragments left... Maybe there's something left to salvage."
+        "text": "But there are still fragments left... Maybe there's something left to salvage. What intentions are you carrying?"
       },
       {
         "event": "vote_start",

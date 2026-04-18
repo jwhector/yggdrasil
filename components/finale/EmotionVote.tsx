@@ -300,9 +300,10 @@ export function EmotionVote({
   if (stage === 'done') {
     return (
       <div style={styles.container}>
-        <div style={styles.phonesDown}>
-          <div style={styles.phonesDownText}>Your intentions have been heard.</div>
+        <div style={styles.questionText}>
+          <WordReveal text="Your intentions have been heard." />
         </div>
+        <style>{keyframes}</style>
       </div>
     );
   }

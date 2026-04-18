@@ -67,7 +67,7 @@ let activeThoughts: AssignedThought[] = [];
 const scatterVotes = new Set<UserId>();
 
 /** Fraction of connected audience needed to trigger scatter. */
-const SCATTER_VOTE_THRESHOLD = 0.5;
+const SCATTER_VOTE_THRESHOLD = 0.20;
 
 /**
  * Clear all intrusive thoughts and notify clients.
