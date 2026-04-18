@@ -14,7 +14,7 @@
  * - Prints aggregate stats
  *
  * Usage:
- *   npx tsx server/tools/simulate-audience.ts [count] [url] [--churn[=rate]]
+ *   npx tsx server/tools/simulate-audience.ts [count] [url] [--churn[=rate]] [--late-join[=count]]
  *
  * Examples:
  *   npx tsx server/tools/simulate-audience.ts          # 40 clients, localhost:3000
@@ -22,6 +22,8 @@
  *   npx tsx server/tools/simulate-audience.ts 40 http://192.168.1.5:3000
  *   npx tsx server/tools/simulate-audience.ts 40 --churn        # churn at default rate (0.1 = ~10% of clients cycle per interval)
  *   npx tsx server/tools/simulate-audience.ts 40 --churn=0.3    # aggressive churn (30%)
+ *   npx tsx server/tools/simulate-audience.ts 40 --late-join     # 5 late joiners trickle in during each phase
+ *   npx tsx server/tools/simulate-audience.ts 40 --late-join=10  # 10 late joiners
  */
 
 import { io, Socket } from 'socket.io-client';
@@ -42,6 +44,19 @@ const CHURN_RATE = churnArg?.includes('=') ? parseFloat(churnArg.split('=')[1]) 
 const CHURN_INTERVAL_MS = 3000;       // How often the churn loop runs
 const CHURN_RECONNECT_MIN_MS = 500;   // Min delay before reconnecting a churned client
 const CHURN_RECONNECT_MAX_MS = 4000;  // Max delay (simulates real WiFi recovery variance)
+
+// --late-join[=count]  Simulate late joiners during each phase transition.
+const lateJoinArg = process.argv.find(a => a.startsWith('--late-join'));
+const LATE_JOIN_ENABLED = !!lateJoinArg;
+const LATE_JOIN_COUNT = lateJoinArg?.includes('=') ? parseInt(lateJoinArg.split('=')[1]) : 5;
+const LATE_JOIN_STAGGER_MS = 3000;     // Time between each late joiner
+
+// Rapid duplicate action simulation — baseline behavior
+const DOUBLE_TAP_CHANCE = 0.08;        // 8% chance of sending a duplicate action
+const DOUBLE_TAP_DELAY_MS = 50;        // Delay between duplicate taps (before server ack)
+
+// Orb recall simulation — baseline behavior
+const ORB_RECALL_CHANCE = 0.15;        // 15% of replace-loop ticks recall instead of move
 
 // V3.4 vote timing — simulates human reading + deciding time
 const VOTE_MIN_DELAY_MS = 2000;      // Fastest answer (intro confirm + read + tap)
@@ -144,6 +159,9 @@ let stats = {
   // Churn stats
   churnDisconnects: 0,
   churnReconnects: 0,
+  // Stress stats
+  doubleTaps: 0,
+  lateJoiners: 0,
 };
 
 function log(msg: string) {
@@ -224,6 +242,17 @@ function answerNextQuestion(client: ClientState, index: number, ordered: Questio
       questionIndex: client.questionIndex,
     });
     stats.emotionsSubmitted++;
+
+    // Double-tap: send same emotion again before advancing
+    if (Math.random() < DOUBLE_TAP_CHANCE) {
+      setTimeout(() => {
+        client.socket.emit('submit_emotion', {
+          chapterId,
+          questionIndex: client.questionIndex,
+        });
+        stats.doubleTaps++;
+      }, DOUBLE_TAP_DELAY_MS);
+    }
 
     if (index < 3) {
       log(`Client ${index}: answered q${client.questionIndex} with ${chapterId} (${client.questionIndex + 1}/${ordered.length})`);
@@ -322,6 +351,13 @@ function createClient(index: number): ClientState {
         setTimeout(() => {
           socket.emit('vote', { choice });
           stats.votes++;
+          // Double-tap: send the same vote again before ack
+          if (Math.random() < DOUBLE_TAP_CHANCE) {
+            setTimeout(() => {
+              socket.emit('vote', { choice });
+              stats.doubleTaps++;
+            }, DOUBLE_TAP_DELAY_MS);
+          }
         }, delay);
       }
     }
@@ -491,9 +527,32 @@ function placeOrbOnNode(client: ClientState, index: number, orbIndex: number, gr
     stats.orbsPlaced++;
   }
 
+  // Double-tap: place same orb on same node again before ack
+  if (Math.random() < DOUBLE_TAP_CHANCE) {
+    setTimeout(() => {
+      client.socket.emit('place_orb', { orbIndex, granularType });
+      stats.doubleTaps++;
+    }, DOUBLE_TAP_DELAY_MS);
+  }
+
   if (index < 3) {
     const action = wasPlaced ? `moved orb ${orbIndex} ${prevNode}→${granularType}` : `placed orb ${orbIndex} on ${granularType}`;
     log(`Client ${index}: ${action} (${orb.chapterId})`);
+  }
+}
+
+function recallOrb(client: ClientState, index: number, orbIndex: number) {
+  if (client.phase !== 'finale_remix' || client.phonesDark) return;
+  const orb = client.orbs[orbIndex];
+  if (!orb || orb.placedOnNode === null) return;
+
+  const prevNode = orb.placedOnNode;
+  orb.placedOnNode = null;
+  client.socket.emit('recall_orb', { orbIndex });
+  stats.orbsRecalled++;
+
+  if (index < 3) {
+    log(`Client ${index}: recalled orb ${orbIndex} from ${prevNode} (${orb.chapterId})`);
   }
 }
 
@@ -531,11 +590,33 @@ function startReplaceLoop(client: ClientState, index: number) {
 
       if (Math.random() < ORB_REPLACE_CHANCE) {
         const placedOrbs = client.orbs.filter(o => o.placedOnNode !== null);
-        if (placedOrbs.length > 0) {
+        const unplacedOrbs = client.orbs.filter(o => o.placedOnNode === null);
+
+        // Recall a placed orb back to hand
+        if (placedOrbs.length > 0 && Math.random() < ORB_RECALL_CHANCE) {
+          const orb = placedOrbs[Math.floor(Math.random() * placedOrbs.length)];
+          recallOrb(client, index, orb.index);
+          // Re-place after a delay (simulates drag back onto a node)
+          const replaceDelay = randomDelay(2000, 5000);
+          setTimeout(() => {
+            if (client.phase !== 'finale_remix' || client.phonesDark) return;
+            if (orb.placedOnNode !== null) return; // already re-placed by something else
+            const node = GRANULAR_TYPES[Math.floor(Math.random() * GRANULAR_TYPES.length)];
+            placeOrbOnNode(client, index, orb.index, node);
+          }, replaceDelay);
+        }
+        // Move a placed orb to a different node
+        else if (placedOrbs.length > 0) {
           const orb = placedOrbs[Math.floor(Math.random() * placedOrbs.length)];
           const otherNodes = GRANULAR_TYPES.filter(n => n !== orb.placedOnNode);
           const newNode = otherNodes[Math.floor(Math.random() * otherNodes.length)];
           placeOrbOnNode(client, index, orb.index, newNode);
+        }
+        // Place an unplaced orb (re-place after decay/scatter)
+        else if (unplacedOrbs.length > 0) {
+          const orb = unplacedOrbs[Math.floor(Math.random() * unplacedOrbs.length)];
+          const node = GRANULAR_TYPES[Math.floor(Math.random() * GRANULAR_TYPES.length)];
+          placeOrbOnNode(client, index, orb.index, node);
         }
       }
 
@@ -553,6 +634,49 @@ function startReplaceLoop(client: ClientState, index: number) {
   }
 
   scheduleNext();
+}
+
+// ============================================================================
+// Late Joiner Simulation
+// ============================================================================
+
+/**
+ * Simulates audience members arriving late or refreshing mid-show.
+ * Listens for phase transitions and spawns new clients staggered over time.
+ * Tests that late joiners receive correct state and can participate immediately.
+ */
+let lateJoinPhaseTracker: string | null = null;
+let lateJoinClientCounter = CLIENT_COUNT;
+
+function startLateJoinWatcher() {
+  log(`Late join enabled: ${LATE_JOIN_COUNT} new clients per phase transition`);
+
+  // Poll the first connected client's phase to detect transitions
+  setInterval(() => {
+    const refClient = clients.find(c => c.connected && c.phase);
+    if (!refClient || !refClient.phase) return;
+
+    if (lateJoinPhaseTracker !== null && refClient.phase !== lateJoinPhaseTracker) {
+      const newPhase = refClient.phase;
+      log(`Late join: phase changed to ${newPhase}, spawning ${LATE_JOIN_COUNT} late joiners`);
+
+      for (let i = 0; i < LATE_JOIN_COUNT; i++) {
+        const delay = randomDelay(1000, LATE_JOIN_COUNT * LATE_JOIN_STAGGER_MS);
+        setTimeout(() => {
+          const clientIndex = lateJoinClientCounter++;
+          const client = createClient(clientIndex);
+          clients.push(client);
+          client.socket.connect();
+          stats.lateJoiners++;
+          if (i < 3) {
+            log(`Late joiner ${clientIndex} connecting during ${newPhase}`);
+          }
+        }, delay);
+      }
+    }
+
+    lateJoinPhaseTracker = refClient.phase;
+  }, 1000);
 }
 
 // ============================================================================
@@ -615,6 +739,11 @@ if (CHURN_ENABLED) {
   setTimeout(() => startChurnLoop(), CLIENT_COUNT * 50 + 2000);
 }
 
+// Start late-join watcher if enabled
+if (LATE_JOIN_ENABLED) {
+  setTimeout(() => startLateJoinWatcher(), CLIENT_COUNT * 50 + 2000);
+}
+
 // Print stats periodically
 setInterval(() => {
   const voteLine = stats.emotionsSubmitted > 0
@@ -629,7 +758,10 @@ setInterval(() => {
   const churnLine = stats.churnDisconnects > 0
     ? `, churn: ${stats.churnDisconnects} disconnects, ${stats.churnReconnects} reconnects`
     : '';
-  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}${orbLine}${churnLine}`);
+  const stressLine = (stats.doubleTaps > 0 || stats.lateJoiners > 0)
+    ? `, stress: ${stats.doubleTaps} double-taps, ${stats.lateJoiners} late joiners`
+    : '';
+  log(`Stats: ${stats.connected} connected, ${stats.votes} votes${voteLine}${thoughtLine}${orbLine}${churnLine}${stressLine}`);
 }, 5000);
 
 // Graceful shutdown

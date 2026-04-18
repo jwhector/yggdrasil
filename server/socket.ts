@@ -203,6 +203,21 @@ export function setupSocketHandlers(
   // Helpers
   // ============================================================================
 
+  // Phases where the projector receives data via dedicated intervals (pool_state,
+  // node_tally) and doesn't display user count — skip projector state_sync for
+  // connection events to avoid expensive TokenPool dot reconciliation on every churn.
+  const PROJECTOR_SKIP_PHASES = new Set([
+    'finale_vote', 'finale_remix', 'epilogue', 'ended',
+  ]);
+
+  /** Send state_sync to controller, and to projector only if the current phase needs it. */
+  function emitConnectionStateSync(state: ShowState): void {
+    io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
+    if (!PROJECTOR_SKIP_PHASES.has(state.phase)) {
+      io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
+    }
+  }
+
   async function handleUserDisconnect(socket: Socket, userId: UserId): Promise<void> {
     const state = getState();
     const user = state.users.get(userId);
@@ -214,11 +229,7 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      // Only update projector + controller (user count) — audience doesn't need
-      // to know about other users disconnecting, and full broadcast causes
-      // component re-renders that restart animations.
-      io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
-      io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
+      emitConnectionStateSync(state);
     }
 
     heartbeats.delete(socket.id);
@@ -301,9 +312,8 @@ export function setupSocketHandlers(
         // Always send full state sync to the joining user
         socket.emit('state_sync', filterStateForClient(state, 'audience', userId));
 
-        // Only update projector + controller (e.g. user count) — don't blast all audience
-        io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
-        io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
+        // Update projector + controller — skip projector during finale phases
+        emitConnectionStateSync(state);
       } else {
         // Projector or controller: just send current state
         socket.emit('state_sync', filterStateForClient(state, data.mode));
@@ -359,9 +369,8 @@ export function setupSocketHandlers(
         }
       }
 
-      // Only update projector + controller (e.g. user count) — don't blast all audience
-      io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
-      io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
+      // Update projector + controller — skip projector during finale phases
+      emitConnectionStateSync(state);
     });
 
     // ------------------------------------------------------------------
