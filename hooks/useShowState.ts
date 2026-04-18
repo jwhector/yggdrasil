@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
 import type {
   ShowState,
@@ -93,12 +93,21 @@ export function useShowState(
   const [rawState, setRawState] = useState<any>(null);
   const [fullState, setFullState] = useState<ShowState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const lastVersionRef = useRef<number>(-1);
 
   useEffect(() => {
     if (!socket) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleStateSync = (data: any) => {
+      // Skip if we already have this version — prevents unnecessary re-renders
+      // from duplicate state_sync broadcasts (e.g. other users joining).
+      const incomingVersion = typeof data?.version === 'number' ? data.version : -1;
+      if (incomingVersion > 0 && incomingVersion <= lastVersionRef.current) {
+        return;
+      }
+      lastVersionRef.current = incomingVersion;
+
       if (data?.config) hydrateIdentity(data.config);
       if (mode === 'controller' && isSerializedState(data)) {
         const deserialized = deserializeState(data);

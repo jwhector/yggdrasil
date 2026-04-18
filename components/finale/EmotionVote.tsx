@@ -91,17 +91,23 @@ export function EmotionVote({
   emit,
   onOrbLanded,
 }: EmotionVoteProps) {
+  // Capture config props on mount — these are static config derived from state_sync
+  // and must NOT cause effects to restart when a new state_sync delivers new array references.
+  const questionsRef = useRef(questions);
+  const npcIntroRef = useRef(npcIntro);
+  const chaptersRef = useRef(chapters);
+
   const allDone = initialAnsweredCount >= questions.length;
   const [stage, setStage] = useState<VoteStage>(allDone ? 'done' : 'intro');
   const [questionIndex, setQuestionIndex] = useState(initialAnsweredCount);
 
-  // Build the ordered questions list (shuffled or linear)
+  // Build the ordered questions list (shuffled or linear) — uses ref for stability
   const orderedQuestions = useMemo(() => {
     if (shuffleQuestions && userId) {
-      return shuffleWithSeed(questions, userId);
+      return shuffleWithSeed(questionsRef.current, userId);
     }
-    return questions;
-  }, [questions, shuffleQuestions, userId]);
+    return questionsRef.current;
+  }, [shuffleQuestions, userId]);
 
   const currentQuestion = questionIndex < orderedQuestions.length ? orderedQuestions[questionIndex] : null;
 
@@ -164,11 +170,11 @@ export function EmotionVote({
 
   useEffect(() => {
     if (stage !== 'intro') return;
-    const cleanup = typewriterPlay(npcIntro, () => {
+    const cleanup = typewriterPlay(npcIntroRef.current, () => {
       setIntroConfirmVisible(true);
     });
     return cleanup;
-  }, [stage, npcIntro, typewriterPlay]);
+  }, [stage, typewriterPlay]);
 
   const handleIntroConfirm = useCallback(() => {
     setStage('question');
@@ -262,7 +268,7 @@ export function EmotionVote({
         </div>
 
         <div style={styles.cardsContainer}>
-          {chapters.map((chapter, cardIndex) => {
+          {chaptersRef.current.map((chapter, cardIndex) => {
             const identity = getChapterIdentity(chapter.id);
             const answerLabel = answers?.find(a => a.chapterId === chapter.id)?.label ?? identity.label;
             const isTapped = flyChapterId === chapter.id;

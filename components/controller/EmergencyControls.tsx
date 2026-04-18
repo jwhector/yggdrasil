@@ -27,7 +27,7 @@ interface EmergencyControlsProps {
   sendCommand: (cmd: ConductorCommand) => void;
 }
 
-type ConfirmAction = 'reset' | 'reconnect' | 'newshow' | 'generate-finale' | null;
+type ConfirmAction = 'reset' | 'reconnect' | 'newshow' | 'generate-finale' | 'generate-orbs' | null;
 
 export function EmergencyControls({ fullState, rawState, sendCommand }: EmergencyControlsProps) {
   const [confirm, setConfirm] = useState<ConfirmAction>(null);
@@ -181,6 +181,15 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                 >
                   Generate Valid Finale
                 </button>
+                {fullState.phase === 'finale_remix' && (
+                  <button
+                    onClick={() => setConfirm('generate-orbs')}
+                    style={{ ...btn, ...btnWarning }}
+                    title="Generate orbs for all connected users who don't have them (bypasses vote phase)"
+                  >
+                    Generate Intentions
+                  </button>
+                )}
               </div>
             ) : confirm === 'reconnect' ? (
               <div style={styles.confirmBox}>
@@ -233,7 +242,7 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : confirm === 'generate-finale' ? (
               <div style={styles.confirmBox}>
                 <p style={styles.confirmText}>Generate a valid finale state using default winners from config? This overwrites all attempt results and jumps to finale_vote.</p>
                 <div style={styles.buttonRow}>
@@ -242,6 +251,21 @@ export function EmergencyControls({ fullState, rawState, sendCommand }: Emergenc
                     style={{ ...btn, ...btnWarning }}
                   >
                     Confirm Generate Finale
+                  </button>
+                  <button onClick={() => setConfirm(null)} style={{ ...btn, ...btnSecondary }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={styles.confirmBox}>
+                <p style={styles.confirmText}>Generate orbs for all connected users who don&apos;t have them? This bypasses the vote phase.</p>
+                <div style={styles.buttonRow}>
+                  <button
+                    onClick={() => { send({ type: 'GENERATE_ORBS' }); setConfirm(null); }}
+                    style={{ ...btn, ...btnWarning }}
+                  >
+                    Confirm Generate Intentions
                   </button>
                   <button onClick={() => setConfirm(null)} style={{ ...btn, ...btnSecondary }}>
                     Cancel

@@ -11,6 +11,9 @@ interface Props {
 export function MedistationLobby({ onboardingConfig }: Props) {
   const [fontsReady, setFontsReady] = useState(false);
   const [view, setView] = useState<'animation' | 'exiting' | 'onboarding'>('animation');
+  // Capture config on mount — static config that must not cause callback identity changes
+  // when state_sync delivers a new object reference.
+  const onboardingRef = useRef(onboardingConfig);
   const stageRef = useRef<HTMLDivElement>(null);
   const staircaseRef = useRef<HTMLDivElement>(null);
   const line1Ref = useRef<HTMLDivElement>(null);
@@ -97,10 +100,10 @@ export function MedistationLobby({ onboardingConfig }: Props) {
     alignStaircase();
 
     // Where button
-    if (whereBtn && onboardingConfig) {
+    if (whereBtn && onboardingRef.current) {
       whereBtn.classList.add('ms-btn-visible');
     }
-  }, [alignStaircase, onboardingConfig]);
+  }, [alignStaircase]);
 
   const runAnimation = useCallback(() => {
     const stage = stageRef.current;
@@ -243,12 +246,12 @@ export function MedistationLobby({ onboardingConfig }: Props) {
         setTimeout(() => dot.classList.add('ms-visible'), 1300);
         setTimeout(() => ambient.classList.add('ms-visible'), 400);
         // Show "Where am I?" button after afterglow
-        if (whereBtn && onboardingConfig) {
+        if (whereBtn && onboardingRef.current) {
           setTimeout(() => whereBtn.classList.add('ms-btn-visible'), 2200);
         }
       }, FALL_DUR - 20);
     }, FALL_AT);
-  }, [alignStaircase, onboardingConfig]);
+  }, [alignStaircase]);
 
   useEffect(() => {
     let cancelled = false;

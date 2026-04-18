@@ -214,7 +214,11 @@ export function setupSocketHandlers(
       setState(state, events);
       persistence.saveState(state);
 
-      await broadcastEvents(io, events, state);
+      // Only update projector + controller (user count) — audience doesn't need
+      // to know about other users disconnecting, and full broadcast causes
+      // component re-renders that restart animations.
+      io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
+      io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
     }
 
     heartbeats.delete(socket.id);
@@ -294,10 +298,12 @@ export function setupSocketHandlers(
           if (user) persistence.saveUser(user, state.id);
         }
 
-        // Always send full state sync
+        // Always send full state sync to the joining user
         socket.emit('state_sync', filterStateForClient(state, 'audience', userId));
 
-        await broadcastEvents(io, events, state);
+        // Only update projector + controller (e.g. user count) — don't blast all audience
+        io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
+        io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
       } else {
         // Projector or controller: just send current state
         socket.emit('state_sync', filterStateForClient(state, data.mode));
@@ -353,7 +359,9 @@ export function setupSocketHandlers(
         }
       }
 
-      await broadcastEvents(io, events, state);
+      // Only update projector + controller (e.g. user count) — don't blast all audience
+      io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
+      io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
     });
 
     // ------------------------------------------------------------------
@@ -627,7 +635,32 @@ export function setupSocketHandlers(
         }
       }
 
-      await broadcastEvents(io, events, state);
+      // Commands that don't change audience-visible state — skip full audience broadcast.
+      // Audio commands produce only AUDIO_CUE events (handled by setState hook / audio router).
+      // SEND_NPC_MESSAGE reaches audience via dedicated 'npc_message' socket event.
+      // Slide commands only affect projector display state.
+      const SKIP_AUDIENCE_BROADCAST: ReadonlySet<string> = new Set([
+        'AUDIO_TRANSPORT', 'AUDIO_PANIC', 'RESET_UTILITIES',
+        'MASTER_DUCK', 'MASTER_UNDUCK',
+        'SEND_NPC_MESSAGE',
+        'ADVANCE_SLIDE', 'SLIDE_MEDIA_READY',
+        'EXPORT_STATE',
+      ]);
+
+      if (SKIP_AUDIENCE_BROADCAST.has(processedCommand.type)) {
+        io.to('controller').emit('state_sync', filterStateForClient(state, 'controller'));
+        io.to('projector').emit('state_sync', filterStateForClient(state, 'projector'));
+        // Relay targeted events that have dedicated handlers
+        for (const event of events) {
+          if (event.type === 'NPC_MESSAGE') {
+            const npcEvt = event as { type: 'NPC_MESSAGE'; message: string };
+            io.to('audience').emit('npc_message', { message: npcEvt.message });
+            io.to('projector').emit('npc_message', { message: npcEvt.message });
+          }
+        }
+      } else {
+        await broadcastEvents(io, events, state);
+      }
     });
 
     // ------------------------------------------------------------------

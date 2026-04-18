@@ -518,6 +518,9 @@ export type ConductorCommand =
   // Failsafe — generate a valid finale from a blank show using config-driven default winners
   | { type: 'GENERATE_VALID_FINALE' }
 
+  // Emergency — generate orbs for all connected users during remix (bypasses vote phase)
+  | { type: 'GENERATE_ORBS' }
+
   // Recovery
   | { type: 'EXPORT_STATE' }
   | { type: 'IMPORT_STATE'; state: ShowState }
